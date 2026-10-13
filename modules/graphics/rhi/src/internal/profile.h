@@ -9,6 +9,8 @@ bool NeedsRaster(const DeviceProfileRequirements&) noexcept;
 bool NeedsCompute(const DeviceProfileRequirements&) noexcept;
 ProfileDiagnostic CheckProfile(const DeviceProfileRequirements&, const DeviceProfile&) noexcept;
 DeviceProfile QueryDeviceProfile() noexcept;
+// Clamp native byte limits to the addressable host size; logical budgets are independently reserved.
+foundation::usize GetResourceSizeLimit(foundation::uint64 nativeBytes) noexcept;
 DeviceProfile CurrentDeviceProfile() noexcept;
 // Guaranteed normalized formats and the enabled L4 HDR attachment profile.
 FormatCapabilities PortableFormatLimits(RasterFormat, const RasterCapabilities&) noexcept;

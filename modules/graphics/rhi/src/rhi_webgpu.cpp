@@ -1,6 +1,7 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
 #include "internal/measurement.h"
+#include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/resources.h"
 #include "internal/webgpu_probe.h"
@@ -282,6 +283,30 @@ void AdapterReady(WGPURequestAdapterStatus status,
     }
     WGPULimits requiredLimits = WGPU_LIMITS_INIT;
     requiredLimits.maxTextureDimension2D = adapterLimits.maxTextureDimension2D;
+    requiredLimits.maxTextureDimension3D = adapterLimits.maxTextureDimension3D;
+    requiredLimits.maxTextureArrayLayers = adapterLimits.maxTextureArrayLayers;
+    requiredLimits.maxBufferSize = internal::GetResourceSizeLimit(adapterLimits.maxBufferSize);
+    requiredLimits.maxStorageBufferBindingSize =
+        adapterLimits.maxStorageBufferBindingSize < requiredLimits.maxBufferSize
+            ? adapterLimits.maxStorageBufferBindingSize
+            : requiredLimits.maxBufferSize;
+    // The pinned port does not forward maxBindingsPerBindGroup in requests.
+    // Sixteen slots fit the default envelope; BindingLimits queries the enabled device.
+    requiredLimits.maxUniformBuffersPerShaderStage =
+        adapterLimits.maxUniformBuffersPerShaderStage < RASTER_BINDING_COUNT
+            ? adapterLimits.maxUniformBuffersPerShaderStage
+            : static_cast<uint32>(RASTER_BINDING_COUNT);
+    requiredLimits.maxStorageBuffersPerShaderStage =
+        adapterLimits.maxStorageBuffersPerShaderStage < RASTER_BINDING_COUNT
+            ? adapterLimits.maxStorageBuffersPerShaderStage
+            : static_cast<uint32>(RASTER_BINDING_COUNT);
+    requiredLimits.maxSampledTexturesPerShaderStage =
+        adapterLimits.maxSampledTexturesPerShaderStage < RASTER_BINDING_COUNT
+            ? adapterLimits.maxSampledTexturesPerShaderStage
+            : static_cast<uint32>(RASTER_BINDING_COUNT);
+    requiredLimits.maxSamplersPerShaderStage = adapterLimits.maxSamplersPerShaderStage < RASTER_BINDING_COUNT
+                                                   ? adapterLimits.maxSamplersPerShaderStage
+                                                   : static_cast<uint32>(RASTER_BINDING_COUNT);
     descriptor.requiredLimits = &requiredLimits;
     // Optional timestamps are requested only for an opted-in measurement session.
     constexpr usize OPTIONAL_FEATURE_COUNT = 2;

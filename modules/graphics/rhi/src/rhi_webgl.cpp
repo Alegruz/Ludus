@@ -4,6 +4,7 @@
 #include "internal/raster.h"
 #include "internal/resources.h"
 #include <ludus/foundation/base/core.h>
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>

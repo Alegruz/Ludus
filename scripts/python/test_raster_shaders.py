@@ -151,7 +151,7 @@ class RasterReflectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'compile stages separately'):raster_interface(data,'fragment')
     def test_stage_usage_and_descriptor_identity(self):
         data=self.fixture();self.assertEqual(raster_interface(data,'fragment')['entries'][0]['offsets'],{'color':0})
-        for change in ({'space':1},{'index':8}):
+        for change in ({'space':1},{'index':16}):
             invalid=copy.deepcopy(data);invalid['parameters'][0]['binding'].update(change)
             with self.assertRaises(RuntimeError):raster_interface(invalid,'fragment')
         data['entryPoints'][0]['bindings'][0]['binding']['used']=0
@@ -242,7 +242,14 @@ class RasterReflectionTests(unittest.TestCase):
             resource=copy.deepcopy(data['parameters'][0]);resource['name']=f'records{i}';resource['binding']['index']=i
             data['parameters'].append(resource)
             data['entryPoints'][0]['bindings'].append({'name':resource['name'],'binding':{'used':1}})
-        with self.assertRaisesRegex(RuntimeError,'four storage'):raster_interface(data,'compute')
+        self.assertEqual(len(raster_interface(data,'compute')['entries']), 5)
+        for i in range(5,16):
+            resource=copy.deepcopy(data['parameters'][0]);resource['name']=f'records{i}';resource['binding']['index']=i
+            data['parameters'].append(resource)
+            data['entryPoints'][0]['bindings'].append({'name':resource['name'],'binding':{'used':1}})
+        self.assertEqual(len(raster_interface(data,'compute')['entries']), 16)
+        data['parameters'][-1]['binding']['index'] = 16
+        with self.assertRaisesRegex(RuntimeError,'bounded profile'):raster_interface(data,'compute')
 
 if __name__=='__main__':unittest.main()
 

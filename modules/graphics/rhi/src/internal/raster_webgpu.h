@@ -186,12 +186,24 @@ BindingCapabilities BindingLimits() noexcept
     }
     return
     {
-        .MaxDynamicUniformBuffers =
-            limits.maxDynamicUniformBuffersPerPipelineLayout < 8 ? limits.maxDynamicUniformBuffersPerPipelineLayout : 8,
-        .MaxDynamicStorageBuffers =
-            limits.maxDynamicStorageBuffersPerPipelineLayout < 4 ? limits.maxDynamicStorageBuffersPerPipelineLayout : 4,
+        .MaxDynamicUniformBuffers = limits.maxDynamicUniformBuffersPerPipelineLayout < internal::RASTER_BINDINGS
+                                        ? limits.maxDynamicUniformBuffersPerPipelineLayout
+                                        : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxDynamicStorageBuffers = limits.maxDynamicStorageBuffersPerPipelineLayout < internal::RASTER_BINDINGS
+                                        ? limits.maxDynamicStorageBuffersPerPipelineLayout
+                                        : static_cast<uint32>(internal::RASTER_BINDINGS),
         .MaxTextureArrayElements = 1,
-        .MaxDescriptorsPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxDescriptorsPerSet = internal::CurrentStorageLimits().DescriptorsPerSet < internal::RASTER_BINDINGS
+                                    ? internal::CurrentStorageLimits().DescriptorsPerSet
+                                    : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxBindings = limits.maxBindingsPerBindGroup < internal::RASTER_BINDINGS
+                           ? limits.maxBindingsPerBindGroup
+                           : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxUniformBuffersPerStage = limits.maxUniformBuffersPerShaderStage,
+        .MaxSampledTexturesPerStage = limits.maxSampledTexturesPerShaderStage,
+        .MaxSamplersPerStage = limits.maxSamplersPerShaderStage,
+        .MaxUniformBuffersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxSamplersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
     };
 }
 RasterCapabilities RasterLimits() noexcept
@@ -204,7 +216,7 @@ RasterCapabilities RasterLimits() noexcept
     {
         return {};
     }
-    constexpr usize max = usize{64} * 1024 * 1024;
+    const usize max = internal::GetResourceSizeLimit(limits.maxBufferSize);
     return {static_cast<usize>(limits.maxBufferSize < max ? limits.maxBufferSize : max),
             limits.maxTextureDimension2D,
             limits.minUniformBufferOffsetAlignment > 256 ? limits.minUniformBufferOffsetAlignment : 256,
@@ -212,7 +224,8 @@ RasterCapabilities RasterLimits() noexcept
             internal::CurrentStorageLimits().ResourcesPerKind,
             internal::CurrentStorageLimits().DrawsPerFrame,
             limits.maxVertexAttributes < 16 ? limits.maxVertexAttributes : 16,
-            true};
+            true,
+            max};
 }
 // Thanks to W3C GPU for the Web Working Group, "WebGPU", texture format capabilities.
 // https://www.w3.org/TR/webgpu/#texture-format-caps
@@ -243,11 +256,9 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     }
     if (result.Uses.Sampled)
     {
-        result.MaxArrayLayers = limits.maxTextureArrayLayers < 256 ? limits.maxTextureArrayLayers : 256;
+        result.MaxArrayLayers = limits.maxTextureArrayLayers;
         result.MaxCubeDimension = result.MaxArrayLayers >= 6 ? result.MaxSampledDimension2D : 0U;
-        result.MaxDimension3D = internal::CompressedTexture(format)  ? 0U
-                                : limits.maxTextureDimension3D < 256 ? limits.maxTextureDimension3D
-                                                                     : 256;
+        result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : limits.maxTextureDimension3D;
         result.PartialViews = true;
     }
     result.MaxAttachmentLayers = result.Uses.ColorAttachment ? result.MaxArrayLayers : 0;
@@ -263,7 +274,7 @@ ComputeCapabilities ComputeLimits() noexcept
     {
         return {};
     }
-    constexpr uint64 range = uint64{16} * 1024 * 1024;
+    const uint64 range = RasterLimits().MaxBufferSize;
     const auto dispatch =
         limits.maxComputeWorkgroupsPerDimension < 65535 ? limits.maxComputeWorkgroupsPerDimension : 65535;
     return {static_cast<usize>(limits.maxStorageBufferBindingSize < range ? limits.maxStorageBufferBindingSize : range),
@@ -272,7 +283,10 @@ ComputeCapabilities ComputeLimits() noexcept
              limits.maxComputeWorkgroupSizeY < 256 ? limits.maxComputeWorkgroupSizeY : 256,
              limits.maxComputeWorkgroupSizeZ < 64 ? limits.maxComputeWorkgroupSizeZ : 64},
             256,
-            {dispatch, dispatch, dispatch}};
+            {dispatch, dispatch, dispatch},
+            limits.maxStorageBuffersPerShaderStage < internal::RASTER_BINDINGS
+                ? limits.maxStorageBuffersPerShaderStage
+                : static_cast<uint32>(internal::RASTER_BINDINGS)};
 }
 RasterStatus ComputeCreatePipeline(usize slot, const internal::ComputePipelineInfo& info, uint32 request) noexcept
 {

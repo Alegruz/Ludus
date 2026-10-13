@@ -28,6 +28,9 @@ rhi::SurfaceHandle gSurface;
 constexpr usize TEXTURE_COUNT = 12;
 constexpr usize VIEW_COUNT = 13;
 constexpr uint32 CASE_COUNT = 20;
+constexpr uint32 ARRAY_LAYERS = 257;
+uint32 gArrayLayers = ARRAY_LAYERS;
+uint32 gVolumeDepth = 0;
 StaticArray<rhi::TextureHandle, TEXTURE_COUNT> gTextures{};
 rhi::TextureHandle gTarget;
 StaticArray<rhi::TextureViewHandle, VIEW_COUNT> gViews{};
@@ -194,29 +197,51 @@ bool CreateExtendedTextures() noexcept
     {
         return false;
     }
-    // Thin images exercise the reference texture's 8240 width without large CI allocations.
-    // A lower enabled device uses its admitted width and reports that result explicitly.
-    gLargeWidth = info.Profile.Formats[static_cast<usize>(rhi::RasterFormat::Rgba8Unorm)].MaxSampledDimension2D;
-    gLargeWidth = gLargeWidth < 8240 ? gLargeWidth : 8240;
-    Array<uint8> large;
-    if (large.TryResize(usize{gLargeWidth} * 4) == false)
+    // Exercise the reference width when enabled. Lower dimension profiles use
+    // explicit caller-authored row padding to retain an upload above 64 MiB.
+    const uint32 dimension =
+        info.Profile.Formats[static_cast<usize>(rhi::RasterFormat::Rgba8Unorm)].MaxSampledDimension2D;
+    gLargeWidth = dimension < 8240 ? dimension : 8240;
+    const uint32 largeHeight = dimension < 2049 ? dimension : 2049;
+    if (gLargeWidth == 0 || largeHeight == 0)
     {
         return false;
     }
-    for (usize x = 0; x < gLargeWidth; ++x)
+    constexpr usize UPLOAD_ALIGNMENT = 4;
+    constexpr usize MIN_UPLOAD_BYTES = usize{64} * 1024 * 1024 + UPLOAD_ALIGNMENT;
+    const usize minimumRowBytes = MIN_UPLOAD_BYTES / largeHeight + (MIN_UPLOAD_BYTES % largeHeight != 0 ? 1U : 0U);
+    const usize paddedRowBytes = (minimumRowBytes + UPLOAD_ALIGNMENT - 1) / UPLOAD_ALIGNMENT * UPLOAD_ALIGNMENT;
+    const usize tightRowBytes = usize{gLargeWidth} * UPLOAD_ALIGNMENT;
+    const usize rowPitch = tightRowBytes > paddedRowBytes ? tightRowBytes : paddedRowBytes;
+    Array<uint8> large;
+    if (large.TryResize(rowPitch * largeHeight) == false)
     {
-        large[x * 4] = static_cast<uint8>((x * 8 / gLargeWidth) * 31);
-        large[x * 4 + 1] = 67;
-        large[x * 4 + 2] = 149;
-        large[x * 4 + 3] = 255;
+        return false;
+    }
+    std::memset(large.GetData(), 0, large.GetSize());
+    for (usize row = 0; row < largeHeight; ++row)
+    {
+        for (usize x = 0; x < gLargeWidth; ++x)
+        {
+            const usize pixel = row * rowPitch + x * UPLOAD_ALIGNMENT;
+            large[pixel] = static_cast<uint8>((x * 8 / gLargeWidth) * 31);
+            large[pixel + 1] = 67;
+            large[pixel + 2] = 149;
+            large[pixel + 3] = 255;
+        }
     }
     if (Accepted(rhi::CreateTexture(gDevice,
-                                    { .Width = gLargeWidth, .Height = 1 },
-                                    {large, usize{gLargeWidth} * 4},
+                                    { .Width = gLargeWidth, .Height = largeHeight },
+                                    {large, rowPitch},
                                     gTextures[8])) == false)
     {
         return false;
     }
+    LUDUS_LOG_INFO(LOG_R9,
+                   "R18c complete upload {} bytes; array layers {}; volume depth {}",
+                   large.GetSize(),
+                   gArrayLayers,
+                   gVolumeDepth);
     constexpr usize FACE_COUNT = 6;
     constexpr usize CUBE_ENCODED_BYTES = FACE_COUNT * BC5_BLOCK_BYTES;
     constexpr usize CUBE_RGBA_BYTES = FACE_COUNT * 4 * 4 * 4;
@@ -317,6 +342,27 @@ bool CreateResources() noexcept
     {
         return false;
     }
+    rhi::FormatCapabilities rgba;
+    if (rhi::GetFormatCapabilities(gDevice, rhi::RasterFormat::Rgba8Unorm, rgba) != rhi::RasterStatus::Ready)
+    {
+        return false;
+    }
+    gArrayLayers = rgba.MaxArrayLayers < ARRAY_LAYERS ? rgba.MaxArrayLayers : ARRAY_LAYERS;
+    if (rgba.MaxDimension3D < 4)
+    {
+        return false;
+    }
+    gVolumeDepth = 4;
+    while (gVolumeDepth < 512 && gVolumeDepth * 2 <= rgba.MaxDimension3D)
+    {
+        gVolumeDepth *= 2;
+    }
+    constexpr usize ARRAY_BYTES = usize{ARRAY_LAYERS} * 64;
+    StaticArray<uint8, ARRAY_BYTES> arrayBytes{};
+    for (usize layer = 0; layer < gArrayLayers; ++layer)
+    {
+        Fill(arrayBytes.GetData() + layer * 64, 16, COLORS[layer == gArrayLayers - 1 ? 1 : 0]);
+    }
     uint8 bytes[384]{};
     for (uint32 slice = 0; slice < 3; ++slice)
     {
@@ -324,8 +370,8 @@ bool CreateResources() noexcept
     }
     if (Accepted(rhi::CreateTexture(
             gDevice,
-            { .Width = 4, .Height = 4, .Dimension = rhi::TextureDimension::D2Array, .DepthOrLayers = 3 },
-            {{bytes, 192}, 16},
+            { .Width = 4, .Height = 4, .Dimension = rhi::TextureDimension::D2Array, .DepthOrLayers = gArrayLayers },
+            {{arrayBytes.GetData(), usize{gArrayLayers} * 64}, 16},
             gTextures[1])) == false)
     {
         return false;
@@ -356,19 +402,34 @@ bool CreateResources() noexcept
     {
         return false;
     }
-    for (uint32 slice = 0; slice < 4; ++slice)
+    const usize volumeBaseBytes = usize{gVolumeDepth} * 64;
+    const usize volumeSecondBytes = usize{gVolumeDepth / 2} * 16;
+    const usize volumeBytesCount = volumeBaseBytes + volumeSecondBytes + usize{gVolumeDepth / 4} * 4;
+    Array<uint8> volumeBytes;
+    if (volumeBytes.TryResize(volumeBytesCount) == false)
     {
-        Fill(bytes + usize{slice} * 64, 16, COLORS[slice]);
+        return false;
     }
-    Fill(bytes + 256, 4, COLORS[4]);
-    Fill(bytes + 272, 4, COLORS[5]);
-    Fill(bytes + 288, 1, COLORS[0]);
-    const rhi::TextureMipUpload mips[3]{{0, 16}, {256, 8}, {288, 4}};
-    if (Accepted(rhi::CreateTexture(
-            gDevice,
-            { .Width = 4, .Height = 4, .MipLevels = 3, .Dimension = rhi::TextureDimension::D3, .DepthOrLayers = 4 },
-            {{bytes, 292}, 0, mips},
-            gTextures[3])) == false)
+    for (usize slice = 0; slice < gVolumeDepth; ++slice)
+    {
+        Fill(volumeBytes.GetData() + slice * 64, 16, COLORS[slice / (gVolumeDepth / 4)]);
+    }
+    for (usize slice = 0; slice < gVolumeDepth / 2; ++slice)
+    {
+        Fill(volumeBytes.GetData() + volumeBaseBytes + slice * 16, 4, COLORS[slice < gVolumeDepth / 4 ? 4 : 5]);
+    }
+    Fill(volumeBytes.GetData() + volumeBaseBytes + volumeSecondBytes, gVolumeDepth / 4, COLORS[0]);
+    const rhi::TextureMipUpload mips[3]{{0, 16}, {volumeBaseBytes, 8}, {volumeBaseBytes + volumeSecondBytes, 4}};
+    if (Accepted(rhi::CreateTexture(gDevice,
+                                    {
+                                        .Width = 4,
+                                        .Height = 4,
+                                        .MipLevels = 3,
+                                        .Dimension = rhi::TextureDimension::D3,
+                                        .DepthOrLayers = gVolumeDepth,
+                                    },
+                                    {volumeBytes, 0, mips},
+                                    gTextures[3])) == false)
     {
         return false;
     }
@@ -474,7 +535,7 @@ bool CreateSets() noexcept
         if (test == 1 || test == 17)
         {
             settings[0] = 1;
-            settings[6] = 1;
+            settings[6] = test == 1 ? static_cast<float32>(gArrayLayers - 1) : 1;
         }
         else if (test >= 2 && test < 8)
         {
@@ -888,6 +949,8 @@ int main()
 #endif
     rhi::DeviceDescription device;
     device.Required.PortableRaster = true;
+    device.RequiredProfile.Raster.MinTextureUploadBytes = usize{64} * 1024 * 1024 + 4;
+    device.RequiredProfile.Raster.MinTextureLayers = 256;
     device.RequiredProfile.FormatCount = 1;
     device.RequiredProfile.Formats[0].Uses.CopySource = true;
     device.RequiredProfile.Formats[0].Uses.CopyDestination = true;

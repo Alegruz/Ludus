@@ -30,14 +30,14 @@ if (typeof window === 'undefined' && typeof process === 'object') {
   const devices=[];
   function device() {
     let lose;
-    const result={features:new Set(),limits:new Proxy({maxTextureDimension2D:textureDimension,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},{get:(o,k)=>o[k]??0}),queue:{},
+    const result={features:new Set(),limits:new Proxy({maxTextureDimension2D:textureDimension,maxUniformBufferBindingSize:65536,maxBufferSize:268435456,maxTextureDimension3D:2048,maxTextureArrayLayers:256,maxStorageBufferBindingSize:134217728,maxBindingsPerBindGroup:1000,maxUniformBuffersPerShaderStage:12,maxStorageBuffersPerShaderStage:8,maxSampledTexturesPerShaderStage:16,maxSamplersPerShaderStage:16},{get:(o,k)=>o[k]??0}),queue:{},
       lost:new Promise(resolve=>{lose=resolve;}),pushErrorScope(){},popErrorScope(){return Promise.resolve(scenario==='surface-failure'?new GPUValidationError('configuration rejected'):null);},
       destroy(){if (!result.destroyed) {result.destroyed=true;++stats.destroyed;lose({reason:'destroyed',message:'test destroy'});}},
       testLose(){lose({reason:'unknown',message:'test loss'});}};
     ++stats.devices;devices.push(result);return result;
   }
-  const adapter={features:new Set(),limits:new Proxy({maxTextureDimension2D:textureDimension,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},{get:(o,k)=>o[k]??0}),requestDevice(desc){
-    if (desc.requiredFeatures?.length || Object.keys(desc.requiredLimits||{}).length !== 1 || desc.requiredLimits.maxTextureDimension2D !== adapter.limits.maxTextureDimension2D) throw new Error('texture limit negotiation or optional requirements changed');
+  const adapter={features:new Set(),limits:new Proxy({maxTextureDimension2D:textureDimension,maxUniformBufferBindingSize:65536,maxBufferSize:268435456,maxTextureDimension3D:2048,maxTextureArrayLayers:256,maxStorageBufferBindingSize:134217728,maxBindingsPerBindGroup:1000,maxUniformBuffersPerShaderStage:12,maxStorageBuffersPerShaderStage:8,maxSampledTexturesPerShaderStage:16,maxSamplersPerShaderStage:16},{get:(o,k)=>o[k]??0}),requestDevice(desc){
+    if (desc.requiredFeatures?.length || Object.keys(desc.requiredLimits||{}).length !== 9 || desc.requiredLimits.maxTextureDimension2D !== adapter.limits.maxTextureDimension2D) throw new Error('texture limit negotiation or optional requirements changed');
     if (scenario==='device-failure') return Promise.reject(new Error('device rejected'));
     return new Promise(resolve=>setTimeout(()=>resolve(device()),scenario==='cancel-device'?80:0));
   }};

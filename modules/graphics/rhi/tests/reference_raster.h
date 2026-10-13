@@ -25,6 +25,8 @@ inline bool ComputeAvailable = true;
 inline foundation::StaticArray<bool, RASTER_FORMAT_COUNT> FormatUnavailable{};
 inline bool FormatBlendUnavailable = false;
 inline bool OverrideRasterLimits = false;
+inline bool HasBindingLimitOverride = false;
+inline BindingCapabilities BindingLimitOverride;
 inline RasterCapabilities RasterLimitOverride;
 inline foundation::usize Dispatches = 0;
 inline RasterStatus ComputeResult = RasterStatus::Ready;
