@@ -212,7 +212,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/render_load_job.cpp
         src/internal/render_preview.h
         src/internal/render_panel.h
-    src/internal/preview_viewport.h
+        src/internal/preview_viewport.h
         src/render_scene.cpp
         src/render_preview.cpp
         src/render_panel.cpp
