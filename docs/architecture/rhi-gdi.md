@@ -885,7 +885,7 @@ Planned, except for the existing
 overlapping R16a/R17a. That immutable native build/query path is implemented;
 it does not complete their broader GDI build/read declarations or R16b/R17b's
 refit/compaction and dedicated ray-pipeline scope, nor R16c/R17c motion/procedural extensions.
-R18a/R18b are Implemented; R18c is Planned. The [R18 texture contract and SDK fixture](../development/fullscreen-rendering.md#reference-scene-texture-profiles-r18) record the scoped format, dimension and byte-budget behavior. BC5 addresses ATI2 DDS data in the
+R18a/R18b are Implemented in [PR #242](https://github.com/Alegruz/Ludus/pull/242); R18c is Planned. The [R18 texture contract and SDK fixture](../development/fullscreen-rendering.md#reference-scene-texture-profiles-r18) record the scoped format, dimension and byte-budget behavior. BC5 addresses ATI2 DDS data in the
 reference sets; width/height negotiation addresses images as large as 8240 by
 8200. The existing 64 MiB complete-upload and buffer ceiling, 16 MiB compute
 storage range and four-storage/eight-total binding profile remain R18c work.
