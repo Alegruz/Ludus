@@ -150,7 +150,9 @@ private:
     QString SourceEntry_;
     /// File picked by the Import button while its preview runs.
     QString PreviewSource_;
-    QJsonObject ImportPreview_, ImportReports_, PendingImportReports_;
+    QJsonObject ImportPreview_;
+    QJsonObject ImportReports_;
+    QJsonObject PendingImportReports_;
     bool PublishingCatalog_ = false;
     QByteArray Response_, SceneBytes_, CandidateCatalog_;
     QString OperationError_;
