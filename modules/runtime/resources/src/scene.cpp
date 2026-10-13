@@ -1,5 +1,6 @@
 #include <ludus/runtime/resources/scene.h>
 
+#include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/byte_order.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/scalar.hpp>
@@ -18,6 +19,12 @@ namespace ludus::resources
 namespace
 {
 namespace math = foundation::math;
+namespace format = content::scene_format;
+// The decoded in-memory types must hold exactly the LUSCN wire components.
+static_assert(sizeof(format::VertexRecord) == 2 * sizeof(math::Vector3) + sizeof(math::Vector2));
+static_assert(sizeof(format::ObjectRecord::Linear) == sizeof(math::Affine3::Columns) &&
+              sizeof(format::ObjectRecord::Translation) == sizeof(math::Affine3::Translation));
+static_assert(sizeof(format::Header::Eye) == sizeof(math::Vector3));
 class Reader final
 {
 public:
@@ -36,12 +43,12 @@ public:
     bool Read(uint32& value) noexcept
     {
         const auto* bytes = Take(4);
-        return bytes != nullptr && foundation::core::TryReadLittleEndian<uint32>({bytes, 4}, value);
+        return bytes != nullptr && foundation::core::TryReadLittleEndian<uint32>({bytes, 4}, value) == true;
     }
     bool Read(float32& value) noexcept
     {
         uint32 bits = 0;
-        if (!Read(bits))
+        if (Read(bits) == false)
         {
             return false;
         }
@@ -50,7 +57,7 @@ public:
     }
     bool Read(math::Vector3& value) noexcept
     {
-        return Read(value.X) && Read(value.Y) && Read(value.Z);
+        return Read(value.X) == true && Read(value.Y) == true && Read(value.Z) == true;
     }
     [[nodiscard]] usize Remaining() const noexcept
     {
@@ -68,7 +75,7 @@ uint64 ReserveEpoch() noexcept
     while (next != 0)
     {
         const uint64 following = next == ~uint64{0} ? 0 : next + 1;
-        if (NextEpoch.compare_exchange_weak(next, following, std::memory_order_relaxed))
+        if (NextEpoch.compare_exchange_weak(next, following, std::memory_order_relaxed) == true)
         {
             return next;
         }
@@ -78,19 +85,21 @@ uint64 ReserveEpoch() noexcept
 } // namespace
 Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition& output) noexcept
 {
-    if (bytes == nullptr || count < 68 || count > usize{64} * 1024 * 1024)
+    if (bytes == nullptr || count < sizeof(format::Header) || count > format::MAX_BUNDLE_BYTES)
     {
         return Status::Failed;
     }
     Reader reader(bytes, count);
-    const auto* magic = reader.Take(8);
+    const auto* magic = reader.Take(format::MAGIC.size());
     uint32 version = 0, meshes = 0, materials = 0, textures = 0, objects = 0;
     SceneDefinition scene;
-    if (std::memcmp(magic, "LUSCN01\0", 8) != 0 || !reader.Read(version) || (version != 1 && version != 2) ||
-        !reader.Read(meshes) || meshes == 0 || meshes > 6 || !reader.Read(materials) || materials == 0 ||
-        materials > 8 || !reader.Read(textures) || textures > 8 || !reader.Read(objects) || objects == 0 ||
-        objects > 128 || !reader.Read(scene.Eye) || !reader.Read(scene.Target) || !reader.Read(scene.Up) ||
-        !reader.Read(scene.VerticalFov))
+    if (std::memcmp(magic, format::MAGIC.data(), format::MAGIC.size()) != 0 || reader.Read(version) == false ||
+        (version != format::VERSION_1 && version != format::VERSION_2) || reader.Read(meshes) == false || meshes == 0 ||
+        meshes > format::MAX_MESHES || reader.Read(materials) == false || materials == 0 ||
+        materials > format::MAX_MATERIALS || reader.Read(textures) == false || textures > format::MAX_TEXTURES ||
+        reader.Read(objects) == false || objects == 0 || objects > format::MAX_OBJECTS ||
+        reader.Read(scene.Eye) == false || reader.Read(scene.Target) == false || reader.Read(scene.Up) == false ||
+        reader.Read(scene.VerticalFov) == false)
     {
         return Status::Failed;
     }
@@ -100,8 +109,8 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
     {
         return Status::Failed;
     }
-    if (!scene.Textures.TryResize(textures) || !scene.Materials.TryResize(materials) ||
-        !scene.Meshes.TryResize(meshes) || !scene.Objects.TryResize(objects))
+    if (scene.Textures.TryResize(textures) == false || scene.Materials.TryResize(materials) == false ||
+        scene.Meshes.TryResize(meshes) == false || scene.Objects.TryResize(objects) == false)
     {
         return Status::OutOfMemory;
     }
@@ -109,10 +118,11 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
     for (auto& texture : scene.Textures)
     {
         uint32 size = 0;
-        if (!reader.Read(texture.Width) || !reader.Read(texture.Height) || !reader.Read(size) || texture.Width == 0 ||
-            texture.Height == 0 || texture.Width > 4096 || texture.Height > 4096 ||
-            size != usize(texture.Width) * texture.Height * 4 || size > usize{16} * 1024 * 1024 ||
-            textureBytes + size > usize{32} * 1024 * 1024)
+        if (reader.Read(texture.Width) == false || reader.Read(texture.Height) == false || reader.Read(size) == false ||
+            texture.Width == 0 || texture.Height == 0 || texture.Width > format::MAX_TEXTURE_DIMENSION ||
+            texture.Height > format::MAX_TEXTURE_DIMENSION ||
+            size != usize(texture.Width) * texture.Height * format::TEXEL_BYTES || size > format::MAX_TEXTURE_BYTES ||
+            textureBytes + size > format::MAX_TOTAL_TEXTURE_BYTES)
         {
             return Status::Failed;
         }
@@ -121,7 +131,7 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
         {
             return Status::Failed;
         }
-        if (!texture.Pixels.TryResize(size))
+        if (texture.Pixels.TryResize(size) == false)
         {
             return Status::OutOfMemory;
         }
@@ -131,16 +141,20 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
     for (auto& material : scene.Materials)
     {
         uint32 address = 0;
-        if (!reader.Read(material.Texture) || (version == 2 && (!reader.Read(address) || address > 1)))
+        if (reader.Read(material.Texture) == false ||
+            (version == format::VERSION_2 && (reader.Read(address) == false || address > format::ADDRESS_REPEAT)))
         {
             return Status::Failed;
         }
-        material.Repeat = version == 2 ? address == 1 : material.Texture > 0 && material.Texture < textures;
-        if (!reader.Read(material.Metallic) || !reader.Read(material.Roughness) || !reader.Read(material.Emission) ||
-            (material.Texture != ~uint32{0} && material.Texture >= textures) || material.Metallic < 0 ||
-            material.Metallic > 1 || material.Roughness < .045F || material.Roughness > 1 || material.Emission.X < 0 ||
-            material.Emission.Y < 0 || material.Emission.Z < 0 || material.Emission.X > 10000 ||
-            material.Emission.Y > 10000 || material.Emission.Z > 10000)
+        material.Repeat = version == format::VERSION_2 ? address == format::ADDRESS_REPEAT
+                                                       : material.Texture > 0 && material.Texture < textures;
+        if (reader.Read(material.Metallic) == false || reader.Read(material.Roughness) == false ||
+            reader.Read(material.Emission) == false ||
+            (material.Texture != format::NO_TEXTURE && material.Texture >= textures) || material.Metallic < 0 ||
+            material.Metallic > 1 || material.Roughness < format::MIN_ROUGHNESS || material.Roughness > 1 ||
+            material.Emission.X < 0 || material.Emission.Y < 0 || material.Emission.Z < 0 ||
+            material.Emission.X > format::MAX_EMISSION || material.Emission.Y > format::MAX_EMISSION ||
+            material.Emission.Z > format::MAX_EMISSION)
         {
             return Status::Failed;
         }
@@ -149,21 +163,22 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
     for (auto& mesh : scene.Meshes)
     {
         uint32 vertices = 0, indices = 0;
-        if (!reader.Read(vertices) || !reader.Read(indices) || vertices == 0 || vertices > 500000 || indices == 0 ||
-            indices > 1500000 || indices % 3 != 0 || vertexTotal + vertices > 500000 ||
-            usize(vertices) * 32 + usize(indices) * 4 > reader.Remaining())
+        if (reader.Read(vertices) == false || reader.Read(indices) == false || vertices == 0 ||
+            vertices > format::MAX_VERTICES || indices == 0 || indices > format::MAX_INDICES || indices % 3 != 0 ||
+            vertexTotal + vertices > format::MAX_VERTICES ||
+            usize(vertices) * sizeof(format::VertexRecord) + usize(indices) * sizeof(uint32) > reader.Remaining())
         {
             return Status::Failed;
         }
-        if (!mesh.Positions.TryResize(vertices) || !mesh.Normals.TryResize(vertices) ||
-            !mesh.Texcoords.TryResize(vertices) || !mesh.Indices.TryResize(indices))
+        if (mesh.Positions.TryResize(vertices) == false || mesh.Normals.TryResize(vertices) == false ||
+            mesh.Texcoords.TryResize(vertices) == false || mesh.Indices.TryResize(indices) == false)
         {
             return Status::OutOfMemory;
         }
         for (usize i = 0; i < vertices; ++i)
         {
-            if (!reader.Read(mesh.Positions[i]) || !reader.Read(mesh.Normals[i]) || !reader.Read(mesh.Texcoords[i].X) ||
-                !reader.Read(mesh.Texcoords[i].Y) ||
+            if (reader.Read(mesh.Positions[i]) == false || reader.Read(mesh.Normals[i]) == false ||
+                reader.Read(mesh.Texcoords[i].X) == false || reader.Read(mesh.Texcoords[i].Y) == false ||
                 (mesh.Normals[i].X == 0 && mesh.Normals[i].Y == 0 && mesh.Normals[i].Z == 0))
             {
                 return Status::Failed;
@@ -171,7 +186,7 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
         }
         for (auto& index : mesh.Indices)
         {
-            if (!reader.Read(index) || index >= vertices)
+            if (reader.Read(index) == false || index >= vertices)
             {
                 return Status::Failed;
             }
@@ -180,20 +195,20 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
     }
     for (auto& object : scene.Objects)
     {
-        if (!reader.Read(object.Mesh) || object.Mesh >= meshes || !reader.Read(object.Material) ||
+        if (reader.Read(object.Mesh) == false || object.Mesh >= meshes || reader.Read(object.Material) == false ||
             object.Material >= materials)
         {
             return Status::Failed;
         }
         for (auto& column : object.Transform.Columns)
         {
-            if (!reader.Read(column))
+            if (reader.Read(column) == false)
             {
                 return Status::Failed;
             }
         }
         math::Affine3 inverse;
-        if (!reader.Read(object.Transform.Translation) ||
+        if (reader.Read(object.Transform.Translation) == false ||
             math::TryInverse(object.Transform, inverse) != math::MathStatus::Success)
         {
             return Status::Failed;
@@ -245,9 +260,9 @@ SceneDefinitionAdapter::~SceneDefinitionAdapter() noexcept
 }
 Status SceneDefinitionAdapter::Initialize(const content::Resource& resource, const SceneDefinition& scene) noexcept
 {
-    if (mState != nullptr || resource.Type != content::Kind::CookedScene || !content::ValidId(resource.Id.View()) ||
-        !content::ValidPath(resource.Path.View()) || scene.Meshes.IsEmpty() || scene.Objects.IsEmpty() ||
-        scene.Bytes() > uint64{64} * 1024 * 1024)
+    if (mState != nullptr || resource.Type != content::Kind::CookedScene ||
+        content::ValidId(resource.Id.View()) == false || content::ValidPath(resource.Path.View()) == false ||
+        scene.Meshes.IsEmpty() == true || scene.Objects.IsEmpty() == true || scene.Bytes() > uint64{64} * 1024 * 1024)
     {
         return Status::InvalidState;
     }
@@ -295,7 +310,7 @@ Status SceneDefinitionAdapter::Begin(void* context, const content::Resource& res
     }
     for (auto& job : state->Jobs)
     {
-        if (!job.Used)
+        if (job.Used == false)
         {
             job = { .Used = true, .Cancelled = false };
             candidate = &job;
@@ -312,7 +327,7 @@ Status SceneDefinitionAdapter::Poll(void* context, void* candidate, const void*&
     }
     auto* state = static_cast<SceneDefinitionAdapter*>(context)->mState;
     const auto& job = *static_cast<State::Job*>(candidate);
-    if (!job.Used || job.Cancelled)
+    if (job.Used == false || job.Cancelled == true)
     {
         return Status::Cancelled;
     }

@@ -18,7 +18,27 @@
 namespace ludus::foundation::math
 {
 using core::float32;
+using core::float64;
 using core::usize;
+
+/// @brief Column-major 4x4 double-precision matrix used for offline and tooling transforms.
+///
+/// Storage matches Matrix4 (column c, row r at Elements[4 * c + r]); default is zero, not identity. Equality is
+/// element-wise IEEE comparison, so -0.0 equals 0.0 and NaN is never equal.
+struct Matrix4d
+{
+    /// Sixteen elements in column-major order.
+    float64 Elements[16] = {};
+
+    /// The identity matrix.
+    [[nodiscard]] static constexpr Matrix4d Identity() noexcept
+    {
+        return Matrix4d{{1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0}};
+    }
+
+    /// Element-wise IEEE equality.
+    [[nodiscard]] friend constexpr bool operator==(const Matrix4d&, const Matrix4d&) = default;
+};
 
 /// @brief Policy for checked matrix inversion.
 ///

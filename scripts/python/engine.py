@@ -1732,6 +1732,16 @@ def run_foundational_includes(root: Path) -> None:
     run([sys.executable, str(script), str(root)], cwd=root)
 
 
+def run_naming_check(root: Path) -> None:
+    """Enforce the mechanically checkable naming/boolean rules (AGENTS.md "Naming").
+
+    Text-only and toolchain-independent; scoped by config/naming_scopes.txt.
+    See tools/check_naming.py.
+    """
+    script = root / "tools" / "check_naming.py"
+    run([sys.executable, str(script), str(root)], cwd=root)
+
+
 def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
     # getattr guards callers that build the Namespace by hand (e.g. command_init).
@@ -1748,6 +1758,7 @@ def command_check(args: argparse.Namespace) -> int:
     # needs no configured build.
     if args.format or run_all:
         run_foundational_includes(root)
+        run_naming_check(root)
     if args.tidy or run_all or include_cleaner or analyzer or inventory_only:
         ensure_bootstrap_for_preset(root, args.preset)
     if inventory_only:

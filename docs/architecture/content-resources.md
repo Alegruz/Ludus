@@ -46,6 +46,17 @@ and Audio. Dynamic music later uses `modules/audio/music/`, `Ludus::Music`.
 Keep source files in `src/`, public headers in `include/`, implementation headers
 in `src/internal/`. Content and AudioContent now export these SDK targets; Music remains proposed.
 
+Cooked interchange formats are contracts owned by neither the tools that write
+them nor the runtime that reads them. The LUSCN cooked scene format lives in
+`modules/content/scene_format/`, exported as the header-only `Ludus::SceneFormat`
+INTERFACE target: versioned POD record layouts (header, texture, material V1/V2,
+mesh, vertex, object), limits and constants with `static_assert`ed sizes. It
+depends only on FoundationBase. `Ludus::SceneCook` and the Editor World composer
+write it, and `Ludus::Resources` (`SceneDefinition::Decode`) reads it for the
+renderer; the cooker never links the renderer and the runtime never links the
+cooker. A format change bumps its version in that header and updates both sides
+in the same change.
+
 Qt adapters stay private to `apps/editor`. Do not move Qt JSON objects into runtime
 headers. Select and pin a bounded, explicit-error JSON parser during the first
 implementation audit; demonstrate compatibility with `-fno-exceptions`, duplicate

@@ -1,5 +1,6 @@
 #include "internal/render_scene.h"
 
+#include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/scalar.hpp>
@@ -26,6 +27,7 @@ namespace
 {
 using namespace foundation;
 namespace math = foundation::math;
+namespace format = ludus::content::scene_format;
 namespace camera = gameplay::camera;
 namespace rr = graphics::renderer;
 bool Fail(QString& error, const QString& text)
@@ -711,7 +713,8 @@ bool RenderScene::Merge(const RenderScene& authored,
     const auto materialCount = imported.Materials.GetSize() + static_cast<usize>(authored.Objects.size());
     const auto textureCount = imported.Textures.GetSize() + static_cast<usize>(authored.Objects.size());
     const auto objectCount = imported.Objects.GetSize() + static_cast<usize>(authored.Objects.size());
-    if (meshCount > 6 || materialCount > 8 || textureCount > 8 || objectCount > 128)
+    if (meshCount > format::MAX_MESHES || materialCount > format::MAX_MATERIALS ||
+        textureCount > format::MAX_TEXTURES || objectCount > format::MAX_OBJECTS)
     {
         return Fail(
             error,
@@ -721,8 +724,8 @@ bool RenderScene::Merge(const RenderScene& authored,
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
-    stream.writeRawData("LUSCN01\0", 8);
-    stream << uint32{2} << static_cast<uint32>(meshCount) << static_cast<uint32>(materialCount)
+    stream.writeRawData(format::MAGIC.data(), static_cast<int32>(format::MAGIC.size()));
+    stream << format::VERSION_2 << static_cast<uint32>(meshCount) << static_cast<uint32>(materialCount)
            << static_cast<uint32>(textureCount) << static_cast<uint32>(objectCount);
     const auto camera = level.value(QStringLiteral("camera")).toObject();
     for (const auto& key : {QStringLiteral("eye"), QStringLiteral("target"), QStringLiteral("up")})
