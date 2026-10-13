@@ -28,6 +28,12 @@ struct Session final
     rhi::NativeTextureRead Read;
     ~Session()
     {
+        if (!native_fixture::RetireConsumers(Foreign))
+        {
+            LUDUS_LOG_ERROR(LOG_NATIVE,
+                            "Foreign GPU borrower could not retire; retain its source for safe failure exit");
+            return;
+        }
         const auto read = rhi::DrainNativeTextureRead(Read);
         if (read != rhi::RasterStatus::Ready && read != rhi::RasterStatus::InvalidHandle)
         {

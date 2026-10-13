@@ -11,6 +11,7 @@ struct Foreign final
     void* Context = nullptr;
 };
 bool CreateForeign(Foreign&) noexcept;
+bool RetireConsumers(Foreign&) noexcept;
 void DestroyForeign(Foreign&) noexcept;
 bool SubmitSample(Foreign&, const ludus::graphics::rhi::NativeTextureInfo&) noexcept;
 bool ReadSample(Foreign&, ludus::foundation::uint8 (&)[64]) noexcept;

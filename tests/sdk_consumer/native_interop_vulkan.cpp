@@ -283,6 +283,20 @@ bool CreateForeign(Foreign& fixture) noexcept
     fixture.Description.SerializedOwnerQueue = true;
     return true;
 }
+bool RetireConsumers(Foreign& fixture) noexcept
+{
+    auto* source = static_cast<Source*>(fixture.Context);
+    if (source != nullptr && source->Device != VK_NULL_HANDLE)
+    {
+        const auto result = source->Api.vkDeviceWaitIdle(source->Device);
+        if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST)
+        {
+            return false;
+        }
+        RetireSample(*source);
+    }
+    return true;
+}
 void DestroyForeign(Foreign& fixture) noexcept
 {
     auto* source = static_cast<Source*>(fixture.Context);

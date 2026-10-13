@@ -51,6 +51,19 @@ bool CreateForeign(Foreign& fixture) noexcept
     fixture.Description.SerializedOwnerQueue = true;
     return true;
 }
+bool RetireConsumers(Foreign& fixture) noexcept
+{
+    auto* source = static_cast<Source*>(fixture.Context);
+    if (source != nullptr && source->Sample != nil)
+    {
+        if (source->Sample.status >= MTLCommandBufferStatusCommitted)
+        {
+            [source->Sample waitUntilCompleted];
+        }
+        source->Sample = nil;
+    }
+    return true;
+}
 void DestroyForeign(Foreign& fixture) noexcept
 {
     delete static_cast<Source*>(fixture.Context);
