@@ -39,6 +39,8 @@ internal::RasterPassInfo gRasterGlPass;
 bool gRasterGlPassOpen = false;
 bool gRasterHdrProbed = false, gRasterHdr = false;
 internal::StorageTable<GLuint> gRasterDepths;
+internal::StorageTable<GLuint> gRasterMsaaColors;
+GLuint gRasterMrtFramebuffer = 0, gRasterResolveFramebuffer = 0;
 struct RasterGlView final
 {
     GLuint Object = 0;
@@ -254,6 +256,14 @@ void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 // WebGL 1.0 section "Vertex Attribute Data Stride": the API caps stride at 255.
 // Ludus uses four-byte-aligned float attributes, so its largest legal stride is 252.
 // https://registry.khronos.org/webgl/specs/1.0/#VERTEX_ATTRIB_POINTER
+uint32 RasterColorAttachmentLimit() noexcept
+{
+    GLint colors = 0, buffers = 0;
+    glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &colors);
+    glGetIntegerv(GL_MAX_DRAW_BUFFERS, &buffers);
+    const auto count = colors < buffers ? colors : buffers;
+    return count > 4 ? 4U : count > 0 ? static_cast<uint32>(count) : 0U;
+}
 uint32 RasterVertexStrideLimit() noexcept
 {
     return 252;
@@ -308,6 +318,28 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
         return {};
     }
     auto result = internal::PortableFormatLimits(format, RasterLimits());
+    if (result.Uses.ColorAttachment)
+    {
+        result.MaxAttachmentMipLevels = 1;
+        result.MaxAttachmentLayers = 1;
+        result.AttachmentViews = true;
+        result.StencilAttachment = true;
+        // WebGL exposes only SAMPLES (a bounded Int32Array), not NUM_SAMPLE_COUNTS.
+        // The bridge copies the returned elements; zeroed trailing entries are ignored.
+        GLint colorSamples[32]{}, depthSamples[32]{};
+        glGetInternalformativ(GL_RENDERBUFFER, RasterGlTextureFormat(format), GL_SAMPLES, 32, colorSamples);
+        glGetInternalformativ(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, GL_SAMPLES, 32, depthSamples);
+        bool color4 = false, depth4 = false;
+        for (usize i = 0; i < 32; ++i)
+        {
+            color4 |= colorSamples[i] == 4;
+            depth4 |= depthSamples[i] == 4;
+        }
+        if (color4 && depth4)
+        {
+            result.SampleCounts |= 4;
+        }
+    }
     if (result.Uses.Sampled)
     {
         GLint layers = 0, volume = 0, cube = 0;
@@ -406,25 +438,53 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     glBindTexture(target, 0);
     if (info.Attachment)
     {
-        glGenTextures(1, &gRasterRenderTextures[slot]);
-        glBindTexture(GL_TEXTURE_2D, gRasterRenderTextures[slot]);
-        glTexStorage2D(GL_TEXTURE_2D,
-                       1,
-                       info.Format == RasterFormat::Rgba16Float  ? GL_RGBA16F
-                       : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
-                                                                 : GL_SRGB8_ALPHA8,
-                       static_cast<GLsizei>(info.Width),
-                       static_cast<GLsizei>(info.Height));
+        if (info.SampleCount == 1)
+        {
+            glGenTextures(1, &gRasterRenderTextures[slot]);
+            glBindTexture(GL_TEXTURE_2D, gRasterRenderTextures[slot]);
+            glTexStorage2D(GL_TEXTURE_2D,
+                           1,
+                           info.Format == RasterFormat::Rgba16Float  ? GL_RGBA16F
+                           : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
+                                                                     : GL_SRGB8_ALPHA8,
+                           static_cast<GLsizei>(info.Width),
+                           static_cast<GLsizei>(info.Height));
+        }
         glGenRenderbuffers(1, &gRasterDepths[slot]);
         glBindRenderbuffer(GL_RENDERBUFFER, gRasterDepths[slot]);
-        glRenderbufferStorage(GL_RENDERBUFFER,
-                              GL_DEPTH_COMPONENT24,
-                              static_cast<GLsizei>(info.Width),
-                              static_cast<GLsizei>(info.Height));
+        if (info.SampleCount == 4)
+        {
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER,
+                                             4,
+                                             info.Stencil ? GL_DEPTH24_STENCIL8 : GL_DEPTH_COMPONENT24,
+                                             static_cast<GLsizei>(info.Width),
+                                             static_cast<GLsizei>(info.Height));
+        }
+        else
+        {
+            glRenderbufferStorage(GL_RENDERBUFFER,
+                                  info.Stencil ? GL_DEPTH24_STENCIL8 : GL_DEPTH_COMPONENT24,
+                                  static_cast<GLsizei>(info.Width),
+                                  static_cast<GLsizei>(info.Height));
+        }
         glGenFramebuffers(1, &gRasterFramebuffers[slot]);
         glBindFramebuffer(GL_FRAMEBUFFER, gRasterFramebuffers[slot]);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gRasterRenderTextures[slot], 0);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gRasterDepths[slot]);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                  info.Stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER,
+                                  gRasterDepths[slot]);
+        if (info.SampleCount == 4)
+        {
+            glGenRenderbuffers(1, &gRasterMsaaColors[slot]);
+            glBindRenderbuffer(GL_RENDERBUFFER, gRasterMsaaColors[slot]);
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER,
+                                             4,
+                                             RasterGlTextureFormat(info.Format),
+                                             static_cast<GLsizei>(info.Width),
+                                             static_cast<GLsizei>(info.Height));
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, gRasterMsaaColors[slot]);
+        }
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         {
             return RasterStatus::Unsupported;
@@ -448,6 +508,11 @@ RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& sour
 {
     const auto& info = gRasterTextureDescriptions[source.Texture];
     const auto& range = source.View;
+    if (range.Attachment)
+    {
+        gRasterViews[slot].Object = gRasterRenderTextures[source.Texture];
+        return RasterStatus::Ready;
+    }
     auto& view = gRasterViews[slot];
     view.Target = RasterGlTextureTarget(range.Dimension);
     const uint32 layers = info.Dimension == TextureDimension::D3 ? 1U : info.DepthOrLayers;
@@ -647,6 +712,8 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             gRasterSampleFramebuffers[slot] = gRasterRenderTextures[slot] = 0;
             glDeleteFramebuffers(1, &gRasterFramebuffers[slot]);
             glDeleteRenderbuffers(1, &gRasterDepths[slot]);
+            glDeleteRenderbuffers(1, &gRasterMsaaColors[slot]);
+            gRasterMsaaColors[slot] = 0;
             gRasterFramebuffers[slot] = gRasterDepths[slot] = 0;
             glDeleteTextures(1, &gRasterTextures[slot]);
             gRasterTextures[slot] = 0;
@@ -789,6 +856,32 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     {
         glDisable(GL_BLEND);
     }
+    if (info.Stencil)
+    {
+        glEnable(GL_STENCIL_TEST);
+        const GLenum
+            stencilComparisons[]{GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL, GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS};
+        const GLenum ops[]{GL_KEEP, GL_ZERO, GL_REPLACE, GL_INCR, GL_DECR, GL_INVERT, GL_INCR_WRAP, GL_DECR_WRAP};
+        const RasterStencilFace faces[]{info.StencilFront, info.StencilBack};
+        for (usize i = 0; i < 2; ++i)
+        {
+            const GLenum face = i == 0 ? GL_FRONT : GL_BACK;
+            const auto& input = faces[i];
+            glStencilFuncSeparate(face,
+                                  stencilComparisons[static_cast<usize>(input.Compare)],
+                                  static_cast<GLint>(info.StencilReference),
+                                  info.StencilReadMask);
+            glStencilOpSeparate(face,
+                                ops[static_cast<usize>(input.Fail)],
+                                ops[static_cast<usize>(input.DepthFail)],
+                                ops[static_cast<usize>(input.Pass)]);
+            glStencilMaskSeparate(face, info.StencilWriteMask);
+        }
+    }
+    else
+    {
+        glDisable(GL_STENCIL_TEST);
+    }
     glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gRasterBuffers[packet.Indices]);
@@ -839,6 +932,44 @@ void RasterEndPass() noexcept
         return;
     }
     const auto& pass = gRasterGlPass;
+    if (pass.ColorCount != 0)
+    {
+        const auto width = static_cast<GLint>(pass.Width), height = static_cast<GLint>(pass.Height);
+        for (usize i = 0; i < pass.ColorCount; ++i)
+        {
+            const auto& c = pass.Colors[i];
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, gRasterMrtFramebuffer);
+            glReadBuffer(GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(i));
+            usize destination = internal::RASTER_INVALID;
+            if (c.ResolveTexture != internal::RASTER_INVALID)
+            {
+                destination = c.ResolveTexture;
+                // First resolve without flipping, then normalize orientation in a single-sample blit.
+                const auto resolve = gRasterResolveFramebuffer;
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolve);
+                glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
+                                       GL_COLOR_ATTACHMENT0,
+                                       GL_TEXTURE_2D,
+                                       gRasterRenderTextures[destination],
+                                       0);
+                glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, resolve);
+                glReadBuffer(GL_COLOR_ATTACHMENT0);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gRasterSampleFramebuffers[destination]);
+                glBlitFramebuffer(0, 0, width, height, 0, height, width, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            }
+            if (c.Store == RasterStore::Store && pass.SampleCount == 1)
+            {
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, gRasterMrtFramebuffer);
+                glReadBuffer(GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(i));
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gRasterSampleFramebuffers[c.Texture]);
+                glBlitFramebuffer(0, 0, width, height, 0, height, width, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            }
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, gRasterMrtFramebuffer);
+        gRasterGlPassOpen = false;
+        return;
+    }
     if (pass.Texture != internal::RASTER_INVALID && pass.Description.ColorStore == RasterStore::Store)
     {
         // GL framebuffer rows run bottom-up; uploaded/sampled texture rows in
@@ -884,23 +1015,77 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     const auto& state = info.Description;
     const bool surface = info.Texture == internal::RASTER_INVALID;
     glBindFramebuffer(GL_FRAMEBUFFER, surface ? 0 : gRasterFramebuffers[info.Texture]);
-    const auto width = surface ? gTarget.Width : gRasterTextureDescriptions[info.Texture].Width;
-    const auto height = surface ? gTarget.Height : gRasterTextureDescriptions[info.Texture].Height;
+    if (info.ColorCount != 0)
+    {
+        if (gRasterMrtFramebuffer == 0)
+        {
+            glGenFramebuffers(1, &gRasterMrtFramebuffer);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, gRasterMrtFramebuffer);
+        GLenum outputs[4]{};
+        for (usize i = 0; i < 4; ++i)
+        {
+            const GLenum attachment = GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(i);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, attachment, GL_TEXTURE_2D, 0, 0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachment, GL_RENDERBUFFER, 0);
+            if (i < info.ColorCount)
+            {
+                const auto slot = info.Colors[i].Texture;
+                outputs[i] = attachment;
+                if (info.SampleCount == 4)
+                {
+                    glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachment, GL_RENDERBUFFER, gRasterMsaaColors[slot]);
+                }
+                else
+                {
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, attachment, GL_TEXTURE_2D, gRasterRenderTextures[slot], 0);
+                }
+            }
+        }
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                  info.Stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER,
+                                  gRasterDepths[info.Texture]);
+        glDrawBuffers(static_cast<GLsizei>(info.ColorCount), outputs);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            return RasterStatus::Failed;
+        }
+    }
+    const auto width = surface ? gTarget.Width : info.Width;
+    const auto height = surface ? gTarget.Height : info.Height;
     glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(state.DepthReadOnly ? GL_FALSE : GL_TRUE);
+    if (info.ColorCount != 0)
+    {
+        for (usize i = 0; i < info.ColorCount; ++i)
+        {
+            if (info.Colors[i].Load != RasterLoad::Load)
+            {
+                glClearBufferfv(GL_COLOR, static_cast<GLint>(i), info.Colors[i].Clear);
+            }
+        }
+    }
     glClearColor(state.Clear[0], state.Clear[1], state.Clear[2], state.Clear[3]);
     glClearDepthf(state.ClearDepth);
     GLbitfield clear = 0;
-    if (state.ColorLoad != RasterLoad::Load)
+    if (info.ColorCount == 0 && state.ColorLoad != RasterLoad::Load)
     {
         clear |= GL_COLOR_BUFFER_BIT;
     }
     if (state.DepthLoad != RasterLoad::Load)
     {
         clear |= GL_DEPTH_BUFFER_BIT;
+    }
+    glStencilMask(255);
+    glClearStencil(static_cast<GLint>(state.ClearStencil));
+    if (info.Stencil && !state.StencilReadOnly && state.StencilLoad != RasterLoad::Load)
+    {
+        clear |= GL_STENCIL_BUFFER_BIT;
     }
     if (clear != 0)
     {
@@ -946,6 +1131,10 @@ void RasterSubmit(uint64 ordinal) noexcept
 }
 void RasterReset() noexcept
 {
+    glDeleteFramebuffers(1, &gRasterMrtFramebuffer);
+    gRasterMrtFramebuffer = 0;
+    glDeleteFramebuffers(1, &gRasterResolveFramebuffer);
+    gRasterResolveFramebuffer = 0;
     gRasterGlPassOpen = false;
     gRasterGlPass = {};
     gRasterHdrProbed = gRasterHdr = false;
@@ -975,7 +1164,8 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
         case internal::RasterKind::Texture:
             return gRasterTextures.EnsureSlots(count) && gRasterTextureDescriptions.EnsureSlots(count) &&
                            gRasterFramebuffers.EnsureSlots(count) && gRasterRenderTextures.EnsureSlots(count) &&
-                           gRasterSampleFramebuffers.EnsureSlots(count) && gRasterDepths.EnsureSlots(count)
+                           gRasterSampleFramebuffers.EnsureSlots(count) && gRasterDepths.EnsureSlots(count) &&
+                           gRasterMsaaColors.EnsureSlots(count)
                        ? RasterStatus::Ready
                        : internal::StorageFailure();
         case internal::RasterKind::View:
@@ -998,7 +1188,25 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
 }
 RasterStatus RasterPrepareStorage() noexcept
 {
-    return gRasterCompletions.EnsureSlots(internal::CurrentStorageLimits().Submissions) ? RasterStatus::Ready
-                                                                                        : internal::StorageFailure();
+    // Frame storage admission precedes Begin(), so preserve synchronous loss
+    // before querying GL errors or allocating the R10 framebuffer objects.
+    if (gContext <= 0 || emscripten_is_webgl_context_lost(gContext))
+    {
+        internal::Fail(gSession, StartupError::DeviceLost);
+        return RasterStatus::DeviceLost;
+    }
+    if (!gRasterCompletions.EnsureSlots(internal::CurrentStorageLimits().Submissions))
+    {
+        return internal::StorageFailure();
+    }
+    if (gRasterMrtFramebuffer == 0)
+    {
+        glGenFramebuffers(1, &gRasterMrtFramebuffer);
+    }
+    if (gRasterResolveFramebuffer == 0)
+    {
+        glGenFramebuffers(1, &gRasterResolveFramebuffer);
+    }
+    return RasterGlResult();
 }
 } // namespace ludus::graphics::rhi::LUDUS_RHI_WEBGL_NAMESPACE

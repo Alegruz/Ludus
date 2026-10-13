@@ -76,19 +76,25 @@ def raster_interface(document, stage, metal=False):
             if resource['type'].get('access', 'read') not in ('read', 'readOnly') or resource['type'].get('multisample', False):
                 raise RuntimeError('Raster textures require non-multisampled read-only sampling')
             result = resource['type'].get('resultType', {})
-            if result.get('elementType', {}).get('scalarType') != 'float32':
-                raise RuntimeError('Raster textures require float sampling')
+            scalar = result.get('scalarType') if result.get('kind') == 'scalar' else result.get('elementType', {}).get('scalarType')
+            scalar_aspect = result.get('kind') == 'scalar'
+            if scalar != 'float32' and not (scalar_aspect and scalar == 'uint32'):
+                raise RuntimeError('Raster textures require float vectors or scalar depth/stencil loads')
             shape = resource['type']['baseShape']
             array = resource['type'].get('array', False)
             if array and shape != 'texture2D':
                 raise RuntimeError('Only 2D sampled texture arrays are in the R9 profile')
             kind = 'Texture2DArray' if array else {'texture2D': 'Texture2D', 'textureCube': 'TextureCube', 'texture3D': 'Texture3D'}[shape]
+            if scalar_aspect:
+                if array or shape != 'texture2D':
+                    raise RuntimeError('Depth/stencil scalar loads require a 2D aspect view')
+                kind = 'TextureDepth2D' if scalar == 'float32' else 'TextureStencil2D'
         else:
             raise RuntimeError('Unsupported raster resource shape: ' + kind)
         if stage == 'compute' and kind not in ('UniformBuffer', 'StorageRead', 'StorageReadWrite'):
             raise RuntimeError('Compute profile accepts buffer bindings only')
         if metal:
-            native_kind = {'StorageRead': 'constantBuffer', 'StorageReadWrite': 'constantBuffer', 'UniformBuffer': 'constantBuffer', 'Texture2D': 'shaderResource', 'Texture2DArray': 'shaderResource', 'TextureCube': 'shaderResource', 'Texture3D': 'shaderResource', 'Sampler': 'samplerState'}[kind]
+            native_kind = {'StorageRead': 'constantBuffer', 'StorageReadWrite': 'constantBuffer', 'UniformBuffer': 'constantBuffer', 'Texture2D': 'shaderResource', 'Texture2DArray': 'shaderResource', 'TextureCube': 'shaderResource', 'Texture3D': 'shaderResource', 'TextureDepth2D': 'shaderResource', 'TextureStencil2D': 'shaderResource', 'Sampler': 'samplerState'}[kind]
             native = [b for b in bindings if b.get('kind') == native_kind]
             if len(native) != 1 or native[0]['index'] != index:
                 raise RuntimeError('Metal binding remapping is outside this raster profile')
@@ -162,14 +168,19 @@ def glsl_interface(code, reflected, cross_reflection):
     images = cross_reflection.get('separate_images', [])
     samplers = cross_reflection.get('separate_samplers', [])
     textures = {}
-    for shape, name in re.findall(r'uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(sampler2DArray|sampler2D|samplerCube|sampler3D)\s+(\w+)\s*;', code):
+    for shape, name in re.findall(r'uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(usampler2D|sampler2DArray|sampler2D|samplerCube|sampler3D)\s+(\w+)\s*;', code):
         pairs = [(image, sampler) for image in images for sampler in samplers
                  if name == 'SPIRV_Cross_Combined' + image['name'] + sampler['name']]
+        if not pairs:
+            pairs = [(image, {'binding': 0xffffffff}) for image in images
+                     if name == 'SPIRV_Cross_Combined' + image['name'] + 'SPIRV_Cross_DummySampler']
         if len(pairs) != 1:
             raise RuntimeError('Cannot verify GLSL ES combined texture/sampler identity')
         image, sampler = pairs[0]
         entries = [x for x in reflected['entries'] if x['binding'] == image['binding']]
-        expected = {'sampler2D': 'Texture2D', 'sampler2DArray': 'Texture2DArray', 'samplerCube': 'TextureCube', 'sampler3D': 'Texture3D'}[shape]
+        expected = {'sampler2D': 'Texture2D', 'sampler2DArray': 'Texture2DArray', 'samplerCube': 'TextureCube', 'sampler3D': 'Texture3D', 'usampler2D': 'TextureStencil2D'}[shape]
+        if len(entries) == 1 and entries[0]['kind'] == 'TextureDepth2D' and shape == 'sampler2D':
+            expected = 'TextureDepth2D'
         if len(entries) != 1 or entries[0]['kind'] != expected:
             raise RuntimeError('GLSL ES emitted texture dimension differs from reflection')
         if image['binding'] in textures:
@@ -247,10 +258,16 @@ def wgsl_contract(code, reflected, stage):
         code = code[:structure.start(1)] + body + code[structure.end(1):]
     for entry in reflected['entries']:
         if entry['kind'].startswith('Texture'):
-            shape = {'Texture2D': '2d', 'Texture2DArray': '2d_array', 'TextureCube': 'cube', 'Texture3D': '3d'}[entry['kind']]
-            declaration = re.search(r'@binding\(' + str(entry['binding']) + r'\)\s+@group\(0\)\s+var\s+\w+\s*:\s*texture_' + shape + r'<f32>\s*;', code)
+            shape = {'Texture2D': '2d', 'Texture2DArray': '2d_array', 'TextureCube': 'cube', 'Texture3D': '3d', 'TextureDepth2D': '2d', 'TextureStencil2D': '2d'}[entry['kind']]
+            scalar = 'u32' if entry['kind'] == 'TextureStencil2D' else 'f32'
+            declaration = re.search(r'@binding\(' + str(entry['binding']) + r'\)\s+@group\(0\)\s+var\s+\w+\s*:\s*texture_' + shape + r'<' + scalar + r'>\s*;', code)
             if declaration is None:
                 raise RuntimeError('WGSL emitted texture dimension differs from reflection')
+            if entry['kind'] in ('TextureDepth2D', 'TextureStencil2D'):
+                variable = re.search(r'var\s+(\w+)\s*:', declaration[0])[1]
+                if re.search(r'\btexture(?:Sample|Gather)\w*\s*\(\s*' + re.escape(variable) + r'\b', code):
+                    raise RuntimeError('Depth/stencil views require unfiltered loads')
+
         if entry['kind'] != 'UniformBuffer':
             continue
         declaration = re.search(r'@binding\(' + str(entry['binding']) + r'\)\s+@group\(0\)\s+var<uniform>\s+\w+\s*:\s*(\w+)\s*;', code)
@@ -351,6 +368,11 @@ def compile_raster(args, lock):
         interfaces[(target, stage)] = raster_interface(json.loads(reflection.read_text()), stage, args.metal)
         if args.metal:
             code = artifact.read_text()
+            for binding in interfaces[(target, stage)]['entries']:
+                if binding['kind'] in ('TextureDepth2D', 'TextureStencil2D'):
+                    variable = re.escape(binding['name']) + r'(?:_\d+)?'
+                    if re.search(r'\b' + variable + r'\s*\)?\s*\.\s*(?:sample|gather)\b', code):
+                        raise RuntimeError('Depth/stencil views require unfiltered loads')
             if compute:
                 # Slang emits non-const device pointers for StructuredBuffer.
                 # Preserve the independently reflected read-only contract in MSL,

@@ -92,6 +92,12 @@ struct RasterPipelineInfo final
     RasterTarget Target = RasterTarget::Surface;
     bool DepthWrite = true;
     RasterDepthCompare DepthCompare = RasterDepthCompare::Less;
+    RasterFormat ColorFormats[4]{};
+    foundation::usize ColorCount = 0;
+    foundation::uint32 SampleCount = 1;
+    bool Stencil = false;
+    RasterStencilFace StencilFront{}, StencilBack{};
+    foundation::uint32 StencilReadMask = 255, StencilWriteMask = 255, StencilReference = 0;
 };
 struct ComputePipelineInfo final
 {
@@ -120,10 +126,24 @@ struct RasterPacket final
     foundation::usize Indirect = RASTER_INVALID;
     foundation::usize IndirectOffset = 0;
 };
+struct RasterAttachmentInfo final
+{
+    foundation::usize View = RASTER_INVALID, Texture = RASTER_INVALID;
+    foundation::usize ResolveView = RASTER_INVALID, ResolveTexture = RASTER_INVALID;
+    foundation::uint32 Mip = 0, Layer = 0, ResolveMip = 0, ResolveLayer = 0;
+    RasterFormat Format = RasterFormat::Rgba8Unorm;
+    RasterLoad Load = RasterLoad::Clear;
+    RasterStore Store = RasterStore::Store;
+    foundation::float32 Clear[4]{0, 0, 0, 1};
+};
 struct RasterPassInfo final
 {
     foundation::usize Texture = RASTER_INVALID;
     RasterPassDescription Description;
+    RasterAttachmentInfo Colors[4]{};
+    foundation::usize ColorCount = 0;
+    foundation::uint32 Width = 0, Height = 0, SampleCount = 1;
+    bool Stencil = false;
 };
 // Canonical rectangles stay top-left; API-specific Y conversion occurs only in backends.
 struct RasterArea final
@@ -214,6 +234,7 @@ void ResetLifetimeRecords() noexcept;
 namespace ludus::graphics::rhi::backend
 {
 RasterCapabilities RasterLimits() noexcept;
+foundation::uint32 RasterColorAttachmentLimit() noexcept;
 ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;
 ComputeCapabilities ComputeLimits() noexcept;

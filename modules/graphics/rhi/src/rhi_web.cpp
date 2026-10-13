@@ -357,6 +357,10 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::FormatLimits(format) : webgpu::FormatLimits(format);
 }
+ludus::foundation::uint32 RasterColorAttachmentLimit() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterColorAttachmentLimit() : webgpu::RasterColorAttachmentLimit();
+}
 ludus::foundation::uint32 RasterVertexStrideLimit() noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::RasterVertexStrideLimit() : webgpu::RasterVertexStrideLimit();

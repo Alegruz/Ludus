@@ -152,7 +152,7 @@ struct FormatCapabilities final
     /// Maximum sampled mip count, additionally bounded by spatial extents (including volume depth).
     ludus::foundation::uint32 MaxMipLevels = 0;
     /// Attachment sample counts as a bit mask: bit value 1 means one sample, 4 means four.
-    /// The current profile supports only 1; zero when no attachment is supported.
+    /// Enabled counts are one and optionally four; zero when no attachment is supported.
     ludus::foundation::uint32 SampleCounts = 0;
     /// Maximum enabled sampled array layers; one means D2 only.
     ludus::foundation::uint32 MaxArrayLayers = 0;
@@ -162,6 +162,20 @@ struct FormatCapabilities final
     ludus::foundation::uint32 MaxDimension3D = 0;
     /// Selected mip/layer color views are implemented for this format.
     bool PartialViews = false;
+    /// Maximum allocated attachment mip levels; one disables nonzero mip selections.
+    ludus::foundation::uint32 MaxAttachmentMipLevels = 0;
+    /// Maximum enabled cubemap color-attachment face extent; zero disables cube attachments.
+    ludus::foundation::uint32 MaxAttachmentCubeDimension = 0;
+    /// Maximum allocated attachment array layers/cube faces; one selects D2 only.
+    ludus::foundation::uint32 MaxAttachmentLayers = 0;
+    /// Single-mip/layer writable color views, including array/cube layers.
+    bool AttachmentViews = false;
+    /// Private depth aspect permits scalar float loads through a D2 view.
+    bool DepthSampled = false;
+    /// Private eight-bit stencil can be allocated and tested/written by raster pipelines.
+    bool StencilAttachment = false;
+    /// Private stencil aspect permits scalar unsigned loads through a D2 view.
+    bool StencilSampled = false;
 };
 /// Fixed public raster interface bounds, independently of larger native adapter limits.
 struct RasterInterfaceCapabilities final
@@ -267,16 +281,24 @@ struct FormatRequirement final
     TextureUses Uses;
     /// Minimum width/height in pixels for every selected sampled/attachment use.
     ludus::foundation::uint32 MinDimension2D = 0;
-    /// Minimum sampled mip count; attachments support only one.
+    /// Minimum mip count for selected uses; multisampled attachments require one.
     ludus::foundation::uint32 MinMipLevels = 1;
     /// Required attachment sample count; a power of two, 1..64. No MSAA is implied.
     ludus::foundation::uint32 SampleCount = 1;
-    /// Required sampled allocation dimension; attachment requests require D2.
+    /// Required allocation dimension; attachments exclude D3.
     TextureDimension Dimension = TextureDimension::D2;
     /// Minimum array layer count or volume depth; zero adds no count constraint.
     ludus::foundation::uint32 MinDepthOrLayers = 0;
     /// Require implemented sampled mip/layer subrange views of this format.
     bool PartialViews = false;
+    /// Require enabled single-mip/layer writable color views.
+    bool AttachmentViews = false;
+    /// Require enabled private depth aspect loads.
+    bool DepthSampled = false;
+    /// Require private stencil allocation and raster testing/writes.
+    bool StencilAttachment = false;
+    /// Require enabled unsigned private stencil aspect loads.
+    bool StencilSampled = false;
 };
 /// Copied bounded required/preferred profile constraints. Unused array entries are ignored.
 /// Required constraints reject before Ready; preferred constraints only produce diagnostics.
@@ -334,6 +356,14 @@ enum class ProfileRequirement : ludus::foundation::uint8
     Sampled,
     /// Requested original-format sampled subrange views are disabled.
     PartialViews,
+    /// Writable mip/layer attachment views are unavailable.
+    AttachmentViews,
+    /// Private depth sampling is unavailable.
+    DepthSampled,
+    /// Stencil allocation/testing is unavailable.
+    StencilAttachment,
+    /// Private stencil sampling is unavailable.
+    StencilSampled,
     /// Linear filtering is unavailable.
     Filterable,
     /// Color attachment use is unavailable.
