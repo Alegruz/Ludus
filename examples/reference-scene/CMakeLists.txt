@@ -22,7 +22,6 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_test(NAME scene_cooker COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/scene_cooker" -v)
 endif()
 
 option(LUDUS_SCENE_SANITIZERS "Instrument the scene consumer with ASan and UBSan" OFF)

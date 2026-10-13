@@ -36,6 +36,8 @@ struct ComputeDispatch final
     BindingSetHandle Bindings{};
     /// Number of workgroups, nonzero and bounded on every axis.
     ludus::foundation::uint32 Groups[3]{1, 1, 1};
+    /// Additional byte offsets for dynamic uniform/storage entries, copied into the graph.
+    RasterBindingOffsets BindingOffsets{};
 };
 /// Indexed indirect command ABI shared by Vulkan, Metal and WebGPU: twenty bytes.
 /// The producing kernel must keep counts within the associated RasterDraw bounds

@@ -87,7 +87,8 @@ bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
                              : entry.Kind == RasterBindingKind::TextureCube  ? MTLTextureTypeCube
                              : entry.Kind == RasterBindingKind::Texture3D    ? MTLTextureType3D
                                                                              : MTLTextureType2D) &&
-                        binding.access == MTLBindingAccessReadOnly;
+                        binding.access == MTLBindingAccessReadOnly &&
+                        ((id<MTLTextureBinding>)binding).arrayLength == entry.Count;
             }
             else if (entry.Kind == RasterBindingKind::Sampler && binding.type == MTLBindingTypeSampler)
             {
@@ -145,6 +146,26 @@ uint32 RasterColorAttachmentLimit() noexcept
 uint32 RasterVertexStrideLimit() noexcept
 {
     return 256;
+}
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
+{
+    return false;
+}
+BindingCapabilities BindingLimits() noexcept
+{
+    if (gDevice == nil)
+    {
+        return {};
+    }
+    return
+    {
+        .MaxDynamicUniformBuffers = 8,
+        .MaxDynamicStorageBuffers = 4,
+        .MaxTextureArrayElements = 31,
+        .MaxDescriptorsPerSet = internal::CurrentStorageLimits().DescriptorsPerSet,
+        .HasUniformTextureIndexing = true,
+        .HasBindlessTextureIndexing = internal::IsBindlessRequested(),
+    };
 }
 RasterCapabilities RasterLimits() noexcept
 {
@@ -214,7 +235,9 @@ RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
     const auto& layout = gRasterLayouts[set.Layout];
     for (usize i = 0; i < layout.Count; ++i)
     {
-        [encoder setBuffer:gRasterBuffers[set.Slots[i]] offset:set.Offsets[i] atIndex:layout.Entries[i].Binding];
+        [encoder setBuffer:gRasterBuffers[set.Slots[i]]
+                    offset:set.Offsets[i] + packet.BindingOffsets.Bytes[layout.Entries[i].Binding]
+                   atIndex:layout.Entries[i].Binding];
     }
     const auto& info = gComputeInfos[packet.Pipeline];
     [encoder dispatchThreadgroups:MTLSizeMake(packet.Groups[0], packet.Groups[1], packet.Groups[2])
@@ -414,8 +437,7 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
 RasterStatus
 RasterCreateSet(usize slot, const internal::RasterLayout&, const internal::RasterSet& info, uint32) noexcept
 {
-    gRasterSets[slot] = info;
-    return RasterStatus::Ready;
+    return gRasterSets[slot].TryCopyFrom(info) == true ? RasterStatus::Ready : internal::StorageFailure();
 }
 RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo& info, uint32) noexcept
 {
@@ -589,31 +611,36 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     [gEncoder setDepthStencilState:pipeline.Depth];
     [gEncoder setStencilReferenceValue:pipeline.Info.StencilReference];
     [gEncoder setFrontFacingWinding:MTLWindingCounterClockwise];
-    for (usize i = 0; i < layout.Count; ++i)
+    for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
-        const auto& entry = layout.Entries[i];
+        const RasterBinding& entry = layout.GetDescriptorBinding(i);
+        const uint32 textureIndex = entry.Binding + layout.GetArrayElement(i);
         const bool vertex = (static_cast<uint8>(entry.Visibility) & 1) != 0;
         const bool fragment = (static_cast<uint8>(entry.Visibility) & 2) != 0;
         if (entry.Kind == RasterBindingKind::UniformBuffer)
         {
             if (vertex)
             {
-                [gEncoder setVertexBuffer:gRasterBuffers[set.Slots[i]] offset:set.Offsets[i] atIndex:entry.Binding];
+                [gEncoder setVertexBuffer:gRasterBuffers[set.Slots[i]]
+                                   offset:set.Offsets[i] + packet.BindingOffsets.Bytes[entry.Binding]
+                                  atIndex:entry.Binding];
             }
             if (fragment)
             {
-                [gEncoder setFragmentBuffer:gRasterBuffers[set.Slots[i]] offset:set.Offsets[i] atIndex:entry.Binding];
+                [gEncoder setFragmentBuffer:gRasterBuffers[set.Slots[i]]
+                                     offset:set.Offsets[i] + packet.BindingOffsets.Bytes[entry.Binding]
+                                    atIndex:entry.Binding];
             }
         }
         else if (internal::TextureBinding(entry.Kind))
         {
             if (vertex)
             {
-                [gEncoder setVertexTexture:gRasterViews[set.Slots[i]] atIndex:entry.Binding];
+                [gEncoder setVertexTexture:gRasterViews[set.Slots[i]] atIndex:textureIndex];
             }
             if (fragment)
             {
-                [gEncoder setFragmentTexture:gRasterViews[set.Slots[i]] atIndex:entry.Binding];
+                [gEncoder setFragmentTexture:gRasterViews[set.Slots[i]] atIndex:textureIndex];
             }
         }
         else

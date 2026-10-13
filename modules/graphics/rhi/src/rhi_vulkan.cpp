@@ -70,6 +70,9 @@ VkQueue gQueue = VK_NULL_HANDLE;
 uint32 gFamily = 0;
 bool gQueueCompute = false;
 bool gRayEnabled = false, gRayApiAvailable = false;
+bool gHasUniformTextureIndexing = false;
+bool gHasBindlessTextureIndexing = false;
+bool gHasBindingApi = false;
 VkPhysicalDeviceAccelerationStructurePropertiesKHR gRayProperties{};
 VkSurfaceKHR gSurface = VK_NULL_HANDLE;
 VkSwapchainKHR gSwapchain = VK_NULL_HANDLE;
@@ -584,6 +587,9 @@ bool Initialize(const ApplicationInfo& app) noexcept
         gMaxUniformSize = properties.limits.maxUniformBufferRange;
         gQueueCompute = (families[gFamily].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
         gRayEnabled = gRayApiAvailable = false;
+        gHasUniformTextureIndexing = false;
+        gHasBindlessTextureIndexing = false;
+        gHasBindingApi = false;
         gHeadless = true;
         return true;
     }
@@ -635,7 +641,9 @@ bool Initialize(const ApplicationInfo& app) noexcept
         static_cast<void>(vkEnumerateInstanceVersion(&loaderVersion));
     }
     gRayApiAvailable = internal::RequestsRayProfile() && loaderVersion >= VK_API_VERSION_1_2;
-    application.apiVersion = gRayApiAvailable ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
+    gHasBindingApi = internal::IsBindlessRequested() == true && loaderVersion >= VK_API_VERSION_1_2;
+    application.apiVersion =
+        gRayApiAvailable == true || gHasBindingApi == true ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
     gNativeInstanceVersion = application.apiVersion;
     VkInstanceCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -851,19 +859,58 @@ bool ConnectWindow(const WindowInfo& window) noexcept
                 }
             }
         }
-        VkPhysicalDeviceFeatures supported{}, enabled{};
+        VkPhysicalDeviceDescriptorIndexingFeatures indexing
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+        };
+        gHasBindlessTextureIndexing = false;
+        if (gHasBindingApi == true && properties.apiVersion >= VK_API_VERSION_1_2)
+        {
+            VkPhysicalDeviceFeatures2 features
+            {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                .pNext = &indexing,
+            };
+            vkGetPhysicalDeviceFeatures2(gPhysical, &features);
+            gHasBindlessTextureIndexing = indexing.shaderSampledImageArrayNonUniformIndexing == VK_TRUE;
+        }
+        if (internal::IsBindlessRequired() == true && gHasBindlessTextureIndexing == false)
+        {
+            // Required profiles filter candidates before committing native device
+            // ownership, so a later supported adapter is still considered.
+            return false;
+        }
+        indexing =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+            .shaderSampledImageArrayNonUniformIndexing = gHasBindlessTextureIndexing == true ? VK_TRUE : VK_FALSE,
+        };
+        void* featureChain = gRayEnabled == true ? static_cast<void*>(&address)
+                             : gHeadless == true ? nullptr
+                                                 : static_cast<void*>(&maintenance);
+        if (gHasBindlessTextureIndexing == true)
+        {
+            indexing.pNext = featureChain;
+            featureChain = &indexing;
+        }
+        VkPhysicalDeviceFeatures supported{};
         vkGetPhysicalDeviceFeatures(gPhysical, &supported);
-        enabled.textureCompressionBC = supported.textureCompressionBC;
-        VkDeviceCreateInfo device{};
-        device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        device.pEnabledFeatures = &enabled;
-        device.queueCreateInfoCount = 1;
-        device.pQueueCreateInfos = &queue;
-        device.enabledExtensionCount = enabledExtensions;
-        device.ppEnabledExtensionNames = extensions;
-        device.pNext = gRayEnabled ? static_cast<void*>(&address)
-                       : gHeadless ? nullptr
-                                   : static_cast<void*>(&maintenance);
+        const VkPhysicalDeviceFeatures enabled
+        {
+            .textureCompressionBC = supported.textureCompressionBC,
+            .shaderSampledImageArrayDynamicIndexing = supported.shaderSampledImageArrayDynamicIndexing,
+        };
+        gHasUniformTextureIndexing = enabled.shaderSampledImageArrayDynamicIndexing == VK_TRUE;
+        const VkDeviceCreateInfo device
+        {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            .pNext = featureChain,
+            .queueCreateInfoCount = 1,
+            .pQueueCreateInfos = &queue,
+            .enabledExtensionCount = enabledExtensions,
+            .ppEnabledExtensionNames = extensions,
+            .pEnabledFeatures = &enabled,
+        };
         if (!Check(vkCreateDevice(gPhysical, &device, nullptr, &gDevice)))
         {
             return false;
@@ -1062,6 +1109,9 @@ void Shutdown() noexcept
     gNativeInstanceVersion = VK_API_VERSION_1_1;
     gPhysical = VK_NULL_HANDLE;
     gRayEnabled = gRayApiAvailable = false;
+    gHasUniformTextureIndexing = false;
+    gHasBindlessTextureIndexing = false;
+    gHasBindingApi = false;
     gRayProperties = {};
     gQueue = VK_NULL_HANDLE;
     gFrame = 0;

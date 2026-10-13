@@ -116,6 +116,11 @@ DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noe
         return DeviceStatus::InvalidDescription;
     }
     const auto compiled = GetCompiledBackends();
+    if (description.Required.BindlessTextureIndexing == true &&
+        ((compiled.Metal == false && compiled.Vulkan == false) || description.Selection != BackendSelection::Auto))
+    {
+        return DeviceStatus::Unsupported;
+    }
     if (description.Required.RayQueries &&
         ((!compiled.Metal && !compiled.Vulkan) || description.Selection == BackendSelection::WebGPU ||
          description.Selection == BackendSelection::WebGL2))
@@ -160,6 +165,9 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
         return DeviceStatus::IdentityExhausted;
     }
     internal::SetGpuTimingRequest(description.EnableGpuTiming);
+    internal::SetBindlessRequest(description.Required.BindlessTextureIndexing == true ||
+                                     description.Preferred.BindlessTextureIndexing == true,
+                                 description.Required.BindlessTextureIndexing);
     internal::SetRayProfileRequest(description.Required.RayQueries || description.Preferred.RayQueries);
     const auto result = internal::StartOwned(
         application,
@@ -168,6 +176,7 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
         description.Limits,
         description.Required.PortableRaster || description.Required.OrderedRasterGraph ||
             description.Required.Compute || description.Required.IndirectRendering || description.Required.RayQueries ||
+            description.Required.BindlessTextureIndexing == true ||
             internal::NeedsRaster(description.RequiredProfile) || internal::NeedsCompute(description.RequiredProfile),
         description.Required.Compute || description.Required.IndirectRendering || description.Required.RayQueries ||
             internal::NeedsCompute(description.RequiredProfile),
@@ -187,6 +196,12 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
         return DeviceStatus::Failed;
     }
     if (result == StartStatus::Ready && description.Required.RayQueries && !backend::RayLimits().InlineQueries)
+    {
+        Shutdown();
+        return DeviceStatus::Unsupported;
+    }
+    if (result == StartStatus::Ready && description.Required.BindlessTextureIndexing == true &&
+        backend::BindingLimits().HasBindlessTextureIndexing == false)
     {
         Shutdown();
         return DeviceStatus::Unsupported;
@@ -255,6 +270,8 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
         info.Supported.FullscreenRaster = true;
         info.Enabled.FullscreenRaster = true;
         info.Profile = internal::CurrentDeviceProfile();
+        info.Supported.BindlessTextureIndexing = info.Profile.Binding.HasBindlessTextureIndexing;
+        info.Enabled.BindlessTextureIndexing = info.Supported.BindlessTextureIndexing;
         info.Supported.PortableRaster = info.Profile.Raster.MaxUniformRange >= 16384;
         info.Enabled.PortableRaster = info.Supported.PortableRaster;
         info.Supported.OrderedRasterGraph = info.Supported.PortableRaster;
@@ -271,6 +288,8 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
             .IndirectRendering = gDescription.Preferred.IndirectRendering && !info.Enabled.IndirectRendering,
             .RayQueries = gDescription.Preferred.RayQueries && !info.Enabled.RayQueries,
             .OrderedRasterGraph = gDescription.Preferred.OrderedRasterGraph && !info.Enabled.OrderedRasterGraph,
+            .BindlessTextureIndexing =
+                gDescription.Preferred.BindlessTextureIndexing == true && info.Enabled.BindlessTextureIndexing == false,
         };
         info.UnmetProfilePreference = internal::CheckProfile(gDescription.PreferredProfile, info.Profile);
     }

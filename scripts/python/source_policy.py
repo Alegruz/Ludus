@@ -112,6 +112,11 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
         )
 
     if Path(path).suffix in CPP:
+        for match in re.finditer(r"!(?!=)|\bnot\b", code):
+            report(
+                match.start(),
+                "use an explicit comparison instead of logical negation (== false for booleans)",
+            )
         for match in re.finditer(
             r"\bauto(?:\s+(?:const|volatile))*\s*[*&]*\s+(\w+|\[[^\]]+\])\s*(=|:|\(|\{)",
             code,

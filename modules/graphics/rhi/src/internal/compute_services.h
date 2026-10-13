@@ -45,6 +45,15 @@ RasterStatus ValidateCompute(DeviceHandle device, const ComputeDispatch& dispatc
     {
         return RasterStatus::InvalidDescription;
     }
+    const RasterStatus offsetsStatus = ValidateBindingOffsets(set->Set, dispatch.BindingOffsets);
+    if (offsetsStatus != RasterStatus::Ready)
+    {
+        return offsetsStatus;
+    }
+    packet.BindingOffsets = dispatch.BindingOffsets;
+    packet.DynamicOffsetCount = CollectDynamicOffsets(At(RasterKind::Layout, set->Set.Layout).Layout,
+                                                      dispatch.BindingOffsets,
+                                                      packet.DynamicOffsets);
     const auto limits = backend::ComputeLimits();
     for (usize i = 0; i < 3; ++i)
     {
@@ -89,10 +98,10 @@ RasterStatus EncodeCompute(const ComputePacket& packet) noexcept
     FrameRetain(RasterKind::Set, packet.Set);
     const auto& set = At(RasterKind::Set, packet.Set).Set;
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
-    for (usize i = 0; i < layout.Count; ++i)
+    for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
         FrameRetain(RasterKind::Buffer, set.Slots[i]);
-        if (layout.Entries[i].Kind == RasterBindingKind::StorageReadWrite)
+        if (layout.GetDescriptorBinding(i).Kind == RasterBindingKind::StorageReadWrite)
         {
             At(RasterKind::Buffer, set.Slots[i]).FrameBufferWritten = true;
         }

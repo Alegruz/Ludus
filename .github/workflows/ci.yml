@@ -125,7 +125,7 @@ jobs:
           ./scripts/install-sdk macos-clang-development
           out/host-tools/venv/bin/python -m venv out/project-tooling-venv
           out/project-tooling-venv/bin/python -m pip install --no-deps ./scripts/python
-          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_render_graph_build test_scene_assets -v
+          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_render_graph_build -v
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
       - name: Qualify installed RG1 Metal and WGSL packages
         run: |
@@ -458,10 +458,6 @@ jobs:
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
       - name: Test reproducible packs with the independent LZ4 decoder
         run: python3 -m unittest discover -s scripts/python -p test_pack_builder.py -v
-      - name: Test scene conversion encodings and geometry
-        run: |
-          python3 -m unittest discover -s tools/scene_cooker -v
-          PYTHONPATH=scripts/python python3 -m unittest test_scene_assets -v
       - name: Test Metal shader reflection contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_rhi_measurements test_metal_shaders test_raster_shaders test_texture_cooker -v
       - name: Test optional RAD tooling contracts
@@ -675,12 +671,24 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/build/linux-clang-development --target ludus_rhi_render_tests ludus_renderer_render_tests ludus_rhi_ray_tests ludus_rhi_native_interop_consumer --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/linux-clang-development --target ludus_rhi_render_tests ludus_renderer_render_tests ludus_rhi_ray_tests ludus_rhi_native_interop_consumer ludus_rhi_r11_consumer --parallel 2
           set -o pipefail
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/rhi/ludus_rhi_render_tests 2>&1 | tee out/raster-vulkan-validation.log
           python3 -c 'from pathlib import Path; text=Path("out/raster-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/rhi/ludus_rhi_native_interop_consumer 2>&1 | tee out/native-interop-vulkan-validation.log
           python3 -c 'from pathlib import Path; text=Path("out/native-interop-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/rhi/ludus_rhi_r11_consumer 2>&1 | tee out/r11-vulkan-validation.log
+          python3 -c 'from pathlib import Path; text=Path("out/r11-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
+          out/host-tools/venv/bin/cmake -S tests/sdk_consumer/raster -B out/r11-raster-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_PREFIX_PATH="$PWD/out/install/linux-clang-development;$PWD/out/conan/linux-clang-development" \
+            -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
+            -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
+            -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
+          out/host-tools/venv/bin/cmake --build out/r11-raster-sdk --target ludus_sdk_r11_consumer --parallel 2
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/r11-raster-sdk/ludus_sdk_r11_consumer 2>&1 | tee out/r11-sdk-vulkan-validation.log
+          python3 -c 'from pathlib import Path; text=Path("out/r11-sdk-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/rhi/ludus_rhi_ray_tests 2>&1 | tee out/ray-vulkan-validation.log
           python3 -c 'from pathlib import Path; text=Path("out/ray-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/renderer/ludus_renderer_render_tests 2>&1 | tee out/renderer-vulkan-validation.log

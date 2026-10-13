@@ -50,11 +50,62 @@ enum class RasterKind : foundation::uint8
     RayBatch,
     Count
 };
+struct DescriptorArenaUsage final
+{
+    foundation::uint64 Pools = 0;
+    foundation::uint64 ReservedDescriptors = 0;
+};
 struct RasterLayout final
 {
     RasterBinding Entries[RASTER_BINDINGS]{};
     foundation::usize Count = 0;
+    foundation::usize DescriptorCount = 0;
+    [[nodiscard]] const RasterBinding& GetDescriptorBinding(foundation::usize descriptor) const noexcept
+    {
+        for (foundation::usize entry = 0; entry < Count; ++entry)
+        {
+            if (descriptor < Entries[entry].Count)
+            {
+                return Entries[entry];
+            }
+            descriptor -= Entries[entry].Count;
+        }
+        LUDUS_UNREACHABLE();
+    }
+    [[nodiscard]] foundation::uint32 GetArrayElement(foundation::usize descriptor) const noexcept
+    {
+        for (foundation::usize entry = 0; entry < Count; ++entry)
+        {
+            if (descriptor < Entries[entry].Count)
+            {
+                return static_cast<foundation::uint32>(descriptor);
+            }
+            descriptor -= Entries[entry].Count;
+        }
+        LUDUS_UNREACHABLE();
+    }
 };
+// Vulkan and WebGPU consume dynamic offsets in increasing binding-number order.
+// Thanks to Khronos Group, Vulkan Specification, vkCmdBindDescriptorSets,
+// https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindDescriptorSets.html
+// for the ordering contract; snapshots remain immutable across every backend.
+inline foundation::uint32 CollectDynamicOffsets(const RasterLayout& layout,
+                                                const RasterBindingOffsets& offsets,
+                                                foundation::uint32 (&outBytes)[RASTER_BINDINGS]) noexcept
+{
+    foundation::uint32 count = 0;
+    for (foundation::usize binding = 0; binding < RASTER_BINDINGS; ++binding)
+    {
+        for (foundation::usize entry = 0; entry < layout.Count; ++entry)
+        {
+            if (layout.Entries[entry].Binding == binding && layout.Entries[entry].HasDynamicOffset == true)
+            {
+                outBytes[count++] = offsets.Bytes[binding];
+            }
+        }
+    }
+    return count;
+}
 struct RasterShaderInfo final
 {
     ShaderStage Stage = ShaderStage::Vertex;
@@ -74,9 +125,28 @@ struct RasterViewSource final
 struct RasterSet final
 {
     foundation::usize Layout = 0;
-    foundation::usize Slots[RASTER_BINDINGS]{};
-    foundation::usize Offsets[RASTER_BINDINGS]{};
-    foundation::usize Sizes[RASTER_BINDINGS]{};
+    StorageArray<foundation::usize> Slots;
+    StorageArray<foundation::usize> Offsets;
+    StorageArray<foundation::usize> Sizes;
+    [[nodiscard]] bool TryResize(foundation::usize count) noexcept
+    {
+        return Slots.TryResize(count) == true && Offsets.TryResize(count) == true && Sizes.TryResize(count) == true;
+    }
+    [[nodiscard]] bool TryCopyFrom(const RasterSet& source) noexcept
+    {
+        if (TryResize(source.Slots.GetSize()) == false)
+        {
+            return false;
+        }
+        Layout = source.Layout;
+        for (foundation::usize descriptor = 0; descriptor < Slots.GetSize(); ++descriptor)
+        {
+            Slots[descriptor] = source.Slots[descriptor];
+            Offsets[descriptor] = source.Offsets[descriptor];
+            Sizes[descriptor] = source.Sizes[descriptor];
+        }
+        return true;
+    }
 };
 struct RasterPipelineInfo final
 {
@@ -110,6 +180,9 @@ struct ComputePacket final
     foundation::usize Pipeline = 0;
     foundation::usize Set = 0;
     foundation::uint32 Groups[3]{1, 1, 1};
+    RasterBindingOffsets BindingOffsets{};
+    foundation::uint32 DynamicOffsets[RASTER_BINDINGS]{};
+    foundation::uint32 DynamicOffsetCount = 0;
 };
 struct RasterPacket final
 {
@@ -125,6 +198,9 @@ struct RasterPacket final
     bool Index32 = false;
     foundation::usize Indirect = RASTER_INVALID;
     foundation::usize IndirectOffset = 0;
+    RasterBindingOffsets BindingOffsets{};
+    foundation::uint32 DynamicOffsets[RASTER_BINDINGS]{};
+    foundation::uint32 DynamicOffsetCount = 0;
 };
 struct RasterAttachmentInfo final
 {
@@ -212,6 +288,9 @@ struct TextureTransfer final
     foundation::usize RowPitch = 0;
     foundation::usize Size = 0;
 };
+bool IsBindlessRequested() noexcept;
+bool IsBindlessRequired() noexcept;
+void SetBindlessRequest(bool isRequested, bool isRequired = false) noexcept;
 // These hooks join the existing frame/loss owner, not a second session.
 bool FrameOpen() noexcept;
 bool ClaimRasterFrame() noexcept;
@@ -234,6 +313,8 @@ void ResetLifetimeRecords() noexcept;
 namespace ludus::graphics::rhi::backend
 {
 RasterCapabilities RasterLimits() noexcept;
+BindingCapabilities BindingLimits() noexcept;
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage& outUsage) noexcept;
 foundation::uint32 RasterColorAttachmentLimit() noexcept;
 ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;

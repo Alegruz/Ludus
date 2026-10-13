@@ -38,10 +38,11 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_target_detection
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_target_detection.py"
             "${CMAKE_CXX_COMPILER}" "${PROJECT_SOURCE_DIR}")
-    # Phase 0 byte-exact goldens of the Python scene/texture cookers (see tests/goldens/scene_pipeline/README.md).
-    add_test(NAME ludus_scene_pipeline_goldens
-        COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/goldens/scene_pipeline" -v)
-    set_tests_properties(ludus_scene_pipeline_goldens PROPERTIES LABELS "goldens" TIMEOUT 120)
+    # Byte-exact goldens of the still-Python texture cooker (see tests/goldens/scene_pipeline/README.md).
+    add_test(NAME ludus_texture_goldens
+        COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/goldens/scene_pipeline"
+            -p test_texture_goldens.py -v)
+    set_tests_properties(ludus_texture_goldens PROPERTIES LABELS "goldens" TIMEOUT 120)
     set_tests_properties(ludus_build_contract_tests ludus_compile_policy ludus_setup_preflight ludus_dependency_diagnostics ludus_assert_policy ludus_assert_headers
         ludus_header_self_sufficiency ludus_foundational_includes ludus_target_detection
         PROPERTIES LABELS "build-contract" TIMEOUT 120)

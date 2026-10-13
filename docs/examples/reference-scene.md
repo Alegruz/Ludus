@@ -71,15 +71,16 @@ libraries must separately be built with sanitizers for full engine coverage.
 From the repository root, with the licensed local reference scene present:
 
 ```bash
-python3 tools/scene_cooker/cook.py \
+out/build/linux-clang-development/modules/content/scene_cook/ludus-cook cook \
   references/resources/scenes/staircase2 out/staircase2
 examples/reference-scene/out/build/linux-clang-development/reference_scene \
   out/staircase2 out/staircase2 256 64
 python3 scripts/reference-hdr out/staircase2/capture.luhdr \
   --pfm out/staircase2/capture.pfm --manifest out/staircase2/capture.json
-python3 tools/scene_cooker/preview.py \
-  out/staircase2/capture.luhdr out/staircase2/preview.png --exposure 1
 ```
+
+The PFM can be viewed with any HDR viewer; the retired `tools/scene_cooker/preview.py`
+PNG tone-mapper has been removed with the Python scene tooling.
 
 The final two capture arguments are square pixel extent (1–1024) and samples per
 pixel (1–4096). Rendering uses four path vertices, roulette from depth three,

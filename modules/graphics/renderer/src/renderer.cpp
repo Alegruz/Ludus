@@ -1583,9 +1583,9 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
         return Status::InvalidState;
     }
     if (vertex.Artifact.Stage != rhi::ShaderStage::Vertex || fragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
-        vertex.Inputs.size() != (lit ? 16U : 7U) || !vertex.Bindings.empty() || !vertex.UniformMembers.empty() ||
-        !fragment.Inputs.empty() || fragment.Bindings.size() != bindingCount ||
-        fragment.UniformMembers.size() != memberCount)
+        vertex.Inputs.size() != (lit == true ? 16U : 7U) || vertex.Bindings.empty() == false ||
+        vertex.UniformMembers.empty() == false || fragment.Inputs.empty() == false ||
+        fragment.Bindings.size() != bindingCount || fragment.UniformMembers.size() != memberCount)
     {
         return Status::InvalidDescription;
     }

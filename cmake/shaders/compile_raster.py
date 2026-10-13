@@ -38,7 +38,7 @@ def external_text_source(namespace, label, data):
     return declaration, definition
 
 
-def raster_interface(document, stage, metal=False):
+def raster_interface(document, stage, metal=False, native_arrays=False):
     points = [x for x in document['entryPoints'] if x['stage'] == stage]
     if len(points) != 1:
         raise RuntimeError('Expected one entry per raster stage')
@@ -63,37 +63,46 @@ def raster_interface(document, stage, metal=False):
         index = descriptors[0]['index']
         if not 0 <= index < 8 or any(e['binding'] == index for e in entries):
             raise RuntimeError('Raster binding is duplicated or outside the bounded profile')
-        kind = resource['type']['kind']
+        resource_type = resource['type']
+        count = 1
+        if resource_type['kind'] == 'array':
+            count = resource_type.get('elementCount')
+            if not native_arrays or type(count) is not int or not 2 <= count < 0xffffffff:
+                raise RuntimeError('Fixed resource arrays require the native binding array profile with a bounded fixed count')
+            resource_type = resource_type.get('elementType', {})
+            if resource_type.get('kind') != 'resource' or resource_type.get('baseShape') != 'texture2D' or resource_type.get('array', False):
+                raise RuntimeError('Native binding arrays require sampled color Texture2D elements')
+        kind = resource_type['kind']
         size = 0
         if kind == 'constantBuffer':
             kind = 'UniformBuffer'
-            size = resource['type']['elementVarLayout']['binding']['size']
+            size = resource_type['elementVarLayout']['binding']['size']
             if not 0 < size <= 16384:
                 raise RuntimeError('Uniform occupied range exceeds the raster profile')
-        elif stage == 'compute' and kind == 'resource' and resource['type'].get('baseShape') == 'structuredBuffer':
-            result = resource['type'].get('resultType', {})
+        elif stage == 'compute' and kind == 'resource' and resource_type.get('baseShape') == 'structuredBuffer':
+            result = resource_type.get('resultType', {})
             scalar = result if result.get('kind') == 'scalar' else result.get('elementType', {})
             width = 1 if result.get('kind') == 'scalar' else result.get('elementCount')
             if result.get('kind') not in ('scalar', 'vector') or scalar.get('scalarType') not in ('float32', 'uint32', 'int32') or width not in (1, 2, 4):
                 raise RuntimeError('Compute storage requires scalar32, vector2 or vector4 elements')
-            if resource['type'].get('access', 'read') not in ('read', 'readWrite'):
+            if resource_type.get('access', 'read') not in ('read', 'readWrite'):
                 raise RuntimeError('Unsupported compute storage access')
-            kind = 'StorageReadWrite' if resource['type'].get('access') == 'readWrite' else 'StorageRead'
+            kind = 'StorageReadWrite' if resource_type.get('access') == 'readWrite' else 'StorageRead'
             size = 4 * width
         elif kind == 'samplerState':
-            if resource['type'].get('isComparison', False) or 'comparison' in str(resource['type'].get('flavor', '')).lower():
+            if resource_type.get('isComparison', False) or 'comparison' in str(resource_type.get('flavor', '')).lower():
                 raise RuntimeError('Comparison samplers are outside the raster profile')
             kind = 'Sampler'
-        elif kind == 'resource' and resource['type'].get('baseShape') in ('texture2D', 'textureCube', 'texture3D'):
-            if resource['type'].get('access', 'read') not in ('read', 'readOnly') or resource['type'].get('multisample', False):
+        elif kind == 'resource' and resource_type.get('baseShape') in ('texture2D', 'textureCube', 'texture3D'):
+            if resource_type.get('access', 'read') not in ('read', 'readOnly') or resource_type.get('multisample', False):
                 raise RuntimeError('Raster textures require non-multisampled read-only sampling')
-            result = resource['type'].get('resultType', {})
+            result = resource_type.get('resultType', {})
             scalar = result.get('scalarType') if result.get('kind') == 'scalar' else result.get('elementType', {}).get('scalarType')
             scalar_aspect = result.get('kind') == 'scalar'
             if scalar != 'float32' and not (scalar_aspect and scalar == 'uint32'):
                 raise RuntimeError('Raster textures require float vectors or scalar depth/stencil loads')
-            shape = resource['type']['baseShape']
-            array = resource['type'].get('array', False)
+            shape = resource_type['baseShape']
+            array = resource_type.get('array', False)
             if array and shape != 'texture2D':
                 raise RuntimeError('Only 2D sampled texture arrays are in the R9 profile')
             kind = 'Texture2DArray' if array else {'texture2D': 'Texture2D', 'textureCube': 'TextureCube', 'texture3D': 'Texture3D'}[shape]
@@ -111,13 +120,19 @@ def raster_interface(document, stage, metal=False):
             if len(native) != 1 or native[0]['index'] != index:
                 raise RuntimeError('Metal binding remapping is outside this raster profile')
         value = {'binding': index, 'kind': kind, 'size': size, 'name': resource['name']}
+        if count > 1:
+            if kind != 'Texture2D':
+                raise RuntimeError('Native binding arrays require sampled color Texture2D elements')
+            value['count'] = count
         if kind in ('StorageRead', 'StorageReadWrite'):
             value['scalar'] = scalar['scalarType']
             value['width'] = width
         if kind == 'UniformBuffer':
-            value['offsets'] = {field['name']: field['binding']['offset'] for field in resource['type']['elementType']['fields']}
-            value['shapes'] = {field['name']: uniform_shape(field.get('type', {})) for field in resource['type']['elementType']['fields']}
+            value['offsets'] = {field['name']: field['binding']['offset'] for field in resource_type['elementType']['fields']}
+            value['shapes'] = {field['name']: uniform_shape(field.get('type', {})) for field in resource_type['elementType']['fields']}
         entries.append(value)
+    if sum(value.get('count', 1) for value in entries) >= 0xffffffff:
+        raise RuntimeError('Native descriptor snapshot count cannot be represented')
     inputs = []
     def input_field(field):
         binding = field.get('binding', {})
@@ -361,6 +376,123 @@ def verify_varyings(vertex, fragment):
         raise RuntimeError('GLSL ES raster stage varying interfaces differ')
 
 
+def spirv_array_indexing(data, reflected):
+    """Derive array access modes from the emitted target, rather than source spelling.
+
+    Thanks to Khronos Group, SPIR-V Specification, OpAccessChain and NonUniform,
+    https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html . The admitted
+    profile rejects unknown descriptor pointer paths instead of guessing safety.
+    """
+    # SPIR-V / GLSL.std.450 enumerants used by this deliberately bounded verifier.
+    op_ext_import, op_ext_inst, op_type_int = 11, 12, 21
+    op_type_pointer, op_constant, op_variable = 32, 43, 59
+    op_access_chain, op_in_bounds_access_chain = 65, 66
+    op_decorate, op_copy_object = 71, 83
+    decoration_binding, decoration_non_uniform = 33, 5300
+    glsl_unsigned_min, glsl_unsigned_clamp = 38, 44
+    op_function, op_function_parameter, op_function_call = 54, 55, 57
+    op_load, op_pointer_access_chain = 61, 67
+    op_composite_construct, op_composite_extract, op_composite_insert = 80, 81, 82
+    op_bitcast, op_select, op_phi = 124, 169, 245
+    pointer_forward_operations = {op_function, op_function_parameter, op_function_call, op_load,
+                                  op_access_chain, op_in_bounds_access_chain, op_pointer_access_chain,
+                                  op_composite_construct, op_composite_extract, op_composite_insert,
+                                  op_copy_object, op_bitcast, op_select, op_phi}
+    if len(data) % 4 or len(data) < 20:
+        raise RuntimeError('Malformed SPIR-V array target')
+    words = struct.unpack('<' + 'I' * (len(data) // 4), data)
+    if words[0] != 0x07230203:
+        raise RuntimeError('Invalid SPIR-V array target')
+    instructions = []
+    position = 5
+    while position < len(words):
+        length, operation = words[position] >> 16, words[position] & 65535
+        if length == 0 or position + length > len(words):
+            raise RuntimeError('Malformed SPIR-V array instruction')
+        instructions.append((operation, words[position + 1:position + length]))
+        position += length
+    bindings, constants, non_uniform, integer_types, definitions, standard_sets = {}, {}, set(), {}, {}, set()
+    for operation, values in instructions:
+        if operation == op_decorate and len(values) >= 2:
+            if values[1] == decoration_binding and len(values) == 3:
+                bindings[values[0]] = values[2]
+            if values[1] == decoration_non_uniform:
+                non_uniform.add(values[0])
+        if operation == op_type_int and len(values) == 3:
+            integer_types[values[0]] = (values[1], values[2])
+        if operation == op_ext_import and len(values) >= 2:
+            name = struct.pack('<' + 'I' * (len(values) - 1), *values[1:]).split(b'\0', 1)[0]
+            if name == b'GLSL.std.450':
+                standard_sets.add(values[0])
+        if operation == op_constant and len(values) == 3:
+            constants[values[1]] = (values[0], values[2])
+        if operation in (op_ext_inst, op_copy_object) and len(values) >= 3:
+            definitions[values[1]] = (operation, values)
+    def is_bounded(identifier, count, visited=None):
+        visited = set() if visited is None else visited
+        if identifier in visited:
+            return False
+        visited.add(identifier)
+        if identifier in constants:
+            kind, value = constants[identifier]
+            return integer_types.get(kind) in ((32, 0), (32, 1)) and value < count
+        operation, values = definitions.get(identifier, (0, ()))
+        if operation == op_copy_object and integer_types.get(values[0]) == (32, 0):
+            return is_bounded(values[2], count, visited)
+        if operation == op_ext_inst and len(values) >= 4 and integer_types.get(values[0]) == (32, 0) and values[2] in standard_sets:
+            if values[3] == glsl_unsigned_min and len(values) == 6:  # unsigned min
+                return any(is_bounded(value, count, visited.copy()) for value in values[4:])
+            if values[3] == glsl_unsigned_clamp and len(values) == 7:  # unsigned clamp
+                lower, upper = constants.get(values[5]), constants.get(values[6])
+                return lower is not None and upper is not None and integer_types.get(lower[0]) == (32, 0) and integer_types.get(upper[0]) == (32, 0) and lower[1] <= upper[1] < count
+        return False
+    pointer_types = {values[0]: values[2] for operation, values in instructions
+                     if operation == op_type_pointer and len(values) == 3}
+    variables = {values[1]: values[0] for operation, values in instructions if operation == op_variable and len(values) >= 3}
+    arrays = {entry['binding']: entry for entry in reflected['entries'] if entry.get('count', 1) > 1}
+    for entry in arrays.values():
+        entry['indexing'] = 'Constant'
+    array_types = {pointer_types[variables[identifier]] for identifier, binding in bindings.items()
+                   if binding in arrays and identifier in variables and variables[identifier] in pointer_types}
+    # Whole descriptor-array loads and local copies would create another access
+    # path. Reject both value and pointer forwarding, including a different storage class.
+    protected_types = array_types | {pointer for pointer, element in pointer_types.items() if element in array_types}
+    for operation, values in instructions:
+        if operation in pointer_forward_operations and len(values) >= 2 and values[0] in protected_types:
+            raise RuntimeError('Native descriptor array pointer forwarding is outside the verified profile')
+    accessed = set()
+    for operation, values in instructions:
+        if operation in (op_access_chain, op_in_bounds_access_chain) and len(values) >= 4 and bindings.get(values[2]) in arrays:
+            binding = bindings[values[2]]
+            entry = arrays[binding]
+            accessed.add(binding)
+            if is_bounded(values[3], entry['count']) is False:
+                raise RuntimeError('Native descriptor index lacks a verified fixed-array bound; use unsigned min/clamp')
+            # A resource array is one-dimensional in this profile. The first
+            # pointer index selects its descriptor, independently of texture layers.
+            mode = 'NonUniform' if values[1] in non_uniform or values[3] in non_uniform else 'Uniform' if values[3] not in constants else 'Constant'
+            if ('Constant', 'Uniform', 'NonUniform').index(mode) > ('Constant', 'Uniform', 'NonUniform').index(entry['indexing']):
+                entry['indexing'] = mode
+            entry['verified_bounds'] = True
+    if accessed != arrays.keys():
+        raise RuntimeError('Native array access path is not independently reflected')
+
+
+def verify_native_metal_arrays(code, interface):
+    """Check emitted MSL resource register/count lowering independently."""
+    for binding in interface['entries']:
+        index = binding['binding']
+        count = binding.get('count', 1)
+        if count > 1:
+            pattern = r'array<\s*texture2d<\s*float\s*>\s*,\s*' + str(count) + r'\s*>\s+\w+\s*\[\[texture\(' + str(index) + r'\)\]\]'
+            if re.search(pattern, code) is None:
+                raise RuntimeError('MSL array count/register differs from target reflection')
+        else:
+            kind = 'buffer' if binding['kind'] == 'UniformBuffer' else 'sampler' if binding['kind'] == 'Sampler' else 'texture'
+            if '[[' + kind + '(' + str(index) + ')]]' not in code:
+                raise RuntimeError('MSL scalar register differs from target reflection')
+
+
 def compile_raster(args, lock):
     from compile_shader import entry, run
     output = Path(args.output)
@@ -369,6 +501,9 @@ def compile_raster(args, lock):
     commands, dependencies, artifacts, interfaces = [], [], {}, {}
     stages = [('compute', args.compute)] if getattr(args, 'compute', None) else [('vertex', args.vertex), ('fragment', args.fragment)]
     compute = stages[0][0] == 'compute'
+    native_arrays = getattr(args, 'native_binding_arrays', False)
+    if native_arrays and (compute or args.spirv_cross is None):
+        raise RuntimeError('Native binding arrays require raster stages and the pinned SPIRV-Cross tool')
     if not args.metal:
         if not args.validator or hashlib.sha256(Path(args.validator).read_bytes()).hexdigest() != lock['spirv_tools']['val_sha256']:
             raise RuntimeError('Raster SPIR-V validator differs from SDK pin')
@@ -378,16 +513,30 @@ def compile_raster(args, lock):
         build = json.loads(Path(str(tool) + '.build.json').read_text())
         if any(build.get(key) != pin[key] for key in ('tag', 'commit', 'source_sha256')) or build.get('binary_sha256') != hashlib.sha256(tool.read_bytes()).hexdigest():
             raise RuntimeError('Raster SPIRV-Cross identity differs from verified pin')
-    target = 'metal' if args.metal else 'spirv'
+    target = 'metal' if args.metal and not native_arrays else 'spirv'
     for stage, name in stages:
-        artifact = output / f'{args.name}.{stage}.{"metal" if args.metal else "spv"}'
+        artifact = output / f'{args.name}.{stage}.{"metal" if target == "metal" else "spv"}'
         reflection, depfile = output / f'{stage}.reflection.json', output / f'{stage}.d'
-        command = [args.compiler, args.source, '-target', target, '-profile', 'sm_6_0' if args.metal else 'spirv_1_3',
+        command = [args.compiler, args.source, '-target', target, '-profile', 'sm_6_0' if target == 'metal' else 'spirv_1_3',
                    '-entry', name, '-stage', stage, '-o', str(artifact), '-reflection-json', str(reflection), '-depfile', str(depfile), *extra]
         commands.append(command); run(command)
         dependencies.append(depfile.read_text().split(':', 1)[1].strip())
-        interfaces[(target, stage)] = raster_interface(json.loads(reflection.read_text()), stage, args.metal)
-        if args.metal:
+        interfaces[(target, stage)] = raster_interface(json.loads(reflection.read_text()), stage, target == 'metal', native_arrays)
+        if native_arrays:
+            spirv_array_indexing(artifact.read_bytes(), interfaces[(target, stage)])
+        if args.metal and native_arrays:
+            emitted = output / f'{args.name}.{stage}.metal'
+            command = [args.spirv_cross, str(artifact), '--msl', '--msl-version', '24000', '--msl-decoration-binding', '--output', str(emitted)]
+            commands.append(command); run(command)
+            code = emitted.read_text()
+            interface = interfaces[(target, stage)]
+            verify_native_metal_arrays(code, interface)
+            names = re.findall(r'\b' + stage + r'\s+\w+\s+(\w+)\s*\(', code)
+            if len(names) != 1:
+                raise RuntimeError('Expected one emitted native array Metal entry')
+            artifacts[('metal', stage)] = (code, names[0])
+            interfaces[('metal', stage)] = interface
+        elif args.metal:
             code = artifact.read_text()
             for binding in interfaces[(target, stage)]['entries']:
                 if binding['kind'] in ('TextureDepth2D', 'TextureStencil2D'):
@@ -415,7 +564,7 @@ def compile_raster(args, lock):
         else:
             run([args.validator, '--target-env', 'vulkan1.1', str(artifact)])
             artifacts[(target, stage)] = (artifact.read_bytes(), entry(artifact))
-            if args.spirv_cross and not compute:
+            if args.spirv_cross and not compute and not native_arrays:
                 essl = output / f'{args.name}.{stage}.essl'
                 command = [args.spirv_cross, str(artifact), '--version', '300', '--es', '--fixup-clipspace', '--output', str(essl)]
                 commands.append(command); run(command)
@@ -428,7 +577,7 @@ def compile_raster(args, lock):
                 interface['blocks'], interface['textures'] = names, textures
                 interfaces[('glsl', stage)] = interface
                 artifacts[('glsl', stage)] = (essl.read_text(), 'main')
-    if not args.metal:
+    if not args.metal and not native_arrays:
         for stage, source_entry in stages:
             artifact = output / f'{args.name}.{stage}.wgsl'
             reflection, depfile = output / f'{stage}.wgsl.reflection.json', output / f'{stage}.wgsl.d'
@@ -457,7 +606,7 @@ def compile_raster(args, lock):
             artifact.write_text(code)
             artifacts[('wgsl', stage)] = (code, names[0])
             interfaces[('wgsl', stage)] = interface
-    if args.spirv_cross and not compute:
+    if args.spirv_cross and not compute and not native_arrays:
         verify_varyings(interfaces[('glsl', 'vertex')]['varyings'], interfaces[('glsl', 'fragment')]['varyings'])
     companion = ''
     header = '#pragma once\n#include <ludus/foundation/base/config.h>\n#include <ludus/graphics/rhi/raster.h>\n'
@@ -481,7 +630,7 @@ def compile_raster(args, lock):
         if interface['entries']:
             header += f'inline constexpr graphics::rhi::RasterBinding {label}_BINDINGS[] = {{\n'
             for binding in interface['entries']:
-                header += '{' + f'{binding["binding"]},graphics::rhi::RasterBindingKind::{binding["kind"]},graphics::rhi::RasterVisibility::{stage.title()},{binding["size"]}' + '},\n'
+                header += '{' + f'.Binding={binding["binding"]},.Kind=graphics::rhi::RasterBindingKind::{binding["kind"]},.Visibility=graphics::rhi::RasterVisibility::{stage.title()},.MinSize={binding["size"]},.Count={binding.get("count",1)},.Indexing=graphics::rhi::RasterBindingIndexing::{binding.get("indexing","Constant")}' + '},\n'
             header += '};\n'
         members = [(entry['binding'], name, offset, entry['shapes'][name]) for entry in interface['entries']
                    for name, offset in entry.get('offsets', {}).items()]
@@ -515,10 +664,14 @@ def compile_raster(args, lock):
             header += f' result.TextureNames[{binding}] = "{texture["name"]}"; result.TextureSamplers[{binding}] = {texture["sampler"]};\n'
         for axis, size in enumerate(interface.get('workgroup', [])):
             header += f' result.WorkgroupSize[{axis}] = {size};\n'
+        if any(entry.get('count', 1) > 1 for entry in interface['entries']):
+            header += ' result.HasVerifiedArrayBounds = true;\n'
         header += ' return result;\n}\n'
     for stage, _ in stages:
         if args.metal:
             header += f'inline auto {stage.title()}() noexcept {{ return Metal{stage.title()}(); }}\n'
+        elif native_arrays:
+            header += f'inline graphics::rhi::RasterShaderDescription {stage.title()}() noexcept {{ return Spirv{stage.title()}(); }}\n'
         else:
             header += f'inline auto {stage.title()}() noexcept {{\n#if defined(LUDUS_PLATFORM_WEB)\n auto result = Wgsl{stage.title()}();\n'
             if args.spirv_cross and not compute:

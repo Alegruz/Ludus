@@ -274,3 +274,65 @@ TEST_CASE("Compute leases survive public destruction and partial encoding faults
         CHECK(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Failed);
     }
 }
+
+TEST_CASE("R11 compute offsets are copied and exact storage ranges are declared", "[rhi][compute][binding]")
+{
+    ComputeSession session;
+    constexpr usize BUFFER_BYTES = 512;
+    const uint8 bytes[BUFFER_BYTES]{};
+    BufferHandle buffer;
+    REQUIRE(CreateBuffer(session.Device, { .Role = BufferRole::Storage, .Size = sizeof(bytes) }, bytes, buffer) ==
+            RasterStatus::Ready);
+    Kernel kernel(session.Device, true, buffer);
+    REQUIRE(Destroy(session.Device, kernel.Pipeline) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, kernel.Set) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, kernel.Layout) == RasterStatus::Ready);
+    const RasterBinding binding
+    {
+        .Kind = RasterBindingKind::StorageReadWrite,
+        .Visibility = RasterVisibility::Compute,
+        .MinSize = 4,
+        .HasDynamicOffset = true,
+    };
+    REQUIRE(CreateBindingLayout(session.Device, {&binding, 1}, kernel.Layout) == RasterStatus::Ready);
+    const RasterBindingResource resource{ .Buffer = buffer, .Size = 16 };
+    REQUIRE(CreateBindingSet(session.Device, kernel.Layout, {&resource, 1}, kernel.Set) == RasterStatus::Ready);
+    REQUIRE(CreateComputePipeline(session.Device,
+                                  { .Shader = kernel.Shader, .Layout = kernel.Layout },
+                                  kernel.Pipeline) == RasterStatus::Ready);
+    OrderedGraph graph;
+    GraphVersion input;
+    GraphVersion output;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    REQUIRE(ImportGraphBuffer(session.Device, graph, buffer, input) == RasterStatus::Ready);
+    REQUIRE(NextGraphVersion(session.Device, graph, input, output) == RasterStatus::Ready);
+    ComputeDispatch dispatch = kernel.Dispatch();
+    dispatch.BindingOffsets.Bytes[0] = 1;
+    const GraphUse use
+    {
+        .Resource = output,
+        .Access = GraphAccessMode::StorageReadWrite,
+        .Offset = 256,
+        .Size = 16,
+        .Visibility = RasterVisibility::Compute,
+    };
+    const GraphPassDescription pass
+    {
+        .Name = "dynamic storage",
+        .Attachment = {},
+        .Uses = &use,
+        .UseCount = 1,
+        .SideEffect = true,
+        .Dispatch = &dispatch,
+    };
+    CHECK(AddGraphPass(session.Device, graph, pass) == RasterStatus::InvalidDescription);
+    dispatch.BindingOffsets.Bytes[0] = 256;
+    REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    dispatch.BindingOffsets.Bytes[0] = 0;
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    SubmissionToken submission;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, submission) == RasterStatus::Ready);
+    CHECK(reference::DispatchPacket.DynamicOffsetCount == 1);
+    CHECK(reference::DispatchPacket.DynamicOffsets[0] == 256);
+}

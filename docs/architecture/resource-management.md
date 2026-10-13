@@ -813,8 +813,9 @@ records that limited evidence without claiming product integration.
 
 ### Initial Stage 5 storage and renderer profile
 
-The installed `ludus_tools.scene_assets` backend owns the loose-file format and is
-shared by the CLI and native Editor. `assets/catalog.json` maps stable typed UUIDs
+The native `Ludus::SceneCook` library owns the loose-file format and is shared by
+the `ludus-cook scene` CLI and the native Editor, which runs it in process on a worker
+thread. `assets/catalog.json` maps stable typed UUIDs
 (`mesh/<uuid>`, `material/<uuid>`, `texture/<uuid>`, and import/license records) to
 immutable `assets/objects/<artifact-key>.bin` files. UUIDs identify logical assets;
 they are not content digests. Reimporting the same source origin retains its UUID
