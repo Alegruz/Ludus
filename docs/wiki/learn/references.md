@@ -133,6 +133,19 @@ The review distinguishes adopted ideas from deferred suggestions and Bloom
 filters. Its local PDF links are source locators in an ignored reference library,
 not downloadable wiki material. No chapter code is copied into the guide examples.
 
+## 9. Improve procedural generation
+
+Start with the [procedural content generation design](../../architecture/procedural-content-generation.md)
+for cross-domain ownership, identity, editing and validation. The
+[Gems and research review](../../architecture/procedural-content-generation-gems-review.md)
+records actual readings; its [conference and journal queue](../../architecture/procedural-content-generation-gems-review.md#conference-and-journal-research-plan)
+maps further reading to the P0-P5 slices and qualification gates.
+
+Use the existing [terrain generation owner](../../architecture/terrain-generation.md)
+for terrain-specific algorithms. Research candidates remain separate from shipped
+facilities and measured improvements. Follow the exact source and attribution
+procedure when adopting a technique.
+
 ## Explore the larger local catalog
 
 The [ranked editor reading guide](../../architecture/editor-reference-reading-guide.md)
