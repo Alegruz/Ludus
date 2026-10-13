@@ -1300,8 +1300,15 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
                                   {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0}};
     for (usize i = 0; i < layout.Count; ++i)
     {
-        const auto kind = static_cast<usize>(layout.Entries[i].Kind);
-        ++sizes[kind > 2 ? 3 : kind].descriptorCount;
+        const auto type = RasterDescriptor(layout.Entries[i].Kind);
+        for (auto& size : sizes)
+        {
+            if (size.type == type)
+            {
+                ++size.descriptorCount;
+                break;
+            }
+        }
     }
     VkDescriptorPoolSize used[4]{};
     uint32 count = 0;

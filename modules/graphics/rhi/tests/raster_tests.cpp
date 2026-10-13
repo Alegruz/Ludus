@@ -2618,6 +2618,77 @@ TextureViewHandle AttachmentView(DeviceHandle device, TextureHandle texture, uin
     return view;
 }
 } // namespace
+TEST_CASE("R10 pooled attachment incarnations reject prior color depth and stencil contents", "[rhi][graph][r10]")
+{
+    Session session;
+    const auto partial = GENERATE(false, true);
+    const auto aspect = GENERATE(0, 1, 2);
+    const TextureDescription description
+    {
+        .Width = 8,
+        .Height = 8,
+        .Attachment = true,
+        .MipLevels = partial ? 2U : 1U,
+        .Dimension = partial ? TextureDimension::D2Array : TextureDimension::D2,
+        .DepthOrLayers = partial ? 2U : 1U,
+        .Stencil = true,
+    };
+    const uint32 selected = partial ? 1U : 0U;
+    OrderedGraph first;
+    GraphVersion initial, written;
+    TextureHandle texture;
+    REQUIRE(CreateOrderedGraph(session.Device, first) == RasterStatus::Ready);
+    REQUIRE(CreateGraphTexture(session.Device, first, description, initial, texture) == RasterStatus::Ready);
+    REQUIRE(NextGraphVersion(session.Device, first, initial, written) == RasterStatus::Ready);
+    auto view = AttachmentView(session.Device, texture, selected, selected);
+    RasterColorAttachment color{ .View = view };
+    GraphUse use{written, GraphAccessMode::ColorWrite};
+    GraphPassDescription pass;
+    pass.Name = "pooled";
+    pass.Uses = &use;
+    pass.UseCount = 1;
+    pass.SideEffect = true;
+    pass.Attachment.Colors = &color;
+    pass.Attachment.ColorCount = 1;
+    pass.Attachment.DepthStore = RasterStore::Store;
+    pass.Attachment.StencilStore = RasterStore::Store;
+    REQUIRE(AddGraphPass(session.Device, first, pass) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, first, report) == RasterStatus::Ready);
+    SubmissionToken token;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, first, token) == RasterStatus::Ready);
+    reference::Completed = reference::Submitted;
+    REQUIRE(GetStatus(session.Device, token) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, view) == RasterStatus::Ready);
+
+    OrderedGraph second;
+    GraphVersion fresh, output;
+    TextureHandle reused;
+    REQUIRE(CreateOrderedGraph(session.Device, second) == RasterStatus::Ready);
+    REQUIRE(CreateGraphTexture(session.Device, second, description, fresh, reused) == RasterStatus::Ready);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Texture)] == 1);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, reused, state) == RasterStatus::Ready);
+    CHECK_FALSE(state.ColorDefined);
+    CHECK_FALSE(state.DepthDefined);
+    CHECK_FALSE(state.StencilDefined);
+    REQUIRE(NextGraphVersion(session.Device, second, fresh, output) == RasterStatus::Ready);
+    view = AttachmentView(session.Device, reused, selected, selected);
+    color.View = view;
+    color.Load = aspect == 0 ? RasterLoad::Load : RasterLoad::Clear;
+    pass.Attachment.DepthLoad = aspect == 1 ? RasterLoad::Load : RasterLoad::Clear;
+    pass.Attachment.StencilLoad = aspect == 2 ? RasterLoad::Load : RasterLoad::Clear;
+    use = {output, aspect == 0 ? GraphAccessMode::ColorReadWrite : GraphAccessMode::ColorWrite};
+    REQUIRE(AddGraphPass(session.Device, second, pass) == RasterStatus::Ready);
+    const auto passes = reference::Passes;
+    CHECK(CompileOrderedGraph(session.Device, second, report) == RasterStatus::InvalidDescription);
+    CHECK(reference::Passes == passes);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    CHECK(BeginRasterPass(session.Device, pass.Attachment) == RasterStatus::InvalidDescription);
+    CHECK(reference::Passes == passes);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    REQUIRE(DiscardOrderedGraph(session.Device, second) == RasterStatus::Ready);
+}
 TEST_CASE("R10 selected attachment initialization preserves undefined siblings and aspects", "[rhi][raster][r10]")
 {
     Session session;

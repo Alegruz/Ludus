@@ -987,7 +987,11 @@ RasterStatus CreateGraphTexture(DeviceHandle device,
             SameTextureDescription(texture.Texture, description))
         {
             texture.Published = true;
-            texture.ColorDefined = texture.DepthDefined = false;
+            texture.ColorDefined = texture.DepthDefined = texture.StencilDefined = false;
+            for (auto& state : texture.AttachmentState)
+            {
+                state = 0;
+            }
             RasterAccess::Set(output, {DeviceOwner(), pool.Texture, texture.Generation});
             return AddImport(*graph, handle, RasterKind::Texture, pool.Texture, version, true);
         }
@@ -1370,7 +1374,7 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
             }
             for (usize i = 0; i < physical.AttachmentState.GetSize(); ++i)
             {
-                tracks[r].States[i] = physical.AttachmentState[i];
+                tracks[r].States[i] = resource.Transient ? 0 : physical.AttachmentState[i];
             }
             for (auto value : tracks[r].States)
             {
