@@ -2,6 +2,7 @@
 // Real browser builds always call their own navigator.gpu through the C API port.
 if (typeof window === 'undefined' && typeof process === 'object') {
   const scenario = process.argv[2] || 'success';
+  const textureDimension = scenario === 'large-texture-limit' ? 16384 : 4096;
   const stats = {adapter:0, devices:0, destroyed:0, configured:0, unconfigured:0};
   const listeners = new Map();
   class Target {
@@ -29,14 +30,14 @@ if (typeof window === 'undefined' && typeof process === 'object') {
   const devices=[];
   function device() {
     let lose;
-    const result={features:new Set(),limits:new Proxy({maxTextureDimension2D:4096,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},{get:(o,k)=>o[k]??0}),queue:{},
+    const result={features:new Set(),limits:new Proxy({maxTextureDimension2D:textureDimension,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},{get:(o,k)=>o[k]??0}),queue:{},
       lost:new Promise(resolve=>{lose=resolve;}),pushErrorScope(){},popErrorScope(){return Promise.resolve(scenario==='surface-failure'?new GPUValidationError('configuration rejected'):null);},
       destroy(){if (!result.destroyed) {result.destroyed=true;++stats.destroyed;lose({reason:'destroyed',message:'test destroy'});}},
       testLose(){lose({reason:'unknown',message:'test loss'});}};
     ++stats.devices;devices.push(result);return result;
   }
-  const adapter={features:new Set(),limits:{maxTextureDimension2D:4096,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},requestDevice(desc){
-    if (desc.requiredFeatures?.length || Object.keys(desc.requiredLimits||{}).length) throw new Error('optional requirements requested');
+  const adapter={features:new Set(),limits:new Proxy({maxTextureDimension2D:textureDimension,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},{get:(o,k)=>o[k]??0}),requestDevice(desc){
+    if (desc.requiredFeatures?.length || Object.keys(desc.requiredLimits||{}).length !== 1 || desc.requiredLimits.maxTextureDimension2D !== adapter.limits.maxTextureDimension2D) throw new Error('texture limit negotiation or optional requirements changed');
     if (scenario==='device-failure') return Promise.reject(new Error('device rejected'));
     return new Promise(resolve=>setTimeout(()=>resolve(device()),scenario==='cancel-device'?80:0));
   }};
@@ -78,7 +79,7 @@ if (typeof window === 'undefined' && typeof process === 'object') {
       return;
     }
     if (state==='ready') {
-      if (phase===0) {if (!status.textContent.includes('4096') || stats.configured!==1) return finish(false,'ready before setup');Module._Restart();phase=1;}
+      if (phase===0) {if (!status.textContent.includes(String(textureDimension)) || stats.configured!==1) return finish(false,'ready before setup');Module._Restart();phase=1;}
       else {Module._Stop();setTimeout(()=>finish(stats.destroyed===stats.devices && stats.unconfigured===stats.configured,'restart cleanup'),25);}
     }
   },10);
