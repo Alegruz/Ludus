@@ -2279,7 +2279,7 @@ struct StoredParts final
         Array<uint8> name;
         ByteWriter nameWriter(name);
         nameWriter.Append("Imported object ");
-        AppendInteger(nameWriter, static_cast<int64>(i + 1));
+        AppendInteger(nameWriter, static_cast<int64>(i) + 1);
         if (FormatUuid(identity, "", identityText) == false || nameWriter.IsOk() == false)
         {
             return inoutFailure.FailOutOfMemory();

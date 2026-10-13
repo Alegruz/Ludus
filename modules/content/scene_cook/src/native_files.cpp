@@ -663,7 +663,6 @@ Status RemoveTree(std::string_view) noexcept
 {
     return Status::Unsupported;
 }
-FileLock::~FileLock() noexcept = default;
 Status FileLock::Acquire(std::string_view, LockMode) noexcept
 {
     return Status::Unsupported;
