@@ -2,6 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include "internal/scene_preview.h"
 #include "internal/world_document.h"
 
 #include <QMap>
@@ -28,6 +29,19 @@ public:
     explicit WorldWorkspace(QWidget* parent = nullptr);
     WorldWorkspace(const ToolingPaths& tooling, QWidget* parent);
     [[nodiscard]] bool ImportScene(const QString& source);
+    [[nodiscard]] QString Path() const
+    {
+        return Path_;
+    }
+    [[nodiscard]] ScenePreview& WorldDemoPreview() noexcept
+    {
+        return DemoPreview_;
+    }
+    [[nodiscard]] const SceneDocument& WorldDemoProjection() const noexcept
+    {
+        return DemoDocument_;
+    }
+    [[nodiscard]] bool StartPreview();
     void SetProject(const QString& root, foundation::uint64 epoch);
     [[nodiscard]] bool Open(const QString& path);
     [[nodiscard]] bool Create(const QString& path);
@@ -35,19 +49,19 @@ public:
     [[nodiscard]] bool ConfirmDiscard();
     [[nodiscard]] bool Dirty() const noexcept
     {
-        return Pending_ || Unsaved_ || Document_.Dirty();
+        return Pending_ || Unsaved_ || Document_.Dirty() || DemoDocument_.Previewing();
     }
     [[nodiscard]] bool CanSave() const noexcept
     {
-        return Document_.Loaded() && !SceneBusy();
+        return Document_.Loaded() && !DemoDocument_.Previewing() && !SceneBusy();
     }
     [[nodiscard]] bool CanUndo() const noexcept
     {
-        return !Pending_ && !SceneBusy() && Document_.CanUndo();
+        return !Pending_ && !DemoDocument_.Previewing() && !SceneBusy() && Document_.CanUndo();
     }
     [[nodiscard]] bool CanRedo() const noexcept
     {
-        return !Pending_ && !SceneBusy() && Document_.CanRedo();
+        return !Pending_ && !DemoDocument_.Previewing() && !SceneBusy() && Document_.CanRedo();
     }
     void StopPreview() noexcept;
     void Undo();
@@ -61,12 +75,15 @@ public:
 Q_SIGNALS:
     void DocumentChanged();
     void PreviewStarting();
+    void PlayRequested();
 
 private:
-    [[nodiscard]] bool LoadProjectSchema(WorldDocument& candidate, QByteArray& schema);
+    [[nodiscard]] bool LoadProjectSchema(WorldDocument& candidate, QByteArray& schema, bool worldDemo = false);
     [[nodiscard]] bool Inside(const QString& path, bool existing) const;
     [[nodiscard]] bool SceneBusy() const noexcept;
     void RefreshScene();
+    void RefreshWorldDemo();
+    void WorldDemoChanged();
     void SceneCompleted(bool accepted);
     void SceneVerified(bool accepted);
     void Render();
@@ -77,6 +94,11 @@ private:
     void Snapshot();
     [[nodiscard]] QByteArray RecoveryHeader() const;
     WorldDocument Document_;
+    SceneDocument DemoDocument_;
+    ScenePreview DemoPreview_;
+    QPushButton* PreviewButton_ = nullptr;
+    QPushButton* PlayButton_ = nullptr;
+    bool DemoSyncing_ = false;
     RenderPanel* Render_ = nullptr;
     LevelWorkspace* Scene_ = nullptr;
     QWidget* Viewport_ = nullptr;

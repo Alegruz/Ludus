@@ -326,7 +326,9 @@ separate acceptance work.
 
 ## Gameplay World workspace: first declarative component-authoring slice
 
-This slice adds a World document owner beside the existing sample Scene adapter.
+This historical slice added a World document owner beside the then-existing
+sample Scene adapter. Current authoring consolidates that adapter into World;
+see [the unified workflow](editor-workspace.md#s4-scene-authoring).
 The canonical workflow, schema contract, audience scenarios and scope limits are
 in [Gameplay world authoring](editor-workspace.md#gameplay-world-authoring).
 The editable `live-edit-game/authoring` starter is embedded in the sample library;

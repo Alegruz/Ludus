@@ -93,7 +93,6 @@ ludus_apply_project_defaults(ludus_editor_scene)
 # --- Editor application ------------------------------------------------------
 qt_add_executable(ludus_editor
     src/internal/scene_preview.h
-    src/internal/scene_workspace.h
     src/internal/render_load_job.h
     src/render_load_job.cpp
     src/internal/render_preview.h
@@ -105,10 +104,9 @@ qt_add_executable(ludus_editor
     src/level_workspace.cpp
     src/internal/world_workspace.h
     src/world_document.cpp
+    src/world_demo_adapter.cpp
     src/world_workspace.cpp
     ${editor_scene_preview_source}
-    src/scene_store.cpp
-    src/scene_workspace.cpp
     src/internal/controller.h
     src/internal/configuration_workspace.h
     src/internal/main_window.h
@@ -152,6 +150,8 @@ foreach(sample cornell-box live-edit-game scripted-game editor-sdk-project)
     list(FILTER sample_files EXCLUDE REGEX "/(out|build|\\.ludus)/|CMakeUserPresets\\.json$")
     list(APPEND editor_sample_files ${sample_files})
 endforeach()
+set(world_demo_schema "${PROJECT_SOURCE_DIR}/apps/world_demo/authoring/world.schema.json")
+qt_add_resources(ludus_editor world_demo_schema PREFIX "/world-demo" BASE "${PROJECT_SOURCE_DIR}/apps/world_demo/authoring" FILES ${world_demo_schema})
 qt_add_resources(ludus_editor ludus_samples
     PREFIX "/samples" BASE "${PROJECT_SOURCE_DIR}/examples" FILES ${editor_sample_files})
 if(APPLE)
@@ -206,7 +206,6 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
     add_executable(ludus_editor_tests
         src/internal/scene_preview.h
-        src/internal/scene_workspace.h
         src/internal/render_load_job.h
         src/render_load_job.cpp
         src/internal/render_preview.h
@@ -218,14 +217,13 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/level_workspace.cpp
         src/internal/world_workspace.h
         src/world_document.cpp
+        src/world_demo_adapter.cpp
         src/world_workspace.cpp
         ${editor_scene_preview_source}
-        src/scene_store.cpp
-        src/scene_workspace.cpp
         tests/world_workspace_tests.cpp
         tests/level_workspace_tests.cpp
         tests/render_authoring_tests.cpp
-        tests/scene_workspace_tests.cpp
+        tests/world_demo_workspace_tests.cpp
         src/internal/controller.h
         src/internal/configuration_workspace.h
         src/internal/main_window.h
@@ -269,6 +267,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         PREFIX "/ludus"
         BASE "${PROJECT_SOURCE_DIR}/docs/wiki/assets"
         FILES ${editor_brand_assets})
+    qt_add_resources(ludus_editor_tests world_demo_schema PREFIX "/world-demo" BASE "${PROJECT_SOURCE_DIR}/apps/world_demo/authoring" FILES ${world_demo_schema})
     qt_add_resources(ludus_editor_tests ludus_samples
         PREFIX "/samples" BASE "${PROJECT_SOURCE_DIR}/examples" FILES ${editor_sample_files})
     target_include_directories(ludus_editor_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/modules/audio/tests")

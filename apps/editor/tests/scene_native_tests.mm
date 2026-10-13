@@ -1,5 +1,5 @@
 #include "internal/scene_preview.h"
-#include "internal/scene_store.h"
+#include "internal/world_workspace.h"
 #import <Cocoa/Cocoa.h>
 #include <QApplication>
 #include <QDir>
@@ -39,33 +39,49 @@ bool Frames(ScenePreview& preview, ludus::foundation::uint64 target)
     return preview.PresentedFrames() >= target;
 }
 } // namespace
-TEST_CASE("Cocoa scene authoring presents Metal frames and accepts native keyboard transforms", "[.scene-native]")
+TEST_CASE("Cocoa World authoring presents Metal frames and accepts native keyboard transforms", "[.scene-native]")
 {
     REQUIRE(QApplication::platformName() == QStringLiteral("cocoa"));
-    SceneDocument document;
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
     const auto bytes = ludus::world_demo::ExampleLevel();
-    REQUIRE(document.Load(bytes.data(), bytes.size()).Error == ludus::world_demo::LevelError::None);
-    ScenePreview preview(&document);
-    REQUIRE(preview.Start());
+    const auto scenePath =
+        QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("room.world.json"));
+    QFile source(scenePath);
+    REQUIRE(source.open(QIODevice::WriteOnly));
+    REQUIRE(source.write(bytes.data(), static_cast<ludus::foundation::int64>(bytes.size())) ==
+            static_cast<ludus::foundation::int64>(bytes.size()));
+    source.close();
+    WorldWorkspace workspace;
+    workspace.SetProject(directory.path(), 1);
+    REQUIRE(workspace.Open(scenePath));
+    const auto& document = workspace.WorldDemoProjection();
+    auto& preview = workspace.WorldDemoPreview();
+    REQUIRE(workspace.StartPreview());
     REQUIRE(Frames(preview, 2));
     auto* window = static_cast<NSWindow*>(preview.WindowInfo().CocoaWindow);
     REQUIRE(window != nil);
     [window makeKeyAndOrderFront:nil];
     QTest::qWait(40);
     const auto original = document.Draft();
+    const auto originalWorld = workspace.Document().Draft();
     preview.Select(original.Level.Entities[0].Id);
     NativeKey(window, 124, true);
     preview.Tick();
     REQUIRE(document.Previewing());
     CHECK(document.Draft() == original);
+    CHECK(workspace.Document().Draft() == originalWorld);
+    CHECK_FALSE(workspace.CanSave());
     NativeKey(window, 124, false);
     preview.Tick();
-    REQUIRE(document.Dirty());
+    REQUIRE(workspace.Dirty());
     CHECK_FALSE(document.Previewing());
     CHECK(document.Draft().Level.Entities[0].Position.X == original.Level.Entities[0].Position.X + 0.1F);
-    REQUIRE(document.Undo());
+    workspace.Undo();
     CHECK(document.Draft() == original);
-    CHECK_FALSE(document.Dirty());
+    CHECK_FALSE(workspace.Dirty());
+    CHECK(workspace.Document().Draft() == originalWorld);
+    CHECK_FALSE(workspace.CanUndo());
     NativeKey(window, 124, true);
     preview.Tick();
     REQUIRE(document.Previewing());
@@ -91,24 +107,13 @@ TEST_CASE("Cocoa scene authoring presents Metal frames and accepts native keyboa
     preview.Tick();
     NativeKey(window, 124, false);
     preview.Tick();
-    REQUIRE(document.Dirty());
-    QTemporaryDir directory;
-    REQUIRE(directory.isValid());
-    const auto scenePath =
-        QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("saved-scene.json"));
-    QFile source(scenePath);
-    REQUIRE(source.open(QIODevice::WriteOnly));
-    REQUIRE(source.write(bytes.data(), static_cast<ludus::foundation::int64>(bytes.size())) ==
-            static_cast<ludus::foundation::int64>(bytes.size()));
-    source.close();
-    const QByteArray baseline(bytes.data(), static_cast<ludus::foundation::int64>(bytes.size()));
-    QByteArray saved;
-    REQUIRE(SaveScene(scenePath, baseline, document, saved));
-    CHECK_FALSE(document.Dirty());
-    SceneDocument reopened;
-    REQUIRE(reopened.Load(saved.constData(), static_cast<ludus::foundation::usize>(saved.size())).Error ==
-            ludus::world_demo::LevelError::None);
-    CHECK(reopened.Draft() == document.Draft());
+    REQUIRE(workspace.Dirty());
+    REQUIRE(workspace.Save());
+    CHECK_FALSE(workspace.Dirty());
+    WorldWorkspace reopened;
+    reopened.SetProject(directory.path(), 1);
+    REQUIRE(reopened.Open(scenePath));
+    CHECK(reopened.Document().Draft() == workspace.Document().Draft());
     const auto player = qEnvironmentVariable("LUDUS_SCENE_TEST_PLAYER");
     if (!player.isEmpty())
     {
@@ -135,8 +140,8 @@ TEST_CASE("Cocoa scene authoring presents Metal frames and accepts native keyboa
     }
     preview.Stop();
     CHECK(document.Loaded());
-    CHECK(document.Draft() == reopened.Draft());
-    REQUIRE(preview.Start());
+    CHECK(workspace.Document().Draft() == reopened.Document().Draft());
+    REQUIRE(workspace.StartPreview());
     REQUIRE(Frames(preview, 2));
     preview.Stop();
 }

@@ -3,7 +3,6 @@
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
 #include "internal/content_browser.h"
-#include "internal/scene_workspace.h"
 #include "internal/script_workspace.h"
 #include "internal/world_workspace.h"
 
@@ -46,12 +45,10 @@ void MainWindow::RenderDocumentActions()
     const bool audio = area != nullptr && area->isAncestorOf(Audio_);
     const bool configuration = area == Configuration_;
     const bool scripts = area == Scripts_;
-    const bool scene = area == Scene_;
     const bool world = area == World_;
     SaveAction_->setText(project         ? QStringLiteral("&Save Project Settings")
                          : audio         ? QStringLiteral("&Save Audio")
                          : world         ? QStringLiteral("&Save World")
-                         : scene         ? QStringLiteral("&Save Scene")
                          : scripts       ? QStringLiteral("&Save Script Asset")
                          : configuration ? QStringLiteral("&Save Preferences")
                                          : QStringLiteral("&Save"));
@@ -64,7 +61,6 @@ void MainWindow::RenderDocumentActions()
     SaveAction_->setEnabled(project   ? Controller_->Caps().CanEdit && !rootBlocked
                             : audio   ? Audio_->CanSave()
                             : world   ? World_->CanSave()
-                            : scene   ? Scene_->CanSave()
                             : scripts ? Scripts_->CanSave()
                                       : configuration && Configuration_->Preview() != nullptr);
 #if defined(Q_OS_WASM)
@@ -91,11 +87,9 @@ void MainWindow::RenderDocumentActions()
     {
         const bool inProject = project && (focus == nullptr || ProjectSettings_->isAncestorOf(focus));
         UndoAction_->setEnabled(world     ? World_->CanUndo()
-                                : scene   ? Scene_->CanUndo()
                                 : scripts ? Scripts_->CanUndo()
                                           : inProject && Controller_->CanUndoProject());
         RedoAction_->setEnabled(world     ? World_->CanRedo()
-                                : scene   ? Scene_->CanRedo()
                                 : scripts ? Scripts_->CanRedo()
                                           : inProject && Controller_->CanRedoProject());
     }
@@ -119,10 +113,6 @@ void MainWindow::OnUndoRequested()
     else if (WorkTabs_->currentWidget() == World_)
     {
         World_->Undo();
-    }
-    else if (WorkTabs_->currentWidget() == Scene_)
-    {
-        Scene_->Undo();
     }
     else if (WorkTabs_->currentWidget() == Scripts_)
     {
@@ -153,10 +143,6 @@ void MainWindow::OnRedoRequested()
     else if (WorkTabs_->currentWidget() == World_)
     {
         World_->Redo();
-    }
-    else if (WorkTabs_->currentWidget() == Scene_)
-    {
-        Scene_->Redo();
     }
     else if (WorkTabs_->currentWidget() == Scripts_)
     {

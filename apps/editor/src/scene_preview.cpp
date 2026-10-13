@@ -82,13 +82,13 @@ bool ScenePreview::Start()
     if (!manager.Initialize({}) ||
         !manager.CreateWindow(
             {
-                .Name = "Ludus scene authoring - WASD cursor, Enter pick, arrows transform, Esc cancel",
+                .Name = "Ludus World authoring - WASD cursor, Enter pick, arrows transform, Esc cancel",
                 .Width = 960,
                 .Height = 640,
             },
             Window_))
     {
-        Status_ = QStringLiteral("Authoring window could not start; the scene remains editable.");
+        Status_ = QStringLiteral("Authoring window could not start; the World remains editable.");
         Q_EMIT Changed();
         return false;
     }
@@ -98,11 +98,11 @@ bool ScenePreview::Start()
     Width_ = Height_ = 0;
     Frames_ = 0;
     Cursor_ = Document_->Draft().Level.Camera;
-    const auto status = rhi::Start({ .Name = "Ludus scene authoring", .Version = 1 }, Window_->GetNativeWindowInfo());
+    const auto status = rhi::Start({ .Name = "Ludus World authoring", .Version = 1 }, Window_->GetNativeWindowInfo());
     if (status != rhi::StartStatus::Ready && status != rhi::StartStatus::Pending)
     {
         Stop();
-        Status_ = QStringLiteral("Rendering could not start; the scene remains editable.");
+        Status_ = QStringLiteral("Rendering could not start; the World remains editable.");
         Q_EMIT Changed();
         return false;
     }
@@ -411,7 +411,7 @@ void ScenePreview::Tick()
         (state == rhi::StartupState::Ready && (!Prepare() || (Ready_ && !Render()))))
     {
         Stop();
-        Status_ = QStringLiteral("Authoring rendering stopped; the scene remains editable and saveable.");
+        Status_ = QStringLiteral("Authoring rendering stopped; the World remains editable and saveable.");
         Q_EMIT Changed();
         return;
     }

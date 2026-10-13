@@ -4,8 +4,8 @@ The editor is an **optional, OFF-by-default** native developer tool
 (`apps/editor`, target `ludus_editor`). It opens a project descriptor, edits its
 native build/launch settings, saves, reopens, configures/builds, runs the
 selected executable in a separate process, stops it, and reports failures. It
-also provides project-defined component authoring in World and a bounded
-world-demo scene authoring adapter in Scene. Trusted authoring
+also provides scene placement and project-defined component authoring in World,
+including the world-demo game adapter. Trusted authoring
 rendering and gameplay use separate windows; the status area describes the runtime.
 
 See the specification package for the authoritative contract:
@@ -27,8 +27,7 @@ editor package; launching the native editor does not need those files on disk.
 | --- | --- |
 | Welcome | New/Open and recent projects while no project is open |
 | Project | Setup/engine overview, lifecycle actions, name/profile and expandable build/launch details |
-| World | Project-defined entities/components, typed fields, references, history/save/recovery and bound native 3D preview |
-| Scene | World-demo level selection, transforms, history, save/recovery and trusted preview |
+| World | 2D/3D placement, game-owned entities/components, typed fields, references, shared history/save/recovery and trusted preview |
 | Scripts | Project-owned script and sequence drafts |
 | Audio | Content selection, definitions, save and preview |
 | Configuration | Independent offline configuration preview and preference editing |
@@ -55,7 +54,7 @@ recheck after changing installations outside the editor.
 **Check setup**, **Repair setup**, **Save settings**, **Build and run**, and
 **Stop** use the existing controller commands and their capability gates. Dirty
 settings must be saved before checks/repair/build. Save settings saves only the
-project descriptor; audio, scenes, scripts and configuration keep their own save
+project descriptor; audio, World documents, scripts and configuration keep their own save
 owners. Opening a project still does not configure, download, repair or build it.
 Repair's browser checkbox and engine selection retain their explicit behavior.
 
@@ -389,8 +388,9 @@ entity: select it to edit its placement and attach gameplay components. The edit
 never loads project code or guesses C++ component layouts. A project may supply
 `authoring/world.schema.json` under its saved source directory; the inspector uses
 that schema for gameplay fields. Without it, World supports scene import and
-placement with an empty gameplay schema. The sample-specific **Scene** adapter
-remains a compatibility workflow for the world-demo format.
+placement with an empty gameplay schema. The world-demo adapter uses this same
+World workspace, document, hierarchy, inspector, Save, Undo and recovery path.
+There are no separate Scene or 3D Levels authoring tabs.
 
 ### Start with an example
 
@@ -507,7 +507,7 @@ These bounds keep this first slice predictable; large production-world UX,
 hierarchy/parenting, multi-selection, prefab/archetype workflows, schema migrations,
 viewport gizmos, automatic runtime binding and browser import/export are still
 unsupported. The browser World tab explains its native-editor requirement and
-disables its file actions. The existing sample Scene workflow remains available.
+disables its file actions. Both 2D and 3D authoring use the native World workspace.
 
 ## World renderer and camera preview
 
@@ -548,14 +548,14 @@ Build the native editor using [Enable the rendered authoring surface](#enable-th
    Invalid replacement files retain the prior preview with persistent stale-data
    feedback. **Close preview** cancels pending publication and closes its device.
 
-The native Scene sample preview and World 3D preview share one device admission
+The world-demo 2D preview and World 3D preview share one device admission
 boundary. Opening either closes the other authoring surface; launching a game
 also closes World rendering. Project/document replacement prevents late worker
 results from reopening or publishing into another document. Failed GPU setup
 stops the surface with feedback and preserves World edits; reopening retries.
 Browser builds and native builds without `LUDUS_EDITOR_RENDER_PREVIEW` explain
-why rendering is unavailable. The existing Scene workflow is still its separate
-world-demo adapter.
+why rendering is unavailable. The game adapter chooses the trusted preview for
+the open World; it does not introduce another authoring workspace.
 
 ### Audience tasks and acceptance cases
 
@@ -734,31 +734,35 @@ conversion/visual limitations and higher-quality offline capture evidence.
 
 ## S4 scene authoring
 
-The Scene tab is the first concrete game-owned adapter, using the same v1
-[level codec](../architecture/level-data.md) as [world demo](../examples/world-demo.md).
-It accepts up to 64 KiB of JSON, 32 authored objects and 16 collision boxes.
-Player, enemy, exit and their assets belong to this sample schema; they are not
-engine entity types or a general reflection API. Open reads a regular file inside
-the current saved source root. Invalid candidates preserve the current scene,
-identity, selection and history. Browser scene authoring is explicitly unavailable.
+World owns the world-demo adapter as well as 3D scene placement. Its sample
+[World files](../examples/world-demo.md#edit-levels-and-gameplay) declare
+`ludus.world-demo.v1`; the shipped `apps/world_demo/authoring/world.schema.json`
+defines Transform, Player, Enemy, Exit, Collision box and Level settings.
+Actors, static boxes and settings all appear in the same World entity list and
+component inspector. The runtime projects settings and boxes into level data;
+they do not become gameplay registry entities merely because they are editable.
 
-Select an authored ID in the hierarchy. Enter position in metres, rotation in
-radians, and positive scale in the inspector, then **Apply transform**. Incomplete
-numbers remain editable buffers bound to the original object and revision; Save
-refuses invalid or stale pending text. **Reset pending fields** explicitly accepts
-current document values after a buffer conflict. Duplicate a
-selected enemy or exit to place another object with a fresh authored ID. The
-schema permits exactly one player. Selection survives canonical ordering and
-Undo/Redo; a temporarily missing object does not become another row's object.
-The shared Save/Undo/Redo actions follow the active work area and focused text.
+1. Open the engine project with `ludus_world_demo` selected, then **World → Open
+   World… → apps/world_demo/levels/first-room.world.json** (inside its saved source root).
+   A standalone copy can place the supplied schema at `authoring/world.schema.json`;
+   when no project schema exists, the known sample schema is available in the editor.
+2. Select `player-start` or `guard-a`. Edit Transform position in metres, rotation
+   in radians, positive scale or the role's gameplay fields. **Apply Changes**,
+   **Reset Fields**, **Save World** and Undo/Redo have the same behavior as other Worlds.
+3. Select `floor` to edit collision center/extents, or **Level settings** to edit
+   bounds, camera and seed. The seed is decimal text so all unsigned 64-bit values
+   survive the JSON/inspector boundary exactly.
+4. Duplicate an enemy/exit with **Duplicate**. Its new ID fits the game's 31-byte
+   identity limit. Add Entity and Add Component can assemble new recipes; unfinished
+   recipes remain editable, while Save/preview reject incompatible role combinations,
+   broken player targets, invalid bounds, excess capacity or missing settings.
 
-The private Qt-free scene document validates whole candidates before publication.
-Its fixed history retains 32 snapshots (under 512 KiB), uses monotonic revisions,
-and compares saved content separately from revision. A transform gesture previews
-only transient state, accepts one history item, and cancels on Escape, focus loss,
-resize or surface teardown. Save captures the committed draft, not a preview;
-acknowledging an older saved snapshot leaves subsequent edits dirty. Both sample
-runtime and Editor use the original codec and canonical authored-ID ordering.
+The player accepts at most 64 KiB, 32 actors and 16 collision boxes, one settings
+entity and exactly one player. Runtime-only handles never enter the file.
+Old v1 world-demo `.json` levels open through this same command: they become
+unsaved sibling `.world.json` documents, and Save writes the sibling. The original
+file remains intact; conversion refuses an existing destination. This is an import
+compatibility path, not a second editor or save workflow.
 
 ### Enable the rendered authoring surface
 
@@ -788,7 +792,7 @@ out/host-tools/venv/bin/cmake --build --preset linux-clang-development \
 ```
 
 For macOS use `macos-clang-development` and omit `LUDUS_SPIRV_VALIDATOR`; its
-pinned Slang path emits Metal. With tools prepared, **Open rendered preview**
+pinned Slang path emits Metal. With tools prepared, World’s **Open rendered preview**
 creates one main-thread Platform-owned window and connects it to RHI. No Qt
 `winId()` borrowing, cross-process embedding, CPU-painted stand-in or project
 module loading is involved. Shutdown releases RHI before the window. This
@@ -806,26 +810,19 @@ document editable/saveable; reopening the preview starts a fresh RHI session.
 
 ### Save, recovery and Play
 
-Scene Save uses a cooperative sidecar lock, compares the current source bytes
-with the loaded baseline, and publishes through `QSaveFile` with direct-write
-fallback disabled. Source conflicts and failed replacement preserve draft and
-history. These are atomic-visibility/cooperating-writer guarantees, not an
-exclusive lock against external programs or power-loss durability.
+**Save World** uses the same cooperative lock, baseline conflict checks, atomic
+replacement and explicit recovery described in [Gameplay world authoring](#gameplay-world-authoring).
+The sample player reads that exact World file. The 2D renderer owns only a
+transient validated projection and pending gesture; it never saves a second
+scene document. Releasing all arrows commits one edit to World's history.
+Undo/Redo update the projection from World, and incomplete inspector buffers
+stop the preview so native keyboard input cannot overwrite unapplied text.
+Pending text and cancelled gestures never enter Save or recovery.
 
-Committed dirty revisions also write a bounded `<scene>.ludus-recovery` snapshot
-atomically. Its version, baseline SHA-256 and payload SHA-256 reject changed
-sources and truncated/changed recovery. Reopening never applies recovery
-silently: **Restore recovery snapshot** creates an undoable edit only over the
-matching saved source. Failed recovery writes are reported. Pending numeric text
-and transient gestures are not journaled. This first recovery slot is shared per
-scene; a later cooperating editor may replace it. Save/discard removes it; normal
-Undo back to saved content removes recovery written by this editor. This is a
-last-successful-snapshot policy, not a claim that every keystroke survives a crash.
-
-For this adapter's **Play saved scene**, configure Project settings to build
+For this adapter's **Play saved World**, configure Project settings to build
 `ludus_world_demo` with `LUDUS_BUILD_WORLD_DEMO=ON`, and set run arguments to
-`--level` followed by the scene path (relative to the configured run working
-directory, or absolute). Save Project settings. The action saves the scene,
+`--level` followed by the `.world.json` path (relative to the configured run working
+directory, or absolute). Save Project settings. The action saves the World,
 closes authoring rendering, then uses the existing supervised Build/Run workflow.
 The child independently reads and validates that saved file before activation;
 simulation never writes authored transforms back to the Editor. The action does
@@ -836,9 +833,9 @@ provide bounded player acceptance paths.
 
 Portable scene tests cover failed-load rollback, all-or-nothing multi-target
 edits, cancelled gestures, saved-content history, eviction, save-during-edit
-acknowledgement, and stale picking. Widget/persistence tests cover invalid
-buffers, canonical save/reopen, source conflicts, placement and corrupt/stale /
-failed recovery publication. The opt-in Cocoa journey exercises actual Metal
+acknowledgement, and stale picking. World widget/persistence tests cover invalid
+buffers, save/reopen, runtime projection, source conflicts, shared recovery,
+actor duplication, collision/settings edits and legacy import preservation. The opt-in Cocoa journey exercises actual Metal
 frames, native keys, resize, save/reopen, and a separately rendered player:
 
 ```bash

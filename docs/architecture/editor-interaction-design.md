@@ -18,7 +18,7 @@ Project / document / save state       Save   useful context actions   Search
 +--------------------------------------------------+-------------------+
 | Active document tabs                             | Inspector         |
 |                                                  | when applicable   |
-| Project settings / Configuration / Audio / Scene  |                   |
+| Project settings / Configuration / Audio / World  |                   |
 |                                                  | Document or       |
 | Current authoring work has first claim on space   | session scope     |
 +--------------------------------------------------+-------------------+
@@ -27,7 +27,7 @@ Project / document / save state       Save   useful context actions   Search
 | Draft / operation / capability status                                |
 ```
 
-The drawing describes roles, not fixed sizes or a promise that Scene exists.
+The drawing describes roles, not fixed sizes or a promise of a particular viewport layout.
 Menus retain common commands and View/Reset Layout. The context strip presents
 frequent actions for the current task; native-only actions do not consume a
 permanently disabled browser row. Advanced commands remain discoverable through

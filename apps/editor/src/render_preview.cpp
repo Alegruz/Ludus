@@ -9,6 +9,8 @@
 #include <ludus/graphics/rhi/rhi.h>
 #include <new>
 
+#include <QElapsedTimer>
+
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
 #    include "renderer_composite.h"
 #    include "renderer_flat.h"
@@ -644,7 +646,20 @@ void RenderPreview::Tick()
         }
         if (good)
         {
-            good = Accepted(Renderer_.AdvanceReferenceCapture(Capture_));
+            // A capture step advances one small tile/stage. Qt may deliver only
+            // one zero-timer event per event-loop turn; batch bounded work so
+            // first-frame admission does not depend on thousands of GUI turns.
+            QElapsedTimer slice;
+            slice.start();
+            for (uint32 step = 0; good && step < 64 && slice.elapsed() < 4; ++step)
+            {
+                const auto progress = Renderer_.AdvanceReferenceCapture(Capture_);
+                good = Accepted(progress);
+                if (progress == rhi::RasterStatus::Ready)
+                {
+                    break;
+                }
+            }
             rr::ReferenceCaptureInfo info;
             if (good && Renderer_.GetReferenceCaptureInfo(Capture_, info) == rhi::RasterStatus::Ready &&
                 info.MinimumSamples > LastSamples_ &&

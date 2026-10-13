@@ -673,7 +673,9 @@ bool WorldDocument::ReplaceEntity(const QJsonObject& entity, QString& error)
 }
 bool WorldDocument::CreateEntity(QString& error, const QString& name, QString& id)
 {
-    const auto fresh = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto fresh = Schema_.value(QStringLiteral("id")) == QJsonValue(QStringLiteral("ludus.world-demo.v1"))
+                           ? QStringLiteral("entity-") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(24)
+                           : QUuid::createUuid().toString(QUuid::WithoutBraces);
     QJsonObject components;
     for (const auto value : Schema_.value(QStringLiteral("components")).toArray())
     {
@@ -703,7 +705,9 @@ bool WorldDocument::DuplicateEntity(QString& error, const QString& source, QStri
     {
         return Fail(error, QStringLiteral("Select an entity to duplicate."));
     }
-    const auto fresh = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto fresh = Schema_.value(QStringLiteral("id")) == QJsonValue(QStringLiteral("ludus.world-demo.v1"))
+                           ? QStringLiteral("entity-") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(24)
+                           : QUuid::createUuid().toString(QUuid::WithoutBraces);
     auto components = entity.value(QStringLiteral("components")).toObject();
     for (auto c = components.begin(); c != components.end(); ++c)
     {

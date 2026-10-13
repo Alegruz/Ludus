@@ -125,10 +125,11 @@ missing, oversized, or incompatible settings fall back to a useful default.
 Only locally generated layout blobs are eligible; project files cannot supply
 layout state. App and exact Qt versions are checked before restoring it.
 
-The initial Scene tab supplies a bounded hierarchy and transform inspector with
-a separate trusted rendering window. A future embedded viewport extends it. It
-must first ship selection, transform editing, save/undo, and validation as one
-vertical slice. The viewport uses an explicit render-surface adapter to RHI;
+World supplies the single hierarchy, component/transform inspector, Save,
+Undo/Redo and recovery owner for 2D and 3D authoring. Game-owned adapters project
+World snapshots into trusted preview and runtime formats; they do not own a second
+authoring tab or durable history. Imported 3D geometry renders in World; the
+world-demo 2D adapter retains its trusted native rendering window. The viewport uses an explicit render-surface adapter to RHI;
 use trusted in-process authoring rendering from document snapshots, separately
 from out-of-process gameplay. Native embedding and browser canvas composition
 require prototypes; host-frame transport is optional later work. Current RHI

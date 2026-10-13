@@ -68,17 +68,24 @@ needed for this engine application.
 
 ## Edit levels and gameplay
 
-Edit [first-room.json](../../apps/world_demo/levels/first-room.json) or
-[second-room.json](../../apps/world_demo/levels/second-room.json), then build. CMake embeds these files;
+Edit [first-room.world.json](../../apps/world_demo/levels/first-room.world.json) or
+[second-room.world.json](../../apps/world_demo/levels/second-room.world.json), then build. CMake embeds these files;
 there is no duplicated C++ level literal. `ReadLevel` owns the result, rejects
 unknown/duplicate fields, and validates kinds, references and procedural visual
 keys. IDs use lowercase ASCII letters, digits and hyphens, with at most 31 bytes.
-The reader accepts JSON escapes for this ASCII vocabulary. It bounds input to
-64 KiB and does not allocate or recurse over an arbitrary JSON tree.
+The Worlds share the editor’s version-1 entity/component envelope and the
+game-owned `ludus.world-demo.v1` schema. `ReadWorldLevel` uses the bounded Ludus
+JSON parser during loading; it owns the resulting typed Level and releases all
+parser storage before returning. Input is limited to 64 KiB, 49 authoring
+entities, bounded nesting/strings and no duplicate or unknown fields.
+
+Use the [World workflow](../development/editor-workspace.md#s4-scene-authoring)
+for transforms, player/enemy/exit fields, collision boxes, camera/bounds and seed.
+The same saved World feeds both trusted preview and the sample player.
 
 `Level` is also directly constructible in code. `Prepare` and `BuildNext` use the
 same world semantics for compiled definitions and decoded JSON. `WriteLevel`
-produces canonical JSON into fallible owned storage, preserving the output on
+produces the legacy v1 interchange JSON into fallible owned storage, preserving the output on
 failure. Entity records sort by authored ID. The codec has no filesystem writes;
 an editor must provide atomic source-file replacement through its own platform
 boundary.
@@ -183,10 +190,14 @@ Recorded checks and remaining limits are in the
 
 ## Author a level with the Editor
 
-The [S4 Scene workspace](../development/editor-workspace.md#s4-scene-authoring)
+The [World workspace](../development/editor-workspace.md#s4-scene-authoring)
 shares this sample's private level codec, not its gameplay state. Native runs
 accept `--level <path>` (at most 64 KiB, regular file, strict v1 validation). It
-can be combined with `--headless` or `--frames 3` to qualify a saved scene. Invalid
+can be combined with `--headless` or `--frames 3` to qualify a saved World. Invalid
 files fail before candidate activation; no source file is rewritten. Without
 `--level`, the built-in first room remains the default. Browser CLI file loading
 is not an authoring workflow.
+
+Legacy v1 level JSON remains readable for import and player compatibility. The
+Editor converts it to a sibling World file and preserves the original; new
+authoring and the shipped rooms use `.world.json`.

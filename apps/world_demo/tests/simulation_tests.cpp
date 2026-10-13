@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
 #include <string>
+#include <utility>
 using namespace ludus::world_demo;
 namespace
 {
@@ -437,4 +438,32 @@ TEST_CASE("Swept static collision stops crossing a thin floor", "[world-demo]")
         REQUIRE(world.RunTick({ .Axis = {0, -1} }) == Status::Success);
     }
     REQUIRE(world.Transforms().Find(player)->Current.Y == Catch::Approx(-3.1F));
+}
+
+TEST_CASE("World authoring decoder preserves outputs and rejects incompatible sample recipes",
+          "[world-demo][world-authoring]")
+{
+    Level level;
+    REQUIRE(ReadWorldLevel(ExampleLevel(), level).Error == LevelError::None);
+    const auto originalSeed = level.Seed;
+    const auto source = std::string(ExampleLevel());
+    for (const auto& replacement : {std::pair{"\"ludus.world-demo.v1\"", "\"unknown.schema\""},
+                                    std::pair{"\"scale_x\": 1", "\"scale_x\": 0"},
+                                    std::pair{"\"seed\": \"42\"", "\"seed\": \"18446744073709551616\""},
+                                    std::pair{"\"target\": \"player-start\"", "\"target\": \"exit-a\""},
+                                    std::pair{"\"speed\": 4", "\"speed\": 4, \"speed\": 5"},
+                                    std::pair{"\"half_x\": 10", "\"unknown\": 10"}})
+    {
+        auto invalid = source;
+        const auto position = invalid.find(replacement.first);
+        REQUIRE(position != std::string::npos);
+        invalid.replace(position, std::string_view(replacement.first).size(), replacement.second);
+        CHECK(ReadWorldLevel(invalid, level).Error != LevelError::None);
+        CHECK(level.Seed == originalSeed);
+        CHECK(level.EntityCount == 3);
+    }
+    CHECK(ReadWorldLevel(std::string(65537, ' '), level).Error == LevelError::Capacity);
+    CHECK(level.Seed == originalSeed);
+    REQUIRE(ReadWorldLevel(BuiltinLevel("second-room"), level).Error == LevelError::None);
+    CHECK(level.Id.View() == "second-room");
 }
