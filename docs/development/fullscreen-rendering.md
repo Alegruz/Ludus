@@ -1560,6 +1560,151 @@ declaration and completion-retention checks. Existing resize/loss suites continu
 to exercise the shared device/frame/resource lifecycle.
 
 
+## Scalable bindings and optional bindless (R11)
+
+R11a adds completion-gated descriptor arenas and packet-local dynamic buffer offsets.
+R11b adds reflected, fully populated fixed arrays of sampled color `Texture2D`
+descriptors and an independently requested non-uniform indexing profile. The
+[architecture milestone](../architecture/rhi-gdi.md#follow-up-milestones-r6r17)
+owns the assignment; the API comments own its detailed caller contracts.
+
+| Operation | Vulkan | Metal | WebGPU | WebGL 2 |
+| --- | --- | --- | --- | --- |
+| Dynamic uniform offsets | Enabled up to negotiated limits | Enabled | Enabled up to negotiated limits | Enabled via uniform range binding |
+| Dynamic compute storage offsets | Enabled up to negotiated limits | Enabled | Enabled up to negotiated limits | Unsupported with compute |
+| Fixed color texture descriptor arrays | Enabled up to configured/native limits | Enabled within 31 texture registers; array ranges cannot overlap | Unsupported | Unsupported |
+| Dynamically uniform array selection | Enabled only with the actual device feature | Enabled | Unsupported | Unsupported |
+| Non-uniform fixed array selection | Explicit request, Vulkan 1.2 and enabled sampled-image indexing feature | Explicit request and verified native lowering | Unsupported | Unsupported |
+| Runtime-sized arrays, holes, update-after-bind, sampler/buffer descriptor arrays | Unsupported | Unsupported | Unsupported | Unsupported |
+
+Inspect `DeviceInfo::Profile.Binding`. Array count never implies non-uniform
+selection. Set `DeviceDescription::Required.BindlessTextureIndexing` when the
+workload cannot run without it, or `Preferred.BindlessTextureIndexing` when an
+authored scalar/constant-array alternative exists. A missing required feature
+rejects device admission; an unavailable preference is reported in
+`UnmetPreferences`. Foreign Vulkan devices cannot enable new features and do not
+infer indexing from adapter support. Portable scalar binding remains available.
+
+### Budgets, immutable snapshots and offsets
+
+`StorageLimits::BindingDescriptors` limits populated descriptors across live,
+pending, detached and submitted snapshots. `DescriptorsPerSet` configures the
+per-snapshot bound, clamped by the backend. Descriptor payloads use budgeted Ludus
+storage during creation; command encoding neither grows metadata nor creates
+new sets. `ResourcesPerKind` still limits snapshot records, and `HostBytes` and
+`ResourceBytes` retain their distinct metadata/backing scopes.
+
+Vulkan shares pools among snapshots with identical descriptor-type counts,
+including separate dynamic uniform/storage types. It frees sets only after
+completion and destroys an empty arena. Pool reservations are amortized in
+bounded groups, with checked sizing; allocation/creation failure rolls back the
+unpublished snapshot and native reservation. Metal/WebGL retain bounded copied
+binding payloads; WebGPU uses immutable bind groups. Replacing a snapshot creates
+a new identity and retains the old backing through its last submitted use.
+
+Declare `RasterBinding::HasDynamicOffset` for a buffer entry. Supply additional
+bytes in `RasterDraw::BindingOffsets.Bytes[binding]` or
+`ComputeDispatch::BindingOffsets`. Absent/static entries require zero. The RHI
+checks alignment, addition overflow and `snapshot.Offset + dynamicOffset + Size`
+against the complete buffer before any native work. Native dynamic offsets are
+ordered by binding number, regardless of authored layout order. GDI declarations
+must cover the effective range. Batches/graphs copy offsets, so later mutation of
+caller packets cannot change retained work. Dynamic offsets do not authorize
+mutation of retained or in-flight buffer contents; the R8 exclusion rules remain.
+
+### Cook, declare and retain array access
+
+Use the installed shader helper with the explicit native profile:
+
+```cmake
+ludus_compile_shader(TARGET app NAME material RASTER NATIVE_BINDING_ARRAYS
+    SOURCE material.slang VERTEX VertexMain FRAGMENT FragmentMain)
+```
+
+The helper supplies the RHI-owned `raster_bindings.slang` include directory.
+Declare a fixed color texture array with `LUDUS_SHADER_BINDING`, and bound a
+runtime unsigned index before access, for example
+`Images[NonUniformResourceIndex(min(index, 3U))]` for four elements. The cooker
+reflects counts and derives Constant/Uniform/NonUniform access from emitted
+SPIR-V. It admits constant in-range indices and verified unsigned min/clamp
+bounds; runtime-sized arrays, unknown pointer/access paths and unbounded indices
+reject. Metal uses the existing pinned SPIRV-Cross MSL 2.4 lowering for this
+profile, with independently checked emitted registers/counts and runtime Metal
+pipeline reflection. Direct Slang Metal lowering does not admit the pinned
+`NonUniformResourceIndex` operation. Pins are unchanged. This helper profile
+requires the pinned translator and an authored browser alternative.
+
+`CreateBindingSet` requires exactly one entry for every `(Binding, ArrayElement)`;
+holes, duplicates, wrong views and out-of-range elements reject. The immutable
+snapshot is the exhaustive reachable-resource table. Every resource stays
+retained, including array entries whose branches are inactive. Obtain a borrowed
+`RasterBindingIndex` with `GetBindingIndex`, and resolve it against that exact
+snapshot with `GetBindingArrayElement`. Destruction/replacement invalidates host
+index resolution; numerical shader indices are not transferable ownership.
+
+For NonUniform arrays, `RasterDraw::ReachableBindings` must declare each array
+element exactly once using tokens from the bound snapshot. Missing, duplicate,
+stale or foreign declarations reject before encoding. GDI additionally requires
+sampled use declarations for every reachable physical texture, and retains the
+whole table through completion. Hazards remain conservative for complete
+allocations until R13. The verified shader bound prevents descriptor-table
+escape; resource lifetime is never inferred from whichever branch happened to
+execute on one frame. Hand-authored shader artifacts must independently verify
+the documented bounds and supply `HasVerifiedArrayBounds`.
+
+### Correctness and measurement evidence
+
+`ludus_rhi_r11_consumer` and the installed `ludus_sdk_r11_consumer` compare static
+snapshots, dynamic offsets, GDI execution and constant/non-uniform native arrays
+against the same independently checked color stripes. GPU compute readback verifies
+a dynamic storage write at byte 256 with an untouched prefix/suffix. The native fixture destroys
+array texture/view owners before drawing and the snapshot before readback;
+retained backing must still produce the expected pixels. Optional non-uniform
+execution is reported unavailable when a Vulkan device cannot enable it.
+The source fixture enables its native array cases when the pinned translator is
+configured (`LUDUS_R11_NATIVE_ARRAYS`); the installed native SDK fixture requires
+that translator and always qualifies the array profile. `r11.html` exercises dynamic
+offset pixels, rejected misalignment and exact GDI ranges on forced WebGPU/WebGL 2;
+WebGPU also checks the dynamic storage write. Registry tests cover creation rollback, descriptor
+pressure across delayed completion, stale indices, retained array elements,
+72-descriptor payloads, copied compute offsets and incorrect graph ranges.
+Reflection regressions cover fixed/runtime counts, target registers, indexing
+modes and unsafe bounds.
+
+The native fixture reports CPU creation time for 32 static snapshots versus one
+reused dynamic snapshot, alongside populated descriptors and actual Vulkan pool
+reservations. R7 `AllocationTelemetry` adds `BindingDescriptors`,
+`RetiringBindingDescriptors`, `DescriptorArenaPools` and
+`ReservedArenaDescriptors`. Descriptor counts are not driver bytes or physical
+residency; driver descriptor allocation bytes remain unavailable. Query
+`GetStorageUsage` for budgeted metadata bytes. These observations compare the
+chosen binding workload, not GPU duration, display latency or universal speedup.
+Named physical GPU qualification remains an R7b gate; optional bindless never
+becomes the default merely because it is implemented.
+
+R11a/R11b implementation is recorded in [PR #239](https://github.com/Alegruz/Ludus/pull/239).
+At code revision `3dace88df9db11a0126fae3d7e2ae7241e5bf01b`, the
+[Linux Development and SDK gate](https://github.com/Alegruz/Ludus/actions/runs/38376845936/job/115228342822)
+passed source and installed R11 Vulkan execution under validation layers with no
+validation errors. Both constant and optional non-uniform arrays ran. The installed
+fixture reported 1,412,602 ns to create 32 static snapshots versus 41,968 ns for one
+dynamic snapshot, 33 populated descriptors and 3 native pools reserving 48 slots.
+Host metadata grew by 165,656 bytes for the static snapshots (including cold
+page/pool growth), then 24 bytes for the additional dynamic snapshot. This is one
+software-driver observation, not a repeated benchmark or physical-GPU qualification.
+The [macOS native gate](https://github.com/Alegruz/Ludus/actions/runs/38376845936/job/115227742875)
+passed its installed Metal shader/consumer step, and the
+[packaged browser gate](https://github.com/Alegruz/Ludus/actions/runs/38376846022/job/115234164137)
+passed the installed SDK's forced WebGPU/WebGL 2 pixel and dynamic-offset journeys.
+Pinned formatting, native/browser analysis, Linux/macOS sanitizers and API
+coverage gates also passed for that code revision.
+
+Thanks to Khronos Group, *Vulkan Specification*,
+[vkCmdBindDescriptorSets](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindDescriptorSets.html),
+and *Vulkan Guide*, [Descriptor Arrays](https://docs.vulkan.org/guide/latest/descriptor_arrays.html),
+for dynamic-offset ordering and independently enabled indexing/lifetime rules;
+and to the Slang and SPIRV-Cross teams for the target reflection/native lowering.
+
 ## Native texture sharing
 
 `native_interop.h` provides a Qt-independent, same-device, same-queue color-read

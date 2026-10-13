@@ -497,9 +497,9 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
     }
     const auto& set = At(RasterKind::Set, packet.Set).Set;
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
-    for (usize i = 0; i < layout.Count; ++i)
+    for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
-        if (!internal::TextureBinding(layout.Entries[i].Kind))
+        if (internal::TextureBinding(layout.GetDescriptorBinding(i).Kind) == false)
         {
             continue;
         }
@@ -532,7 +532,7 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
         if (contents)
         {
             const auto use = texture.InFrame ? texture.FrameTextureUse : texture.TextureUse;
-            const auto visibility = static_cast<uint8>(layout.Entries[i].Visibility);
+            const uint8 visibility = static_cast<uint8>(layout.GetDescriptorBinding(i).Visibility);
             const uint8 available = use == RasterTextureUse::SampledVertex     ? 1
                                     : use == RasterTextureUse::SampledFragment ? 2
                                     : use == RasterTextureUse::SampledBoth     ? 3
@@ -549,16 +549,16 @@ void RetainPacketTextures(const RasterPacket& packet) noexcept
 {
     const auto& set = At(RasterKind::Set, packet.Set).Set;
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
-    for (usize i = 0; i < layout.Count; ++i)
+    for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
-        if (!internal::TextureBinding(layout.Entries[i].Kind))
+        if (internal::TextureBinding(layout.GetDescriptorBinding(i).Kind) == false)
         {
             continue;
         }
         const auto slot = At(RasterKind::View, set.Slots[i]).TextureSlot;
         FrameRetain(RasterKind::Texture, slot);
         auto& texture = At(RasterKind::Texture, slot);
-        const auto visibility = static_cast<uint8>(layout.Entries[i].Visibility);
+        const uint8 visibility = static_cast<uint8>(layout.GetDescriptorBinding(i).Visibility);
         const auto use = visibility == 1   ? RasterTextureUse::SampledVertex
                          : visibility == 2 ? RasterTextureUse::SampledFragment
                                            : RasterTextureUse::SampledBoth;
@@ -1270,9 +1270,9 @@ CheckDeclaredPacket(const GraphRecord& graph, const GraphPassRecord& pass, const
     }
     const auto& set = At(RasterKind::Set, packet.Set).Set;
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
-    for (usize i = 0; i < layout.Count; ++i)
+    for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
-        const auto& binding = layout.Entries[i];
+        const RasterBinding& binding = layout.GetDescriptorBinding(i);
         if (binding.Kind == RasterBindingKind::Sampler)
         {
             continue;
@@ -1284,7 +1284,7 @@ CheckDeclaredPacket(const GraphRecord& graph, const GraphPassRecord& pass, const
                     buffer ? RasterKind::Buffer : RasterKind::Texture,
                     slot,
                     buffer ? GraphAccessMode::Uniform : GraphAccessMode::Sampled,
-                    buffer ? set.Offsets[i] : 0,
+                    buffer ? set.Offsets[i] + packet.BindingOffsets.Bytes[binding.Binding] : 0,
                     buffer ? set.Sizes[i] : 0,
                     static_cast<uint8>(binding.Visibility)) == nullptr)
         {
@@ -1646,9 +1646,9 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
         {
             const auto& set = At(RasterKind::Set, graph.Draws[pass.FirstDraw + d].Set).Set;
             const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
-            for (usize b = 0; b < layout.Count; ++b)
+            for (usize b = 0; b < layout.DescriptorCount; ++b)
             {
-                if (TextureBinding(layout.Entries[b].Kind))
+                if (TextureBinding(layout.GetDescriptorBinding(b).Kind))
                 {
                     const auto& view = At(RasterKind::View, set.Slots[b]);
                     const auto& texture = At(RasterKind::Texture, view.TextureSlot);
@@ -1676,15 +1676,21 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
         {
             const auto& set = At(RasterKind::Set, pass.Dispatch.Set).Set;
             const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
-            for (usize i = 0; i < layout.Count; ++i)
+            for (usize i = 0; i < layout.DescriptorCount; ++i)
             {
-                const auto& binding = layout.Entries[i];
+                const RasterBinding& binding = layout.GetDescriptorBinding(i);
                 const auto access = binding.Kind == RasterBindingKind::UniformBuffer ? GraphAccessMode::Uniform
                                     : binding.Kind == RasterBindingKind::StorageRead
                                         ? GraphAccessMode::StorageRead
                                         : GraphAccessMode::StorageReadWrite;
-                if (FindUse(graph, pass, RasterKind::Buffer, set.Slots[i], access, set.Offsets[i], set.Sizes[i], 4) ==
-                    nullptr)
+                if (FindUse(graph,
+                            pass,
+                            RasterKind::Buffer,
+                            set.Slots[i],
+                            access,
+                            set.Offsets[i] + pass.Dispatch.BindingOffsets.Bytes[binding.Binding],
+                            set.Sizes[i],
+                            4) == nullptr)
                 {
                     return RasterStatus::InvalidDescription;
                 }

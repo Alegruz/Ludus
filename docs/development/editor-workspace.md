@@ -757,15 +757,16 @@ only after complete validation and renderer admission. A failed/cancelled import
 or save preserves the previous saved data; the last-good viewport remains visible
 while a candidate is prepared.
 
-The installed scene CLI retains its `.lulevel` interchange workflow and uses
-the same asset/import backend. It does not consume World gameplay components:
+The `ludus-cook` scene CLI (built with `modules/content/scene_cook`) retains the
+`.lulevel` interchange workflow and uses the same native asset/import library as the
+Editor. It does not consume World gameplay components:
 
 ```bash
-ludus scene new /path/to/project scenes/main.lulevel --name Main
-ludus scene import /path/to/project scenes/main.lulevel /path/to/staircase2
-ludus --json scene dump /path/to/project scenes/main.lulevel
-ludus scene open /path/to/moved-project scenes/main.lulevel
-ludus scene publish /path/to/project scenes/main.lulevel /path/to/new-release
+ludus-cook scene new /path/to/project scenes/main.lulevel --name Main
+ludus-cook scene import /path/to/project scenes/main.lulevel /path/to/staircase2
+ludus-cook scene dump /path/to/project scenes/main.lulevel --json
+ludus-cook scene open /path/to/moved-project scenes/main.lulevel
+ludus-cook scene publish /path/to/project scenes/main.lulevel /path/to/new-release
 ```
 
 `scene publish` writes only the selected required closure and its licenses,

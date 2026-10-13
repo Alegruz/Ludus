@@ -4,13 +4,12 @@
 #include "internal/render_preview.h"
 #include "internal/world_document.h"
 
+#include <QByteArray>
 #include <QJsonObject>
-#include <QTemporaryDir>
 #include <QThread>
 #include <QWidget>
-#if !defined(Q_OS_WASM)
-#    include <QProcess>
-#endif
+
+#include <atomic>
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -21,8 +20,9 @@ class QPushButton;
 QT_END_NAMESPACE
 namespace ludus::editor
 {
-// Project-owned 3D level surface. The installed host backend owns cooking,
-// immutable catalogs and save conflicts; no project game code is executed.
+// Project-owned 3D level surface. Ludus::SceneCook owns cooking, immutable
+// catalogs and save conflicts; it runs in process on a worker thread and no
+// project game code is executed.
 class PreviewViewport;
 class LevelWorkspace final : public QWidget
 {
@@ -101,6 +101,16 @@ Q_SIGNALS:
 private:
     bool Start(const QString& operation, const QString& path = {}, const QString& source = {});
     void Completed();
+    /// Inputs for one scene operation, grouped so call sites name each field.
+    struct SceneOperationRequest
+    {
+        QString Operation;
+        QString Path;
+        QString Source;
+        QJsonValue Expected;
+    };
+    bool Run(const SceneOperationRequest& request);
+    void WaitForOperation();
     void Publish();
     void CommitCandidate();
     void CommitImport();
@@ -121,12 +131,11 @@ private:
     QJsonValue CatalogExpected_;
     QString Source_;
     bool PublishingCatalog_ = false;
-    QByteArray Output_;
-    QTemporaryDir Scratch_;
+    QByteArray Response_, SceneBytes_, CandidateCatalog_;
+    QString OperationError_;
+    QThread* Operate_ = nullptr;
+    std::atomic<bool> CancelRequested_{false};
     QThread Decode_;
-#if !defined(Q_OS_WASM)
-    QProcess Process_;
-#endif
     WorldDocument WorldSnapshot_;
     RenderScene Scene_;
     RenderScene PreviousScene_;

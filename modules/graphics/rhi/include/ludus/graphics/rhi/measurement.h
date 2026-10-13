@@ -74,6 +74,7 @@ struct MeasurementAdapter final
 [[nodiscard]] RasterStatus GetMeasurementAdapter(DeviceHandle, MeasurementAdapter&) noexcept;
 /// Allocation telemetry scoped to general raster/compute buffers and textures (including depth
 /// and retained texture-upload allocations); excludes facade/surface, transfer rings and ray objects.
+/// R11 descriptor counts/reservations are a separate scope; descriptor driver bytes remain unavailable.
 struct AllocationTelemetry final
 {
     /// Current R6 logical resource bytes in this scope, including deferred retirement.
@@ -102,6 +103,17 @@ struct AllocationTelemetry final
     foundation::uint64 PhysicalBytes = 0;
     /// Whether actual physical residency can be observed. Currently false on all backends.
     bool PhysicalBytesAvailable = false;
+    /// Populated binding descriptors, including pending/detached/in-flight snapshots.
+    foundation::uint64 BindingDescriptors = 0;
+    /// Populated descriptors retained after their snapshot owner was destroyed.
+    foundation::uint64 RetiringBindingDescriptors = 0;
+    /// Native shared descriptor pools alive; meaningful only when DescriptorArenasAvailable.
+    foundation::uint64 DescriptorArenaPools = 0;
+    /// Descriptor slots reserved by those native pools, including unused capacity.
+    /// Counts are not driver allocation bytes or physical memory measurements.
+    foundation::uint64 ReservedArenaDescriptors = 0;
+    /// Whether shared native descriptor arena reservations can be queried (Vulkan only).
+    bool DescriptorArenasAvailable = false;
 };
 /// Copy scoped allocation/retirement telemetry without waiting/allocating; owner-thread only.
 /// InvalidHandle preserves output; other unavailable device states zero it. ApiBytesAvailable

@@ -1,8 +1,6 @@
 #include "internal/level_workspace.h"
 #include "internal/preview_viewport.h"
-#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-#    include <QQuickWindow>
-#endif
+#include "scene_fixture.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -11,12 +9,12 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
-#include <QProcess>
-#include <QProcessEnvironment>
 #include <QSignalSpy>
-#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+#    include <QQuickWindow>
+#endif
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,7 +25,6 @@ ToolingPaths SceneTools()
 {
     ToolingPaths tools;
     tools.ToolingRoot = QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT);
-    tools.PythonPath = QStandardPaths::findExecutable(QStringLiteral("python3"));
     return tools;
 }
 void Drain(LevelWorkspace& workspace)
@@ -100,25 +97,10 @@ TEST_CASE("saved cooked level renders after moving the project and removing sour
     const auto root = QDir(directory.path()).filePath(QStringLiteral("project"));
     const auto source = QDir(directory.path()).filePath(QStringLiteral("external"));
     const auto tools = SceneTools();
-    QProcess prepare;
-    auto environment = QProcessEnvironment::systemEnvironment();
-    environment.insert(QStringLiteral("PYTHONPATH"),
-                       QDir(tools.ToolingRoot).filePath(QStringLiteral("scripts/python")));
-    prepare.setProcessEnvironment(environment);
-    prepare.start(
-        tools.PythonPath,
-        {QStringLiteral("-c"),
-         QStringLiteral(
-             "from pathlib import Path; import sys; from unittest.mock import patch; "
-             "from ludus_tools import scene_assets as a; from test_scene_assets import fixture; "
-             "r=Path(sys.argv[1]); s=Path(sys.argv[2]); r.mkdir(); s.mkdir(); (s/'source').write_text('fixture'); "
-             "p=patch.object(a.scene_cook,'cook',side_effect=fixture); p.start(); "
-             "v=a.import_scene(r,s,a.new_level()); p.stop(); a.save_level(r,'scenes/main.lulevel',v)"),
-         root,
-         source});
-    REQUIRE(prepare.waitForFinished(10000));
-    INFO(prepare.readAllStandardError().constData());
-    REQUIRE(prepare.exitCode() == 0);
+    REQUIRE(ludus::editor::tests::CreateFixtureSource(source));
+    QString error;
+    INFO(error.toStdString());
+    REQUIRE(ludus::editor::tests::PrepareImportedLevel(root, QStringLiteral("scenes/main.lulevel"), source, error));
     REQUIRE(QDir(source).removeRecursively());
     const auto moved = QDir(directory.path()).filePath(QStringLiteral("moved"));
     REQUIRE(QDir().rename(root, moved));
@@ -170,14 +152,7 @@ TEST_CASE("staircase2 imports, saves and renders from a moved project without it
     const auto source = QDir(directory.path()).filePath(QStringLiteral("external"));
     REQUIRE(QDir().mkpath(root));
     const auto tools = SceneTools();
-    QProcess copy;
-    copy.start(tools.PythonPath,
-               {QStringLiteral("-c"),
-                QStringLiteral("import shutil,sys; shutil.copytree(sys.argv[1],sys.argv[2])"),
-                reference,
-                source});
-    REQUIRE(copy.waitForFinished(10000));
-    REQUIRE(copy.exitCode() == 0);
+    REQUIRE(ludus::editor::tests::CopyTree(reference, source));
     LevelWorkspace workspace(tools);
     workspace.SetProject(root, 1);
     const auto path = QDir(root).filePath(QStringLiteral("scenes/main.lulevel"));

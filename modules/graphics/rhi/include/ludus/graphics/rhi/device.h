@@ -54,6 +54,9 @@ struct DeviceFeatures final
     bool RayQueries = false;
     /// Ordered portable raster graph, version/hazard validation and offscreen passes (R3).
     bool OrderedRasterGraph = false;
+    /// Optional non-uniform fixed texture descriptor indexing (R11), separately
+    /// requested through Required/Preferred; never implied by binding arrays.
+    bool BindlessTextureIndexing = false;
 };
 
 /// Backend code compiled into this artifact; does not promise adapter/runtime availability.

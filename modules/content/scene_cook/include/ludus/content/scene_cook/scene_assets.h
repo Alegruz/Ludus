@@ -90,6 +90,12 @@ struct AssetOptions final
     /// Provenance recorded as `source_origin` and used to reuse logical
     /// identities on reimport; empty selects realpath(source).
     std::string_view SourceOrigin;
+    /// Optional replacement for Cook, for tests that need a synthetic source;
+    /// nullptr selects the pbrt-reference-v1 cooker.
+    bool (*CookOrNull)(std::string_view source,
+                       CookResult& outResult,
+                       CookError& outError,
+                       const Cancellation* cancelOrNull) noexcept = nullptr;
 };
 
 /// @brief Result of PrepareImport: a complete candidate that is not yet published.
@@ -286,4 +292,76 @@ ReadCatalog(std::string_view root, foundation::Array<uint8>& outCatalog, AssetEr
 /// @return true on success.
 [[nodiscard]] bool
 WriteFileAtomically(std::string_view path, std::span<const uint8> data, AssetError& outError) noexcept;
+/// Operations the Editor runs in process (scene_editor.operate).
+enum class EditorSceneOperation : uint8
+{
+    /// Read, validate and assemble a saved level.
+    Open,
+    /// Prepare an import candidate without publishing the catalog.
+    Import,
+    /// Publish a prepared candidate catalog.
+    CommitImport,
+    /// Save the level after checking the bytes on disk.
+    Save,
+    /// Validate and assemble an unsaved level.
+    Assemble,
+};
+
+/// Stage callback for long Editor operations; called on the worker thread.
+struct EditorSceneProgress final
+{
+    /// Receives a short stage name; must be thread-safe for the caller.
+    void (*Report)(void* context, std::string_view stage) noexcept = nullptr;
+    /// Opaque pointer passed back to Report.
+    void* Context = nullptr;
+};
+
+/// One Editor scene request; the views must outlive the call.
+struct EditorSceneRequest final
+{
+    /// Operation to run.
+    EditorSceneOperation Operation = EditorSceneOperation::Assemble;
+    /// Project directory.
+    std::string_view Root;
+    /// Project-relative `.lulevel` path for Open and Save.
+    std::string_view Path;
+    /// Source scene directory for Import and CommitImport.
+    std::string_view Source;
+    /// Level JSON bytes; ignored by Open.
+    std::span<const uint8> Level;
+    /// Candidate catalog from Import; required by CommitImport.
+    std::span<const uint8> Catalog;
+    /// Expected digest: the saved level for Save, the published catalog for CommitImport.
+    bool HasExpected = false;
+    /// Lowercase hexadecimal SHA-256 used when HasExpected is true.
+    std::string_view Expected;
+    /// Optional stage reports.
+    const EditorSceneProgress* ProgressOrNull = nullptr;
+};
+
+/// Result of OperateEditorScene.
+struct EditorSceneResult final
+{
+    /// Canonical JSON matching scene_editor.py's success response: schema, ok,
+    /// level, committed, artifacts, catalog_expected, resident_bytes, warnings
+    /// and, for Open and Save, disk.
+    foundation::Array<uint8> Response;
+    /// Assembled LUSCN bundle; empty for CommitImport or a level without objects.
+    foundation::Array<uint8> Scene;
+    /// Canonical candidate catalog produced by Import.
+    foundation::Array<uint8> Catalog;
+};
+
+/// Run one Editor scene operation in process, replacing the scene_editor.py
+/// subprocess. Thread-safe with respect to other projects; same-project
+/// writers are serialised by the project lock.
+/// @param request Operation and inputs.
+/// @param options Cancellation, UUID source and provenance override.
+/// @param outResult Replaced on success; left unchanged on failure.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool OperateEditorScene(const EditorSceneRequest& request,
+                                      const AssetOptions& options,
+                                      EditorSceneResult& outResult,
+                                      AssetError& outError) noexcept;
 } // namespace ludus::content::scene_cook

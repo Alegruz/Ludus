@@ -268,6 +268,19 @@ uint32 RasterVertexStrideLimit() noexcept
 {
     return 252;
 }
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
+{
+    return false;
+}
+BindingCapabilities BindingLimits() noexcept
+{
+    return
+    {
+        .MaxDynamicUniformBuffers = 8,
+        .MaxTextureArrayElements = 1,
+        .MaxDescriptorsPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+    };
+}
 RasterCapabilities RasterLimits() noexcept
 {
     if (gContext <= 0)
@@ -668,8 +681,7 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
 RasterStatus
 RasterCreateSet(usize slot, const internal::RasterLayout&, const internal::RasterSet& info, uint32) noexcept
 {
-    gRasterSets[slot] = info;
-    return RasterStatus::Ready;
+    return gRasterSets[slot].TryCopyFrom(info) == true ? RasterStatus::Ready : internal::StorageFailure();
 }
 RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo& info, uint32) noexcept
 {
@@ -789,7 +801,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
             glBindBufferRange(GL_UNIFORM_BUFFER,
                               entry.Binding,
                               gRasterBuffers[set.Slots[i]],
-                              static_cast<GLintptr>(set.Offsets[i]),
+                              static_cast<GLintptr>(set.Offsets[i] + packet.BindingOffsets.Bytes[entry.Binding]),
                               static_cast<GLsizeiptr>(set.Sizes[i]));
         }
         else if (internal::TextureBinding(entry.Kind))

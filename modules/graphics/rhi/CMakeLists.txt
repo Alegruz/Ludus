@@ -105,7 +105,7 @@ endif()
 
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp tests/profile_tests.cpp tests/raster_tests.cpp tests/native_interop_tests.cpp tests/compute_tests.cpp tests/reference_raster.cpp src/rhi.cpp src/device.cpp src/profile.cpp src/raster.cpp src/ray_unsupported.cpp)
+    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp tests/profile_tests.cpp tests/raster_tests.cpp tests/binding_tests.cpp tests/native_interop_tests.cpp tests/compute_tests.cpp tests/reference_raster.cpp src/rhi.cpp src/device.cpp src/profile.cpp src/raster.cpp src/ray_unsupported.cpp)
     target_compile_definitions(ludus_rhi_lifecycle_tests PRIVATE LUDUS_RHI_TEST_STORAGE=1)
     target_include_directories(ludus_rhi_lifecycle_tests PRIVATE include src)
     target_link_libraries(ludus_rhi_lifecycle_tests PRIVATE Ludus::Platform Ludus::FoundationContainers Catch2::Catch2WithMain)
@@ -182,6 +182,31 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN AND LUDUS_SLANG_COMPILER AND (APPLE OR L
     ludus_apply_project_defaults(ludus_rhi_r8_consumer)
     ludus_compile_shader(TARGET ludus_rhi_r8_consumer NAME raster RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    add_executable(ludus_rhi_r11_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r11.cpp")
+    target_link_libraries(ludus_rhi_r11_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
+    ludus_apply_project_defaults(ludus_rhi_r11_consumer)
+    ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11compute SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11compute.slang" COMPUTE ComputeMain)
+    ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11scalar RASTER
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT FragmentMain
+        INCLUDES "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
+    # Native binding-array shaders require the explicitly configured translator.
+    # Setup/analysis configurations still compile and exercise the dynamic profile;
+    # native SDK/GPU CI supplies the pinned translator and qualifies both profiles.
+    if(LUDUS_SPIRV_CROSS)
+        target_compile_definitions(ludus_rhi_r11_consumer PRIVATE LUDUS_R11_NATIVE_ARRAYS=1)
+        foreach(entry IN ITEMS arrays constant)
+            if(entry STREQUAL "arrays")
+                set(fragment_entry FragmentMain)
+            else()
+                set(fragment_entry ConstantArrayMain)
+            endif()
+            ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11${entry} RASTER NATIVE_BINDING_ARRAYS
+                SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT ${fragment_entry}
+                INCLUDES "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders" DEFINES LUDUS_R11_ARRAYS=1)
+        endforeach()
+    endif()
+    add_test(NAME ludus_rhi_r11_consumer COMMAND ludus_rhi_r11_consumer)
+    set_tests_properties(ludus_rhi_r11_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
     add_executable(ludus_rhi_r10_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r10.cpp")
     target_link_libraries(ludus_rhi_r10_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
     ludus_apply_project_defaults(ludus_rhi_r10_consumer)

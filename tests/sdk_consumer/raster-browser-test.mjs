@@ -11,7 +11,7 @@ const {PNG} = require('pngjs');
 const root = resolve(process.argv[2]);
 const output = resolve(process.argv[3] || 'out/raster-browser');
 await mkdir(output, {recursive:true});
-for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm','r8.html','r8.js','r8.wasm','r9.html','r9.js','r9.wasm','r10.html','r10.js','r10.wasm']) await access(resolve(root,name));
+for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm','r8.html','r8.js','r8.wasm','r9.html','r9.js','r9.wasm','r10.html','r10.js','r10.wasm','r11.html','r11.js','r11.wasm']) await access(resolve(root,name));
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
   const path = resolve(root, '.' + pathname);
@@ -347,6 +347,22 @@ try {
     assert.equal(status.state,'passed',JSON.stringify(status));
     assert.equal(status.frames,'17'); assert.deepEqual(errors,[]);
     report.cases.push({scenario:`r10-${backend}`,frames:17,pixelReadbacks:17});
+    await context.close();
+  }
+
+  for (const backend of ['webgpu','webgl2']) {
+    const context = await browser.newContext();
+    const page = await context.newPage(); lastPage = page;
+    const errors = [];
+    page.on('pageerror', error => errors.push(String(error)));
+    page.on('console', message => report.console.push({scenario:`r11-${backend}`,type:message.type(),text:message.text()}));
+    await page.goto(`http://127.0.0.1:${server.address().port}/r11.html?backend=${backend}`);
+    await page.waitForFunction(() => ['passed','failed'].includes(document.querySelector('#status')?.dataset.state),null,{timeout:30000});
+    const status = await page.locator('#status').evaluate(node => ({...node.dataset}));
+    assert.equal(status.state,'passed',JSON.stringify(status));
+    assert.equal(status.frames,backend === 'webgpu' ? '3' : '2'); assert.deepEqual(errors,[]);
+    assert.equal(status.compute,backend === 'webgpu' ? 'passed' : 'unavailable');
+    report.cases.push({scenario:`r11-${backend}`,frames:Number(status.frames),pixelReadbacks:2,compute:status.compute});
     await context.close();
   }
 

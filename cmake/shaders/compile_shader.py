@@ -213,6 +213,7 @@ def main():
     parser.add_argument('--validator')
     parser.add_argument('--metal', action='store_true')
     parser.add_argument('--raster', action='store_true')
+    parser.add_argument('--native-binding-arrays', action='store_true')
     parser.add_argument('--include', action='append', default=[])
     parser.add_argument('--define', action='append', default=[])
     # Optional build-time SPIR-V -> GLSL ES 3.00 translator for the WebGL 2
@@ -233,6 +234,8 @@ def main():
         from compile_graph_stage import compile_graph_stage
         compile_graph_stage(args, lock)
         return
+    if args.native_binding_arrays and not args.raster:
+        raise RuntimeError("Native binding arrays require raster stages")
     if args.compute and (args.vertex or args.fragment or args.raster):
         raise RuntimeError("Compute is mutually exclusive with raster/fullscreen stages")
     if not args.compute and (not args.vertex or not args.fragment):
