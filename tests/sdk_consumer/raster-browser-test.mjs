@@ -326,12 +326,33 @@ try {
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
     page.on('console', message => report.console.push({scenario:`r9-${backend}`,type:message.type(),text:message.text()}));
+    await context.addInitScript(() => {
+      globalThis.__textureLimitRequests = [];
+      if (typeof GPUAdapter !== 'undefined') {
+        const request = GPUAdapter.prototype.requestDevice;
+        GPUAdapter.prototype.requestDevice = function(descriptor) {
+          globalThis.__textureLimitRequests.push({
+            adapter: this.limits.maxTextureDimension2D,
+            requested: descriptor.requiredLimits?.maxTextureDimension2D,
+          });
+          return request.call(this, descriptor);
+        };
+      }
+    });
     await page.goto(`http://127.0.0.1:${server.address().port}/r9.html?backend=${backend === 'fallback' ? 'auto' : backend}`);
     await page.waitForFunction(() => ['passed','failed'].includes(document.querySelector('#status')?.dataset.state),null,{timeout:45000});
     const status = await page.locator('#status').evaluate(node => ({...node.dataset}));
     assert.equal(status.state,'passed',JSON.stringify(status));
     assert.equal(status.frames,'20'); assert.deepEqual(errors,[]);
-    report.cases.push({scenario:`r9-${backend}`,frames:20,pixelReadbacks:20});
+    const textureLimitRequests = await page.evaluate(() => globalThis.__textureLimitRequests);
+    if (backend === 'webgpu' || backend === 'auto') {
+      assert.equal(textureLimitRequests.length, 1);
+      assert.equal(textureLimitRequests[0].requested, textureLimitRequests[0].adapter,
+        'R18 must request the adapter texture maximum before publishing enabled device limits');
+    } else {
+      assert.deepEqual(textureLimitRequests, []);
+    }
+    report.cases.push({scenario:`r9-${backend}`,frames:20,pixelReadbacks:20,textureLimitRequests});
     await context.close();
   }
   for (const backend of ['webgpu','webgl2','auto','fallback']) {
