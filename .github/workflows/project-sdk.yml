@@ -59,12 +59,13 @@ jobs:
           /tmp/ludus-venv/bin/ludus render-graph new /tmp/ludus-rg0-depth --output depth
           /tmp/ludus-venv/bin/ludus --json render-graph validate /tmp/ludus-rg0-depth/main.lurender.json
           /tmp/ludus-venv/bin/ludus render-graph validate /tmp/ludus-rg0-depth/rasterize.lurender.json --library
+          /tmp/ludus-venv/bin/ludus render-graph new-build /tmp/ludus-rg0-depth/main.lurender.json --profiles spirv wgsl glsl
           /tmp/ludus-venv/bin/python -c "import ludus_tools, sys; mods=[m for m in sys.modules if 'PyQt' in m or 'PySide' in m or m=='engine']; assert mods==[], mods; print('no Qt/engine imports')"
       - name: Run host-tooling unit/integration tests
         if: steps.scope.outputs.native_required == 'true'
         run: |
           cd scripts/python
-          PATH=/tmp/ludus-venv/bin:$PATH python3 -m unittest test_editor_debugger test_editor_tool test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_ludus_failure_scenarios test_ludus_release test_ludus_itch_release test_macos_release test_ludus_butler -v
+          PATH=/tmp/ludus-venv/bin:$PATH python3 -m unittest test_editor_debugger test_editor_tool test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_render_graph_build test_ludus_failure_scenarios test_ludus_release test_ludus_itch_release test_macos_release test_ludus_butler -v
 
       - name: Exercise the installed release backend outside the checkout
         if: steps.scope.outputs.native_required == 'true'

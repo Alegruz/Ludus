@@ -1,0 +1,146 @@
+"""RG1 single-stage adapter at the existing pinned shader-helper boundary.
+
+Thanks to the Slang authors, Using the Reflection API (User Guide),
+https://shader-slang.org/slang/user-guide/reflection.html: validate each target's
+layout independently. This bounded adapter supports float scalar/vector schemas;
+matrices, arrays, textures, storage and ray stages require a separate profile.
+"""
+import hashlib
+import json
+from pathlib import Path
+import re
+
+from compile_raster import (glsl_interface, glsl_varyings, raster_interface,
+                            uniform_shape, wgsl_contract)
+from compile_shader import entry, run
+
+
+def varying_interface(point, stage):
+    """Extract typed stage links, excluding builtin position/depth semantics."""
+    def fields(value):
+        ty = value.get('type', {})
+        if ty.get('kind') == 'struct':
+            return [item for child in ty['fields'] for item in fields(child)]
+        semantic = value.get('semanticName', '')
+        if semantic.startswith('SV_'):
+            return []
+        binding = value.get('binding', {})
+        shape = uniform_shape(ty)
+        if binding.get('kind') not in ('varyingInput', 'varyingOutput') or shape not in ('Float32', 'Float2', 'Float3', 'Float4'):
+            raise RuntimeError('RG1 stage links require reflected float scalar/vector locations')
+        return [{'location': binding['index'], 'type': shape}]
+    values = [point.get('result', {})] if stage == 'vertex' else point.get('parameters', [])
+    result = [item for value in values if value.get('type', {}).get('kind') != 'void' for item in fields(value)]
+    if len({x['location'] for x in result}) != len(result):
+        raise RuntimeError('RG1 duplicate stage link location')
+    return sorted(result, key=lambda x: x['location'])
+
+
+def metal_layouts(code, interface, document):
+    """Independently derive emitted scalar/vector Metal uniform struct layouts."""
+    for entry_value in interface['entries']:
+        resource = next(p for p in document['parameters'] if p['name'] == entry_value['name'])
+        type_name = resource['type']['elementType']['name']
+        bodies = re.findall(r'struct\s+' + re.escape(type_name) + r'(?:_\d+)?\s*\{([^}]+)\}', code)
+        if len(bodies) != 1:
+            raise RuntimeError('RG1 emitted Metal uniform struct is missing or ambiguous')
+        offset, alignment, offsets = 0, 1, {}
+        for declaration in bodies[0].split(';'):
+            if not declaration.strip():
+                continue
+            field = re.fullmatch(r'\s*(float[234]?)\s+(\w+)\s*', declaration)
+            if field is None:
+                raise RuntimeError('RG1 Metal uniforms require scalar/vector fields')
+            ty, emitted = field.groups()
+            width = int(ty[-1]) if ty[-1].isdigit() else 1
+            size = 16 if width == 3 else 4 * width
+            align = size
+            alignment = max(alignment, align)
+            offset = (offset + align - 1) // align * align
+            stem = re.sub(r'_\d+$', '', emitted)
+            if stem in offsets:
+                raise RuntimeError('RG1 Metal uniform field is duplicated')
+            offsets[stem] = offset
+            offset += size
+        size = (offset + alignment - 1) // alignment * alignment
+        if offsets != entry_value['offsets'] or size != entry_value['size']:
+            raise RuntimeError('RG1 emitted Metal packing differs from target reflection')
+
+
+def compile_graph_stage(args, lock):
+    target, stage = args.graph_target, args.graph_stage
+    output = Path(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    metal = target == 'metal'
+    slang_target = 'spirv' if target == 'glsl' else target
+    if target in ('spirv', 'glsl'):
+        if not args.validator or hashlib.sha256(Path(args.validator).read_bytes()).hexdigest() != lock['spirv_tools']['val_sha256']:
+            raise RuntimeError('RG1 SPIR-V validator differs from SDK pin')
+    if target == 'glsl':
+        if not args.spirv_cross or not args.spirv_cross_lock:
+            raise RuntimeError('RG1 GLSL requires the pinned SPIRV-Cross translator')
+        pin = json.loads(Path(args.spirv_cross_lock).read_text())['spirv_cross']
+        tool = Path(args.spirv_cross).resolve()
+        build = json.loads(Path(str(tool) + '.build.json').read_text())
+        if any(build.get(k) != pin[k] for k in ('tag', 'commit', 'source_sha256')) or build.get('binary_sha256') != hashlib.sha256(tool.read_bytes()).hexdigest():
+            raise RuntimeError('RG1 SPIRV-Cross identity differs from SDK pin')
+    artifact = output / ('artifact.' + {'spirv': 'spv', 'wgsl': 'wgsl', 'metal': 'metal', 'glsl': 'essl'}[target])
+    intermediate = output / 'intermediate.spv' if target == 'glsl' else artifact
+    reflection, depfile = output / 'reflection.json', output / 'stage.d'
+    profile = 'spirv_1_3' if slang_target == 'spirv' else 'sm_6_0'
+    command = [args.compiler, args.source, '-target', slang_target, '-profile', profile,
+               '-entry', args.name, '-stage', stage, '-o', str(intermediate),
+               '-reflection-json', str(reflection), '-depfile', str(depfile)]
+    run(command)
+    document = json.loads(reflection.read_text())
+    points = document.get('entryPoints', [])
+    if len(points) != 1 or points[0].get('stage') != stage or points[0].get('name') != args.name:
+        raise RuntimeError('RG1 requested entry/stage differs from target reflection')
+    interface = raster_interface(document, stage, metal)
+    if any(x['kind'] != 'UniformBuffer' for x in interface['entries']):
+        raise RuntimeError('RG1 initial schema profile permits uniform buffers only')
+    links = varying_interface(points[0], stage)
+    if slang_target == 'spirv':
+        run([args.validator, '--target-env', 'vulkan1.1', str(intermediate)])
+    if target == 'spirv':
+        emitted = entry(artifact)
+    elif target == 'wgsl':
+        code = wgsl_contract(artifact.read_text(), interface, stage)
+        names = re.findall(r'@' + stage + r'\s+fn\s+(\w+)', code)
+        if len(names) != 1:
+            raise RuntimeError('RG1 requires exactly one emitted WGSL stage entry')
+        artifact.write_text(code)
+        emitted = names[0]
+    elif metal:
+        names = re.findall(r'\[\[' + stage + r'\]\]\s+\w+\s+(\w+)\s*\(', artifact.read_text())
+        if len(names) != 1:
+            raise RuntimeError('RG1 requires exactly one emitted Metal stage entry')
+        code = artifact.read_text()
+        metal_layouts(code, interface, document)
+        source_root = Path(args.source).resolve().parent
+        def remap(match):
+            filename = Path(match[2])
+            if filename.is_absolute():
+                if not filename.is_relative_to(source_root):
+                    raise RuntimeError('RG1 emitted debug path escapes captured source root')
+                return match[1] + filename.relative_to(source_root).as_posix() + match[3]
+            return match[0]
+        code = re.sub(r'(^\s*#line\s+\d+\s+")([^"]+)(")', remap, code, flags=re.M)
+        artifact.write_text(code)
+        emitted = names[0]
+    else:
+        run([args.spirv_cross, str(intermediate), '--version', '300', '--es', '--fixup-clipspace', '--output', str(artifact)])
+        cross = json.loads(run([args.spirv_cross, str(intermediate), '--reflect']))
+        code, varyings = glsl_varyings(artifact.read_text(), cross, stage)
+        interface['blocks'], interface['textures'] = glsl_interface(code, interface, cross)
+        cross_links = [{'location': loc, 'type': {'float': 'Float32', 'vec2': 'Float2', 'vec3': 'Float3', 'vec4': 'Float4'}[ty]} for loc, ty in varyings]
+        if links != cross_links:
+            raise RuntimeError('RG1 Slang and emitted GLSL stage links differ')
+        artifact.write_text(code)
+        emitted = 'main'
+    # Result contains no machine-specific commands or temporary paths. Raw
+    # reflection is used by the shared schema validator before publication.
+    result = {'version': 1, 'target': target, 'stage': stage, 'source_entry': args.name,
+              'entry': emitted, 'artifact': artifact.name, 'interface': interface,
+              'links': links, 'sha256': hashlib.sha256(artifact.read_bytes()).hexdigest()}
+    (output / 'stage.json').write_text(json.dumps(result, sort_keys=True, indent=2) + '\n')

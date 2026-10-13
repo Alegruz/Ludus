@@ -1,4 +1,4 @@
-# Save, import and validate render graphs
+# Save, validate and build render graphs
 
 RG0 implements the offline graph contract in the installable `ludus` host tools.
 It saves reusable graph assets, validates explicit configurations and camera
@@ -6,12 +6,13 @@ output routes, and prints a deterministic serial plan. The same Python backend
 is available to future editor jobs; no Qt or engine checkout is required after
 installation. See [host tools](host-tools.md) for installation and the
 [architecture](../architecture/render-graph-authoring.md) for ownership and later
-stages.
+stages. RG1 adds explicit offline shader/schema builds and immutable packages,
+using the same CLI/backend. Renderer admission remains RG2.
 
 **RG0 plans are contract diagnostics, not executable renderer packages.** They
 do not compile shaders, evaluate scene draw-item coverage, negotiate device
-capabilities or render pixels. Those checks are reported as pending; RG1 and RG2
-own shader-build and Renderer/RHI integration. `DefaultOpaque` and
+capabilities or render pixels. Those checks are reported as pending. RG1 builds shader packages; RG2 owns
+Renderer/RHI integration. `DefaultOpaque` and
 `RendererStatic` name the first planned raster contract, not verified arbitrary
 mesh/material compatibility or a newly delivered depth-only GPU pipeline.
 
@@ -208,3 +209,206 @@ presentation and depth roots outside the checkout. The macOS host-tooling suite
 runs the graph regressions. RG0 assertions cover contracts and provenance; GPU
 pixel, shader compilation and scene-coverage evidence must come from their later
 stages and cannot be inferred from this validator's success.
+
+
+## Build explicit shader packages (RG1)
+
+RG1 delivers the bounded scalar/vector uniform raster profile of the
+[build contract](../architecture/render-graph-authoring.md#deterministic-shader-and-graph-build).
+It generates shared CPU/schema/shader declarations, resource bindings and entry
+wrappers; calls the existing SDK shader helper; verifies target layouts and stage
+links; and publishes all authored techniques/profiles/recipes as one immutable
+package. It does not create device pipelines or execute the diagnostic graph.
+
+Start with an RG0 closed root and create its sibling build source:
+
+```bash
+ludus render-graph new out/raster-sources
+ludus render-graph new-build out/raster-sources/main.lurender.json --profiles metal wgsl
+ludus --json render-graph build out/raster-sources/main.lushader.json out/raster-build \
+  --helper /path/to/sdk/lib/cmake/Ludus/shaders \
+  --compiler /path/to/pinned/slangc
+```
+
+Use the SDK built from this revision or later: its `shaders` directory includes
+`compile_graph_stage.py`. The helper remains the owner of target compilation;
+the editor/CLI share the build service, rather than introducing another compiler.
+The host tools wheel owns the editable starter graph/functions. The source
+checkout's `cmake/shaders` directory by itself lacks installed toolchain locks;
+use an installed SDK. No command downloads tools, repairs game projects or
+changes engine capabilities. See [shader toolchain setup](../decisions/0010-shader-toolchain-feasibility.md).
+
+For the Linux Vulkan/browser chain, explicitly admit its three targets:
+
+```bash
+ludus render-graph new out/browser-raster
+ludus render-graph new-build out/browser-raster/main.lurender.json --profiles spirv wgsl glsl
+ludus render-graph build out/browser-raster/main.lushader.json out/browser-build \
+  --helper /path/to/sdk/lib/cmake/Ludus/shaders \
+  --compiler /path/to/pinned/slangc \
+  --validator /path/to/pinned/spirv-val \
+  --spirv-cross /path/to/verified/spirv-cross
+```
+
+Targets are `metal`, `spirv`, `wgsl` and `glsl` (ES 3.00). Slang must match the
+SDK pin, SPIR-V uses the pinned validator, and GLSL additionally verifies the
+SPIRV-Cross source/build identity and binary digest. Metal and WGSL can build on
+macOS without a Linux SPIR-V validator. The initial build profile has vertex and
+fragment functions, float scalar/vector fields, read-only uniform bindings in
+set/group zero, and one color plus depth or depth alone. Matrices, arrays,
+texture/storage bindings, compute/ray stages, custom fragment-depth outputs,
+MSAA and broader attachment profiles reject; extend them with independently
+qualified schema/target fixtures. Transform rows can use explicit `Float4` fields.
+The illustrative starter vertex takes clip-space positions; it does not wire an
+engine scene or implement scene-material/deformation/coverage parity.
+
+### Source ownership and finite choices
+
+The closed version-1 `.lushader.json` source has these fields:
+
+| Field | Contract |
+| --- | --- |
+| `version`, `id` | Version 1 and an ASCII identifier |
+| `profiles` | Nonempty, unique list of admitted targets; all are built |
+| `schemas` | At most 16 named `Uniform`, `Vertex` or `Varying` schemas; at most 16 fields each |
+| `programs` | Named stage/function/source records; input/output schemas and explicit uniform bindings |
+| `techniques` | Explicit `DefaultStaticOpaque.ColorAndDepth` and/or `.DepthOnly` mappings and legal pipeline recipes |
+| `budgets` | Author bounds for configurations, programs, emitted artifacts and pipeline recipes |
+
+Identifiers use 1–63 ASCII letters/digits/underscores and start with a letter;
+reserved C++/Slang/wrapper names reject. A field has `id` and `type`
+(`Float32`, `Float2`, `Float3`, `Float4`). Vertex/varying fields also declare
+`semantic` and `location` in 0–15; ordinary varying locations are unique. Vertex inputs use Float2/3/4.
+Vertex output has exactly one Float4 `SV_Position`; other supported semantics
+are POSITION, NORMAL, TEXCOORD0–9 and COLOR0–9. System position is not a user
+varying link. Field names are stable schema identities in this initial format;
+a rename is a schema change, rather than an implicit migration.
+
+A program declares `id`, `stage`, `source`, `function`, `input`, `output` and
+`bindings`. Vertex input/output name Vertex/Varying schemas; fragment input names
+a Varying schema and output is `Color` or `Depth`. Color functions return float4;
+Depth functions return void and may implement authored coverage/discard. Entry
+wrappers add stage and target semantics. Uniform bindings declare `id`, `schema`
+and a unique `slot` in 0–7. Shader authors write functions using those generated
+values, with no manually duplicated structs or resource register declarations:
+
+```slang
+float4 PSMain(RasterVarying value)
+{
+    return float4(material.tint * material.gain, 1);
+}
+```
+
+Each technique declares `id`, `configuration`, `vertex`, `fragment` and nonempty
+`recipes`. The starter manifest shows the entire source format. Every program
+belongs to a technique; unknown, implicit or wrong-stage selections fail.
+All root graph configurations and their import interfaces are validated, and
+selected graph techniques must appear in the build manifest. Both authored
+techniques are cooked even if the current root only selects one. Unused Color
+never manufactures a depth-only program.
+
+A recipe declares `id`, `color`, `depth`, `samples`, `topology`, `cull`, `front`,
+`depth_compare`, `depth_write` and `blend`. The profile admits RGBA8Unorm or None,
+Depth32Float, one sample, TriangleList, None/Back/Front culling,
+Clockwise/CounterClockwise front face, Less/LessEqual/Equal/Always comparison,
+explicit Boolean depth writes and Opaque blend. This describes portable prewarm
+requests; device capability and Ready status remain pending. Load/store belongs
+to the graph plan, rather than the shader program. Recipe keys compare complete
+canonical state, stage identities, vertex schema and target binding layouts;
+recipe/node names and camera/extent values do not create extra shader programs.
+
+Budget ceilings are 8 configurations, 32 programs, 128 target artifacts and
+64 target pipeline recipes. The author may choose smaller bounds. Root and
+import-closure graph configurations also fit the configuration bound, counted
+separately from technique configurations. Reports distinguish declared programs,
+unique stage identities, target artifacts and unique recipe keys. Deduplication
+never permits the authored count to exceed its bound or silently drops a target.
+
+Shader sources and literal quoted includes must remain inside the package root.
+Includes are relative to their shader file; graph imports are relative to the
+package root. Module imports, dynamic/continued includes, source remapping and
+recursive includes reject. Conditional includes are conservatively tracked.
+The compiler reads staged captured sources only, and its dependency file is
+checked against that closure. Sources are bounded to 64 files/4 MiB, each at
+most 128 KiB, with include depth 16; generated artifacts are at most 2 MiB each
+and a generation is at most 64 MiB/1024 files. Use `--root` for a containing
+package when the sibling root/manifest lives in a subdirectory; program source
+paths are relative to that package root, not the manifest directory.
+
+### Generated layouts and publication
+
+`current.json` names a content-addressed directory under `generations/`.
+`build-report.json` contains candidate job timing and cache hit/miss counts outside
+the immutable generation. Only `current.json` determines activation; a failure
+after reporting can leave an unactivated candidate report. Inspect the report's package path:
+
+```bash
+ludus --json render-graph verify-package /path/to/raster-build/generations/GENERATION_DIGEST
+```
+
+| File/directory | Purpose |
+| --- | --- |
+| `package.json` | Plans, explicit selections, counts/bounds, program descriptors, complete recipe keys, routes, pending runtime checks and provenance |
+| `schemas.json`, `schemas.h` | Logical schema source and generated C++ values/per-program/target uniform packers |
+| `programs/KEY/` | Target artifact, raw reflection, verified stage descriptor and generated wrapper |
+| `sources/` | Captured graph/build/function/include sources for source-directed diagnostics |
+| `integrity.json` | Complete bounded file inventory and SHA-256 identities |
+
+Generated C++ uses Ludus primitive aliases and has no owning runtime containers,
+allocation or exceptions. Include `schemas.h`, fill logical values, and call the
+appropriate `ludus::render_graph_generated::Pack_PROGRAM_TARGET_BINDING` with
+caller-owned native-endian upload bytes. Null/short output returns false and
+preserves output; input/output must not overlap. Padding is zeroed, and bytes
+beyond the target's occupied size remain untouched. The packer is usable on any
+thread when callers provide independent storage; device uploads retain their
+own RHI ownership/thread rules. A native C++ struct is never reinterpreted as the
+shader buffer: `Float3` followed by `Float32` places the scalar at 16 in Metal
+and at 12 in the qualified SPIR-V/WGSL/GLSL profile. Target reflection and emitted
+Metal/WGSL/GLSL declarations are checked independently, including field identities
+and offsets; inter-stage consumers must match a typed subset of vertex outputs.
+
+Stage cache identities include captured transitive sources, generated wrappers,
+used schemas, target/profile and the actual helper/generator/tool/library/lock
+identities. Graph layout, camera count, extent and recipe state do not enter stage
+identity. Pipeline state changes rebuild packages/recipes and reuse stages;
+a changed included function rebuilds only its affected stage/targets. Cached
+entries compare full identity and every artifact digest. Corrupt/missing entries
+rebuild; a corrupt cooked generation is rejected, never reported ready. Metal
+source debug paths are remapped to package-relative owners for clean-build
+reproducibility, and saved wrappers/source snapshots retain provenance.
+
+One nonblocking cooperative writer owns a build tree; a second CLI/editor job
+reports Busy. Different trees do not share writable compiler state. Cancellation
+is supported through the shared API callback and CLI interruption; compiler
+process groups are terminated/reaped and private staging is removed. Source/tool
+snapshots are rechecked before publication. Compiler/reflection/budget failures,
+cancellation, stale sources and failed publication preserve the previous
+`current.json`. Cache entries completed by a failed job may be reused later;
+they cannot activate a partial package. A completed generation is published
+before the pointer is atomically replaced, and old generations remain available.
+This guarantees process-level publication, not power-loss durability across all
+filesystems; raw edits to cache/generation/build trees are unsupported.
+
+### Acceptance evidence
+
+`test_render_graph_build` covers deterministic clean/warm builds, transitive
+invalidation, independent target packing, budgets, strict source boundaries,
+corrupt artifacts/descriptors, cancellation/staleness/compiler failures, Busy,
+CLI/backend equivalence and unchanged prior publication. Pinned Slang acceptance
+can be enabled with `LUDUS_RG1_SLANG`; optional `LUDUS_RG1_CXX` compiles/runs the
+generated header. `tests/sdk_consumer/verify_render_graph_build.py` exercises the
+installed wheel/SDK helper outside the checkout, clean/warm builds, real include
+invalidation, compiler failure, relocated package verification and generated CPU
+packing under ASan/UBSan. `render-graph-browser-test.mjs` validates emitted WGSL
+and GLSL stages on pinned Chromium's software adapter; this is shader admission,
+not a rendering or physical-GPU performance claim.
+
+Local macOS evidence covers pinned Slang Metal/WGSL, pinned Chromium WGSL
+admission and Clang 18 generated packing. On macOS 26.6 the local sanitizer
+packing executable and an empty Clang 18 sanitizer control both stall at startup;
+local ASan/UBSan acceptance is unavailable. CI runs the packing fixture with
+sanitizers on its supported macOS/Linux hosts.
+CI includes installed macOS Metal/WGSL and Linux SPIR-V/WGSL/GLSL acceptance.
+Linux SPIR-V/GLSL evidence must pass that job; it is not inferred from macOS.
+DeviceCapabilities, SceneCoverage, PipelineReadiness and GpuExecution remain
+explicitly pending even after successful RG1 publication.
