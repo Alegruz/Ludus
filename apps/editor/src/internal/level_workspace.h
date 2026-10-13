@@ -33,7 +33,22 @@ public:
     void SetProject(const QString& root, foundation::uint64 epoch);
     [[nodiscard]] bool Create(const QString& path);
     [[nodiscard]] bool Open(const QString& path);
+    /// Import a source directory (pbrt-reference-v1) or a .pbrt file (routed by
+    /// Ludus::SceneCook; general scenes use pbrt-best-effort-v1).
     [[nodiscard]] bool Import(const QString& source);
+    /// Plan importing source as a dry run on the worker thread (cancellable, with
+    /// progress). Nothing is written; ImportPreviewFinished reports the result.
+    [[nodiscard]] bool PreviewImport(const QString& source);
+    /// The last successful PreviewImport response (profile, report, reference_rejection).
+    [[nodiscard]] QJsonObject ImportPreview() const
+    {
+        return ImportPreview_;
+    }
+    /// Stored import reports of the current level, keyed by import id (best-effort imports only).
+    [[nodiscard]] QJsonObject ImportReports() const
+    {
+        return ImportReports_;
+    }
     [[nodiscard]] bool Save();
     [[nodiscard]] bool ConfirmDiscard();
     [[nodiscard]] bool Dirty() const noexcept
@@ -97,6 +112,7 @@ Q_SIGNALS:
     void PreviewStarting();
     void OperationFinished(bool accepted);
     void AssetsVerified(bool accepted);
+    void ImportPreviewFinished(bool accepted);
 
 private:
     bool Start(const QString& operation, const QString& path = {}, const QString& source = {});
@@ -130,6 +146,11 @@ private:
     QJsonObject Level_, Candidate_, CandidateRevisions_;
     QJsonValue CatalogExpected_;
     QString Source_;
+    /// pbrt entry file inside Source_; empty keeps the reference profile.
+    QString SourceEntry_;
+    /// File picked by the Import button while its preview runs.
+    QString PreviewSource_;
+    QJsonObject ImportPreview_, ImportReports_, PendingImportReports_;
     bool PublishingCatalog_ = false;
     QByteArray Response_, SceneBytes_, CandidateCatalog_;
     QString OperationError_;

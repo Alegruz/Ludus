@@ -1,0 +1,190 @@
+// Import preview and report summaries, and the World import preview/report panels.
+
+#include "internal/import_report.h"
+#include "internal/level_workspace.h"
+#include "internal/world_workspace.h"
+
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QPlainTextEdit>
+#include <QTemporaryDir>
+#include <QTest>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <functional>
+
+using namespace ludus::editor;
+
+namespace
+{
+/// Write a small general pbrt-v4 scene outside the reference profile.
+void WriteGeneralScene(const QString& directory, const QString& name)
+{
+    REQUIRE(QDir().mkpath(directory) == true);
+    QFile scene(QDir(directory).filePath(name));
+    REQUIRE(scene.open(QIODevice::WriteOnly) == true);
+    scene.write("LookAt 0 1 4  0 0 0  0 1 0\nCamera \"perspective\" \"float fov\" [ 45 ]\nWorldBegin\n"
+                "LightSource \"infinite\" \"rgb L\" [ .2 .2 .2 ]\n"
+                "Material \"diffuse\" \"rgb reflectance\" [ .6 .5 .4 ]\n"
+                "Shape \"trianglemesh\" \"point3 P\" [ -1 0 -1  1 0 -1  1 0 1  -1 0 1 ]\n"
+                "  \"integer indices\" [ 0 1 2  0 2 3 ]\n"
+                "AttributeBegin\nAreaLightSource \"diffuse\" \"rgb L\" [ 4 4 4 ]\n"
+                "Shape \"sphere\" \"float radius\" [ .25 ]\nAttributeEnd\n");
+    QFile license(QDir(directory).filePath(QStringLiteral("LICENSE.txt")));
+    REQUIRE(license.open(QIODevice::WriteOnly) == true);
+    license.write("CC0 synthetic fixture\n");
+}
+
+/// Process events until isDone holds or ten seconds pass.
+[[nodiscard]] bool WaitUntil(const std::function<bool()>& isDone)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (isDone() == false && timer.elapsed() < 10000)
+    {
+        QTest::qWait(10);
+    }
+    return isDone();
+}
+
+[[nodiscard]] ToolingPaths MakeSceneTools()
+{
+    ToolingPaths tools;
+    tools.ToolingRoot = QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT);
+    return tools;
+}
+
+[[nodiscard]] QJsonObject MakeBestEffortReport(bool isDryRun)
+{
+    return QJsonDocument::fromJson(QByteArray(R"({"importer":"pbrt-best-effort-v1","entry":"room.pbrt","dry_run":)") +
+                                   (isDryRun == true ? "true" : "false") +
+                                   R"(,"source":{"files":2,"placements":40,"vertices":1200,"materials":12,"textures":3,
+               "lights":{"area":2,"infinite":1,"point":3,"spot":0,"distant":1,"other":0}},
+               "cooked":{"meshes":6,"materials":6,"textures":6,"objects":6,"vertices":1200,
+               "bundle_bytes":2097152,"dropped_placements":0},
+               "diagnostics":[{"code":"DIRECTIVE_IGNORED","severity":"info","count":1,"message":"Integrator"},
+               {"code":"MATERIALS_MERGED","severity":"warning","count":6,"message":"merged into slot 0"}]})")
+        .object();
+}
+} // namespace
+
+TEST_CASE("import sources split into a directory and a pbrt entry", "[editor][import]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid() == true);
+    const ImportSource reference = SplitImportSource(directory.path());
+    CHECK(reference.Entry.isEmpty() == true);
+    CHECK(reference.Directory == QDir(directory.path()).absolutePath());
+    const ImportSource general = SplitImportSource(QDir(directory.path()).filePath(QStringLiteral("room.pbrt")));
+    CHECK(general.Entry == QStringLiteral("room.pbrt"));
+    CHECK(general.Directory == QDir(directory.path()).absolutePath());
+}
+
+TEST_CASE("import previews list source and cooked counts, budget and fallbacks", "[editor][import]")
+{
+    const QJsonObject response{{QStringLiteral("profile"), QStringLiteral("pbrt-best-effort-v1")},
+                               {QStringLiteral("report"), MakeBestEffortReport(true)},
+                               {QStringLiteral("reference_rejection"), QStringLiteral("unsupported PixelFilter")}};
+    const QString text = DescribeImportPreview(response);
+    CHECK(text.contains(QStringLiteral("Importer: pbrt-best-effort-v1 (room.pbrt)")) == true);
+    CHECK(text.contains(QStringLiteral("40 placements, 1200 vertices, 12 materials, 3 textures")) == true);
+    CHECK(text.contains(QStringLiteral("2 area (emissive), 1 infinite (environment fallback), 4 skipped")) == true);
+    CHECK(text.contains(QStringLiteral("Cooked: 6/6 meshes, 6/8 materials, 6/8 textures, 6 objects")) == true);
+    CHECK(text.contains(QStringLiteral("bundle size measured on import")) == true);
+    CHECK(text.contains(QStringLiteral("MATERIALS_MERGED ×6: merged into slot 0")) == true);
+    CHECK(text.contains(QStringLiteral("DIRECTIVE_IGNORED")) == false); // Informational only.
+    CHECK(text.contains(QStringLiteral("unsupported PixelFilter")) == true);
+
+    const QString stored = DescribeImportReport(MakeBestEffortReport(false));
+    CHECK(stored.contains(QStringLiteral("2.0 MiB of 64.0 MiB")) == true);
+
+    const QJsonObject manifest{{QStringLiteral("source"), QStringLiteral("Modern Hall / staircase2")},
+                               {QStringLiteral("meshes"), 6},
+                               {QStringLiteral("materials"), 8},
+                               {QStringLiteral("items"), 17},
+                               {QStringLiteral("approximations"), QJsonArray{QStringLiteral("fog skipped")}}};
+    const QString reference = DescribeImportReport(manifest);
+    CHECK(reference.contains(QStringLiteral("Importer: pbrt-reference-v1 (Modern Hall / staircase2)")) == true);
+    CHECK(reference.contains(QStringLiteral("  fog skipped")) == true);
+
+    CHECK(DescribeImportReports({}).isEmpty() == true);
+    const QJsonObject reports{
+        {QStringLiteral("import_reports"), QJsonObject{{QStringLiteral("scene/1"), MakeBestEffortReport(false)}}}};
+    CHECK(DescribeImportReports(reports).startsWith(QStringLiteral("Import scene/1\nImporter:")) == true);
+}
+
+TEST_CASE("Level preview of a general pbrt scene writes nothing, then imports with a stored report", "[editor][import]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid() == true);
+    const QString root = QDir(directory.path()).filePath(QStringLiteral("project"));
+    const QString source = QDir(directory.path()).filePath(QStringLiteral("external"));
+    REQUIRE(QDir().mkpath(root) == true);
+    WriteGeneralScene(source, QStringLiteral("room.pbrt"));
+    const QString scene = QDir(source).filePath(QStringLiteral("room.pbrt"));
+    LevelWorkspace workspace(MakeSceneTools());
+    workspace.SetProject(root, 1);
+    REQUIRE(workspace.Create(QDir(root).filePath(QStringLiteral("scenes/main.lulevel"))) == true);
+
+    REQUIRE(workspace.PreviewImport(scene) == true);
+    CHECK(workspace.CanCancel() == true);
+    REQUIRE(WaitUntil([&workspace]() { return workspace.Busy() == false; }) == true);
+    const QJsonObject preview = workspace.ImportPreview();
+    INFO(workspace.StatusText().toStdString());
+    REQUIRE(preview.value(QStringLiteral("profile")).toString() == QStringLiteral("pbrt-best-effort-v1"));
+    CHECK(preview.value(QStringLiteral("report")).toObject().value(QStringLiteral("dry_run")).toBool() == true);
+    CHECK(QFileInfo::exists(QDir(root).filePath(QStringLiteral("assets"))) == false);
+
+    REQUIRE(workspace.Import(scene) == true);
+    REQUIRE(WaitUntil([&workspace]() { return workspace.Busy() == false; }) == true);
+    INFO(workspace.StatusText().toStdString());
+    CHECK(workspace.Document().value(QStringLiteral("objects")).toArray().isEmpty() == false);
+    REQUIRE(workspace.ImportReports().isEmpty() == false);
+    CHECK(DescribeImportReports(QJsonObject{{QStringLiteral("import_reports"), workspace.ImportReports()}})
+              .contains(QStringLiteral("ENVIRONMENT_FALLBACK")) == true);
+}
+
+TEST_CASE("A failed Level preview leaves no preview", "[editor][import]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid() == true);
+    WriteGeneralScene(directory.path(), QStringLiteral("room.pbrt"));
+    LevelWorkspace workspace(MakeSceneTools());
+    workspace.SetProject(directory.path(), 1);
+    REQUIRE(workspace.Create(QDir(directory.path()).filePath(QStringLiteral("main.lulevel"))) == true);
+    REQUIRE(workspace.PreviewImport(QDir(directory.path()).filePath(QStringLiteral("missing.pbrt"))) == true);
+    REQUIRE(WaitUntil([&workspace]() { return workspace.Busy() == false; }) == true);
+    CHECK(workspace.ImportPreview().isEmpty() == true);
+}
+
+TEST_CASE("World shows the import preview, imports on confirmation and shows the stored report",
+          "[editor][import][world]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid() == true);
+    const QString root = QFileInfo(directory.path()).canonicalFilePath();
+    const QString source = QDir(root).filePath(QStringLiteral("external"));
+    WriteGeneralScene(source, QStringLiteral("room.pbrt"));
+    WorldWorkspace workspace(MakeSceneTools(), nullptr);
+    workspace.SetProject(root, 1);
+    REQUIRE(workspace.Create(QDir(root).filePath(QStringLiteral("main.world.json"))) == true);
+    auto* preview = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportPreview"));
+    auto* report = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportReport"));
+    REQUIRE(preview != nullptr);
+    REQUIRE(report != nullptr);
+
+    REQUIRE(workspace.PreviewImportScene(QDir(source).filePath(QStringLiteral("room.pbrt"))) == true);
+    REQUIRE(WaitUntil([preview]() { return preview->isHidden() == false; }) == true);
+    CHECK(preview->toPlainText().contains(QStringLiteral("pbrt-best-effort-v1")) == true);
+    CHECK(report->isHidden() == true);
+
+    REQUIRE(workspace.ConfirmImportPreview() == true);
+    CHECK(preview->isHidden() == true);
+    REQUIRE(WaitUntil([report]() { return report->isHidden() == false; }) == true);
+    CHECK(report->toPlainText().contains(QStringLiteral("Cooked:")) == true);
+    CHECK(workspace.ConfirmImportPreview() == false); // The preview is consumed.
+}
