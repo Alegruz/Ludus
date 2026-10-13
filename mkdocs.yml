@@ -87,6 +87,8 @@ nav:
       - Troubleshooting: wiki/guides/troubleshooting.md
   - Engine development:
       - Build and initialize: development/building.md
+      - Port a new platform: development/platform-porting.md
+      - Mobile support plan: development/mobile-support-plan.md
       - Native debugging: development/debugging.md
       - Diagnostics: development/diagnostics.md
       - Behavior contracts and cooking: architecture/behavior-s4.md
