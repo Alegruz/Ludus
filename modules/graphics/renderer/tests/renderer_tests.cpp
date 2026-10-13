@@ -1796,7 +1796,7 @@ TEST_CASE("Cancelled GPU producers retain budget until completion", "[renderer][
     rr::Renderer renderer;
     session.Initialize(renderer);
     const rhi::RasterBinding bindings[]{
-        {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Compute, 208},
+        {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Compute, 224},
         {1, rhi::RasterBindingKind::StorageRead, rhi::RasterVisibility::Compute, 16},
         {2, rhi::RasterBindingKind::StorageReadWrite, rhi::RasterVisibility::Compute, 16},
         {3, rhi::RasterBindingKind::StorageReadWrite, rhi::RasterVisibility::Compute, 16},

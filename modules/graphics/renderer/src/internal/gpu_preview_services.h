@@ -14,7 +14,7 @@ using internal::GpuPreviewRecord;
 using internal::GpuPreviewState;
 using internal::ReferenceJob;
 constexpr rhi::RasterBinding GPU_COMPUTE_BINDINGS[]{
-    {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Compute, 208},
+    {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Compute, sizeof(internal::GpuPreviewUniform)},
     {1, rhi::RasterBindingKind::StorageRead, rhi::RasterVisibility::Compute, 16},
     {2, rhi::RasterBindingKind::StorageReadWrite, rhi::RasterVisibility::Compute, 16},
     {3, rhi::RasterBindingKind::StorageReadWrite, rhi::RasterVisibility::Compute, 16},
@@ -239,7 +239,10 @@ Status PackGpuScene(const ReferenceJob& job,
     uniform.Sampling[2] = (job.Description.ReverseZ ? 1U : 0U) | (job.Description.InfiniteFar ? 2U : 0U) |
                           (job.Description.CenterRays ? 4U : 0U);
     uniform.Sampling[3] = job.Description.TargetSamples;
-    uniform.Environment = GpuVector(job.Description.Environment, GpuBits(static_cast<uint32>(lightsWide)));
+    uniform.Environment = GpuVector(job.Description.Environment);
+    uniform.SurfaceLayout[0] = 8;
+    uniform.SurfaceLayout[1] = static_cast<uint32>(lightsWide);
+    uniform.SurfaceLayout[2] = 2; // Private surface/analytic-light kernel ABI.
     uniform.Options.X = job.Description.SecondaryDistance;
     uniform.BoundsMinimumWorld = GpuVector(scene.Bounds.Min);
     uniform.BoundsMaximumWorld = GpuVector(scene.Bounds.Max);
@@ -266,7 +269,7 @@ Status PollGpuJob(rhi::DeviceHandle device, const GpuPreviewState& state, GpuPre
         if (!job.ComputeBindingsCreated)
         {
             const usize pixels = usize(job.Width) * job.Height;
-            const rhi::RasterBindingResource bindings[]{{0, job.Parameters, 0, 208},
+            const rhi::RasterBindingResource bindings[]{{0, job.Parameters, 0, sizeof(internal::GpuPreviewUniform)},
                                                         {1, job.Data, 0, job.DataBytes},
                                                         {2, job.Accumulation, 0, pixels * 32},
                                                         {3, job.Colors, 0, pixels * 16},
@@ -869,7 +872,11 @@ Status BuildGpuGraph(rhi::DeviceHandle device,
     const usize pixels = usize(job.Width) * job.Height;
     const rhi::GraphUse computeUses[]{
         {versions[0], rhi::GraphAccessMode::StorageRead, 0, job.DataBytes, rhi::RasterVisibility::Compute},
-        {versions[1], rhi::GraphAccessMode::Uniform, 0, 208, rhi::RasterVisibility::Compute},
+        {versions[1],
+         rhi::GraphAccessMode::Uniform,
+         0,
+         sizeof(internal::GpuPreviewUniform),
+         rhi::RasterVisibility::Compute},
         {accumulation, rhi::GraphAccessMode::StorageReadWrite, 0, pixels * 32, rhi::RasterVisibility::Compute},
         {colors, rhi::GraphAccessMode::StorageReadWrite, 0, pixels * 16, rhi::RasterVisibility::Compute},
         {versions[7], rhi::GraphAccessMode::StorageRead, 0, job.TexelBytes, rhi::RasterVisibility::Compute}};

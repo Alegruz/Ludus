@@ -1887,6 +1887,13 @@ A regression observes old packets during pending/failure and new packets only af
 success. The closest-hit shader explicitly restricts primitive-index tie breaking
 to equal distances, supplementing its existing closest-distance intersection bound.
 
+The private GPU kernel uniform grows from 208 to 224 bytes, adding an integer
+`SurfaceLayout` record for surface stride, analytic-light offset and kernel ABI 2.
+Old cooked kernels are rejected by reflected uniform-size admission before scene
+allocation; they must be recooked with the installed sources. A regression verifies
+this rejection, so an old six-word surface decoder cannot silently consume the new
+eight-word records. Unsupported runtime layout produces an error pixel.
+
 Reference `ProfileVersion` is 2. LUHDR file schema and addressed sampler version
 remain 1; the decoder retains versions 1/2 as distinct metadata. Maps extend the
 canonical scene fingerprint with normal strength, image layout and immutable bytes;

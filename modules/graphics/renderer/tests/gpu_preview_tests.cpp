@@ -93,6 +93,19 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     rr::Renderer renderer;
     REQUIRE(renderer.Initialize(device, shaders::renderer_flat::Vertex(), shaders::renderer_flat::Fragment()) ==
             S::Ready);
+    rhi::RasterShaderDescription oldKernel = shaders::renderer_gpu_preview::Compute();
+    constexpr usize COMPUTE_BINDING_COUNT = 5;
+    rhi::RasterBinding oldBindings[COMPUTE_BINDING_COUNT];
+    for (usize index = 0; index < COMPUTE_BINDING_COUNT; ++index)
+    {
+        oldBindings[index] = oldKernel.Bindings[index];
+    }
+    oldBindings[0].MinSize = 208;
+    oldKernel.Bindings = oldBindings;
+    CHECK(renderer.EnableGpuPreview(oldKernel,
+                                    shaders::renderer_gpu_preview_image::Vertex(),
+                                    shaders::renderer_gpu_preview_image::Fragment(),
+                                    {usize{32} * 1024 * 1024, usize{32} * 1024 * 1024, 1}) == S::InvalidDescription);
     REQUIRE(renderer.EnableGpuPreview(shaders::renderer_gpu_preview::Compute(),
                                       shaders::renderer_gpu_preview_image::Vertex(),
                                       shaders::renderer_gpu_preview_image::Fragment(),
@@ -329,7 +342,9 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
 #endif
     REQUIRE(started == rhi::DeviceStatus::Ready);
     rr::Renderer renderer;
-    REQUIRE(renderer.Initialize(device, shaders::renderer_flat::Vertex(), shaders::renderer_flat::Fragment()) ==
+    rr::Limits limits;
+    limits.Materials = 16;
+    REQUIRE(renderer.Initialize(device, shaders::renderer_flat::Vertex(), shaders::renderer_flat::Fragment(), limits) ==
             S::Ready);
     REQUIRE(renderer.EnableGpuPreview(shaders::renderer_gpu_preview::Compute(),
                                       shaders::renderer_gpu_preview_image::Vertex(),
@@ -391,12 +406,19 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
     rr::LightSelection selection;
     rr::MaterialVersion retained;
     REQUIRE(renderer.CreateLitMaterial(program, material, retained, selection) == S::Ready);
-    rr::MaterialVersion rasterMaterials[6];
-    rr::LightClusterDescription cluster;
-    for (uint32 kind = 0; kind < 3; ++kind)
-    {
-        light.Kind = static_cast<rr::LightKind>(kind);
+    constexpr uint32 LIGHT_CASE_COUNT = 4;
+    constexpr usize RASTER_MATERIAL_COUNT = usize{LIGHT_CASE_COUNT} * 2;
+    rr::MaterialVersion rasterMaterials[RASTER_MATERIAL_COUNT];
+    const auto selectLight = [&light](uint32 kind) {
+        light.Kind = kind == 3 ? rr::LightKind::Point : static_cast<rr::LightKind>(kind);
         light.Direction = kind == 2 ? math::Vector3{0, 0, 1} : math::Vector3{-.6F, 0, .8F};
+        light.Position = kind == 3 ? math::Vector3{.003F, 0, .696F} : math::Vector3{.6F, 0, -.1F};
+        light.Intensity = kind == 3 ? .0001F : 1;
+    };
+    rr::LightClusterDescription cluster;
+    for (uint32 kind = 0; kind < LIGHT_CASE_COUNT; ++kind)
+    {
+        selectLight(kind);
         material.Lights = &light;
         material.LightCount = 1;
         material.Clusters = nullptr;
@@ -409,10 +431,9 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
     }
     REQUIRE(rhi::Destroy(device, map) == S::Ready);
     // The material retains map backing after the public texture owner is destroyed.
-    for (uint32 kind = 0; kind < 3; ++kind)
+    for (uint32 kind = 0; kind < LIGHT_CASE_COUNT; ++kind)
     {
-        light.Kind = static_cast<rr::LightKind>(kind);
-        light.Direction = kind == 2 ? math::Vector3{0, 0, 1} : math::Vector3{-.6F, 0, .8F};
+        selectLight(kind);
         rr::SceneItem item;
         item.Geometry = mesh;
         item.Surface = retained;
@@ -453,7 +474,9 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
                                     expected) == S::Ready);
         if (kind != 0)
         {
-            const float32 window = 1 - .0001F;
+            const float32 window = kind == 3 ? 1.0F : 1 - .0001F;
+            // The near point is 0.005m away: intensity 1e-4 / the 1e-4 m²
+            // attenuation floor equals one, rather than the unbounded value four.
             const float32 cone = (.8F - .5F) / (.95F - .5F);
             expected = expected * (window * window * (kind == 2 ? cone * cone : 1));
         }

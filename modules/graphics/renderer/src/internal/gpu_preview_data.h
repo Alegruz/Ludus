@@ -22,8 +22,9 @@ struct GpuPreviewUniform final
     math::Vector4 Environment;
     math::Vector4 Options;
     math::Vector4 BoundsMinimumWorld, BoundsMaximumWorld;
+    uint32 SurfaceLayout[4]{};
 };
-static_assert(sizeof(GpuPreviewUniform) == 208);
+static_assert(sizeof(GpuPreviewUniform) == 224);
 struct GpuFrameRecord final
 {
     uint64 Generation = 1;

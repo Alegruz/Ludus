@@ -31,6 +31,7 @@ LUDUS_SHADER_BINDING(0) cbuffer Parameters
     float4 Options; // secondary range, exposure, reserved
     float4 BoundsMinimumWorld;
     float4 BoundsMaximumWorld;
+    uint4 SurfaceLayout; // surface stride, analytic offset, private kernel ABI (2), reserved
 };
 LUDUS_SHADER_BINDING(1) StructuredBuffer<uint4> sceneWords;
 float4 SceneValue(uint index)
@@ -69,7 +70,7 @@ float2 TexcoordUv(uint t, float2 uv)
 float4 Surface(uint t, uint field)
 {
     uint i = asuint(SceneValue(t * 10).w);
-    return SceneValue(Offsets.w + i * 8 + field);
+    return SceneValue(Offsets.w + i * SurfaceLayout.x + field);
 }
 int Address(int i, int extent, bool repeat)
 {
@@ -329,6 +330,8 @@ float3 SampleBsdf(float3 normalWorld, float3 viewDirectionWorld, float roughness
 }
 float3 Integrate(uint pixel, uint sample)
 {
+    if (SurfaceLayout.x != 8 || SurfaceLayout.z != 2)
+        return float3(-1);
     float2 jitter = (Sampling.z & 4) != 0 ? float2(.5) : float2(Random01(pixel, sample, 0), Random01(pixel, sample, 1));
     float2 positionUv = (float2(pixel % Dimensions.x, pixel / Dimensions.x) + jitter) / float2(Dimensions.xy);
     float nearClipZ = (Sampling.z & 1) != 0 ? 1 : 0;
@@ -410,7 +413,7 @@ float3 Integrate(uint pixel, uint sample)
             bool isDelta = false, hasFiniteEndpoint = false;
             if (selected < Counts.w)
             {
-                uint light = asuint(Environment.w) + selected * 4;
+                uint light = SurfaceLayout.y + selected * 4;
                 float4 colorAndKind = SceneValue(light), positionAndRangeWorld = SceneValue(light + 1),
                        directionAndConeWorld = SceneValue(light + 2);
                 lightColor = colorAndKind.xyz;

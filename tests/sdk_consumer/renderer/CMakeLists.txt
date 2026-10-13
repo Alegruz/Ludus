@@ -33,7 +33,7 @@ target_link_libraries(ludus_sdk_renderer_overlays_consumer PRIVATE Ludus::Graphi
 target_compile_options(ludus_sdk_renderer_overlays_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
 foreach(shader renderer_flat renderer_composite renderer_overlay)
     ludus_compile_shader(TARGET ludus_sdk_renderer_overlays_consumer NAME ${shader} RASTER
-        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry})
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
 endforeach()
 if(EMSCRIPTEN)
     target_link_options(ludus_sdk_renderer_overlays_consumer PRIVATE -fno-exceptions -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
@@ -46,7 +46,7 @@ target_link_libraries(ludus_sdk_renderer_materials_consumer PRIVATE Ludus::Graph
 target_compile_options(ludus_sdk_renderer_materials_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
 foreach(shader renderer_flat renderer_composite renderer_material)
     ludus_compile_shader(TARGET ludus_sdk_renderer_materials_consumer NAME ${shader} RASTER
-        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry})
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
 endforeach()
 ludus_compile_shader(TARGET ludus_sdk_renderer_materials_consumer NAME l3_layout RASTER
     SOURCE ../l3_layout.slang VERTEX vertexMain FRAGMENT fragmentMain)
