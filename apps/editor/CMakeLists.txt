@@ -114,6 +114,8 @@ qt_add_executable(ludus_editor
     src/render_panel.cpp
     src/internal/level_workspace.h
     src/level_workspace.cpp
+    src/internal/import_report.h
+    src/import_report.cpp
     src/internal/world_workspace.h
     src/world_document.cpp
     src/world_demo_adapter.cpp
@@ -232,6 +234,9 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/render_panel.cpp
         src/internal/level_workspace.h
         src/level_workspace.cpp
+        src/internal/import_report.h
+        src/import_report.cpp
+        tests/import_report_tests.cpp
         src/internal/world_workspace.h
         src/world_document.cpp
         src/world_demo_adapter.cpp

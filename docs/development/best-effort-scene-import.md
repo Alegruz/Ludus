@@ -1,6 +1,6 @@
 # Best-effort pbrt-v4 scene import
 
-Status: Phase 1b, October 13, 2026. Importer id `pbrt-best-effort-v1`,
+Status: Phase 1b, October 13, 2026 (Editor import added the same day). Importer id `pbrt-best-effort-v1`,
 report schema `1`.
 
 `Ludus::SceneCook` has two pbrt paths. `pbrt-reference-v1` is the frozen,
@@ -76,6 +76,32 @@ The cooked scene must fit 6 meshes, 8 materials, 8 textures, 500k vertices,
 
 The output is deterministic: the same input yields the same bundle and
 report bytes. Paths in the report are relative to the entry directory.
+
+## Importing in the Editor
+
+World **Import scene…** (and the Level surface's **Import**) accepts any `.pbrt`
+file. Ludus::SceneCook picks the importer from the file name:
+
+- `scene-v4.pbrt` is cooked with `pbrt-reference-v1` first, so staircase2 keeps
+  its byte-identical reference path. Only when the reference profile rejects
+  the scene does the import fall back to `pbrt-best-effort-v1`; the preview
+  says why.
+- Any other `.pbrt` file uses `pbrt-best-effort-v1`.
+- A source directory (the older flow and its tests) stays on the reference
+  profile with no fallback.
+
+Choosing a file first runs a dry-run preview on the scene worker thread, with
+progress and **Cancel scene operation**. The preview panel lists source and
+cooked counts, budget use against the runtime limits and every warning-level
+fallback. Nothing is written until **Import previewed scene**; **Discard
+preview** drops it.
+
+A best-effort import stores its full report in the scene manifest, beside the
+input digests that guard against a source changing mid-import. Opening or
+reassembling a World returns these reports as `import_reports`, and the
+**Import report** panel shows them for the World's imported scenes.
+Reference imports have no such report; their approximations still appear as
+warnings.
 
 ## Tests
 

@@ -14,6 +14,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QPlainTextEdit;
 class QPushButton;
 class QVBoxLayout;
 class QSplitter;
@@ -31,6 +32,11 @@ public:
     explicit WorldWorkspace(QWidget* parent = nullptr);
     WorldWorkspace(const ToolingPaths& tooling, QWidget* parent);
     [[nodiscard]] bool ImportScene(const QString& source);
+    /// Dry-run source (a .pbrt file or a reference directory) and show the
+    /// preview panel; ConfirmImportPreview then imports the previewed source.
+    [[nodiscard]] bool PreviewImportScene(const QString& source);
+    /// Import the source shown in the preview panel.
+    [[nodiscard]] bool ConfirmImportPreview();
     [[nodiscard]] QString Path() const
     {
         return Path_;
@@ -116,6 +122,19 @@ private:
     bool DraftPreview_ = false;
     QPushButton* Import_ = nullptr;
     QPushButton* CancelScene_ = nullptr;
+    /// Dry-run preview of a pending import, with confirm and discard actions.
+    QPlainTextEdit* ImportPreview_ = nullptr;
+    QPushButton* ConfirmImport_ = nullptr;
+    QPushButton* DiscardImport_ = nullptr;
+    QString PreviewedSource_;
+    /// Stored import reports of the World's scene.
+    QPlainTextEdit* ImportReport_ = nullptr;
+    void ShowImportPreview(bool isAccepted);
+    void ShowImportReports();
+    /// Import source into the World; isPreviewed requires it to match the approved preview.
+    [[nodiscard]] bool StartSceneImport(const QString& source, bool isPreviewed);
+    /// Drop the previewed import and the report panel when the live World is replaced.
+    void ClearImportState();
     bool Importing_ = false;
     bool SavePending_ = false;
     bool SaveValidated_ = false;

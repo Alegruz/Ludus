@@ -421,6 +421,37 @@ Status ReadFileBounded(std::string_view path, usize maximum, foundation::Array<u
     return status;
 }
 
+Status HashFile(std::string_view path, content::Digest& outDigest) noexcept
+{
+    SequentialFile file;
+    const Status opened = file.Open(path);
+    if (opened != Status::Ok)
+    {
+        return opened;
+    }
+    content::Hasher hasher;
+    uint8 buffer[65536];
+    while (true)
+    {
+        usize count = 0;
+        const Status read = file.Read(std::span<uint8>(buffer, sizeof(buffer)), count);
+        if (read != Status::Ok)
+        {
+            return read;
+        }
+        if (count == 0)
+        {
+            break;
+        }
+        if (hasher.Add(std::span<const uint8>(buffer, count)) == false)
+        {
+            return Status::Limit;
+        }
+    }
+    outDigest = hasher.Finish();
+    return Status::Ok;
+}
+
 void SequentialFile::Close() noexcept
 {
     if (mDescriptor >= 0)
@@ -679,6 +710,10 @@ bool DoesPathExist(std::string_view) noexcept
     return false;
 }
 Status ReadFileBounded(std::string_view, usize, foundation::Array<uint8>&) noexcept
+{
+    return Status::Unsupported;
+}
+Status HashFile(std::string_view, content::Digest&) noexcept
 {
     return Status::Unsupported;
 }

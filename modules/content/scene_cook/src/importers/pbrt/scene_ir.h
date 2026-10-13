@@ -6,6 +6,7 @@
 // ObjectBegin/ObjectInstance instancing is preserved so the planner decides
 // whether to expand it. Materials are already mapped to the engine's PBR terms.
 
+#include <ludus/content/content.h>
 #include <ludus/foundation/base/core.h>
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/math/matrix.hpp>
@@ -160,6 +161,12 @@ struct SceneIr final
 {
     /// Root-relative source files in first-visit order; shapes refer to them by index.
     Array<String> SourceFiles;
+    /// Root-relative PLY files read for plymesh shapes, in first-use order.
+    Array<String> DataFiles;
+    /// SHA-256 of the bytes read from each SourceFiles entry (parallel array).
+    Array<Digest> SourceDigests;
+    /// SHA-256 of the bytes read from each DataFiles entry (parallel array).
+    Array<Digest> DataDigests;
     Array<IrTexture> Textures;
     Array<IrMaterial> Materials;
     Array<IrMesh> Meshes;

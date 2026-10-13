@@ -154,6 +154,10 @@ struct CookedTexture final
     uint32 SourceWidth = 0;
     uint32 SourceHeight = 0;
     bool IsFallback = false;
+    /// IR texture whose image file was read (even if decoding failed), or IR_NONE.
+    uint32 ReadSource = IR_NONE;
+    /// SHA-256 of the image bytes read for ReadSource.
+    Digest ReadDigest;
 };
 
 /// One cooked world-space mesh.
@@ -199,6 +203,8 @@ struct CookedMesh final
             ImageResult decoded = ImageResult::Invalid;
             if (read == Status::Ok)
             {
+                cooked->ReadSource = planned.Texture;
+                cooked->ReadDigest = Hash(bytes.AsSpan());
                 decoded = DecodeImage(texture.File.GetView(), bytes.AsSpan(), cooked->Image, message);
             }
             if (decoded == ImageResult::OutOfMemory)
@@ -762,6 +768,96 @@ void CountDiagnostics(const DiagnosticLog& log, ImportSummary& inoutSummary) noe
     }
     return "cannot read the entry file";
 }
+
+/// Append path and the digest of its bytes to the result unless already listed.
+[[nodiscard]] bool AddInput(std::string_view path, const Digest& digest, BestEffortResult& inoutResult) noexcept
+{
+    for (const String& input : inoutResult.Inputs)
+    {
+        if (input.GetView() == path)
+        {
+            return true;
+        }
+    }
+    String copy;
+    return copy.TryAssign(path) == StringStatus::Ok && inoutResult.Inputs.TryAdd(static_cast<String&&>(copy)) == true &&
+           inoutResult.InputDigests.TryAdd(digest) == true;
+}
+
+/// Every file the import consulted with the digest of the exact bytes it read:
+/// sources, PLY files, existing images and the licence. Images the budget never
+/// read are hashed here, since their bytes did not reach the bundle.
+[[nodiscard]] Status CollectInputs(const SceneIr& scene,
+                                   std::string_view root,
+                                   const Array<CookedTexture>& textures,
+                                   const Digest* licenseDigestOrNull,
+                                   std::string_view licenseName,
+                                   BestEffortResult& inoutResult) noexcept
+{
+    inoutResult.Inputs.Clear();
+    inoutResult.InputDigests.Clear();
+    for (usize i = 0; i < scene.SourceFiles.GetSize(); ++i)
+    {
+        if (AddInput(scene.SourceFiles[i].GetView(), scene.SourceDigests[i], inoutResult) == false)
+        {
+            return Status::OutOfMemory;
+        }
+    }
+    for (usize i = 0; i < scene.DataFiles.GetSize(); ++i)
+    {
+        if (AddInput(scene.DataFiles[i].GetView(), scene.DataDigests[i], inoutResult) == false)
+        {
+            return Status::OutOfMemory;
+        }
+    }
+    for (usize t = 0; t < scene.Textures.GetSize(); ++t)
+    {
+        const IrTexture& texture = scene.Textures[t];
+        if (texture.File.IsEmpty() == true)
+        {
+            continue;
+        }
+        Digest digest;
+        bool hasDigest = false;
+        for (const CookedTexture& cooked : textures)
+        {
+            if (cooked.ReadSource != IR_NONE &&
+                scene.Textures[cooked.ReadSource].File.GetView() == texture.File.GetView())
+            {
+                digest = cooked.ReadDigest;
+                hasDigest = true;
+                break;
+            }
+        }
+        if (hasDigest == false)
+        {
+            String native;
+            const std::string_view parts[] = {root, std::string_view("/"), texture.File.GetView()};
+            if (native.TryAppendMany(parts) != StringStatus::Ok)
+            {
+                return Status::OutOfMemory;
+            }
+            const Status hashed = detail::HashFile(native.GetView(), digest);
+            if (hashed == Status::NotFound)
+            {
+                continue;
+            }
+            if (hashed != Status::Ok)
+            {
+                return hashed;
+            }
+        }
+        if (AddInput(texture.File.GetView(), digest, inoutResult) == false)
+        {
+            return Status::OutOfMemory;
+        }
+    }
+    if (licenseDigestOrNull != nullptr && AddInput(licenseName, *licenseDigestOrNull, inoutResult) == false)
+    {
+        return Status::OutOfMemory;
+    }
+    return Status::Ok;
+}
 } // namespace
 
 bool ImportPbrtBestEffort(std::string_view entryFile,
@@ -773,6 +869,8 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
     outResult.Bundle.Clear();
     outResult.Report.Clear();
     outResult.License.Clear();
+    outResult.Inputs.Clear();
+    outResult.InputDigests.Clear();
     outResult.Summary = ImportSummary{};
     SceneIr scene;
     DiagnosticLog log;
@@ -870,6 +968,7 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
         outResult.Bundle.Clear();
         return FailWith(outError, status, DescribeStatus(status));
     }
+    std::string_view licenseName;
     for (const std::string_view name : {std::string_view("LICENSE.txt"), std::string_view("LICENSE.md")})
     {
         String licensePath;
@@ -877,11 +976,19 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
         if (licensePath.TryAppendMany(parts) == StringStatus::Ok &&
             detail::ReadFileBounded(licensePath.GetView(), MAX_SOURCE_BYTES, outResult.License) == Status::Ok)
         {
+            licenseName = name;
             break;
         }
         outResult.License.Clear();
     }
-    return true;
+    const Digest licenseDigest = Hash(outResult.License.AsSpan());
+    const Status collected = CollectInputs(scene,
+                                           root.GetView(),
+                                           textures,
+                                           licenseName.empty() == true ? nullptr : &licenseDigest,
+                                           licenseName,
+                                           outResult);
+    return collected == Status::Ok ? true : FailWith(outError, collected, DescribeStatus(collected));
 }
 
 bool WriteBestEffortImport(std::string_view output, const BestEffortResult& result, CookError& outError) noexcept

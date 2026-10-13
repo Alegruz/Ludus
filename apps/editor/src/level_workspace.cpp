@@ -1,4 +1,5 @@
 #include "internal/level_workspace.h"
+#include "internal/import_report.h"
 #include "internal/preview_viewport.h"
 
 #include <QCryptographicHash>
@@ -98,14 +99,34 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
         }
     });
     connect(Import_, &QPushButton::clicked, this, [this]() {
-        const auto file = QFileDialog::getOpenFileName(this,
-                                                       QStringLiteral("Import supported PBRT reference scene"),
-                                                       {},
-                                                       QStringLiteral("PBRT scene (scene-v4.pbrt)"));
-        if (!file.isEmpty())
+        const QString file = QFileDialog::getOpenFileName(this,
+                                                          QStringLiteral("Import PBRT scene"),
+                                                          {},
+                                                          QStringLiteral("PBRT scenes (*.pbrt)"));
+        if (file.isEmpty() == false)
         {
-            (void)Import(QFileInfo(file).absolutePath());
+            PreviewSource_ = file;
+            (void)PreviewImport(file);
         }
+    });
+    // Confirm a previewed import: show the dry-run summary, then import on request.
+    connect(this, &LevelWorkspace::ImportPreviewFinished, this, [this](bool isAccepted) {
+        const QString source = PreviewSource_;
+        PreviewSource_.clear();
+        if (isAccepted == false || source.isEmpty() == true)
+        {
+            return;
+        }
+        QMessageBox* confirm = new QMessageBox(QMessageBox::Question,
+                                               QStringLiteral("Import preview"),
+                                               DescribeImportPreview(ImportPreview_),
+                                               QMessageBox::Ok | QMessageBox::Cancel,
+                                               this);
+        confirm->setObjectName(QStringLiteral("levelImportPreview"));
+        confirm->button(QMessageBox::Ok)->setText(QStringLiteral("Import"));
+        confirm->setAttribute(Qt::WA_DeleteOnClose);
+        connect(confirm, &QMessageBox::accepted, this, [this, source]() { (void)ImportPreviewed(source); });
+        confirm->open();
     });
     connect(Save_, &QPushButton::clicked, this, [this]() { (void)Save(); });
     connect(Cancel_, &QPushButton::clicked, this, &LevelWorkspace::Cancel);
@@ -276,7 +297,49 @@ bool LevelWorkspace::Import(const QString& source)
     {
         return false;
     }
-    return Start(QStringLiteral("import"), {}, source);
+    const ImportSource split = SplitImportSource(source);
+    SourceEntry_ = split.Entry;
+    const bool isStarted = Start(QStringLiteral("import"), {}, split.Directory);
+    ExpectedSourceDigest_.clear();
+    return isStarted;
+}
+bool LevelWorkspace::ImportPreviewed(const QString& source)
+{
+    const QString digest = ImportPreview_.value(QStringLiteral("source_digest")).toString();
+    if (digest.isEmpty() == true)
+    {
+        return false;
+    }
+    ExpectedSourceDigest_ = digest;
+    return Import(source);
+}
+bool LevelWorkspace::PreviewImport(const QString& source)
+{
+#if defined(Q_OS_WASM)
+    (void)source;
+    return false;
+#else
+    if (Busy_ == true || Root_.isEmpty() == true || Operate_ != nullptr)
+    {
+        return false;
+    }
+    const ImportSource split = SplitImportSource(source);
+    SourceEntry_ = split.Entry;
+    Source_ = split.Directory;
+    Operation_ = QStringLiteral("preview-import");
+    Error_.clear();
+    Cancelling_ = false;
+    ImportPreview_ = {};
+    if (Run({Operation_, {}, Source_, QJsonValue(QJsonValue::Null)}) == false)
+    {
+        Status_->setText(QStringLiteral("Could not start the import preview; current scene retained."));
+        return false;
+    }
+    Busy_ = true;
+    Status_->setText(QStringLiteral("Planning the import (dry run)… Previous viewport remains available."));
+    Render();
+    return true;
+#endif
 }
 QWidget* LevelWorkspace::TakeViewport(QWidget* parent)
 {
@@ -323,6 +386,22 @@ bool LevelWorkspace::ImportInto(const QJsonObject& level, const QString& source)
     // Start(import) copies Level_. Retain the authoritative document for this service operation.
     Level_ = level;
     return Import(source);
+}
+bool LevelWorkspace::ImportPreviewedInto(const QJsonObject& level, const QString& source)
+{
+    if (Busy_ == true || level.isEmpty() == true)
+    {
+        return false;
+    }
+    Level_ = level;
+    return ImportPreviewed(source);
+}
+void LevelWorkspace::ClearImportState()
+{
+    PreviewSource_.clear();
+    ImportPreview_ = {};
+    ImportReports_ = {};
+    PendingImportReports_ = {};
 }
 bool LevelWorkspace::Save()
 {
@@ -393,6 +472,10 @@ QString DescribeStage(std::string_view stage)
     {
         return QStringLiteral("Importing reference scene… Previous viewport remains available.");
     }
+    if (stage == "preview")
+    {
+        return QStringLiteral("Planning the import (dry run)… Nothing is written.");
+    }
     if (stage == "commit")
     {
         return QStringLiteral("Committing prepared scene assets…");
@@ -433,6 +516,10 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
     {
         kind = EditorSceneOperation::CommitImport;
     }
+    else if (operation == QStringLiteral("preview-import"))
+    {
+        kind = EditorSceneOperation::PreviewImport;
+    }
     else if (operation == QStringLiteral("save"))
     {
         kind = EditorSceneOperation::Save;
@@ -451,6 +538,8 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
     QByteArray root = Root_.toUtf8();
     QByteArray relative = path.toUtf8();
     QByteArray from = source.toUtf8();
+    QByteArray entry = SourceEntry_.toUtf8();
+    QByteArray expectedSource = kind == EditorSceneOperation::Import ? ExpectedSourceDigest_.toUtf8() : QByteArray();
     QByteArray digest = expected.isString() ? expected.toString().toUtf8() : QByteArray();
     QByteArray catalog = kind == EditorSceneOperation::CommitImport ? CandidateCatalog_ : QByteArray();
     const bool hasExpected = expected.isString();
@@ -462,60 +551,63 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
         CandidateCatalog_.clear();
     }
     CancelRequested_.store(false);
-    Operate_ = QThread::create([this, kind, hasExpected, level, root, relative, from, digest, catalog]() {
-        EditorSceneProgress progress;
-        progress.Context = this;
-        progress.Report = [](void* context, std::string_view stage) noexcept {
-            LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
-            const QString text = DescribeStage(stage);
-            if (!text.isEmpty())
+    Operate_ = QThread::create(
+        [this, kind, hasExpected, level, root, relative, from, entry, expectedSource, digest, catalog]() {
+            EditorSceneProgress progress;
+            progress.Context = this;
+            progress.Report = [](void* context, std::string_view stage) noexcept {
+                LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
+                const QString text = DescribeStage(stage);
+                if (text.isEmpty() == false)
+                {
+                    QMetaObject::invokeMethod(
+                        self,
+                        [self, text]() {
+                            if (self->Busy_ == true && self->Cancelling_ == false)
+                            {
+                                self->Status_->setText(text);
+                            }
+                        },
+                        Qt::QueuedConnection);
+                }
+            };
+            Cancellation cancel;
+            cancel.Requested = &IsCancelRequested;
+            cancel.Context = &CancelRequested_;
+            AssetOptions options;
+            options.CancelOrNull = &cancel;
+            options.SourceEntry = ToView(entry);
+            options.ExpectedSourceDigest = ToView(expectedSource);
+            EditorSceneRequest request;
+            request.Operation = kind;
+            request.Root = ToView(root);
+            request.Path = ToView(relative);
+            request.Source = ToView(from);
+            request.Level = kind == EditorSceneOperation::Open ? std::span<const foundation::uint8>() : ToSpan(level);
+            request.Catalog = ToSpan(catalog);
+            request.HasExpected = hasExpected;
+            request.Expected = ToView(digest);
+            request.ProgressOrNull = &progress;
+            EditorSceneResult result;
+            AssetError error;
+            if (OperateEditorScene(request, options, result, error))
             {
-                QMetaObject::invokeMethod(
-                    self,
-                    [self, text]() {
-                        if (self->Busy_ && !self->Cancelling_)
-                        {
-                            self->Status_->setText(text);
-                        }
-                    },
-                    Qt::QueuedConnection);
+                Response_ = QByteArray(reinterpret_cast<const char*>(result.Response.GetData()),
+                                       static_cast<qsizetype>(result.Response.GetSize()));
+                SceneBytes_ = QByteArray(reinterpret_cast<const char*>(result.Scene.GetData()),
+                                         static_cast<qsizetype>(result.Scene.GetSize()));
+                if (kind == EditorSceneOperation::Import)
+                {
+                    CandidateCatalog_ = QByteArray(reinterpret_cast<const char*>(result.Catalog.GetData()),
+                                                   static_cast<qsizetype>(result.Catalog.GetSize()));
+                }
             }
-        };
-        Cancellation cancel;
-        cancel.Requested = &IsCancelRequested;
-        cancel.Context = &CancelRequested_;
-        AssetOptions options;
-        options.CancelOrNull = &cancel;
-        EditorSceneRequest request;
-        request.Operation = kind;
-        request.Root = ToView(root);
-        request.Path = ToView(relative);
-        request.Source = ToView(from);
-        request.Level = kind == EditorSceneOperation::Open ? std::span<const foundation::uint8>() : ToSpan(level);
-        request.Catalog = ToSpan(catalog);
-        request.HasExpected = hasExpected;
-        request.Expected = ToView(digest);
-        request.ProgressOrNull = &progress;
-        EditorSceneResult result;
-        AssetError error;
-        if (OperateEditorScene(request, options, result, error))
-        {
-            Response_ = QByteArray(reinterpret_cast<const char*>(result.Response.GetData()),
-                                   static_cast<qsizetype>(result.Response.GetSize()));
-            SceneBytes_ = QByteArray(reinterpret_cast<const char*>(result.Scene.GetData()),
-                                     static_cast<qsizetype>(result.Scene.GetSize()));
-            if (kind == EditorSceneOperation::Import)
+            else
             {
-                CandidateCatalog_ = QByteArray(reinterpret_cast<const char*>(result.Catalog.GetData()),
-                                               static_cast<qsizetype>(result.Catalog.GetSize()));
+                const std::string_view message = error.Message.View();
+                OperationError_ = QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size()));
             }
-        }
-        else
-        {
-            const std::string_view message = error.Message.View();
-            OperationError_ = QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size()));
-        }
-    });
+        });
     connect(Operate_, &QThread::finished, this, [this]() {
         Operate_->deleteLater();
         Operate_ = nullptr;
@@ -540,6 +632,28 @@ void LevelWorkspace::Completed()
 #if !defined(Q_OS_WASM)
     const QJsonObject result = QJsonDocument::fromJson(Response_).object();
     const bool succeeded = OperationError_.isEmpty() && result.value(QStringLiteral("ok")).toBool();
+    if (Operation_ == QStringLiteral("preview-import"))
+    {
+        const bool isAccepted =
+            Cancelling_ == false && succeeded == true && result.value(QStringLiteral("schema")).toInt() == 1;
+        Busy_ = false;
+        if (isAccepted == true)
+        {
+            ImportPreview_ = result;
+            Status_->setText(QStringLiteral("Import preview ready; nothing was written."));
+        }
+        else
+        {
+            Status_->setText(Cancelling_ == true                  ? QStringLiteral("Import preview cancelled.")
+                             : OperationError_.isEmpty() == false ? OperationError_
+                                                                  : QStringLiteral("Import preview failed."));
+        }
+        Cancelling_ = false;
+        Render();
+        Q_EMIT ImportPreviewFinished(isAccepted);
+        ApplyPendingProject();
+        return;
+    }
     if (PublishingCatalog_)
     {
         PublishingCatalog_ = false;
@@ -568,6 +682,7 @@ void LevelWorkspace::Completed()
         Publish();
         return;
     }
+    PendingImportReports_ = result.value(QStringLiteral("import_reports")).toObject();
     Candidate_ = result.value(QStringLiteral("level")).toObject();
     CandidateRevisions_ = result.value(QStringLiteral("artifacts")).toObject();
     CatalogExpected_ = result.value(QStringLiteral("catalog_expected"));
@@ -636,6 +751,7 @@ void LevelWorkspace::CommitImport()
 void LevelWorkspace::CommitCandidate()
 {
     Level_ = Candidate_;
+    ImportReports_ = PendingImportReports_;
     if (Scene_.Identity.isEmpty())
     {
         Viewport_->ClearFrame(QStringLiteral("No visible scene instances."));
