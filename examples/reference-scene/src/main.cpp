@@ -1,3 +1,4 @@
+#include <ludus/foundation/base/byte_order.hpp>
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/parse_number.hpp>
 
@@ -10,6 +11,8 @@
 
 #include <ludus/content/content.h>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/measurement.h>
 #include <ludus/runtime/resources/scene.h>
 
 #include "ray_query.h"
@@ -20,6 +23,9 @@
 #include "renderer_output.h"
 #include "renderer_shadow.h"
 
+#include <cstring>
+#include <string_view>
+
 namespace
 {
 using namespace ludus::foundation;
@@ -27,6 +33,12 @@ namespace rr = ludus::graphics::renderer;
 namespace rhi = ludus::graphics::rhi;
 using Status = rhi::RasterStatus;
 LUDUS_DEFINE_LOG_CATEGORY(LOG_SCENE, "ReferenceScene");
+
+struct SceneEvidence final
+{
+    // Textures, materials, meshes, objects, vertices, stored and instanced triangles.
+    uint64 Counts[7]{};
+};
 
 template <typename Handle>
 Status Wait(rr::Renderer& renderer, const Handle& handle, Status status) noexcept
@@ -45,7 +57,9 @@ bool Load(const uint8* bytes,
           rhi::DeviceHandle device,
           rr::MaterialProgram program,
           rr::Snapshot& snapshot,
-          rr::ReferenceCaptureDescription& capture) noexcept
+          rr::ReferenceCaptureDescription& capture,
+          SceneEvidence& evidence,
+          rr::Snapshot* identitySnapshot) noexcept
 {
     ludus::resources::SceneDefinition scene;
     if (ludus::resources::SceneDefinition::Decode(bytes, count, scene) != ludus::resources::Status::Ok)
@@ -61,6 +75,10 @@ bool Load(const uint8* bytes,
     capture.WorldToClip = projection * view;
     capture.CameraPosition = scene.Eye;
     capture.ReverseZ = true;
+    evidence.Counts[0] = scene.Textures.GetSize();
+    evidence.Counts[1] = scene.Materials.GetSize();
+    evidence.Counts[2] = scene.Meshes.GetSize();
+    evidence.Counts[3] = scene.Objects.GetSize();
     rhi::TextureHandle textures[8];
     for (usize i = 0; i < scene.Textures.GetSize(); ++i)
     {
@@ -108,6 +126,8 @@ bool Load(const uint8* bytes,
     for (usize i = 0; i < scene.Meshes.GetSize(); ++i)
     {
         const auto& source = scene.Meshes[i];
+        evidence.Counts[4] += source.Positions.GetSize();
+        evidence.Counts[5] += source.Indices.GetSize() / 3;
         rr::MeshDescription description{source.Positions.GetData(),
                                         source.Positions.GetSize(),
                                         source.Indices.GetData(),
@@ -132,10 +152,31 @@ bool Load(const uint8* bytes,
         item.Surface = materials[source.Material];
         item.Transform = source.Transform;
         item.SourceId = i + 1;
+        evidence.Counts[6] += scene.Meshes[source.Mesh].Indices.GetSize() / 3;
     }
     if (renderer.CreateSnapshot(items.GetData(), items.GetSize(), snapshot) != Status::Ready)
     {
         return false;
+    }
+    if (identitySnapshot != nullptr)
+    {
+        for (usize i = 0; i < items.GetSize(); ++i)
+        {
+            auto& item = items[i];
+            const auto id = static_cast<uint32>(item.SourceId);
+            item.Surface = {};
+            item.Material.Color =
+            {
+                .X = float32(id) / 255,
+                .Y = float32((id * 73) % 255 + 1) / 255,
+                .Z = float32((id * 151) % 255 + 1) / 255,
+                .W = 1,
+            };
+        }
+        if (renderer.CreateSnapshot(items.GetData(), items.GetSize(), *identitySnapshot) != Status::Ready)
+        {
+            return false;
+        }
     }
     for (usize i = 0; i < scene.Meshes.GetSize(); ++i)
     {
@@ -145,7 +186,164 @@ bool Load(const uint8* bytes,
     {
         (void)renderer.Release(materials[i]);
     }
+    for (usize i = 0; i < scene.Textures.GetSize(); ++i)
+    {
+        if (rhi::Destroy(device, textures[i]) != Status::Ready)
+        {
+            return false;
+        }
+    }
     return true;
+}
+
+// Public-API acceptance: compare batching/culling with every authored object in
+// source order. Raster/reference transport are different models; their images
+// are deliberately not compared to one another.
+bool RasterEvidence(rr::Renderer& renderer,
+                    rhi::DeviceHandle device,
+                    rhi::SurfaceHandle surface,
+                    rr::Snapshot snapshot,
+                    const rr::ReferenceCaptureDescription& capture,
+                    const SceneEvidence& evidence,
+                    filesystem::WriteDirectory& directory,
+                    bool identity = false) noexcept
+{
+    rr::PreparedView views[2];
+    rr::ViewReport reports[2];
+    rhi::TextureHandle targets[2];
+    for (usize i = 0; i < 2; ++i)
+    {
+        rr::ViewDescription description;
+        description.WorldToClip = capture.WorldToClip;
+        description.CameraPosition = capture.CameraPosition;
+        description.Depth = rr::DepthConvention::ReverseZ;
+        description.Reference = i == 0;
+        if (Wait(renderer, views[i], renderer.PrepareView(snapshot, description, views[i], reports[i])) !=
+            Status::Ready)
+        {
+            return false;
+        }
+        rhi::TextureDescription target{capture.Width, capture.Height, rhi::RasterFormat::Rgba8Unorm};
+        target.Attachment = true;
+        if (rhi::CreateTexture(device, target, {}, targets[i]) != Status::Ready)
+        {
+            return false;
+        }
+    }
+    if (reports[0].Submitted != evidence.Counts[3] || reports[0].Visible != evidence.Counts[3] ||
+        reports[0].Reported != evidence.Counts[3] || reports[0].Draws != evidence.Counts[3] ||
+        reports[1].Submitted != evidence.Counts[3] || reports[1].Visible + reports[1].Culled != evidence.Counts[3] ||
+        reports[1].Reported != reports[1].Visible || rhi::BeginFrame(device, surface) != rhi::DeviceStatus::Ready)
+    {
+        return false;
+    }
+    bool drawn = true;
+    for (usize i = 0; i < 2; ++i)
+    {
+        rhi::RasterPassDescription pass;
+        pass.Color = targets[i];
+        drawn = renderer.DrawView(views[i], pass) == Status::Ready && drawn;
+    }
+    rhi::SubmissionToken completion;
+    if (rhi::EndFrame(device, completion) != Status::Ready || !drawn)
+    {
+        return false;
+    }
+    const auto frameStarted = time::NowTicks();
+    auto frameStatus = rhi::GetStatus(device, completion);
+    while (frameStatus == Status::Pending && time::NowTicks() - frameStarted < 30 * time::NANOSECONDS_PER_SECOND)
+    {
+        frameStatus = rhi::GetStatus(device, completion);
+    }
+    if (frameStatus != Status::Ready)
+    {
+        return false;
+    }
+    for (usize i = 0; i < 2; ++i)
+    {
+        const std::string_view name = identity ? (i == 0 ? "identity-reference.rgba" : "identity-optimized.rgba")
+                                               : (i == 0 ? "raster-reference.rgba" : "raster-optimized.rgba");
+        rhi::ReadbackTicket readback;
+        auto status = rhi::RequestTextureReadback(device,
+                                                  targets[i],
+                                                  {0, 0, 0, capture.Width, capture.Height},
+                                                  usize(capture.Width) * 4,
+                                                  readback);
+        const auto started = time::NowTicks();
+        while (status == Status::Pending && time::NowTicks() - started < 30 * time::NANOSECONDS_PER_SECOND)
+        {
+            status = rhi::GetStatus(device, readback);
+        }
+        Array<uint8> pixels;
+        if (status != Status::Ready || !pixels.TryResize(usize(capture.Width) * capture.Height * 4) ||
+            rhi::CopyReadback(device, readback, pixels.GetData(), pixels.GetSize()) != Status::Ready ||
+            !directory.Publish(name, {pixels.GetData(), pixels.GetSize()}).Outcome.Succeeded() ||
+            rhi::Release(device, readback) != Status::Ready || renderer.Release(views[i]) != Status::Ready ||
+            rhi::Destroy(device, targets[i]) != Status::Ready)
+        {
+            return false;
+        }
+    }
+    // LUSAC01: seven scene counts, reference submitted/draws, optimized
+    // submitted/visible/culled/draws, selected backend; then uint64 source IDs.
+    Array<uint8> bytes;
+    rhi::DeviceInfo deviceInfo;
+    rhi::MeasurementAdapter adapter;
+    if (rhi::GetDeviceInfo(device, deviceInfo) != rhi::DeviceStatus::Ready ||
+        rhi::GetMeasurementAdapter(device, adapter) != Status::Ready ||
+        !bytes.TryResize(8 + 14 * 8 + usize(reports[0].Reported + reports[1].Reported) * 8))
+    {
+        return false;
+    }
+    usize nameSize = 0;
+    while (nameSize < 255 && adapter.Name[nameSize] != '\0')
+    {
+        ++nameSize;
+    }
+    if (!directory.Publish("adapter-name.txt", {reinterpret_cast<const uint8*>(adapter.Name), nameSize})
+             .Outcome.Succeeded())
+    {
+        return false;
+    }
+    std::memcpy(bytes.GetData(), "LUSAC01\0", 8);
+    usize offset = 8;
+    const auto append = [&bytes, &offset](uint64 value) noexcept {
+        if (!core::TryWriteLittleEndian<uint64>(value, {bytes.GetData() + offset, 8}))
+        {
+            return false;
+        }
+        offset += 8;
+        return true;
+    };
+    for (const auto count : evidence.Counts)
+    {
+        if (!append(count))
+        {
+            return false;
+        }
+    }
+    if (!append(reports[0].Submitted) || !append(reports[0].Draws) || !append(reports[1].Submitted) ||
+        !append(reports[1].Visible) || !append(reports[1].Culled) || !append(reports[1].Draws))
+    {
+        return false;
+    }
+    if (!append(static_cast<uint64>(deviceInfo.Startup.SelectedBackend)))
+    {
+        return false;
+    }
+    for (const auto& report : reports)
+    {
+        for (usize i = 0; i < report.Reported; ++i)
+        {
+            if (!append(report.SourceIds[i]))
+            {
+                return false;
+            }
+        }
+    }
+    return directory
+        .Publish(identity ? "identity-acceptance.bin" : "scene-acceptance.bin", {bytes.GetData(), bytes.GetSize()})
+        .Outcome.Succeeded();
 }
 
 bool Number(const char* text, uint32 maximum, uint32& output) noexcept
@@ -170,9 +368,15 @@ bool Number(const char* text, uint32 maximum, uint32& output) noexcept
 
 int Run(int argc, char** argv) noexcept
 {
-    if (argc != 5)
+    if (argc != 5 && argc != 6)
     {
         return 1; // root-directory, output-directory, square extent, samples
+    }
+    const bool native = argc == 6 && std::string_view(argv[5]) == "native";
+    const bool acceptance = argc == 6 && (native || std::string_view(argv[5]) == "acceptance");
+    if (argc == 6 && !acceptance)
+    {
+        return 1;
     }
     rr::ReferenceCaptureDescription description;
     if (!Number(argv[3], 1024, description.Width) || !Number(argv[4], 4096, description.TargetSamples))
@@ -190,6 +394,7 @@ int Run(int argc, char** argv) noexcept
     }
     rhi::DeviceDescription request;
     request.Required.PortableRaster = true;
+    request.Required.RayQueries = native;
     rhi::DeviceHandle device;
     rhi::SurfaceHandle surface;
     if (rhi::CreateDevice({}, { .Width = 8, .Height = 8 }, request, device, surface) != rhi::DeviceStatus::Ready)
@@ -215,7 +420,8 @@ int Run(int argc, char** argv) noexcept
     {
         return 5;
     }
-    const rr::ReferenceRenderingOptions options{rr::ReferenceTraversal::CpuOracle,
+    const rr::ReferenceRenderingOptions options{native ? rr::ReferenceTraversal::NativeQueries
+                                                       : rr::ReferenceTraversal::CpuOracle,
                                                 usize{128} * 1024 * 1024,
                                                 usize{128} * 1024 * 1024,
                                                 512};
@@ -234,13 +440,42 @@ int Run(int argc, char** argv) noexcept
         return 7;
     }
     rr::Snapshot snapshot;
-    if (!Load(bundle.Data().data(), bundle.Data().size(), renderer, device, program, snapshot, description))
+    rr::Snapshot identitySnapshot;
+    SceneEvidence evidence;
+    if (!Load(bundle.Data().data(),
+              bundle.Data().size(),
+              renderer,
+              device,
+              program,
+              snapshot,
+              description,
+              evidence,
+              acceptance ? &identitySnapshot : nullptr))
     {
         return 8;
+    }
+    filesystem::WriteDirectory directory;
+    if (!directory.Open(argv[2]).Succeeded())
+    {
+        return 14;
+    }
+    if (acceptance && !RasterEvidence(renderer, device, surface, snapshot, description, evidence, directory))
+    {
+        return 15;
+    }
+    if (acceptance &&
+        (!RasterEvidence(renderer, device, surface, identitySnapshot, description, evidence, directory, true) ||
+         renderer.Release(identitySnapshot) != Status::Ready))
+    {
+        return 15;
     }
     rr::ReferenceCapture capture;
     auto status = renderer.BeginReferenceCapture(snapshot, description, capture);
     if (status != Status::Ready && status != Status::Pending)
+    {
+        return 9;
+    }
+    if (renderer.Release(snapshot) != Status::Ready)
     {
         return 9;
     }
@@ -256,7 +491,9 @@ int Run(int argc, char** argv) noexcept
     }
     rr::ReferenceCaptureInfo info;
     if (renderer.GetReferenceCaptureInfo(capture, info) != Status::Ready || !info.Complete ||
-        info.InvalidContributions != 0)
+        info.InvalidContributions != 0 || info.MinimumSamples != description.TargetSamples ||
+        info.MaximumSamples != description.TargetSamples ||
+        info.CommittedSamples != uint64(description.Width) * description.Height * description.TargetSamples)
     {
         return 11;
     }
@@ -270,9 +507,7 @@ int Run(int argc, char** argv) noexcept
     {
         return 13;
     }
-    filesystem::WriteDirectory directory;
-    if (!directory.Open(argv[2]).Succeeded() ||
-        !directory.Publish("capture.luhdr", {bytes.GetData(), written}).Outcome.Succeeded())
+    if (!directory.Publish("capture.luhdr", {bytes.GetData(), written}).Outcome.Succeeded())
     {
         return 14;
     }
@@ -289,14 +524,15 @@ int main(int argc, char** argv)
     const int result = Run(argc, argv);
     if (result != 0)
     {
-        LUDUS_LOG_ERROR(LOG_SCENE,
-                        "Scene capture failed at step {}. Usage: reference_scene <cooked-directory> <output-directory> "
-                        "<extent:1..1024> <samples:1..4096>. See the reference-scene guide for step meanings.",
-                        result);
+        LUDUS_LOG_ERROR(
+            LOG_SCENE,
+            "Scene capture failed at step {}. Usage: reference_scene <cooked-directory> <output-directory> "
+            "<extent:1..1024> <samples:1..4096> [acceptance|native]. See the reference-scene guide for step meanings.",
+            result);
     }
     else
     {
-        LUDUS_LOG_INFO(LOG_SCENE, "Complete CPU-oracle capture written to capture.luhdr.");
+        LUDUS_LOG_INFO(LOG_SCENE, "Complete explicit-traversal capture written to capture.luhdr.");
     }
     LogSystem::Shutdown();
     return result;

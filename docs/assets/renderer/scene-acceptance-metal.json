@@ -1,0 +1,804 @@
+{
+  "version": 1,
+  "producer_base_commit": "9b266ff3a10526f73b1d90e385f40af8e02162a9",
+  "producer_changes": "Full-scene acceptance consumer and extent-based reference-origin allowance in this change",
+  "scope": "Prepared-scene correctness acceptance; no source-PBRT fidelity or performance qualification claim",
+  "cpu_64x64_32spp": {
+    "version": 1,
+    "scope": "complete prepared LUSCN01 RGB reflection profile; not source-renderer fidelity or performance qualification",
+    "host": {
+      "system": "Darwin",
+      "release": "25.6.0",
+      "architecture": "arm64",
+      "python": "3.9.6"
+    },
+    "bundle_sha256": "19ff7633bb1514f766b869047d9b3023488603f22c872284fe0869ee6cbc45de",
+    "binary_sha256": "000559a75760105b448df53aeec814ad459ddd5691690424388803b7b490dc00",
+    "counts": {
+      "textures": 3,
+      "materials": 8,
+      "meshes": 6,
+      "objects": 17,
+      "vertices": 85554,
+      "stored_triangles": 28561,
+      "instanced_triangles": 28831
+    },
+    "source_manifest": {
+      "version": 1,
+      "source": "Modern Hall / staircase2",
+      "author": "NewSee2l035",
+      "license": "https://creativecommons.org/licenses/by/3.0/",
+      "source_format": "PBRT v4 subset + binary PLY + uncompressed TGA",
+      "inputs": {
+        "LICENSE.txt": "e87cc079965a12fe7ee57bdab59429ba75cb81b7372aeb7f35fc2ef9cfb2b32a",
+        "models/Mesh000.ply": "d1ecbcefe3bdcf4fdb8f4e3b788c7b9df35bb7f454ace556d2eb1e5430d6dfbe",
+        "models/Mesh001.ply": "702e01ceb376f440e9283ebf8eaac20829ea181358962096e11c4f68d89eff6c",
+        "models/Mesh002.ply": "4499c1b577b5d72fc52377756863a7874dd65db01e04a1aa781a21d13fa87674",
+        "models/Mesh003.ply": "074343404169dba5972cccc1edd3827041bf7919414fec5ffa96676e2c0b680c",
+        "models/Mesh004.ply": "af8e2c284bc3e1f2d5e0ff9d7394c2fb2299b20fae9cabe9a6882cdbcf9b500b",
+        "models/Mesh005.ply": "b8f8db4dacef63e74a8ebd583861993ce4e6e2318d17f22635feb9c6bbe714bb",
+        "models/Mesh006.ply": "0c29718ab6eec24589e53c1797f878d4d652364e5aa4e2a03af6231ea0db6b56",
+        "models/Mesh007.ply": "655731ab67024d8561a70a9701b8fde4e7897013d6af399e2c0d6ba4c44e7005",
+        "models/Mesh008.ply": "9720560bb3811cd4a7d594858848871bd01ce95f2267128be63c299b2e372ec7",
+        "models/Mesh009.ply": "6d1ea2d16ad3bbb556044a98cb29543e3457c77f310eb46dec8b2ccaa358a0ef",
+        "models/Mesh010.ply": "b31a713fca3b5aa9bbae03182bdf5579139866cd848dbe1d46e496e7c7457b31",
+        "models/Mesh011.ply": "44d2b64bc428db9163b5533dc9df4525f3a2c687d84a7f52886751f11ea9daef",
+        "models/Mesh012.ply": "566f1f4e66cccbafba942bae5e0f22660d5399f8e1e667dbd4c03f2292b07470",
+        "models/Mesh013.ply": "7dbf28bb0a306911ed4bfa891f7a1b640939d8ec0fb5889a8f9f89d3e82e1b70",
+        "models/Mesh014.ply": "706cc534264a8f5cd51e911044bebbbf629e139dbe8321f44d043efe92319086",
+        "models/Mesh015.ply": "8214fa9391b85ef994cbfa40a8d0641123323287b3819acf72845ce72847ef11",
+        "models/Mesh016.ply": "9acf6726eeef3b54abbeac0e196a6074d69b4b8a33dbcc5ea57a8a1d0442bb20",
+        "models/Mesh017.ply": "3ee5a9857ac05484908695749be3cc00ed41b97ee5aefc1e7235772cb99e8b85",
+        "models/Mesh018.ply": "8e7effd8c926ddd014a18d6112b99cb59c79f1092832d0a2be3f92f88e291f8e",
+        "models/small_square_light_1.ply": "44a7c74d91389f27b23871e110e8ebc1629538df59f0057d5ff5d4aa952f86a7",
+        "models/small_square_light_2.ply": "ed2fda1e46a178b941d68fe378ba97c29c1954f04fec44c1dc63cd027212d8f8",
+        "models/small_square_light_3.ply": "ca4a0a1530740026d59fe76cf0b4e07d9dc0684e9138540888cdfa00cc5acc67",
+        "models/small_square_light_4.ply": "470a974ab95a128241f8cb8846d63316106d54f1a428850847afa96b9bfdbb3b",
+        "scene-v4.pbrt": "43f68f56d9469c56dec76fe52f518e98dd8b2269731dfe90ddc5a464b09e31ca",
+        "textures/Tiles.tga": "69490855e750ca1a10f1c1bfbd158517a9c52bc982b673f1281452d44917c00a",
+        "textures/Wallpaper.tga": "2ca2e03e36df96ef900a09f8bb2e18d2455cf96a082399836784235a6727ec8a",
+        "textures/wood5.tga": "3ee21f2dc99596c974e03ab47242cb6b9520f0d6b5d9401f14eccaf98c099bbb"
+      },
+      "bundle_sha256": "19ff7633bb1514f766b869047d9b3023488603f22c872284fe0869ee6cbc45de",
+      "source_ply_meshes": 23,
+      "source_triangles": 32967,
+      "discarded_zero_area_triangles": 2432,
+      "meshes": 6,
+      "materials": 8,
+      "items": 17,
+      "cooked_triangles": 28561,
+      "rendered_triangles": 28831,
+      "bytes": 15081516,
+      "camera": {
+        "eye": [
+          6.91181609404709,
+          1.651630343398386,
+          2.5541413016294565
+        ],
+        "target": [
+          6.01163909404709,
+          1.651630296577186,
+          2.1186173016294565
+        ],
+        "up": [
+          -4.21474e-08,
+          1.0,
+          -2.03917e-08
+        ],
+        "fov_degrees": 70.0
+      },
+      "approximations": [
+        "PBRT coated diffuse mapped to frozen RGB GGX/Lambert; no layer multiple scattering",
+        "conductor eta/k reduced to RGB normal-incidence F0 and Schlick",
+        "diffuse surfaces use L6 dielectric F0 0.04",
+        "L6 surface emission is two-sided; PBRT diffuse area lights default to one-sided",
+        "single retained texture mip; no PBRT footprint/trilinear filtering",
+        "disk tessellation: 64 segments",
+        "emissive planar grids represented by equivalent quads",
+        "PBRT integrator/sampler options replaced by explicit L6 capture settings"
+      ]
+    },
+    "runs": {
+      "cpu": {
+        "capture": {
+          "schema": 1,
+          "profile": 1,
+          "sampler": 1,
+          "width": 64,
+          "height": 64,
+          "target_samples": 32,
+          "max_depth": 4,
+          "roulette_depth": 3,
+          "flags": 9,
+          "seed": 871,
+          "revision": 1,
+          "scene_fingerprint": "4a3729a57838b90766ebfc192aae6423",
+          "traversal": "cpu_oracle",
+          "partial": false,
+          "minimum_samples": 32,
+          "maximum_samples": 32,
+          "secondary_distance": 1000000.0,
+          "texture_mip": 0,
+          "light_count": 0,
+          "world_to_clip": [
+            0.621992826461792,
+            -1.532538647097681e-07,
+            0.0004503137315623462,
+            -0.9001771211624146,
+            8.989522722133853e-14,
+            1.4281480312347412,
+            5.963447097245833e-11,
+            -1.1920930376163597e-07,
+            -1.2855862379074097,
+            -7.414724478849166e-08,
+            0.0002178709692088887,
+            -0.435524046421051,
+            -1.0155311822891235,
+            -2.358771562576294,
+            0.04635605216026306,
+            7.3342485427856445
+          ],
+          "camera_position": [
+            6.911816120147705,
+            1.6516304016113281,
+            2.5541412830352783
+          ],
+          "environment": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "sha256": "4f707ae61f2d4fa17a9086b3bac21f3841751fdf7f5182da794ad7e79d53dfc0"
+        },
+        "backend": "metal",
+        "submitted": 17,
+        "visible": 16,
+        "culled": 1,
+        "draws": 8,
+        "reference_draws": 17,
+        "source_ids": [
+          1,
+          2,
+          3,
+          4,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          14,
+          15,
+          16,
+          17,
+          13
+        ],
+        "adapter_name": "Apple M5",
+        "raster_max_byte_error": 0,
+        "identity_max_byte_error": 0,
+        "observed_source_ids": [
+          1,
+          2,
+          3,
+          4,
+          6,
+          7,
+          12,
+          17
+        ],
+        "artifact_sha256": {
+          "scene-acceptance.bin": "d70d707288ce0285becd6b48514e5499e55b638305f34dd39b89f4d27e3124cd",
+          "raster-reference.rgba": "1168cce313dca594eb1e213ec3bd3fd1e720a9d5663b8c253795999d4aa2f187",
+          "raster-optimized.rgba": "1168cce313dca594eb1e213ec3bd3fd1e720a9d5663b8c253795999d4aa2f187",
+          "capture.luhdr": "4f707ae61f2d4fa17a9086b3bac21f3841751fdf7f5182da794ad7e79d53dfc0",
+          "adapter-name.txt": "b4d8cd2e60e10231d9f5559ddc91c2c91abb3f8562ecb1b3125bd192a62446a6",
+          "identity-acceptance.bin": "8463f9688d212c29c06651688e8c45fe165b839554efca564cf45ff5a4ae8e3f",
+          "identity-reference.rgba": "cdc879eef354182e0c17345bb78dc0af2b368d62d44db78130b5f728b782dbab",
+          "identity-optimized.rgba": "cdc879eef354182e0c17345bb78dc0af2b368d62d44db78130b5f728b782dbab"
+        }
+      }
+    },
+    "native_parity": {
+      "status": "not_requested"
+    }
+  },
+  "native_32x32_8spp": {
+    "version": 1,
+    "scope": "complete prepared LUSCN01 RGB reflection profile; not source-renderer fidelity or performance qualification",
+    "host": {
+      "system": "Darwin",
+      "release": "25.6.0",
+      "architecture": "arm64",
+      "python": "3.9.6"
+    },
+    "bundle_sha256": "19ff7633bb1514f766b869047d9b3023488603f22c872284fe0869ee6cbc45de",
+    "binary_sha256": "000559a75760105b448df53aeec814ad459ddd5691690424388803b7b490dc00",
+    "counts": {
+      "textures": 3,
+      "materials": 8,
+      "meshes": 6,
+      "objects": 17,
+      "vertices": 85554,
+      "stored_triangles": 28561,
+      "instanced_triangles": 28831
+    },
+    "source_manifest": {
+      "version": 1,
+      "source": "Modern Hall / staircase2",
+      "author": "NewSee2l035",
+      "license": "https://creativecommons.org/licenses/by/3.0/",
+      "source_format": "PBRT v4 subset + binary PLY + uncompressed TGA",
+      "inputs": {
+        "LICENSE.txt": "e87cc079965a12fe7ee57bdab59429ba75cb81b7372aeb7f35fc2ef9cfb2b32a",
+        "models/Mesh000.ply": "d1ecbcefe3bdcf4fdb8f4e3b788c7b9df35bb7f454ace556d2eb1e5430d6dfbe",
+        "models/Mesh001.ply": "702e01ceb376f440e9283ebf8eaac20829ea181358962096e11c4f68d89eff6c",
+        "models/Mesh002.ply": "4499c1b577b5d72fc52377756863a7874dd65db01e04a1aa781a21d13fa87674",
+        "models/Mesh003.ply": "074343404169dba5972cccc1edd3827041bf7919414fec5ffa96676e2c0b680c",
+        "models/Mesh004.ply": "af8e2c284bc3e1f2d5e0ff9d7394c2fb2299b20fae9cabe9a6882cdbcf9b500b",
+        "models/Mesh005.ply": "b8f8db4dacef63e74a8ebd583861993ce4e6e2318d17f22635feb9c6bbe714bb",
+        "models/Mesh006.ply": "0c29718ab6eec24589e53c1797f878d4d652364e5aa4e2a03af6231ea0db6b56",
+        "models/Mesh007.ply": "655731ab67024d8561a70a9701b8fde4e7897013d6af399e2c0d6ba4c44e7005",
+        "models/Mesh008.ply": "9720560bb3811cd4a7d594858848871bd01ce95f2267128be63c299b2e372ec7",
+        "models/Mesh009.ply": "6d1ea2d16ad3bbb556044a98cb29543e3457c77f310eb46dec8b2ccaa358a0ef",
+        "models/Mesh010.ply": "b31a713fca3b5aa9bbae03182bdf5579139866cd848dbe1d46e496e7c7457b31",
+        "models/Mesh011.ply": "44d2b64bc428db9163b5533dc9df4525f3a2c687d84a7f52886751f11ea9daef",
+        "models/Mesh012.ply": "566f1f4e66cccbafba942bae5e0f22660d5399f8e1e667dbd4c03f2292b07470",
+        "models/Mesh013.ply": "7dbf28bb0a306911ed4bfa891f7a1b640939d8ec0fb5889a8f9f89d3e82e1b70",
+        "models/Mesh014.ply": "706cc534264a8f5cd51e911044bebbbf629e139dbe8321f44d043efe92319086",
+        "models/Mesh015.ply": "8214fa9391b85ef994cbfa40a8d0641123323287b3819acf72845ce72847ef11",
+        "models/Mesh016.ply": "9acf6726eeef3b54abbeac0e196a6074d69b4b8a33dbcc5ea57a8a1d0442bb20",
+        "models/Mesh017.ply": "3ee5a9857ac05484908695749be3cc00ed41b97ee5aefc1e7235772cb99e8b85",
+        "models/Mesh018.ply": "8e7effd8c926ddd014a18d6112b99cb59c79f1092832d0a2be3f92f88e291f8e",
+        "models/small_square_light_1.ply": "44a7c74d91389f27b23871e110e8ebc1629538df59f0057d5ff5d4aa952f86a7",
+        "models/small_square_light_2.ply": "ed2fda1e46a178b941d68fe378ba97c29c1954f04fec44c1dc63cd027212d8f8",
+        "models/small_square_light_3.ply": "ca4a0a1530740026d59fe76cf0b4e07d9dc0684e9138540888cdfa00cc5acc67",
+        "models/small_square_light_4.ply": "470a974ab95a128241f8cb8846d63316106d54f1a428850847afa96b9bfdbb3b",
+        "scene-v4.pbrt": "43f68f56d9469c56dec76fe52f518e98dd8b2269731dfe90ddc5a464b09e31ca",
+        "textures/Tiles.tga": "69490855e750ca1a10f1c1bfbd158517a9c52bc982b673f1281452d44917c00a",
+        "textures/Wallpaper.tga": "2ca2e03e36df96ef900a09f8bb2e18d2455cf96a082399836784235a6727ec8a",
+        "textures/wood5.tga": "3ee21f2dc99596c974e03ab47242cb6b9520f0d6b5d9401f14eccaf98c099bbb"
+      },
+      "bundle_sha256": "19ff7633bb1514f766b869047d9b3023488603f22c872284fe0869ee6cbc45de",
+      "source_ply_meshes": 23,
+      "source_triangles": 32967,
+      "discarded_zero_area_triangles": 2432,
+      "meshes": 6,
+      "materials": 8,
+      "items": 17,
+      "cooked_triangles": 28561,
+      "rendered_triangles": 28831,
+      "bytes": 15081516,
+      "camera": {
+        "eye": [
+          6.91181609404709,
+          1.651630343398386,
+          2.5541413016294565
+        ],
+        "target": [
+          6.01163909404709,
+          1.651630296577186,
+          2.1186173016294565
+        ],
+        "up": [
+          -4.21474e-08,
+          1.0,
+          -2.03917e-08
+        ],
+        "fov_degrees": 70.0
+      },
+      "approximations": [
+        "PBRT coated diffuse mapped to frozen RGB GGX/Lambert; no layer multiple scattering",
+        "conductor eta/k reduced to RGB normal-incidence F0 and Schlick",
+        "diffuse surfaces use L6 dielectric F0 0.04",
+        "L6 surface emission is two-sided; PBRT diffuse area lights default to one-sided",
+        "single retained texture mip; no PBRT footprint/trilinear filtering",
+        "disk tessellation: 64 segments",
+        "emissive planar grids represented by equivalent quads",
+        "PBRT integrator/sampler options replaced by explicit L6 capture settings"
+      ]
+    },
+    "runs": {
+      "cpu": {
+        "capture": {
+          "schema": 1,
+          "profile": 1,
+          "sampler": 1,
+          "width": 32,
+          "height": 32,
+          "target_samples": 8,
+          "max_depth": 4,
+          "roulette_depth": 3,
+          "flags": 9,
+          "seed": 871,
+          "revision": 1,
+          "scene_fingerprint": "4a3729a57838b90766ebfc192aae6423",
+          "traversal": "cpu_oracle",
+          "partial": false,
+          "minimum_samples": 8,
+          "maximum_samples": 8,
+          "secondary_distance": 1000000.0,
+          "texture_mip": 0,
+          "light_count": 0,
+          "world_to_clip": [
+            0.621992826461792,
+            -1.532538647097681e-07,
+            0.0004503137315623462,
+            -0.9001771211624146,
+            8.989522722133853e-14,
+            1.4281480312347412,
+            5.963447097245833e-11,
+            -1.1920930376163597e-07,
+            -1.2855862379074097,
+            -7.414724478849166e-08,
+            0.0002178709692088887,
+            -0.435524046421051,
+            -1.0155311822891235,
+            -2.358771562576294,
+            0.04635605216026306,
+            7.3342485427856445
+          ],
+          "camera_position": [
+            6.911816120147705,
+            1.6516304016113281,
+            2.5541412830352783
+          ],
+          "environment": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "sha256": "aaa563fbcad60bcefcbb695920a7d93d75d609a758a7573662de9b47a9b092ca"
+        },
+        "backend": "metal",
+        "submitted": 17,
+        "visible": 16,
+        "culled": 1,
+        "draws": 8,
+        "reference_draws": 17,
+        "source_ids": [
+          1,
+          2,
+          3,
+          4,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          14,
+          15,
+          16,
+          17,
+          13
+        ],
+        "adapter_name": "Apple M5",
+        "raster_max_byte_error": 0,
+        "identity_max_byte_error": 0,
+        "observed_source_ids": [
+          1,
+          2,
+          3,
+          4,
+          12
+        ],
+        "artifact_sha256": {
+          "scene-acceptance.bin": "d70d707288ce0285becd6b48514e5499e55b638305f34dd39b89f4d27e3124cd",
+          "raster-reference.rgba": "a9dcfc13faeab089b8b43523b90725afa712e3109464d48e179ce192336247a3",
+          "raster-optimized.rgba": "a9dcfc13faeab089b8b43523b90725afa712e3109464d48e179ce192336247a3",
+          "capture.luhdr": "aaa563fbcad60bcefcbb695920a7d93d75d609a758a7573662de9b47a9b092ca",
+          "adapter-name.txt": "b4d8cd2e60e10231d9f5559ddc91c2c91abb3f8562ecb1b3125bd192a62446a6",
+          "identity-acceptance.bin": "8463f9688d212c29c06651688e8c45fe165b839554efca564cf45ff5a4ae8e3f",
+          "identity-reference.rgba": "17f479a078602edb4c87efb457b0ae7b0d53bad57d5605485f5e30f4c3c39806",
+          "identity-optimized.rgba": "17f479a078602edb4c87efb457b0ae7b0d53bad57d5605485f5e30f4c3c39806"
+        }
+      },
+      "native": {
+        "capture": {
+          "schema": 1,
+          "profile": 1,
+          "sampler": 1,
+          "width": 32,
+          "height": 32,
+          "target_samples": 8,
+          "max_depth": 4,
+          "roulette_depth": 3,
+          "flags": 8,
+          "seed": 871,
+          "revision": 1,
+          "scene_fingerprint": "4a3729a57838b90766ebfc192aae6423",
+          "traversal": "native_queries",
+          "partial": false,
+          "minimum_samples": 8,
+          "maximum_samples": 8,
+          "secondary_distance": 1000000.0,
+          "texture_mip": 0,
+          "light_count": 0,
+          "world_to_clip": [
+            0.621992826461792,
+            -1.532538647097681e-07,
+            0.0004503137315623462,
+            -0.9001771211624146,
+            8.989522722133853e-14,
+            1.4281480312347412,
+            5.963447097245833e-11,
+            -1.1920930376163597e-07,
+            -1.2855862379074097,
+            -7.414724478849166e-08,
+            0.0002178709692088887,
+            -0.435524046421051,
+            -1.0155311822891235,
+            -2.358771562576294,
+            0.04635605216026306,
+            7.3342485427856445
+          ],
+          "camera_position": [
+            6.911816120147705,
+            1.6516304016113281,
+            2.5541412830352783
+          ],
+          "environment": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "sha256": "834a16db228edfa14edba9019a4065a899a05f0e1935298798aaf48f9e4c4a41"
+        },
+        "backend": "metal",
+        "submitted": 17,
+        "visible": 16,
+        "culled": 1,
+        "draws": 8,
+        "reference_draws": 17,
+        "source_ids": [
+          1,
+          2,
+          3,
+          4,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          14,
+          15,
+          16,
+          17,
+          13
+        ],
+        "adapter_name": "Apple M5",
+        "raster_max_byte_error": 0,
+        "identity_max_byte_error": 0,
+        "observed_source_ids": [
+          1,
+          2,
+          3,
+          4,
+          12
+        ],
+        "artifact_sha256": {
+          "scene-acceptance.bin": "d70d707288ce0285becd6b48514e5499e55b638305f34dd39b89f4d27e3124cd",
+          "raster-reference.rgba": "a9dcfc13faeab089b8b43523b90725afa712e3109464d48e179ce192336247a3",
+          "raster-optimized.rgba": "a9dcfc13faeab089b8b43523b90725afa712e3109464d48e179ce192336247a3",
+          "capture.luhdr": "834a16db228edfa14edba9019a4065a899a05f0e1935298798aaf48f9e4c4a41",
+          "adapter-name.txt": "b4d8cd2e60e10231d9f5559ddc91c2c91abb3f8562ecb1b3125bd192a62446a6",
+          "identity-acceptance.bin": "8463f9688d212c29c06651688e8c45fe165b839554efca564cf45ff5a4ae8e3f",
+          "identity-reference.rgba": "17f479a078602edb4c87efb457b0ae7b0d53bad57d5605485f5e30f4c3c39806",
+          "identity-optimized.rgba": "17f479a078602edb4c87efb457b0ae7b0d53bad57d5605485f5e30f4c3c39806"
+        }
+      }
+    },
+    "native_parity": {
+      "passed": true,
+      "failing_pixels": 0,
+      "largest_errors": [
+        {
+          "pixel": 622,
+          "rgb_vector_error": 0.00023929031269021798
+        },
+        {
+          "pixel": 649,
+          "rgb_vector_error": 9.264288119895414e-05
+        },
+        {
+          "pixel": 322,
+          "rgb_vector_error": 7.596291030750203e-05
+        },
+        {
+          "pixel": 471,
+          "rgb_vector_error": 7.039834043485027e-05
+        },
+        {
+          "pixel": 264,
+          "rgb_vector_error": 6.59256000763708e-05
+        },
+        {
+          "pixel": 820,
+          "rgb_vector_error": 6.054567708493259e-05
+        },
+        {
+          "pixel": 822,
+          "rgb_vector_error": 5.980915694668485e-05
+        },
+        {
+          "pixel": 701,
+          "rgb_vector_error": 5.1976285722747875e-05
+        }
+      ],
+      "max_rgb_vector_error": 0.00023929031269021798,
+      "rms_rgb_vector_error": 1.069282011055848e-05,
+      "absolute_tolerance": 0.002,
+      "relative_tolerance": 0.0001
+    }
+  },
+  "native_64x64_32spp": {
+    "accepted": false,
+    "metrics": {
+      "passed": false,
+      "failing_pixels": 4,
+      "largest_errors": [
+        {
+          "pixel": 902,
+          "rgb_vector_error": 0.1849447408658591
+        },
+        {
+          "pixel": 231,
+          "rgb_vector_error": 0.1055587253701998
+        },
+        {
+          "pixel": 540,
+          "rgb_vector_error": 0.06541646947004384
+        },
+        {
+          "pixel": 604,
+          "rgb_vector_error": 0.009988584153808227
+        },
+        {
+          "pixel": 4060,
+          "rgb_vector_error": 0.001612529216150652
+        },
+        {
+          "pixel": 592,
+          "rgb_vector_error": 8.531155150787773e-05
+        },
+        {
+          "pixel": 1717,
+          "rgb_vector_error": 6.924508680740933e-05
+        },
+        {
+          "pixel": 2015,
+          "rgb_vector_error": 5.82970468129424e-05
+        }
+      ],
+      "max_rgb_vector_error": 0.1849447408658591,
+      "rms_rgb_vector_error": 0.0034843737452558404,
+      "absolute_tolerance": 0.002,
+      "relative_tolerance": 0.0001
+    },
+    "cpu": {
+      "bundle_sha256": "19ff7633bb1514f766b869047d9b3023488603f22c872284fe0869ee6cbc45de",
+      "binary_sha256": "000559a75760105b448df53aeec814ad459ddd5691690424388803b7b490dc00",
+      "counts": [
+        3,
+        8,
+        6,
+        17,
+        85554,
+        28561,
+        28831
+      ],
+      "capture": {
+        "schema": 1,
+        "profile": 1,
+        "sampler": 1,
+        "width": 64,
+        "height": 64,
+        "target_samples": 32,
+        "max_depth": 4,
+        "roulette_depth": 3,
+        "flags": 9,
+        "seed": 871,
+        "revision": 1,
+        "scene_fingerprint": "4a3729a57838b90766ebfc192aae6423",
+        "traversal": "cpu_oracle",
+        "partial": false,
+        "minimum_samples": 32,
+        "maximum_samples": 32,
+        "secondary_distance": 1000000.0,
+        "texture_mip": 0,
+        "light_count": 0,
+        "world_to_clip": [
+          0.621992826461792,
+          -1.532538647097681e-07,
+          0.0004503137315623462,
+          -0.9001771211624146,
+          8.989522722133853e-14,
+          1.4281480312347412,
+          5.963447097245833e-11,
+          -1.1920930376163597e-07,
+          -1.2855862379074097,
+          -7.414724478849166e-08,
+          0.0002178709692088887,
+          -0.435524046421051,
+          -1.0155311822891235,
+          -2.358771562576294,
+          0.04635605216026306,
+          7.3342485427856445
+        ],
+        "camera_position": [
+          6.911816120147705,
+          1.6516304016113281,
+          2.5541412830352783
+        ],
+        "environment": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "sha256": "4f707ae61f2d4fa17a9086b3bac21f3841751fdf7f5182da794ad7e79d53dfc0"
+      },
+      "backend": "metal",
+      "submitted": 17,
+      "visible": 16,
+      "culled": 1,
+      "draws": 8,
+      "reference_draws": 17,
+      "source_ids": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        14,
+        15,
+        16,
+        17,
+        13
+      ],
+      "adapter_name": "Apple M5",
+      "raster_max_byte_error": 0,
+      "identity_max_byte_error": 0,
+      "observed_source_ids": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        12,
+        17
+      ],
+      "artifact_sha256": {
+        "scene-acceptance.bin": "d70d707288ce0285becd6b48514e5499e55b638305f34dd39b89f4d27e3124cd",
+        "raster-reference.rgba": "1168cce313dca594eb1e213ec3bd3fd1e720a9d5663b8c253795999d4aa2f187",
+        "raster-optimized.rgba": "1168cce313dca594eb1e213ec3bd3fd1e720a9d5663b8c253795999d4aa2f187",
+        "capture.luhdr": "4f707ae61f2d4fa17a9086b3bac21f3841751fdf7f5182da794ad7e79d53dfc0",
+        "adapter-name.txt": "b4d8cd2e60e10231d9f5559ddc91c2c91abb3f8562ecb1b3125bd192a62446a6",
+        "identity-acceptance.bin": "8463f9688d212c29c06651688e8c45fe165b839554efca564cf45ff5a4ae8e3f",
+        "identity-reference.rgba": "cdc879eef354182e0c17345bb78dc0af2b368d62d44db78130b5f728b782dbab",
+        "identity-optimized.rgba": "cdc879eef354182e0c17345bb78dc0af2b368d62d44db78130b5f728b782dbab"
+      }
+    },
+    "native": {
+      "bundle_sha256": "19ff7633bb1514f766b869047d9b3023488603f22c872284fe0869ee6cbc45de",
+      "binary_sha256": "000559a75760105b448df53aeec814ad459ddd5691690424388803b7b490dc00",
+      "counts": [
+        3,
+        8,
+        6,
+        17,
+        85554,
+        28561,
+        28831
+      ],
+      "capture": {
+        "schema": 1,
+        "profile": 1,
+        "sampler": 1,
+        "width": 64,
+        "height": 64,
+        "target_samples": 32,
+        "max_depth": 4,
+        "roulette_depth": 3,
+        "flags": 8,
+        "seed": 871,
+        "revision": 1,
+        "scene_fingerprint": "4a3729a57838b90766ebfc192aae6423",
+        "traversal": "native_queries",
+        "partial": false,
+        "minimum_samples": 32,
+        "maximum_samples": 32,
+        "secondary_distance": 1000000.0,
+        "texture_mip": 0,
+        "light_count": 0,
+        "world_to_clip": [
+          0.621992826461792,
+          -1.532538647097681e-07,
+          0.0004503137315623462,
+          -0.9001771211624146,
+          8.989522722133853e-14,
+          1.4281480312347412,
+          5.963447097245833e-11,
+          -1.1920930376163597e-07,
+          -1.2855862379074097,
+          -7.414724478849166e-08,
+          0.0002178709692088887,
+          -0.435524046421051,
+          -1.0155311822891235,
+          -2.358771562576294,
+          0.04635605216026306,
+          7.3342485427856445
+        ],
+        "camera_position": [
+          6.911816120147705,
+          1.6516304016113281,
+          2.5541412830352783
+        ],
+        "environment": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "sha256": "b89bb034a9320c1ddd3f5f3c9a4d04c59f458cb0ae6ff0103c1ecc6585063c1e"
+      },
+      "backend": "metal",
+      "submitted": 17,
+      "visible": 16,
+      "culled": 1,
+      "draws": 8,
+      "reference_draws": 17,
+      "source_ids": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        14,
+        15,
+        16,
+        17,
+        13
+      ],
+      "adapter_name": "Apple M5",
+      "raster_max_byte_error": 0,
+      "identity_max_byte_error": 0,
+      "observed_source_ids": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        12,
+        17
+      ],
+      "artifact_sha256": {
+        "scene-acceptance.bin": "d70d707288ce0285becd6b48514e5499e55b638305f34dd39b89f4d27e3124cd",
+        "raster-reference.rgba": "1168cce313dca594eb1e213ec3bd3fd1e720a9d5663b8c253795999d4aa2f187",
+        "raster-optimized.rgba": "1168cce313dca594eb1e213ec3bd3fd1e720a9d5663b8c253795999d4aa2f187",
+        "capture.luhdr": "b89bb034a9320c1ddd3f5f3c9a4d04c59f458cb0ae6ff0103c1ecc6585063c1e",
+        "adapter-name.txt": "b4d8cd2e60e10231d9f5559ddc91c2c91abb3f8562ecb1b3125bd192a62446a6",
+        "identity-acceptance.bin": "8463f9688d212c29c06651688e8c45fe165b839554efca564cf45ff5a4ae8e3f",
+        "identity-reference.rgba": "cdc879eef354182e0c17345bb78dc0af2b368d62d44db78130b5f728b782dbab",
+        "identity-optimized.rgba": "cdc879eef354182e0c17345bb78dc0af2b368d62d44db78130b5f728b782dbab"
+      }
+    },
+    "disposition": "Open: strict dense native parity fails; hit diagnostics include near-coincident primitive choices and near-origin disagreements. Root cause not fully resolved."
+  }
+}
