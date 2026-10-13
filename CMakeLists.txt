@@ -178,6 +178,7 @@ if(NOT EMSCRIPTEN)
     add_subdirectory(tools/configuration)
 endif()
 add_subdirectory(modules/content)
+add_subdirectory(modules/content/scene_cook)
 add_subdirectory(modules/audio/content)
 add_subdirectory(modules/runtime/resources)
 

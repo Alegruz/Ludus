@@ -132,6 +132,9 @@ template <typename ScalarType>
 [[nodiscard]] float64 Exp(float64 value) noexcept;
 [[nodiscard]] float64 Floor(float64 value) noexcept;
 [[nodiscard]] float64 Ceil(float64 value) noexcept;
+/// Raise base to exponent with the platform libm pow (IEEE special cases apply).
+/// Offline cookers use it to reproduce reference transfer functions bit for bit.
+[[nodiscard]] float64 Pow(float64 base, float64 exponent) noexcept;
 
 /// Decode a finite [0,1] sRGB channel into linear light with the IEC/W3C piecewise
 /// transfer. Values outside this bounded domain return NaN. No allocation/state.

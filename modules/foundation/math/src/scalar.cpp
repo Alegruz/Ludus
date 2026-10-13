@@ -186,6 +186,10 @@ float64 Floor(float64 value) noexcept
 {
     return std::floor(value);
 }
+float64 Pow(float64 base, float64 exponent) noexcept
+{
+    return std::pow(base, exponent);
+}
 float64 Ceil(float64 value) noexcept
 {
     return std::ceil(value);
