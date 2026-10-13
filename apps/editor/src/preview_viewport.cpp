@@ -4,9 +4,11 @@
 
 #include <new>
 
+#include <QComboBox>
 #include <QGuiApplication>
 #include <QLabel>
 #include <QPointer>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
@@ -30,6 +32,8 @@ struct PreviewViewport::State final
     QVBoxLayout* Layout = nullptr;
     QLabel* Message = nullptr;
     uint64 Presented = 0;
+    bool IsAutomatic = true;
+    bool CanShowFrames = true;
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     // Thanks to The Qt Company: QQuickWindow frame stages and Native Interfaces
     // define wrapping and submission order. We use its basic owner-thread loop,
@@ -135,7 +139,7 @@ private:
     void createItem()
     {
         Item = new ImageItem(*this, Window->contentItem());
-        Item->setSize(QSizeF(Widget->size()));
+        Item->setSize(QSizeF(Window->size()));
     }
     void createWindow()
     {
@@ -234,6 +238,12 @@ private:
                              Message->setText(error);
                              QTimer::singleShot(0, Widget, [this]() { Preview->Stop(); });
                          });
+        QObject::connect(Window, &QQuickWindow::widthChanged, Widget, [this]() {
+            static_cast<PreviewViewport*>(Widget)->resizeSurface();
+        });
+        QObject::connect(Window, &QQuickWindow::heightChanged, Widget, [this]() {
+            static_cast<PreviewViewport*>(Widget)->resizeSurface();
+        });
         createItem();
         Container = QWidget::createWindowContainer(Window, Widget);
         Container->setFocusPolicy(Qt::NoFocus);
@@ -262,6 +272,7 @@ private:
     }
     void clearFrames()
     {
+        CanShowFrames = IsAutomatic;
         bool hasFrames = false;
         for (const Frame& frame : Frames)
         {
@@ -373,9 +384,29 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     setFocusPolicy(Qt::StrongFocus);
     setToolTip(QStringLiteral("Drag to orbit · middle/Shift-drag to pan · wheel to zoom · double-click to frame all"));
     mState->Preview = preview;
+    mState->IsAutomatic = isAutomatic;
+    mState->CanShowFrames = isAutomatic;
     mState->Widget = this;
     mState->Layout = new QVBoxLayout(this);
     mState->Layout->setContentsMargins(0, 0, 0, 0);
+    QComboBox* shading = new QComboBox(this);
+    shading->setObjectName(QStringLiteral("viewportShading"));
+    shading->setAccessibleName(QStringLiteral("Viewport shading"));
+    shading->addItem(QStringLiteral("Solid — neutral preview shading"));
+    shading->addItem(QStringLiteral("Albedo — unlit surface colors"));
+    shading->addItem(QStringLiteral("Lit — scene lighting"));
+    shading->setToolTip(QStringLiteral("Solid uses an editor-only neutral material and preview light; Albedo shows "
+                                       "base colors without illumination. Lit shows emission; "
+                                       "imported emitting surfaces do not yet illuminate the room."));
+    shading->setCurrentIndex(static_cast<foundation::int32>(preview->GetShading()));
+    mState->Layout->addWidget(shading);
+    connect(shading, &QComboBox::currentIndexChanged, this, [preview](foundation::int32 index) {
+        preview->SetShading(static_cast<PreviewShading>(index));
+    });
+    connect(preview, &RenderPreview::NavigationChanged, shading, [preview, shading]() {
+        const QSignalBlocker blocker(shading);
+        shading->setCurrentIndex(static_cast<foundation::int32>(preview->GetShading()));
+    });
     mState->Message = new QLabel(QStringLiteral("Open a World to render it here."), this);
     mState->Message->setAlignment(Qt::AlignCenter);
     mState->Message->setWordWrap(true);
@@ -398,9 +429,9 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
             mState->destroyWindow();
         }
     });
-    connect(&mState->Service, &QTimer::timeout, this, [this, isAutomatic]() {
+    connect(&mState->Service, &QTimer::timeout, this, [this]() {
         mState->releaseRetired();
-        if (isAutomatic == true)
+        if (mState->CanShowFrames == true)
         {
             mState->showFrame();
         }
@@ -424,6 +455,9 @@ PreviewViewport::~PreviewViewport()
 void PreviewViewport::ShowFrame()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    // A manually gated import may present only after its catalog is committed.
+    // Once admitted, also retry frames that arrived while both slots were leased.
+    mState->CanShowFrames = true;
     mState->showFrame();
 #endif
 }
@@ -463,9 +497,12 @@ bool PreviewViewport::eventFilter(QObject* watched, QEvent* event)
 void PreviewViewport::resizeSurface()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    if (mState->Item != nullptr)
+    if (mState->Window != nullptr && mState->Item != nullptr)
     {
-        mState->Item->setSize(QSizeF(size()));
+        const foundation::float64 ratio = mState->Window->devicePixelRatio();
+        Preview_->Resize(qRound(static_cast<foundation::float64>(mState->Window->width()) * ratio),
+                         qRound(static_cast<foundation::float64>(mState->Window->height()) * ratio));
+        mState->Item->setSize(QSizeF(mState->Window->size()));
         mState->Item->update();
     }
 #endif

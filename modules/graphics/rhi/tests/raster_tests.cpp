@@ -1,7 +1,10 @@
 #include "internal/lifecycle.h"
+#include "internal/profile.h"
 #include "reference_raster.h"
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
+
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
 
@@ -26,14 +29,22 @@ struct Session final
 {
     DeviceHandle Device;
     SurfaceHandle Surface;
-    explicit Session(const StorageLimits& storage = {})
+    explicit Session(const StorageLimits& storage = {},
+                     uint32 maxTextureDimension = 4096,
+                     Backend activeBackend = Backend::WebGPU)
     {
         Shutdown();
         reference::Reset();
         backend::ImmediateError = StartupError::None;
         backend::NextFrame = FrameStatus::Ready;
-        backend::ActiveKind = Backend::WebGPU;
+        backend::ActiveKind = activeBackend;
         backend::SelectionSupported = true;
+        if (maxTextureDimension != 4096)
+        {
+            reference::RasterLimitOverride = backend::RasterLimits();
+            reference::RasterLimitOverride.MaxTextureDimension2D = maxTextureDimension;
+            reference::OverrideRasterLimits = true;
+        }
         DeviceDescription description;
         description.Storage = storage;
         REQUIRE(CreateDevice({}, {}, description, Device, Surface) == DeviceStatus::Pending);
@@ -2532,8 +2543,7 @@ TEST_CASE("R9 dimensional uploads validate slices blocks and retained typed view
     CHECK(CreateTexture(session.Device, description, {{bytes, 39}, 0, blocks}, malformed) ==
           RasterStatus::InvalidDescription);
     description.Width = 7;
-    CHECK(CreateTexture(session.Device, description, {{bytes, 40}, 0, blocks}, malformed) ==
-          RasterStatus::InvalidDescription);
+    CHECK(CreateTexture(session.Device, description, {{bytes, 40}, 0, blocks}, malformed) == RasterStatus::Unsupported);
     description = { .Width = 4, .Height = 2, .Dimension = TextureDimension::Cube, .DepthOrLayers = 6 };
     CHECK(CreateTexture(session.Device, description, {{bytes, 192}, 16}, malformed) ==
           RasterStatus::InvalidDescription);
@@ -3039,4 +3049,230 @@ TEST_CASE("R10 rejects NaN color and depth clears before backend calls", "[rhi][
     CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
     CHECK(reference::Passes == 0);
     REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+}
+
+TEST_CASE("BC5 validates encoded mip and slice footprints before publication", "[rhi][r18][texture]")
+{
+    Session session;
+    constexpr usize ENCODED_BYTES = 672;
+    constexpr usize MIP_COUNT = 4;
+    StaticArray<uint8, ENCODED_BYTES> bytes{};
+    StaticArray<TextureMipUpload, MIP_COUNT> mips{{{0, 32}, {32, 16}, {48, 16}, {64, 16}}};
+    TextureDescription description{ .Width = 8, .Height = 4, .Format = RasterFormat::Bc5RgUnorm, .MipLevels = 4 };
+    usize byteCount = 80;
+    SECTION("two-dimensional") {}
+    SECTION("array")
+    {
+        description.Dimension = TextureDimension::D2Array;
+        description.DepthOrLayers = 3;
+        mips = {{{0, 32}, {96, 16}, {144, 16}, {192, 16}}};
+        byteCount = 240;
+    }
+    SECTION("cube")
+    {
+        description.Height = 8;
+        description.Dimension = TextureDimension::Cube;
+        description.DepthOrLayers = 6;
+        mips = {{{0, 32}, {384, 16}, {480, 16}, {576, 16}}};
+        byteCount = 672;
+    }
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device, description, {{bytes.GetData(), byteCount}, 0, mips}, texture) ==
+            RasterStatus::Ready);
+    TextureResidency residency;
+    REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedBytes == byteCount);
+    TextureViewHandle view;
+    TextureViewDescription selected;
+    selected.Dimension = description.Dimension;
+    selected.BaseMip = 3;
+    selected.MipCount = 1;
+    REQUIRE(CreateTextureView(session.Device, texture, selected, view) == RasterStatus::Ready);
+
+    StorageUsage before;
+    REQUIRE(GetStorageUsage(session.Device, before) == RasterStatus::Ready);
+    const usize publications = reference::Creates[static_cast<usize>(internal::RasterKind::Texture)];
+    TextureHandle preserved = texture;
+    CHECK(CreateTexture(session.Device, description, {{bytes.GetData(), byteCount - 1}, 0, mips}, preserved) ==
+          RasterStatus::InvalidDescription);
+    CHECK(GetStatus(session.Device, preserved) == RasterStatus::Ready);
+    mips[1].RowPitch = 8;
+    CHECK(CreateTexture(session.Device, description, {{bytes.GetData(), byteCount}, 0, mips}, preserved) ==
+          RasterStatus::InvalidDescription);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Texture)] == publications);
+    StorageUsage after;
+    REQUIRE(GetStorageUsage(session.Device, after) == RasterStatus::Ready);
+    CHECK(after.ResourceBytes == before.ResourceBytes);
+    CHECK(after.HostBytes == before.HostBytes);
+    REQUIRE(Destroy(session.Device, preserved) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, texture) == RasterStatus::InvalidHandle);
+    CHECK(GetStatus(session.Device, view) == RasterStatus::Ready);
+}
+
+TEST_CASE("BC5 rejects unsupported allocation roles and rolls back native failure", "[rhi][r18][texture]")
+{
+    Session session;
+    constexpr usize BLOCK_BYTES = 16;
+    StaticArray<uint8, BLOCK_BYTES> bytes{};
+    TextureHandle texture;
+    TextureDescription description{ .Width = 4, .Height = 4, .Format = RasterFormat::Bc5RgUnorm };
+    SECTION("attachment")
+    {
+        description.Attachment = true;
+        CHECK(CreateTexture(session.Device, description, {}, texture) == RasterStatus::InvalidDescription);
+    }
+    SECTION("CPU content")
+    {
+        description.RetainCpuContent = true;
+        CHECK(CreateTexture(session.Device, description, {bytes, 16}, texture) == RasterStatus::InvalidDescription);
+    }
+    SECTION("volume")
+    {
+        description.Dimension = TextureDimension::D3;
+        CHECK(CreateTexture(session.Device, description, {bytes, 16}, texture) == RasterStatus::Unsupported);
+    }
+    SECTION("unaligned base")
+    {
+        description.Width = 3;
+        CHECK(CreateTexture(session.Device, description, {bytes, 16}, texture) == RasterStatus::Unsupported);
+    }
+    SECTION("backend failure")
+    {
+        StorageUsage before;
+        REQUIRE(GetStorageUsage(session.Device, before) == RasterStatus::Ready);
+        reference::Next = RasterStatus::OutOfMemory;
+        CHECK(CreateTexture(session.Device, description, {bytes, 16}, texture) == RasterStatus::OutOfMemory);
+        StorageUsage after;
+        REQUIRE(GetStorageUsage(session.Device, after) == RasterStatus::Ready);
+        CHECK(after.ResourceBytes == before.ResourceBytes);
+        reference::Next = RasterStatus::Ready;
+        REQUIRE(CreateTexture(session.Device, description, {bytes, 16}, texture) == RasterStatus::Ready);
+        REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    }
+    CHECK(IsNull(texture) == true);
+}
+
+TEST_CASE("Negotiated large texture dimensions preserve byte budgets and outputs", "[rhi][r18][texture]")
+{
+    Session session({}, 16384);
+    constexpr usize WIDTH = 8240;
+    constexpr usize BYTE_COUNT = WIDTH * 4;
+    StaticArray<uint8, BYTE_COUNT> bytes{};
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device, { .Width = WIDTH, .Height = 1 }, {bytes, BYTE_COUNT}, texture) ==
+            RasterStatus::Ready);
+    TextureDescription actual;
+    REQUIRE(GetTextureDescription(session.Device, texture, actual) == RasterStatus::Ready);
+    CHECK(actual.Width == WIDTH);
+    constexpr usize LIMIT_BYTE_COUNT = usize{16384} * 4;
+    StaticArray<uint8, LIMIT_BYTE_COUNT> boundary{};
+    TextureHandle exact;
+    REQUIRE(CreateTexture(session.Device, { .Width = 16384, .Height = 1 }, {boundary, LIMIT_BYTE_COUNT}, exact) ==
+            RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, exact) == RasterStatus::Ready);
+    TextureHandle preserved = texture;
+    CHECK(CreateTexture(session.Device, { .Width = 16385, .Height = 1 }, {bytes, BYTE_COUNT}, preserved) ==
+          RasterStatus::Unsupported);
+    REQUIRE(GetTextureDescription(session.Device, preserved, actual) == RasterStatus::Ready);
+    CHECK(actual.Width == WIDTH);
+    CHECK(CreateTexture(session.Device, { .Width = WIDTH, .Height = 8200 }, {bytes, BYTE_COUNT}, preserved) ==
+          RasterStatus::InvalidDescription);
+    REQUIRE(GetTextureDescription(session.Device, preserved, actual) == RasterStatus::Ready);
+    CHECK(actual.Width == WIDTH);
+    REQUIRE(Destroy(session.Device, preserved) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, texture) == RasterStatus::InvalidHandle);
+}
+
+TEST_CASE("BC5 dimensions do not override the resource byte budget", "[rhi][r18][texture]")
+{
+    StorageLimits storage;
+    storage.ResourceBytes = 15;
+    Session session(storage);
+    constexpr usize BLOCK_BYTES = 16;
+    StaticArray<uint8, BLOCK_BYTES> bytes{};
+    TextureHandle texture;
+    CHECK(CreateTexture(session.Device,
+                        { .Width = 4, .Height = 4, .Format = RasterFormat::Bc5RgUnorm },
+                        {bytes, BLOCK_BYTES},
+                        texture) == RasterStatus::CapacityExceeded);
+    CHECK(IsNull(texture) == true);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Texture)] == 0);
+    StorageUsage usage;
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.ResourceBytes == 0);
+}
+
+TEST_CASE("Native BC5 edge dimensions retain complete blocks and mip packing", "[rhi][r18][texture]")
+{
+    Session session({}, 4096, Backend::Metal);
+    constexpr usize BYTE_COUNT = 64;
+    constexpr usize MIP_COUNT = 3;
+    StaticArray<uint8, BYTE_COUNT> bytes{};
+    const StaticArray<TextureMipUpload, MIP_COUNT> mips{{{0, 32}, {32, 16}, {48, 16}}};
+    FormatCapabilities format;
+    REQUIRE(GetFormatCapabilities(session.Device, RasterFormat::Bc5RgUnorm, format) == RasterStatus::Ready);
+    CHECK(format.HasUnalignedBlockExtents == true);
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device,
+                          { .Width = 7, .Height = 3, .Format = RasterFormat::Bc5RgUnorm, .MipLevels = 3 },
+                          {bytes, 0, mips},
+                          texture) == RasterStatus::Ready);
+    TextureResidency residency;
+    REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedBytes == BYTE_COUNT);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+}
+
+TEST_CASE("R18c array and volume extents admit their exact enabled boundary", "[rhi][raster][r18c]")
+{
+    Session session;
+    constexpr uint32 EXTENT = 2048;
+    constexpr usize UPLOAD_BYTES = usize{EXTENT} * 4;
+    ludus::foundation::StaticArray<uint8, UPLOAD_BYTES> bytes{};
+    TextureHandle texture;
+    TextureDescription description
+    {
+        .Width = 1,
+        .Height = 1,
+        .Dimension = TextureDimension::D2Array,
+        .DepthOrLayers = EXTENT,
+    };
+    SECTION("array") {}
+    SECTION("volume")
+    {
+        description.Dimension = TextureDimension::D3;
+    }
+    REQUIRE(CreateTexture(session.Device, description, {bytes, 4}, texture) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    description.DepthOrLayers = EXTENT + 1;
+    const usize creates = reference::Creates[static_cast<usize>(internal::RasterKind::Texture)];
+    CHECK(CreateTexture(session.Device, description, {bytes, 4}, texture) == RasterStatus::Unsupported);
+    CHECK(IsNull(texture) == true);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Texture)] == creates);
+}
+
+TEST_CASE("R18c complete upload limit is independent of buffer and logical budgets", "[rhi][raster][r18c]")
+{
+    Session session;
+    reference::RasterLimitOverride = backend::RasterLimits();
+    reference::OverrideRasterLimits = true;
+    // Configure a smaller complete-upload limit without changing the enabled buffer size.
+    reference::RasterLimitOverride.MaxBufferSize = 64;
+    reference::RasterLimitOverride.MaxTextureDimension2D = 4096;
+    reference::RasterLimitOverride.MaxUniformRange = 16384;
+    reference::RasterLimitOverride.MaxTextureUploadBytes = 16;
+    constexpr usize BYTE_COUNT = 32;
+    ludus::foundation::StaticArray<uint8, BYTE_COUNT> bytes{};
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device, { .Width = 1, .Height = 1 }, {{bytes.GetData(), 16}, 16}, texture) ==
+            RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    StorageUsage before;
+    REQUIRE(GetStorageUsage(session.Device, before) == RasterStatus::Ready);
+    CHECK(CreateTexture(session.Device, { .Width = 1, .Height = 1 }, {bytes, 32}, texture) ==
+          RasterStatus::InvalidDescription);
+    CHECK(IsNull(texture) == true);
+    StorageUsage after;
+    REQUIRE(GetStorageUsage(session.Device, after) == RasterStatus::Ready);
+    CHECK(after.ResourceBytes == before.ResourceBytes);
 }

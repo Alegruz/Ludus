@@ -100,6 +100,7 @@ nav:
       - Save, validate and build render graphs: development/render-graph-authoring.md
       - Render graph authoring proposal: architecture/render-graph-authoring.md
       - Benchmark scenes and suites: development/benchmark-scenes.md
+      - Best-effort pbrt import: development/best-effort-scene-import.md
       - Release packages: development/game-packaging-publishing.md
       - Browser editor build: development/browser-editor.md
   - Samples:
@@ -115,6 +116,7 @@ nav:
       - Startup and shutdown: wiki/architecture/lifecycle.md
       - Platform and rendering: wiki/architecture/rendering.md
       - Terrain and generation: wiki/architecture/terrain.md
+      - Procedural content generation: architecture/procedural-content-generation.md
       - Physics systems proposal: architecture/physics-systems.md
       - Worlds and frame updates: wiki/architecture/world.md
       - Content and audio: wiki/architecture/content.md

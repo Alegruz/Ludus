@@ -2,6 +2,8 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/containers/static_array.hpp>
+
 namespace ludus::graphics::rhi
 {
 /// Allocation/sampled-view dimensionality; cube faces use +X,-X,+Y,-Y,+Z,-Z order.
@@ -34,7 +36,16 @@ enum class RasterFormat : ludus::foundation::uint8
     Bc1RgbaUnorm,
     /// BC3 RGBA normalized 4x4 blocks (16 bytes), sampled when enabled; no automatic compression.
     Bc3RgbaUnorm,
+    /// BC5 RG unsigned normalized 4x4 blocks (16 bytes); sampling returns (R,G,0,1).
+    /// Requires enabled compression support; no normal reconstruction, conversion or compression.
+    Bc5RgUnorm,
 };
+/// Number of known formats; profile tables are indexed by RasterFormat.
+inline constexpr ludus::foundation::usize RASTER_FORMAT_COUNT =
+    static_cast<ludus::foundation::usize>(RasterFormat::Bc5RgUnorm) + 1;
+/// Maximum group-zero binding numbers and copied shader/layout metadata entries.
+/// Enabled per-stage descriptor counts may be lower; query DeviceProfile before authoring layouts.
+inline constexpr ludus::foundation::usize RASTER_BINDING_COUNT = 16;
 /// Copied R6 storage maxima and explicit byte budgets. Configure before startup.
 /// Counts are limits, not reservations; creation may fail under byte/allocation pressure.
 /// Defaults preserve the original general profiles. The fullscreen facade is separate.
@@ -94,7 +105,8 @@ struct RasterCapabilities final
 {
     /// Maximum bytes per buffer; zero when unavailable.
     ludus::foundation::usize MaxBufferSize = 0;
-    /// Maximum width/height of sampled textures.
+    /// Enabled device/context width/height ceiling in texels; individual formats/uses may be lower.
+    /// Does not reserve memory or override upload/resource byte budgets.
     ludus::foundation::uint32 MaxTextureDimension2D = 0;
     /// Uniform range offset alignment in bytes.
     ludus::foundation::usize UniformOffsetAlignment = 0;
@@ -109,10 +121,14 @@ struct RasterCapabilities final
     /// RGBA16F attachment supports sampling, linear filtering and blending.
     /// False selects the authored linear RGBA8 fallback; no automatic backend switch.
     bool HdrColor = false;
+    /// Maximum complete creation-upload blob in bytes, including row/slice padding.
+    /// Independent of transfer-ring slice size; bounded by backend staging/address limits.
+    /// Creation separately consumes the configured ResourceBytes budget.
+    ludus::foundation::usize MaxTextureUploadBytes = 0;
 };
 /// Bounded single-queue buffer compute profile; zero fields mean unavailable.
 /// Storage textures, atomics between queues and indirect dispatch are deferred.
-/// Layouts contain at most four storage bindings and eight total buffer bindings.
+/// Layouts obey enabled MaxStorageBindings and Interface.MaxBindings independently.
 struct ComputeCapabilities final
 {
     /// Maximum storage binding range in bytes.
@@ -125,6 +141,8 @@ struct ComputeCapabilities final
     ludus::foundation::uint32 MaxWorkgroupInvocations = 0;
     /// Maximum dispatched workgroups along each axis.
     ludus::foundation::uint32 MaxDispatch[3]{};
+    /// Maximum scalar storage buffer descriptors in a compute layout; zero disables storage.
+    ludus::foundation::uint32 MaxStorageBindings = 0;
 };
 /// Implemented texture operations; native support alone never enables an engine API.
 /// Storage remains unimplemented; copy flags describe bounded R8 RGBA8Unorm D2 operations.
@@ -182,8 +200,11 @@ struct FormatCapabilities final
     bool StencilAttachment = false;
     /// Private stencil aspect permits scalar unsigned loads through a D2 view.
     bool StencilSampled = false;
+    /// Compressed base width/height may end inside a block; uploaded edge blocks remain complete.
+    /// False on the pinned WebGPU compressed profile; no implicit padding/resizing is performed.
+    bool HasUnalignedBlockExtents = false;
 };
-/// Fixed public raster interface bounds, independently of larger native adapter limits.
+/// Enabled public raster interface bounds, intersected with implemented metadata capacities.
 struct RasterInterfaceCapabilities final
 {
     /// Maximum group-zero binding entries.
@@ -217,6 +238,18 @@ struct BindingCapabilities final
     /// and enabled. Every element must be declared reachable and fully populated.
     /// Does not enable runtime-sized arrays, sparse tables or update-after-bind.
     bool HasBindlessTextureIndexing = false;
+    /// Maximum group-zero entries; binding numbers must also be below this bound.
+    ludus::foundation::uint32 MaxBindings = 0;
+    /// Maximum uniform buffer descriptors visible to any one shader stage.
+    ludus::foundation::uint32 MaxUniformBuffersPerStage = 0;
+    /// Maximum sampled texture descriptors visible to any one raster stage, including array elements.
+    ludus::foundation::uint32 MaxSampledTexturesPerStage = 0;
+    /// Maximum sampler descriptors visible to any one raster stage.
+    ludus::foundation::uint32 MaxSamplersPerStage = 0;
+    /// Maximum uniform descriptors across every stage in one group-zero layout.
+    ludus::foundation::uint32 MaxUniformBuffersPerSet = 0;
+    /// Maximum sampler descriptors across every stage in one group-zero layout.
+    ludus::foundation::uint32 MaxSamplersPerSet = 0;
 };
 /// Immutable effective profile snapshot while the device is ready; zero otherwise.
 /// Formats are indexed by RasterFormat's underlying value, in declaration order.
@@ -254,8 +287,8 @@ struct DeviceProfile final
         .HostBytes = 0,
         .ResourceBytes = 0,
     };
-    /// Seven format entries indexed by RasterFormat, including unsupported uses.
-    FormatCapabilities Formats[7]{};
+    /// Known format entries indexed by RasterFormat, including unsupported uses.
+    ludus::foundation::StaticArray<FormatCapabilities, RASTER_FORMAT_COUNT> Formats{};
 };
 /// Raster admission constraints; zero fields impose no additional requirement.
 /// Nonzero fields imply required portable raster for required profile admission.
@@ -285,6 +318,18 @@ struct RasterRequirements final
     ludus::foundation::uint32 MinColorAttachments = 0;
     /// Minimum texture array layers.
     ludus::foundation::uint32 MinTextureLayers = 0;
+    /// Minimum complete texture creation-upload blob size in bytes.
+    ludus::foundation::usize MinTextureUploadBytes = 0;
+    /// Minimum uniform descriptors visible to one stage.
+    ludus::foundation::uint32 MinUniformBindings = 0;
+    /// Minimum sampled texture descriptors visible to one raster stage.
+    ludus::foundation::uint32 MinTextureBindings = 0;
+    /// Minimum sampler descriptors visible to one raster stage.
+    ludus::foundation::uint32 MinSamplerBindings = 0;
+    /// Minimum total uniform descriptors across stages in one layout.
+    ludus::foundation::uint32 MinUniformBindingsPerSet = 0;
+    /// Minimum total sampler descriptors across stages in one layout.
+    ludus::foundation::uint32 MinSamplerBindingsPerSet = 0;
 };
 /// Compute admission constraints; zero fields impose no additional requirement.
 /// Nonzero fields imply required compute for required profile admission.
@@ -300,6 +345,8 @@ struct ComputeRequirements final
     ludus::foundation::uint32 MinWorkgroupInvocations = 0;
     /// Minimum supported dispatched group count along each axis.
     ludus::foundation::uint32 MinDispatch[3]{};
+    /// Minimum compute storage descriptors in one layout.
+    ludus::foundation::uint32 MinStorageBindings = 0;
 };
 /// Required or preferred use of one known format. Uses are checked together.
 struct FormatRequirement final
@@ -328,6 +375,8 @@ struct FormatRequirement final
     bool StencilAttachment = false;
     /// Require enabled unsigned private stencil aspect loads.
     bool StencilSampled = false;
+    /// Require compressed base dimensions not divisible by block width/height; sampled BC formats only.
+    bool RequiresUnalignedBlockExtents = false;
 };
 /// Copied bounded required/preferred profile constraints. Unused array entries are ignored.
 /// Required constraints reject before Ready; preferred constraints only produce diagnostics.
@@ -337,8 +386,8 @@ struct DeviceProfileRequirements final
     RasterRequirements Raster;
     /// Additional compute limits.
     ComputeRequirements Compute;
-    /// At most seven unique known format requests.
-    FormatRequirement Formats[7]{};
+    /// At most RASTER_FORMAT_COUNT unique known format requests; unused entries are ignored.
+    ludus::foundation::StaticArray<FormatRequirement, RASTER_FORMAT_COUNT> Formats{};
     /// Number of valid entries in Formats; larger counts or duplicates are malformed.
     ludus::foundation::uint32 FormatCount = 0;
 };
@@ -411,6 +460,22 @@ enum class ProfileRequirement : ludus::foundation::uint8
     MipCount,
     /// The format's attachment sample count is unsupported.
     SampleCount,
+    /// Compressed base extents must be block-aligned on the enabled profile.
+    UnalignedBlockExtents,
+    /// Complete texture creation-upload byte limit is insufficient.
+    TextureUploadBytes,
+    /// Per-stage uniform descriptor limit is insufficient.
+    UniformBindings,
+    /// Per-stage sampled texture descriptor limit is insufficient.
+    TextureBindings,
+    /// Per-stage sampler descriptor limit is insufficient.
+    SamplerBindings,
+    /// Compute storage descriptor limit is insufficient.
+    StorageBindings,
+    /// Set-wide uniform descriptor limit is insufficient.
+    UniformBindingsPerSet,
+    /// Set-wide sampler descriptor limit is insufficient.
+    SamplerBindingsPerSet,
 };
 /// Bounded negotiation diagnostic; no strings or borrowed request data.
 struct ProfileDiagnostic final

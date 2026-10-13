@@ -20,6 +20,7 @@ retain detailed contracts, reference attribution and acceptance evidence.
 | [Startup and shutdown](lifecycle.md) | When is a provider usable? How does partial startup unwind? |
 | [Platform and rendering](rendering.md) | Who owns a window, frame and GPU resource? |
 | [Terrain and generation](terrain.md) | How should ground, generation, editing and streaming connect? |
+| [Procedural content generation](../../architecture/procedural-content-generation.md) | How do recipes, domain generators, author controls and runtime publication compose? |
 | [Physics systems](../../architecture/physics-systems.md) | Who owns shapes, bodies, sensors, constraints and queries? |
 | [Worlds and frame updates](world.md) | What makes an entity valid? When do edits and simulation take effect? |
 | [Content and audio](content.md) | Who owns source documents, resource revisions and playback? |

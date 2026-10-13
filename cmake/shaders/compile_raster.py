@@ -10,6 +10,9 @@ import struct
 # Reflect each target independently. No cross-target CPU packing is inferred.
 # Raster rejects storage; compute accepts bounded structured buffers. Both reject
 # resource arrays, extra groups and unsupported inputs.
+# Must match rhi::RASTER_BINDING_COUNT in profile.h; regression-checked.
+RASTER_BINDING_COUNT = 16
+
 def uniform_shape(value):
     kind = value.get('kind')
     if kind == 'scalar' and value.get('scalarType') == 'float32':
@@ -36,10 +39,6 @@ def external_text_source(namespace, label, data):
                   f"extern const char {label}[{len(encoded)}] = {{\n" +
                   ",\n".join(rows) + "\n};\n}\n")
     return declaration, definition
-
-
-# Must match rhi::RASTER_BINDING_COUNT; covered by shader-tool regression tests.
-RASTER_BINDING_COUNT = 16
 
 
 def raster_interface(document, stage, metal=False, native_arrays=False):
@@ -164,8 +163,8 @@ def raster_interface(document, stage, metal=False, native_arrays=False):
         group = point.get('threadGroupSize')
         if not isinstance(group, list) or len(group) != 3 or any(type(x) is not int or x <= 0 for x in group) or group[0] * group[1] * group[2] > 256 or any(x > cap for x, cap in zip(group, (256, 256, 64))):
             raise RuntimeError('Compute local workgroup dimensions exceed the bounded profile')
-        if sum(x['kind'].startswith('Storage') for x in entries) > 4:
-            raise RuntimeError('Compute supports at most four storage bindings')
+        if sum(x['kind'].startswith('Storage') for x in entries) > RASTER_BINDING_COUNT:
+            raise RuntimeError('Compute exceeds the implemented storage binding metadata capacity')
         result['workgroup'] = group
     return result
 

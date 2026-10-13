@@ -1,4 +1,5 @@
 #include "internal/world_workspace.h"
+#include "internal/import_report.h"
 
 #include "internal/controller.h"
 #include "internal/level_workspace.h"
@@ -26,6 +27,7 @@
 #include <QListWidget>
 #include <QLockFile>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScrollArea>
@@ -117,13 +119,13 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
         Scene_->CancelOperation();
     });
     connect(Import_, &QPushButton::clicked, this, [this]() {
-        const auto source = QFileDialog::getOpenFileName(this,
-                                                         QStringLiteral("Import reference scene"),
-                                                         {},
-                                                         QStringLiteral("PBRT scene (scene-v4.pbrt)"));
-        if (!source.isEmpty())
+        const QString source = QFileDialog::getOpenFileName(this,
+                                                            QStringLiteral("Import PBRT scene"),
+                                                            {},
+                                                            QStringLiteral("PBRT scenes (*.pbrt)"));
+        if (source.isEmpty() == false)
         {
-            (void)ImportScene(QFileInfo(source).absolutePath());
+            (void)PreviewImportScene(source);
         }
     });
     PreviewButton_ = new QPushButton(QStringLiteral("Open rendered preview"), this);
@@ -143,6 +145,39 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     connect(&DemoPreview_, &ScenePreview::Changed, this, &WorldWorkspace::WorldDemoChanged);
     files->addStretch();
     layout->addLayout(files);
+    QHBoxLayout* previewRow = new QHBoxLayout;
+    ImportPreview_ = new QPlainTextEdit(this);
+    ImportPreview_->setObjectName(QStringLiteral("worldImportPreview"));
+    ImportPreview_->setAccessibleName(QStringLiteral("Import preview"));
+    ImportPreview_->setReadOnly(true);
+    ImportPreview_->setMaximumHeight(160);
+    ImportPreview_->hide();
+    ConfirmImport_ = new QPushButton(QStringLiteral("Import previewed scene"), this);
+    ConfirmImport_->setObjectName(QStringLiteral("worldImportConfirm"));
+    ConfirmImport_->hide();
+    DiscardImport_ = new QPushButton(QStringLiteral("Discard preview"), this);
+    DiscardImport_->setObjectName(QStringLiteral("worldImportDiscard"));
+    DiscardImport_->hide();
+    QVBoxLayout* previewActions = new QVBoxLayout;
+    previewActions->addWidget(ConfirmImport_);
+    previewActions->addWidget(DiscardImport_);
+    previewActions->addStretch();
+    previewRow->addWidget(ImportPreview_, 1);
+    previewRow->addLayout(previewActions);
+    layout->addLayout(previewRow);
+    connect(ConfirmImport_, &QPushButton::clicked, this, [this]() { (void)ConfirmImportPreview(); });
+    connect(DiscardImport_, &QPushButton::clicked, this, [this]() {
+        PreviewedSource_.clear();
+        ShowImportPreview(false);
+        Changed(QStringLiteral("Import preview discarded; nothing was written."));
+    });
+    ImportReport_ = new QPlainTextEdit(this);
+    ImportReport_->setObjectName(QStringLiteral("worldImportReport"));
+    ImportReport_->setAccessibleName(QStringLiteral("Import report"));
+    ImportReport_->setReadOnly(true);
+    ImportReport_->setMaximumHeight(160);
+    ImportReport_->hide();
+    layout->addWidget(ImportReport_);
     PathLabel_ = new QLabel(this);
     PathLabel_->setTextFormat(Qt::PlainText);
     PathLabel_->setWordWrap(true);
@@ -181,6 +216,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     Viewport_->hide();
     connect(Scene_, &LevelWorkspace::OperationFinished, this, &WorldWorkspace::SceneCompleted);
     connect(Scene_, &LevelWorkspace::AssetsVerified, this, &WorldWorkspace::SceneVerified);
+    connect(Scene_, &LevelWorkspace::ImportPreviewFinished, this, &WorldWorkspace::ShowImportPreview);
     connect(Scene_, &LevelWorkspace::DocumentChanged, this, [this]() { Changed(); });
     connect(Scene_, &LevelWorkspace::PreviewStarting, this, [this]() {
         Render_->Stop();
@@ -359,6 +395,7 @@ void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
     Render_->Preview().RestoreNavigation({});
     Scene_->RestoreNavigation({});
     Scene_->SetProject(canonical, epoch);
+    ClearImportState();
     ValidatedScene_ = {};
     ValidatedWorld_.clear();
     SceneError_.clear();
@@ -521,6 +558,7 @@ bool WorldWorkspace::Open(const QString& path)
     SceneError_.clear();
     ++DocumentGeneration_;
     Document_ = candidate;
+    ClearImportState();
     Render_->SetWorld(Root_, &Document_);
     SchemaDisk_ = schema;
     Disk_ = legacy ? QByteArray() : bytes;
@@ -568,6 +606,7 @@ bool WorldWorkspace::Create(const QString& path)
     SceneError_.clear();
     ++DocumentGeneration_;
     Document_ = candidate;
+    ClearImportState();
     Render_->SetWorld(Root_, &Document_);
     SchemaDisk_ = schema;
     Disk_.clear();
@@ -584,6 +623,10 @@ bool WorldWorkspace::SceneBusy() const noexcept
     return Scene_ != nullptr && Scene_->Busy();
 }
 bool WorldWorkspace::ImportScene(const QString& source)
+{
+    return StartSceneImport(source, false);
+}
+bool WorldWorkspace::StartSceneImport(const QString& source, bool isPreviewed)
 {
     if (!Document_.Loaded() || Pending_ || SceneBusy())
     {
@@ -607,13 +650,74 @@ bool WorldWorkspace::ImportScene(const QString& source)
     SceneGeneration_ = DocumentGeneration_;
     Importing_ = true;
     Scene_->SetWorldSnapshot(Document_);
-    if (!Scene_->ImportInto(level, source))
+    const bool isStarted =
+        isPreviewed == true ? Scene_->ImportPreviewedInto(level, source) : Scene_->ImportInto(level, source);
+    if (isStarted == false)
     {
         Importing_ = false;
         return false;
     }
     Changed(QStringLiteral("Importing scene assets into World…"));
     return true;
+}
+bool WorldWorkspace::PreviewImportScene(const QString& source)
+{
+    if (Document_.Loaded() == false || Pending_ == true || SceneBusy() == true)
+    {
+        return false;
+    }
+    PreviewedSource_.clear();
+    ShowImportPreview(false);
+    if (Scene_->PreviewImport(source) == false)
+    {
+        return false;
+    }
+    PreviewedSource_ = source;
+    Changed(QStringLiteral("Planning the import (dry run)…"));
+    return true;
+}
+bool WorldWorkspace::ConfirmImportPreview()
+{
+    const QString source = PreviewedSource_;
+    if (source.isEmpty() == true || Scene_->ImportPreview().isEmpty() == true)
+    {
+        return false;
+    }
+    PreviewedSource_.clear();
+    ShowImportPreview(false);
+    return StartSceneImport(source, true);
+}
+void WorldWorkspace::ClearImportState()
+{
+    PreviewedSource_.clear();
+    Scene_->ClearImportState();
+    ShowImportPreview(false);
+    ImportReport_->clear();
+    ImportReport_->hide();
+}
+void WorldWorkspace::ShowImportPreview(bool isAccepted)
+{
+    const bool isShown = isAccepted == true && PreviewedSource_.isEmpty() == false;
+    if (isAccepted == false && PreviewedSource_.isEmpty() == false)
+    {
+        PreviewedSource_.clear();
+        Changed(Scene_->StatusText());
+    }
+    ImportPreview_->setPlainText(isShown == true ? DescribeImportPreview(Scene_->ImportPreview()) : QString());
+    ImportPreview_->setVisible(isShown);
+    ConfirmImport_->setVisible(isShown);
+    DiscardImport_->setVisible(isShown);
+    if (isShown == true)
+    {
+        Changed(QStringLiteral("Import preview ready; review it, then import or discard."));
+    }
+}
+void WorldWorkspace::ShowImportReports()
+{
+    const QJsonObject reports = Scene_->ImportReports();
+    const QString text = DescribeImportReports(QJsonObject{{QStringLiteral("import_reports"), reports}});
+    ImportReport_->setPlainText(text);
+    ImportReport_->setVisible(text.isEmpty() == false);
 }
 void WorldWorkspace::RefreshScene()
 {
@@ -667,6 +771,7 @@ void WorldWorkspace::SceneCompleted(bool accepted)
         return;
     }
     SceneError_.clear();
+    ShowImportReports();
     if (!conversion.isEmpty())
     {
         WorldDocument candidate;

@@ -64,7 +64,15 @@ ludus_compile_shader(TARGET raster_consumer NAME raster RASTER SOURCE raster.sla
         with (source/'raster.slang').open('a') as file:file.write('\n// raster dependency regression\n')
         run([args.cmake,'--build',build]);assert header.stat().st_mtime_ns!=stamp
         original=(source/'raster.slang').read_text()
-        # Slot 16 is outside the shared 16-slot raster profile on Metal too.
+        # R18c's final implemented slot is legal on independently reflected targets.
+        (source/'raster.slang').write_text(original.replace('vk::binding(1, 0)','vk::binding(15, 0)').replace('register(t1)','register(t15)'))
+        run([args.cmake,'--build',build])
+        expanded=json.loads((output/'manifest.json').read_text())
+        for target in targets:
+            assert any(entry['binding']==15 and entry['kind']=='Texture2D'
+                       for entry in expanded['interfaces'][target+'_fragment']['entries'])
+        # Metal has no descriptor spaces; reject its separately reflected native
+        # register at 16 as well as the invalid group on SPIR-V/WGSL targets.
         (source/'raster.slang').write_text(original.replace('vk::binding(1, 0)','vk::binding(1, 1)').replace('register(t1)','register(t16)'))
         failure=run([args.cmake,'--build',build],success=False)
         assert 'group/set zero' in failure or 'bounded profile' in failure or 'remapping' in failure, failure

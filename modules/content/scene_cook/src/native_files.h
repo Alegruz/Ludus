@@ -34,6 +34,32 @@ WriteFileAtomic(std::string_view directory, std::string_view name, std::span<con
 [[nodiscard]] bool DoesPathExist(std::string_view path) noexcept;
 /// scene_cook.bounded_bytes: the whole file, Limit when it exceeds maximum bytes.
 [[nodiscard]] Status ReadFileBounded(std::string_view path, usize maximum, foundation::Array<uint8>& outData) noexcept;
+/// SHA-256 of a whole file, streamed in bounded memory (no size limit).
+/// @return Ok, NotFound, IoError or Unsupported; outDigest is set only on Ok.
+[[nodiscard]] Status HashFile(std::string_view path, content::Digest& outDigest) noexcept;
+
+/// Sequential read-only file handle (POSIX open/read), closed on destruction.
+class SequentialFile final
+{
+public:
+    SequentialFile() noexcept = default;
+    ~SequentialFile() noexcept
+    {
+        Close();
+    }
+    SequentialFile(const SequentialFile&) = delete;
+    SequentialFile& operator=(const SequentialFile&) = delete;
+    /// Open path for reading. @return Ok, NotFound or IoError.
+    [[nodiscard]] Status Open(std::string_view path) noexcept;
+    /// Read up to outBuffer.size() bytes; outCount is zero at end of file.
+    [[nodiscard]] Status Read(std::span<uint8> outBuffer, usize& outCount) noexcept;
+    /// Close the file if open; Open may be called again afterwards.
+    void Close() noexcept;
+
+private:
+    /// POSIX descriptor; unused where SequentialFile is unsupported.
+    [[maybe_unused]] int mDescriptor = -1;
+};
 
 /// How PublishFile commits its synced temporary.
 enum class PublishMode : uint8

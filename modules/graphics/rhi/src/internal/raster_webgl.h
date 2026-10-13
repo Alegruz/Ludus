@@ -20,8 +20,8 @@ struct RasterGlPipeline final
     GLuint Object = 0;
     GLuint Array = 0;
     internal::RasterPipelineInfo Info;
-    GLint Textures[internal::RASTER_BINDINGS]{};
-    uint32 Samplers[internal::RASTER_BINDINGS]{};
+    foundation::StaticArray<GLint, internal::RASTER_BINDINGS> Textures{};
+    foundation::StaticArray<uint32, internal::RASTER_BINDINGS> Samplers{};
     RasterGlPipeline() noexcept
     {
         for (GLint& location : Textures)
@@ -281,11 +281,36 @@ bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
 }
 BindingCapabilities BindingLimits() noexcept
 {
+    GLint vertexBlocks = 0;
+    GLint fragmentBlocks = 0;
+    GLint vertexTextures = 0;
+    GLint fragmentTextures = 0;
+    GLint uniformBindings = 0;
+    GLint textureUnits = 0;
+    glGetIntegerv(GL_MAX_VERTEX_UNIFORM_BLOCKS, &vertexBlocks);
+    glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_BLOCKS, &fragmentBlocks);
+    glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &vertexTextures);
+    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &fragmentTextures);
+    glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS, &uniformBindings);
+    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &textureUnits);
+    const uint32 uniforms = static_cast<uint32>(vertexBlocks < fragmentBlocks ? vertexBlocks : fragmentBlocks);
+    const uint32 textures = static_cast<uint32>(vertexTextures < fragmentTextures ? vertexTextures : fragmentTextures);
+    const uint32 nativeBindings = static_cast<uint32>(uniformBindings < textureUnits ? uniformBindings : textureUnits);
+    const uint32 bindings =
+        nativeBindings < internal::RASTER_BINDINGS ? nativeBindings : static_cast<uint32>(internal::RASTER_BINDINGS);
     return
     {
-        .MaxDynamicUniformBuffers = 8,
+        .MaxDynamicUniformBuffers = uniforms < bindings ? uniforms : bindings,
         .MaxTextureArrayElements = 1,
-        .MaxDescriptorsPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxDescriptorsPerSet = internal::CurrentStorageLimits().DescriptorsPerSet < bindings
+                                    ? internal::CurrentStorageLimits().DescriptorsPerSet
+                                    : bindings,
+        .MaxBindings = bindings,
+        .MaxUniformBuffersPerStage = uniforms < bindings ? uniforms : bindings,
+        .MaxSampledTexturesPerStage = textures < bindings ? textures : bindings,
+        .MaxSamplersPerStage = textures < bindings ? textures : bindings,
+        .MaxUniformBuffersPerSet = bindings,
+        .MaxSamplersPerSet = bindings,
     };
 }
 RasterCapabilities RasterLimits() noexcept
@@ -294,6 +319,8 @@ RasterCapabilities RasterLimits() noexcept
     {
         return {};
     }
+    GLint textureDimension = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &textureDimension);
     GLint alignment = 0;
     GLint uniform = 0;
     GLint attributes = 0;
@@ -308,8 +335,8 @@ RasterCapabilities RasterLimits() noexcept
     glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &vertexTextures);
     glGetIntegerv(GL_MAX_VERTEX_UNIFORM_BLOCKS, &vertexBlocks);
     glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_BLOCKS, &fragmentBlocks);
-    if (alignment <= 0 || uniform < 16384 || attributes < 8 || textures < 8 || vertexTextures < 8 || vertexBlocks < 8 ||
-        fragmentBlocks < 8)
+    if (textureDimension <= 0 || alignment <= 0 || uniform < 16384 || attributes < 8 || textures < 8 ||
+        vertexTextures < 8 || vertexBlocks < 8 || fragmentBlocks < 8)
     {
         return {};
     }
@@ -318,14 +345,18 @@ RasterCapabilities RasterLimits() noexcept
         gRasterHdr = emscripten_webgl_enable_extension(gContext, "EXT_color_buffer_float") == EM_TRUE;
         gRasterHdrProbed = true;
     }
-    return {64U * 1024U * 1024U,
-            gMaxDimension < 4096 ? gMaxDimension : 4096,
+    // WebGL has no queryable buffer-size maximum; retain a signed-32-bit API bound,
+    // independently intersected with the caller-configured logical resource budget.
+    const usize bufferBytes = internal::GetResourceSizeLimit(0x7fffffffU);
+    return {bufferBytes,
+            static_cast<uint32>(textureDimension),
             static_cast<usize>(alignment > 256 ? alignment : 256),
             16384,
             internal::CurrentStorageLimits().ResourcesPerKind,
             internal::CurrentStorageLimits().DrawsPerFrame,
             static_cast<uint32>(attributes < 16 ? attributes : 16),
-            gRasterHdr};
+            gRasterHdr,
+            bufferBytes};
 }
 // Thanks to Khronos Group, "WebGL 2.0 Specification", texture formats and GLES 3.0 constraints.
 // https://registry.khronos.org/webgl/specs/2.0.0/
@@ -337,9 +368,31 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
     if (result.Uses.ColorAttachment)
     {
+        GLint renderbufferDimension = 0;
+        glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &renderbufferDimension);
+        // The private depth/stencil renderbuffer and raster viewport can be smaller than sampled textures.
+        if (renderbufferDimension <= 0)
+        {
+            result.MaxAttachmentDimension2D = 0;
+            result.Uses.ColorAttachment = false;
+            result.Uses.Blendable = false;
+            result.SampleCounts = 0;
+        }
+        else
+        {
+            const uint32 depthDimension = static_cast<uint32>(renderbufferDimension);
+            if (depthDimension < result.MaxAttachmentDimension2D)
+            {
+                result.MaxAttachmentDimension2D = depthDimension;
+            }
+            if (gMaxDimension < result.MaxAttachmentDimension2D)
+            {
+                result.MaxAttachmentDimension2D = gMaxDimension;
+            }
+        }
         result.MaxAttachmentMipLevels = 1;
         result.MaxAttachmentLayers = 1;
         result.AttachmentViews = true;
@@ -366,8 +419,8 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
         glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &layers);
         glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &volume);
         glGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, &cube);
-        result.MaxArrayLayers = layers > 0 ? static_cast<uint32>(layers < 256 ? layers : 256) : 0;
-        result.MaxDimension3D = volume > 0 ? static_cast<uint32>(volume < 256 ? volume : 256) : 0;
+        result.MaxArrayLayers = layers > 0 ? static_cast<uint32>(layers) : 0;
+        result.MaxDimension3D = volume > 0 ? static_cast<uint32>(volume) : 0;
         result.MaxCubeDimension = cube > 0 ? static_cast<uint32>(cube) : 0;
         if (result.MaxCubeDimension > result.MaxSampledDimension2D)
         {

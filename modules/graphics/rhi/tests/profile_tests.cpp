@@ -238,11 +238,15 @@ TEST_CASE("Malformed profile requests never launch a backend and preserve output
     request.RequiredProfile.Formats[0].Uses.Sampled = true;
     SECTION("too many formats")
     {
-        request.RequiredProfile.FormatCount = 8;
+        request.RequiredProfile.FormatCount = static_cast<ludus::foundation::uint32>(RASTER_FORMAT_COUNT + 1);
     }
     SECTION("invalid format")
     {
         request.RequiredProfile.Formats[0].Format = static_cast<RasterFormat>(255);
+    }
+    SECTION("unaligned compressed requirement on uncompressed format")
+    {
+        request.RequiredProfile.Formats[0].RequiresUnalignedBlockExtents = true;
     }
     SECTION("no use")
     {
@@ -263,7 +267,7 @@ TEST_CASE("Malformed profile requests never launch a backend and preserve output
     }
     SECTION("malformed preference")
     {
-        request.PreferredProfile.FormatCount = 8;
+        request.PreferredProfile.FormatCount = static_cast<ludus::foundation::uint32>(RASTER_FORMAT_COUNT + 1);
     }
     const auto token = backend::PendingToken;
     StartupInfo failure;
@@ -293,7 +297,7 @@ TEST_CASE("Preferred constraints report misses without failing or changing enabl
     CHECK_FALSE(info.Enabled.Compute);
     CHECK(info.UnmetProfilePreference.Requirement == ProfileRequirement::StorageRange);
     CHECK(info.UnmetProfilePreference.Available == 0);
-    CHECK(info.Profile.Raster.MaxBufferSize == ludus::foundation::usize{64} * 1024U * 1024U);
+    CHECK(info.Profile.Raster.MaxBufferSize == ludus::foundation::usize{512} * 1024U * 1024U);
     REQUIRE(DestroyDevice(fixture.Device) == DeviceStatus::Ready);
     fixture.Surface = {};
     request.RequiredProfile.Compute.MinStorageRange = 4;
@@ -530,19 +534,19 @@ TEST_CASE("R9 format dimensions and partial view requirements negotiate before R
         .Format = RasterFormat::Rgba8Unorm,
         .Uses = { .Sampled = true },
         .Dimension = TextureDimension::D2Array,
-        .MinDepthOrLayers = 257,
+        .MinDepthOrLayers = 2049,
         .PartialViews = true,
     };
     ProfileRequirement expected = ProfileRequirement::TextureLayerCount;
-    ludus::foundation::uint64 available = 256;
+    ludus::foundation::uint64 available = 2048;
     SECTION("array layers") {}
     SECTION("volume mip count")
     {
         request.RequiredProfile.Formats[0].Dimension = TextureDimension::D3;
         request.RequiredProfile.Formats[0].MinDepthOrLayers = 0;
-        request.RequiredProfile.Formats[0].MinMipLevels = 10;
+        request.RequiredProfile.Formats[0].MinMipLevels = 13;
         expected = ProfileRequirement::MipCount;
-        available = 9;
+        available = 12;
     }
     REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
     fixture.Complete();
@@ -585,4 +589,155 @@ TEST_CASE("R10 startup rejects unimplemented multisample dimension and sampled-u
     CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::SampleCount);
     CHECK(info.Startup.ProfileFailure.Requested == 4);
     CHECK(info.Startup.ProfileFailure.Available == 1);
+}
+
+TEST_CASE("Texture dimensions and BC5 are negotiated against enabled profiles", "[rhi][r18][profile]")
+{
+    ProfileFixture fixture;
+    reference::RasterLimitOverride = backend::RasterLimits();
+    reference::RasterLimitOverride.MaxTextureDimension2D = 16384;
+    reference::OverrideRasterLimits = true;
+    DeviceDescription request;
+    request.RequiredProfile.Raster.MinTextureDimension2D = 8240;
+    request.RequiredProfile.FormatCount = 1;
+    request.RequiredProfile.Formats[0] =
+    {
+        .Format = RasterFormat::Bc5RgUnorm,
+        .Uses = { .Sampled = true, .Filterable = true },
+        .MinDimension2D = 8240,
+        .MinMipLevels = 14,
+    };
+    SECTION("enabled native-sized profile")
+    {
+        REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+        fixture.Complete();
+        DeviceInfo info;
+        REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Ready);
+        CHECK(info.Profile.Raster.MaxTextureDimension2D == 16384);
+        FormatCapabilities format;
+        REQUIRE(GetFormatCapabilities(fixture.Device, RasterFormat::Bc5RgUnorm, format) == RasterStatus::Ready);
+        CHECK(format.MaxSampledDimension2D == 16384);
+        CHECK(format.MaxMipLevels == 15);
+        CHECK(format.Uses.ColorAttachment == false);
+        CHECK(format.MaxDimension3D == 0);
+    }
+    SECTION("lower device limit")
+    {
+        reference::RasterLimitOverride.MaxTextureDimension2D = 8192;
+        REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+        fixture.Complete();
+        DeviceInfo info;
+        CHECK(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
+        CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::TextureDimension);
+        CHECK(info.Startup.ProfileFailure.Requested == 8240);
+        CHECK(info.Startup.ProfileFailure.Available == 8192);
+    }
+    SECTION("unsupported BC5")
+    {
+        reference::FormatUnavailable[static_cast<ludus::foundation::usize>(RasterFormat::Bc5RgUnorm)] = true;
+        REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+        fixture.Complete();
+        DeviceInfo info;
+        CHECK(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
+        CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::Sampled);
+    }
+    SECTION("unaligned compressed base is independently required")
+    {
+        request.RequiredProfile.Formats[0].RequiresUnalignedBlockExtents = true;
+        REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+        fixture.Complete();
+        DeviceInfo info;
+        CHECK(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
+        CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::UnalignedBlockExtents);
+    }
+    SECTION("native unaligned compressed base is admitted")
+    {
+        backend::ActiveKind = Backend::Metal;
+        request.RequiredProfile.Formats[0].RequiresUnalignedBlockExtents = true;
+        REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+        fixture.Complete();
+        DeviceInfo info;
+        REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Ready);
+        CHECK(info.Profile.Formats[static_cast<ludus::foundation::usize>(RasterFormat::Bc5RgUnorm)]
+                  .HasUnalignedBlockExtents == true);
+    }
+    SECTION("preference is diagnostic only")
+    {
+        request.PreferredProfile = request.RequiredProfile;
+        request.RequiredProfile = {};
+        reference::RasterLimitOverride.MaxTextureDimension2D = 8192;
+        REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+        fixture.Complete();
+        DeviceInfo info;
+        REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Ready);
+        CHECK(info.UnmetProfilePreference.Requirement == ProfileRequirement::TextureDimension);
+        CHECK(info.Profile.Raster.MaxTextureDimension2D == 8192);
+    }
+}
+
+TEST_CASE("R18c byte and descriptor requirements use enabled limits independently", "[rhi][profile][r18c]")
+{
+    ProfileFixture fixture;
+    DeviceDescription request;
+    request.RequiredProfile.Raster.MinBufferSize = ludus::foundation::usize{64} * 1024 * 1024 + 256;
+    request.RequiredProfile.Raster.MinTextureUploadBytes = ludus::foundation::usize{64} * 1024 * 1024 + 4;
+    request.RequiredProfile.Raster.MinBindings = 9;
+    request.RequiredProfile.Raster.MinUniformBindings = 12;
+    request.RequiredProfile.Raster.MinTextureBindings = 16;
+    request.RequiredProfile.Raster.MinSamplerBindings = 16;
+    request.RequiredProfile.Compute.MinStorageRange = ludus::foundation::usize{16} * 1024 * 1024 + 4;
+    request.RequiredProfile.Compute.MinStorageBindings = 5;
+    ProfileRequirement expected = ProfileRequirement::None;
+    SECTION("expanded supported profile") {}
+    SECTION("required upload limit")
+    {
+        request.RequiredProfile.Raster.MinTextureUploadBytes = ludus::foundation::usize{512} * 1024 * 1024 + 1;
+        expected = ProfileRequirement::TextureUploadBytes;
+    }
+    SECTION("required uniform count")
+    {
+        request.RequiredProfile.Raster.MinUniformBindings = 13;
+        expected = ProfileRequirement::UniformBindings;
+    }
+    SECTION("required sampled texture count")
+    {
+        request.RequiredProfile.Raster.MinTextureBindings = 17;
+        expected = ProfileRequirement::TextureBindings;
+    }
+    SECTION("required sampler count")
+    {
+        request.RequiredProfile.Raster.MinSamplerBindings = 17;
+        expected = ProfileRequirement::SamplerBindings;
+    }
+    SECTION("required set-wide uniform count")
+    {
+        request.RequiredProfile.Raster.MinUniformBindingsPerSet = 17;
+        expected = ProfileRequirement::UniformBindingsPerSet;
+    }
+    SECTION("required set-wide sampler count")
+    {
+        request.RequiredProfile.Raster.MinSamplerBindingsPerSet = 17;
+        expected = ProfileRequirement::SamplerBindingsPerSet;
+    }
+    SECTION("required storage count")
+    {
+        request.RequiredProfile.Compute.MinStorageBindings = 9;
+        expected = ProfileRequirement::StorageBindings;
+    }
+    SECTION("preferred storage count preserves Ready")
+    {
+        request.PreferredProfile.Compute.MinStorageBindings = 9;
+    }
+    REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+    fixture.Complete();
+    DeviceInfo info;
+    const DeviceStatus status = GetDeviceInfo(fixture.Device, info);
+    CHECK(status == (expected == ProfileRequirement::None ? DeviceStatus::Ready : DeviceStatus::Failed));
+    CHECK(info.Startup.ProfileFailure.Requirement == expected);
+    if (request.PreferredProfile.Compute.MinStorageBindings != 0)
+    {
+        CHECK(info.UnmetProfilePreference.Requirement == ProfileRequirement::StorageBindings);
+        CHECK(info.UnmetProfilePreference.Requested == 9);
+        CHECK(info.UnmetProfilePreference.Available == 8);
+    }
 }

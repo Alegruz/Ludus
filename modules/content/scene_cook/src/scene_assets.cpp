@@ -1,3 +1,4 @@
+#include <ludus/content/scene_cook/best_effort_import.h>
 #include <ludus/content/scene_cook/scene_assets.h>
 
 #include "native_files.h"
@@ -47,6 +48,7 @@ constexpr usize MAX_CLOSURE_RESOURCES = 64;
 constexpr usize MAX_LOCK_IDENTITY_BYTES = 4096;
 constexpr usize HEX_DIGEST_BYTES = 64;
 constexpr usize MATERIAL_RECORD_BYTES = 24;
+constexpr usize MATERIAL_RECORD_V2_BYTES = 28;
 constexpr float64 MAX_AUTHORED_MAGNITUDE = 1e12;
 constexpr float64 MAX_WORLD_MAGNITUDE = 3e38;
 constexpr float64 MIN_DIRECTION_SQUARED = 1e-12;
@@ -174,14 +176,37 @@ struct HexDigest final
     }
 };
 
-void ComputeHexDigest(std::span<const uint8> data, HexDigest& outHex) noexcept
+void FormatHexDigest(const Digest& digest, HexDigest& outHex) noexcept
 {
     static constexpr char HEX[] = "0123456789abcdef";
-    const Digest digest = Hash(data);
     for (usize i = 0; i < sizeof(digest.Data); ++i)
     {
         outHex.Text[i * 2] = HEX[digest.Data[i] >> 4];
         outHex.Text[i * 2 + 1] = HEX[digest.Data[i] & 0xf];
+    }
+}
+
+void ComputeHexDigest(std::span<const uint8> data, HexDigest& outHex) noexcept
+{
+    FormatHexDigest(Hash(data), outHex);
+}
+
+/// Stream-hash a source input in bounded memory; source files may exceed MAX_ASSET_BYTES.
+[[nodiscard]] bool HashSourceInput(std::string_view path, HexDigest& outHex, Failure& inoutFailure) noexcept
+{
+    Digest digest;
+    const Status status = HashFile(path, digest);
+    switch (status)
+    {
+        case Status::Ok:
+            FormatHexDigest(digest, outHex);
+            return true;
+        case Status::NotFound:
+            return inoutFailure.Fail(AssetErrorCode::AssetCorrupt, {"No such file or directory: '", path, "'"});
+        case Status::Unsupported:
+            return inoutFailure.FailStatus(status, "Read", path);
+        default:
+            return inoutFailure.Fail(AssetErrorCode::AssetCorrupt, {"Cannot read '", path, "'"});
     }
 }
 
@@ -1781,7 +1806,12 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
     return writer.IsOk() == true && outText.TryAssign(GetView(bytes)) == foundation::StringStatus::Ok;
 }
 
-/// str(Path(source).resolve()), or the caller's provenance override.
+/// The reference profile's entry file; it keeps the directory as its origin.
+constexpr std::string_view REFERENCE_ENTRY = "scene-v4.pbrt";
+
+/// str(Path(source).resolve()), or the caller's provenance override. A best-effort
+/// entry other than the reference scene-v4.pbrt appends "/<entry>", so two entry files
+/// in one directory keep separate logical identities on reimport.
 [[nodiscard]] bool
 ResolveOrigin(std::string_view source, const AssetOptions& options, String& outOrigin, Failure& inoutFailure) noexcept
 {
@@ -1791,7 +1821,17 @@ ResolveOrigin(std::string_view source, const AssetOptions& options, String& outO
                    ? true
                    : inoutFailure.FailOutOfMemory();
     }
-    return ResolveNative(source, outOrigin, inoutFailure);
+    if (ResolveNative(source, outOrigin, inoutFailure) == false)
+    {
+        return false;
+    }
+    const std::string_view entry = options.SourceEntry;
+    if (entry.empty() == true || entry == REFERENCE_ENTRY)
+    {
+        return true;
+    }
+    const std::string_view parts[] = {std::string_view("/"), entry};
+    return outOrigin.TryAppendMany(parts) == foundation::StringStatus::Ok ? true : inoutFailure.FailOutOfMemory();
 }
 
 /// scene_cook.asset_path(source, name).
@@ -1837,14 +1877,12 @@ ResolveSourceInput(std::string_view source, std::string_view name, String& outPa
     for (usize i = 0; i < tree.GetCount(inputs); ++i)
     {
         String path;
-        Array<uint8> data;
+        HexDigest digest;
         if (ResolveSourceInput(source, tree.GetKey(inputs, i), path, inoutFailure) == false ||
-            ReadBytes(path.GetView(), MAX_ASSET_BYTES, data, inoutFailure) == false)
+            HashSourceInput(path.GetView(), digest, inoutFailure) == false)
         {
             return false;
         }
-        HexDigest digest;
-        ComputeHexDigest(GetSpan(data), digest);
         if (tree.IsString(tree.GetValue(inputs, i), digest.View()) == false)
         {
             return inoutFailure.Fail(AssetErrorCode::Conflict, message);
@@ -2078,22 +2116,27 @@ struct PreparedImport final
                                             Array<uint8>& outBytes,
                                             Failure& inoutFailure) noexcept
 {
-    if (material.Bytes.size() != MATERIAL_RECORD_BYTES)
+    // Version 1 records (24 bytes) imply the sampler address; version 2 records
+    // (pbrt-best-effort-v1) carry it explicitly after the texture index.
+    const bool isVersion2 = material.Bytes.size() == MATERIAL_RECORD_V2_BYTES;
+    if (material.Bytes.size() != MATERIAL_RECORD_BYTES && isVersion2 == false)
     {
         return inoutFailure.Fail(AssetErrorCode::UnsupportedScene, "unpack requires a buffer of 24 bytes");
     }
     const uint32 texture = material.Texture;
     const bool hasTexture = texture != format::NO_TEXTURE;
-    const bool isRepeat = 0 < texture && texture < textures.GetSize();
+    const bool isRepeat = isVersion2 == true ? DecodeUint32(material.Bytes.data() + 4) == format::ADDRESS_REPEAT
+                                             : 0 < texture && texture < textures.GetSize();
+    const uint8* values = material.Bytes.data() + (isVersion2 == true ? 8 : 4);
     JsonTree tree;
     const JsonIndex root = tree.AddObject();
     tree.SetMember(root, "texture", tree.AddString(hasTexture == true ? textures[texture].GetView() : ""));
-    tree.SetMember(root, "metallic", tree.AddFloat(DecodeFloat(material.Bytes.data() + 4)));
-    tree.SetMember(root, "roughness", tree.AddFloat(DecodeFloat(material.Bytes.data() + 8)));
+    tree.SetMember(root, "metallic", tree.AddFloat(DecodeFloat(values)));
+    tree.SetMember(root, "roughness", tree.AddFloat(DecodeFloat(values + 4)));
     const JsonIndex emission = tree.AddArray();
     for (usize channel = 0; channel < 3; ++channel)
     {
-        tree.Append(emission, tree.AddFloat(DecodeFloat(material.Bytes.data() + 12 + channel * 4)));
+        tree.Append(emission, tree.AddFloat(DecodeFloat(values + 8 + channel * 4)));
     }
     tree.SetMember(root, "emission", emission);
     tree.SetMember(root, "address", tree.AddString(isRepeat == true ? "repeat" : "clamp"));
@@ -2309,7 +2352,176 @@ struct StoredParts final
     return tree.IsOk() == true ? true : inoutFailure.FailOutOfMemory();
 }
 
-/// prepare_import(root, source, level, cancelled).
+/// Licence text recorded when a best-effort source directory has none.
+constexpr std::string_view MISSING_LICENSE_TEXT = "No LICENSE.txt or LICENSE.md was found beside the imported scene.\n";
+
+/// Cooked outputs of one import and the profile that produced them.
+struct RoutedCook final
+{
+    CookResult Cooked;
+    /// Importer profile: pbrt-reference-v1 or pbrt-best-effort-v1.
+    std::string_view Profile = IMPORTER_NAME;
+    /// Best-effort import report; empty for the reference profile.
+    Array<uint8> Report;
+    /// Why the reference profile rejected scene-v4.pbrt before the fallback; empty otherwise.
+    String ReferenceRejection;
+};
+
+/// Add "CODE: message" for every warning diagnostic of a best-effort report.
+[[nodiscard]] JsonIndex AddReportApproximations(JsonTree& inoutTree, const Document& report) noexcept
+{
+    const JsonIndex approximations = inoutTree.AddArray();
+    const JsonTree& source = report.Tree;
+    const JsonIndex diagnostics = source.GetMember(report.Root, "diagnostics");
+    for (usize i = 0; diagnostics != NO_JSON_NODE && i < source.GetCount(diagnostics); ++i)
+    {
+        const JsonIndex item = source.GetItem(diagnostics, i);
+        const JsonIndex code = source.GetMember(item, "code");
+        const JsonIndex message = source.GetMember(item, "message");
+        if (source.IsString(source.GetMember(item, "severity"), "warning") == false || code == NO_JSON_NODE ||
+            message == NO_JSON_NODE)
+        {
+            continue;
+        }
+        String text;
+        if (Concatenate(text, {source.GetText(code), ": ", source.GetText(message)}) == false)
+        {
+            return NO_JSON_NODE;
+        }
+        inoutTree.Append(approximations, inoutTree.AddString(text.GetView()));
+    }
+    return approximations;
+}
+
+/// Cook source/entry with pbrt-best-effort-v1 into reference-shaped outputs: the
+/// manifest carries the input digests, approximations and the full import report.
+[[nodiscard]] bool CookBestEffortSource(std::string_view source,
+                                        std::string_view entry,
+                                        bool isDryRun,
+                                        const AssetOptions& options,
+                                        RoutedCook& inoutCook,
+                                        Failure& inoutFailure) noexcept
+{
+    if (entry.empty() == true || entry.find('/') != std::string_view::npos ||
+        entry.find('\\') != std::string_view::npos || entry == "." || entry == "..")
+    {
+        return inoutFailure.Fail(AssetErrorCode::UnsupportedScene,
+                                 "pbrt entry must be a file name in the source directory");
+    }
+    String entryPath;
+    if (Concatenate(entryPath, {source, "/", entry}) == false)
+    {
+        return inoutFailure.FailOutOfMemory();
+    }
+    BestEffortOptions importOptions;
+    importOptions.IsDryRun = isDryRun;
+    BestEffortResult imported;
+    CookError cookError;
+    if (ImportPbrtBestEffort(entryPath.GetView(), importOptions, imported, cookError, options.CancelOrNull) == false)
+    {
+        return MapCookFailure(cookError, inoutFailure);
+    }
+    inoutCook.Profile = BEST_EFFORT_PROFILE;
+    Document report;
+    if (ParseDocument(GetSpan(imported.Report), AssetErrorCode::UnsupportedScene, report, inoutFailure) == false)
+    {
+        return false;
+    }
+    JsonTree tree;
+    const JsonIndex root = tree.AddObject();
+    tree.SetMember(root, "version", tree.AddInteger(1));
+    tree.SetMember(root, "source", tree.AddString(entry));
+    tree.SetMember(root, "author", tree.AddString("See retained LICENSE.txt"));
+    tree.SetMember(root, "license", tree.AddString("See retained LICENSE.txt"));
+    tree.SetMember(root, "source_format", tree.AddString("PBRT v4 (best effort)"));
+    tree.SetMember(root, "importer", tree.AddString(BEST_EFFORT_PROFILE));
+    const JsonIndex inputs = tree.AddObject();
+    // Digests come from the importer's own reads, so they describe exactly the
+    // bytes that produced the bundle even if a source changes mid-import.
+    for (usize i = 0; i < imported.Inputs.GetSize(); ++i)
+    {
+        HexDigest digest;
+        FormatHexDigest(imported.InputDigests[i], digest);
+        tree.SetMember(inputs, imported.Inputs[i].GetView(), tree.AddString(digest.View()));
+    }
+    tree.SetMember(root, "inputs", inputs);
+    HexDigest bundleDigest;
+    ComputeHexDigest(GetSpan(imported.Bundle), bundleDigest);
+    tree.SetMember(root, "bundle_sha256", tree.AddString(bundleDigest.View()));
+    const JsonIndex approximations = AddReportApproximations(tree, report);
+    if (approximations == NO_JSON_NODE)
+    {
+        return inoutFailure.FailOutOfMemory();
+    }
+    tree.SetMember(root, "approximations", approximations);
+    tree.SetMember(root, "import_report", tree.CopyFrom(report.Tree, report.Root));
+    if (tree.IsOk() == false || WriteCanonical(tree, root, inoutCook.Cooked.Manifest, inoutFailure) == false)
+    {
+        return tree.IsOk() == false ? inoutFailure.FailOutOfMemory() : false;
+    }
+    inoutCook.Cooked.Bundle = std::move(imported.Bundle);
+    inoutCook.Cooked.License = std::move(imported.License);
+    if (inoutCook.Cooked.License.IsEmpty() == true && inoutCook.Cooked.License.TryAddRange(std::span<const uint8>(
+                                                          reinterpret_cast<const uint8*>(MISSING_LICENSE_TEXT.data()),
+                                                          MISSING_LICENSE_TEXT.size())) == false)
+    {
+        return inoutFailure.FailOutOfMemory();
+    }
+    inoutCook.Report = std::move(imported.Report);
+    return true;
+}
+
+/// Pick the importer for a source directory (see AssetOptions::SourceEntry) and cook it.
+[[nodiscard]] bool CookRoutedSource(std::string_view source,
+                                    const AssetOptions& options,
+                                    bool isDryRun,
+                                    RoutedCook& outCook,
+                                    Failure& inoutFailure) noexcept
+{
+    const std::string_view entry = options.SourceEntry;
+    if (options.CookOrNull != nullptr || entry.empty() == true || entry == REFERENCE_ENTRY)
+    {
+        CookError cookError;
+        const bool isCooked = options.CookOrNull != nullptr
+                                  ? options.CookOrNull(source, outCook.Cooked, cookError, options.CancelOrNull)
+                                  : Cook(source, outCook.Cooked, cookError, options.CancelOrNull);
+        if (isCooked == true)
+        {
+            return true;
+        }
+        // Only a profile rejection of scene-v4.pbrt falls back; cancellation, I/O
+        // failures and an explicit reference request keep their error.
+        if (options.CookOrNull != nullptr || entry.empty() == true || cookError.Result != Status::Invalid)
+        {
+            return MapCookFailure(cookError, inoutFailure);
+        }
+        if (outCook.ReferenceRejection.TryAssign(cookError.Message.View()) != foundation::StringStatus::Ok)
+        {
+            return inoutFailure.FailOutOfMemory();
+        }
+    }
+    return CookBestEffortSource(source, entry, isDryRun, options, outCook, inoutFailure);
+}
+
+/// SHA-256 of the canonical `inputs` object of a cooked manifest: the token a
+/// PreviewImport response carries as `source_digest` and a confirmed import checks.
+[[nodiscard]] bool
+ComputeSourceDigest(const JsonTree& manifest, JsonIndex root, HexDigest& outHex, Failure& inoutFailure) noexcept
+{
+    const JsonIndex inputs = manifest.GetMember(root, "inputs");
+    Array<uint8> bytes;
+    if (inputs == NO_JSON_NODE || manifest.GetKind(inputs) != JsonKind::Object)
+    {
+        return inoutFailure.FailInvalid("Invalid manifest inputs");
+    }
+    if (WriteCanonical(manifest, inputs, bytes, inoutFailure) == false)
+    {
+        return false;
+    }
+    ComputeHexDigest(GetSpan(bytes), outHex);
+    return true;
+}
+
 [[nodiscard]] bool PrepareImportDocuments(std::string_view root,
                                           std::string_view source,
                                           const Document& level,
@@ -2325,21 +2537,31 @@ struct StoredParts final
     {
         return inoutFailure.Fail(AssetErrorCode::InstallCancelled, "Scene import cancelled");
     }
-    CookResult cooked;
-    CookError cookError;
-    const bool isCooked = options.CookOrNull != nullptr
-                              ? options.CookOrNull(source, cooked, cookError, options.CancelOrNull)
-                              : Cook(source, cooked, cookError, options.CancelOrNull);
-    if (isCooked == false)
+    RoutedCook routed;
+    if (CookRoutedSource(source, options, false, routed, inoutFailure) == false)
     {
-        return MapCookFailure(cookError, inoutFailure);
+        return false;
     }
+    const CookResult& cooked = routed.Cooked;
     BundleParts parts;
     Document manifest;
     if (SplitBundle(GetSpan(cooked.Bundle), parts, inoutFailure) == false ||
         ParseDocument(GetSpan(cooked.Manifest), AssetErrorCode::UnsupportedScene, manifest, inoutFailure) == false)
     {
         return false;
+    }
+    if (options.ExpectedSourceDigest.empty() == false)
+    {
+        HexDigest current;
+        if (ComputeSourceDigest(manifest.Tree, manifest.Root, current, inoutFailure) == false)
+        {
+            return false;
+        }
+        if (current.View() != options.ExpectedSourceDigest)
+        {
+            return inoutFailure.Fail(AssetErrorCode::Conflict,
+                                     "Source changed since the import preview; preview it again");
+        }
     }
     // Source read consistency is checked before the catalog commit point.
     if (AreSourceInputsUnchanged(source,
@@ -2353,8 +2575,11 @@ struct StoredParts final
     BuildRecord build;
     JsonTree& buildTree = build.Tree;
     build.Root = buildTree.AddObject();
-    buildTree.SetMember(build.Root, "importer", buildTree.AddString(IMPORTER_NAME));
-    buildTree.SetMember(build.Root, "importer_sha256", buildTree.AddString(IMPORTER_SHA256));
+    buildTree.SetMember(build.Root, "importer", buildTree.AddString(routed.Profile));
+    if (routed.Profile == IMPORTER_NAME)
+    {
+        buildTree.SetMember(build.Root, "importer_sha256", buildTree.AddString(IMPORTER_SHA256));
+    }
     buildTree.SetMember(build.Root, "publisher_sha256", buildTree.AddString(PUBLISHER_SHA256));
     buildTree.SetMember(build.Root,
                         "source_inputs",
@@ -3360,6 +3585,95 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
     return outDoesExist == false || ReadBytes(path.GetView(), MAX_METADATA_BYTES, outBytes, inoutFailure) == true;
 }
 
+/// PreviewImport: cook as a dry run and describe the result without touching the project.
+[[nodiscard]] bool PreviewImportDocuments(const EditorSceneRequest& request,
+                                          const AssetOptions& options,
+                                          EditorSceneResult& outResult,
+                                          Failure& inoutFailure) noexcept
+{
+    ReportStage(request, "preview");
+    RoutedCook routed;
+    if (CookRoutedSource(request.Source, options, true, routed, inoutFailure) == false)
+    {
+        return false;
+    }
+    // The reference profile has no dry run; its manifest is its report.
+    const Array<uint8>& reportBytes = routed.Report.IsEmpty() == true ? routed.Cooked.Manifest : routed.Report;
+    Document report;
+    Document manifest;
+    HexDigest sourceDigest;
+    if (ParseDocument(GetSpan(reportBytes), AssetErrorCode::UnsupportedScene, report, inoutFailure) == false ||
+        ParseDocument(GetSpan(routed.Cooked.Manifest), AssetErrorCode::UnsupportedScene, manifest, inoutFailure) ==
+            false ||
+        ComputeSourceDigest(manifest.Tree, manifest.Root, sourceDigest, inoutFailure) == false)
+    {
+        return false;
+    }
+    JsonTree tree;
+    const JsonIndex response = tree.AddObject();
+    tree.SetMember(response, "schema", tree.AddInteger(1));
+    tree.SetMember(response, "ok", tree.AddBoolean(true));
+    tree.SetMember(response, "profile", tree.AddString(routed.Profile));
+    tree.SetMember(response, "report", tree.CopyFrom(report.Tree, report.Root));
+    tree.SetMember(response, "source_digest", tree.AddString(sourceDigest.View()));
+    if (routed.ReferenceRejection.IsEmpty() == false)
+    {
+        tree.SetMember(response, "reference_rejection", tree.AddString(routed.ReferenceRejection.GetView()));
+    }
+    if (tree.IsOk() == false)
+    {
+        return inoutFailure.FailOutOfMemory();
+    }
+    ReportStage(request, "done");
+    outResult.Scene.Clear();
+    outResult.Catalog.Clear();
+    return WriteCanonical(tree, response, outResult.Response, inoutFailure);
+}
+
+/// Stored best-effort import reports of the level's imported scenes, keyed by
+/// import id; NO_JSON_NODE when none of them carries one (reference imports).
+[[nodiscard]] bool CollectImportReports(std::string_view root,
+                                        const Document& level,
+                                        const Document& catalog,
+                                        JsonTree& inoutTree,
+                                        JsonIndex& outReports,
+                                        Failure& inoutFailure) noexcept
+{
+    outReports = NO_JSON_NODE;
+    const JsonIndex resources = catalog.Tree.GetMember(catalog.Root, "resources");
+    const JsonIndex imports = level.Tree.GetMember(level.Root, "imports");
+    for (usize i = 0; i < level.Tree.GetCount(imports); ++i)
+    {
+        const std::string_view identity = level.Tree.GetText(level.Tree.GetItem(imports, i));
+        const JsonIndex record = catalog.Tree.GetMember(resources, identity);
+        const JsonIndex path = record == NO_JSON_NODE ? NO_JSON_NODE : catalog.Tree.GetMember(record, "path");
+        if (path == NO_JSON_NODE || catalog.Tree.GetKind(path) != JsonKind::String)
+        {
+            return inoutFailure.FailInvalid("Missing imported scene record");
+        }
+        String native;
+        Document manifest;
+        if (ResolveInside(root, catalog.Tree.GetText(path), native, inoutFailure) == false ||
+            LoadDocument(native.GetView(), manifest, inoutFailure) == false)
+        {
+            return false;
+        }
+        const JsonIndex report = manifest.Tree.GetKind(manifest.Root) == JsonKind::Object
+                                     ? manifest.Tree.GetMember(manifest.Root, "import_report")
+                                     : NO_JSON_NODE;
+        if (report == NO_JSON_NODE)
+        {
+            continue;
+        }
+        if (outReports == NO_JSON_NODE)
+        {
+            outReports = inoutTree.AddObject();
+        }
+        inoutTree.SetMember(outReports, identity, inoutTree.CopyFrom(manifest.Tree, report));
+    }
+    return inoutTree.IsOk() == true ? true : inoutFailure.FailOutOfMemory();
+}
+
 [[nodiscard]] bool OperateEditorSceneDocuments(const EditorSceneRequest& request,
                                                const AssetOptions& options,
                                                EditorSceneResult& outResult,
@@ -3367,6 +3681,10 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
 {
     const std::string_view root = request.Root;
     const EditorSceneOperation operation = request.Operation;
+    if (operation == EditorSceneOperation::PreviewImport)
+    {
+        return PreviewImportDocuments(request, options, outResult, inoutFailure);
+    }
     Document level;
     Document current;
     const Document* currentOrNull = nullptr;
@@ -3539,6 +3857,15 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
         return false;
     }
     tree.SetMember(response, "warnings", warnings);
+    JsonIndex importReports = NO_JSON_NODE;
+    if (CollectImportReports(root, level, *catalog, tree, importReports, inoutFailure) == false)
+    {
+        return false;
+    }
+    if (importReports != NO_JSON_NODE)
+    {
+        tree.SetMember(response, "import_reports", importReports);
+    }
     if (operation == EditorSceneOperation::Open || operation == EditorSceneOperation::Save)
     {
         bool doesExist = false;

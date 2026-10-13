@@ -182,6 +182,10 @@ float64 Exp(float64 value) noexcept
 {
     return std::exp(value);
 }
+float64 Log(float64 value) noexcept
+{
+    return std::log(value);
+}
 float64 Floor(float64 value) noexcept
 {
     return std::floor(value);

@@ -368,12 +368,12 @@ The original R1 profile:
 | Facility | Contract |
 | --- | --- |
 | Records | Configured `Storage.ResourcesPerKind` (default 64), including pending/detached records retained by dependencies or submitted work |
-| Buffers | Complete immutable initial bytes, at most 64 MiB or the lower enabled limit; Vertex, Index16, Index32 or Uniform role |
+| Buffers | Complete immutable initial bytes up to enabled `MaxBufferSize`, subject to logical resource budgets; Vertex, Index16, Index32 or Uniform role |
 | Uniforms | Bound range at most 16 KiB, range size a multiple of 16, offsets aligned to the queried limit (at least 256); allocation may be larger than a bound range |
-| Textures | RGBA8 linear or sRGB sampling, at most 4096 in each dimension or the lower enabled limit; one mip/layer/sample |
+| Textures | RGBA8 linear or sRGB sampling, within the enabled per-format/device dimensions; one mip/layer/sample |
 | Uploads | Complete top-left RGBA8 rows, explicit pitch divisible by four; caller bytes consumed/copied before return; aggregate upload at most the maximum buffer size |
 | Views | Complete original-format sampled views; no reinterpretation, partial sampled range or attachment view |
-| Bindings | One group/set, at most sixteen unique binding numbers below sixteen; physical descriptor/stage limits are separately admitted; uniform ranges, sampled 2D textures and non-comparison samplers |
+| Bindings | One group/set, up to sixteen implemented slots intersected with enabled binding/descriptor limits; uniform ranges, sampled 2D textures and non-comparison samplers |
 | Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride divisible by four, 4..256 on native/WebGPU and 4..252 on WebGL 2; up to the queried maximum (at most sixteen) unique float2/3/4 attributes |
 | Draw | Triangle list, Index16/Index32, zero base vertex/first instance, configured `Storage.DrawsPerFrame` (default 1024); fixed primitive-restart indices are rejected |
 | State | No culling, one color target, one sample; explicit depth comparison/write and premultiplied-alpha blend; defaults retain less-than |
@@ -763,9 +763,9 @@ Ready. The engine does not translate or emulate a compute kernel on WebGL 2.
 with complete initial bytes. The latter two also support vertex/instance input
 or indexed indirect arguments, respectively. Their role never changes. Initial
 sizes and storage binding lengths are multiples of four; binding offsets obey
-`GetComputeCapabilities().StorageOffsetAlignment`. Storage buffers are bounded
-by the lower enabled range and 16 MiB. Layouts retain at most four storage
-bindings and eight total buffer bindings. Uniform buffers can also be read by
+`GetComputeCapabilities().StorageOffsetAlignment`. Storage allocations obey `Raster.MaxBufferSize`; each bound range independently
+obeys `Compute.MaxStorageRange`. Layouts obey `Compute.MaxStorageBindings`,
+`Interface.MaxBindings` and each enabled per-stage descriptor count. Uniform buffers can also be read by
 compute. Each storage entry uses `StorageRead` or `StorageReadWrite`,
 `RasterVisibility::Compute`, and a reflected minimum element stride. Storage
 textures, raster-stage storage access and CPU update/upload of existing storage
@@ -1354,9 +1354,10 @@ Uploads contain every mip in ascending order. Each mip contains all of its
 layers/faces/depth slices in ascending order. For an uncompressed format a
 slice occupies `RowPitch * mipHeight` bytes. For BC it occupies
 `RowPitch * ceil(mipHeight / 4)` encoded bytes. BC1 uses eight bytes per 4-by-4
-block; BC3 uses sixteen. Pitches must cover `ceil(mipWidth / 4)` blocks and be
-multiples of the block byte count. Base BC width/height are multiples of four;
-small tail mips still occupy complete edge blocks. There is no compression,
+block; BC3 and the R18 BC5 profile use sixteen. Pitches must cover `ceil(mipWidth / 4)` blocks and be
+multiples of the block byte count. Base BC width/height must be multiples of four
+unless `HasUnalignedBlockExtents` is enabled (native Vulkan/Metal profiles);
+small tail mips and unaligned native base edges still occupy complete blocks. There is no compression,
 format conversion, mip generation or implicit padding insertion.
 
 Mips must be tightly concatenated; supplied offsets and the exact total byte
@@ -1365,7 +1366,9 @@ aligned (binary16 RGBA pitches are eight-byte aligned). HDR bytes are original
 IEEE binary16 channel encodings. Creation consumes/copies all caller bytes and
 metadata before returning; `Pending` owns asynchronous validation/upload work.
 The complete borrowed blob, including row padding, retains the existing
-`RasterCapabilities.MaxBufferSize` ceiling (64 MiB or the lower enabled limit).
+`RasterCapabilities.MaxTextureUploadBytes` limit; the logical allocation separately
+consumes `StorageLimits.ResourceBytes`. This is independent of buffer allocation size
+and of the R8 transfer-ring slice size.
 Logical allocation bytes include every slice and rounded-up compressed block,
 and independently consume `StorageLimits.ResourceBytes`. The dimension/layer
 maxima do not reserve memory or remove these byte limits. Required mip counts
@@ -1406,14 +1409,14 @@ addressing; mip filtering must be enabled to sample LODs beyond level zero.
 | Normalized D2/array/cube/volume upload and sampling | Queried | Enabled | Device limits | Context limits |
 | Original RGBA16F upload and sampling | Queried | Enabled | Enabled | Enabled |
 | Original-format mip/layer color views | Native views | Native views | Native views | Budgeted sampled copies |
-| BC1/BC3 D2/array/cube upload and sampling | Enabled BC feature + format queries | Device BC support | Enabled `texture-compression-bc` | Unsupported |
+| BC1/BC3/BC5_UNORM D2/array/cube upload and sampling | Enabled BC feature + format queries | Device BC support | Enabled `texture-compression-bc` | Unsupported |
 | BC volumes, cube arrays, format reinterpretation | Unsupported | Unsupported | Unsupported | Unsupported |
 | HDR partial view without float color attachment support | Queried | Enabled | Enabled | Unsupported |
 
 `FormatCapabilities.MaxArrayLayers`, `MaxCubeDimension`, `MaxDimension3D` and
 `PartialViews` describe enabled operations, not raw hardware potential. Array
-layers and volume extents are conservatively capped at 256, sampled 2D/cube
-extents at the existing 4096 profile ceiling, and mip chains at sixteen. Vulkan
+layers and volume extents use independently enabled backend limits; mip chains
+remain bounded at sixteen. R18 removes the historical 4096 sampled 2D/cube ceiling. Vulkan
 queries combined image usage/type/creation flags; browser limits come from the
 enabled device/context. Compression is independently optional. Required and
 preferred format entries may specify `Dimension`, `MinDepthOrLayers` and
@@ -1429,12 +1432,125 @@ logical copy bytes are not a physical-residency claim.
 
 The public `tests/sdk_consumer/r9.cpp` journey validates rendered readbacks for
 partial initialized mips, array layers, all six cube directions, volume slices
-and tail mips, binary16 HDR values, and BC1/BC3 where enabled. It destroys texture
+and tail mips, binary16 HDR values, and BC1/BC3/BC5 where enabled. It destroys texture
 owners before drawing to exercise retained views. The same fixture is built
 natively and through the installed browser SDK; browser QA runs forced WebGPU,
 forced WebGL 2, Auto and Auto fallback. Reference regressions cover malformed
 slice/block packing, range bounds, typed binding mismatches, CPU view-relative
 mips and conservative mutation exclusion. Physical host qualification remains R7b.
+
+## Reference-scene texture profiles (R18)
+
+R18a adds `RasterFormat::Bc5RgUnorm` for original BC5_UNORM blocks, including
+ATI2 DDS payloads prepared by a caller. It uses the R9 D2/array/cube upload,
+partial-view, typed-binding, graph-retention and completion contracts. Each
+4-by-4 block occupies sixteen bytes, with independent red and green endpoint
+palettes and index bits. Native sampling returns `(R,G,0,1)` in normalized
+linear space. Normal reconstruction belongs to the caller. Signed BC5, BC
+volumes, compressed attachments, retained CPU texels and mutable compressed
+transfers remain unsupported; no decoder, compressor or automatic conversion
+is introduced. Format capability queries explicitly reject the WebGL profile
+and devices without enabled BC compression. `HasUnalignedBlockExtents` reports
+native base-edge support, and `RequiresUnalignedBlockExtents` admits that
+requirement before Ready. This covers prepared ATI2 payloads whose base sizes
+are not divisible by four. The pinned WebGPU profile requires block-aligned
+compressed base dimensions and returns `Unsupported` for unaligned bases;
+callers supply a separately authored supported texture. The RHI does not pad
+or resize it silently.
+
+R18b publishes enabled texture width/height limits instead of clamping general
+raster to 4096. Vulkan intersects native image/type/usage format limits with the
+device limit. Metal uses the existing startup-selected Mac2/Apple4-or-later
+16384 guarantee. WebGPU requests the adapter's reported 2D maximum before
+creating its device, then publishes the resulting **device** limit; the adapter
+alone is not an enabled profile. WebGL uses its sampled context limit, with separate
+cube limits and attachment limits intersected with depth-renderbuffer/viewport
+bounds. Existing required/preferred `Raster.MinTextureDimension2D` and
+`Formats[].MinDimension2D` admission checks apply before Ready. Required misses
+fail with requested/available diagnostics; preferred misses retain the enabled
+profile and report the first unmet preference. A per-format/use limit may be
+lower than `Raster.MaxTextureDimension2D`; callers must check both.
+
+R18c separates allocation size (`Raster.MaxBufferSize`), complete creation-upload
+bytes (`Raster.MaxTextureUploadBytes`) and bound compute range
+(`Compute.MaxStorageRange`). Vulkan uses its Vulkan 1.1 maintenance3 allocation
+limit and storage-range properties; Metal uses `maxBufferLength`; WebGPU requests
+adapter buffer/storage maxima before creation and publishes enabled **device**
+limits. WebGL has no queryable buffer-size maximum, so its implemented ceiling
+is the signed 32-bit byte envelope. Successful admission does not reserve memory:
+logical allocations separately consume `StorageLimits.ResourceBytes` and may
+fail with `CapacityExceeded` or `OutOfMemory`, preserving outputs and ownership.
+A complete 8240-by-8200 RGBA8 blob requires both an upload limit and remaining
+resource budget large enough for its roughly 258 MiB payload; width alone does
+not establish support. There is no implicit resizing or conversion.
+
+Binding metadata and copied dynamic-offset/shader-name tables now have sixteen
+slots (`RASTER_BINDING_COUNT`). `Interface.MaxBindings` and
+`Binding.MaxBindings` report the enabled entry/index envelope. Independently
+check `Binding.MaxUniformBuffersPerStage`, `MaxSampledTexturesPerStage`,
+`MaxSamplersPerStage`, `Compute.MaxStorageBindings` and
+`Binding.MaxDescriptorsPerSet`, `MaxUniformBuffersPerSet` and `MaxSamplersPerSet`.
+Vulkan set-wide uniform/sampler limits additionally constrain mixed-stage layouts.
+Texture array elements count as descriptors;
+visibility in both raster stages counts in each. Dynamic-offset limits remain
+separate. Layout admission rejects excessive per-stage counts before backend
+allocation, even when total entries fit. Required/preferred requests use
+`Raster.MinTextureUploadBytes`, `MinUniformBindings`, `MinTextureBindings`,
+`MinSamplerBindings`, `MinUniformBindingsPerSet`, `MinSamplerBindingsPerSet`,
+and `Compute.MinStorageBindings` alongside existing
+`MinBufferSize`, `MinBindings` and `MinStorageRange`. Required misses fail
+before Ready; preferred misses report requested/available diagnostics without
+changing the enabled profile.
+
+Array layers and volume dimensions are independently queried for Vulkan image
+format/type/usage, enabled WebGPU device limits, and WebGL context limits. Metal
+uses the selected Mac2/Apple4-or-later guarantee of 2048 layers and 2048 volume
+texels per axis. Formats may expose lower or zero limits; compressed volumes
+remain unsupported. `Formats[].Dimension` and `MinDepthOrLayers` admit each
+requested profile before Ready. Initialized mip chains remain bounded at sixteen.
+R8 streaming still uses its separately configured bounded slices and supported
+formats/operations. R18c does not enable new compute, descriptor kinds, indirect
+commands or ray operations.
+
+The offline raw-texel cooker accepts dimensions through 32768. Its default
+complete-chain budget remains 64 MiB; an authored `max_upload_bytes` integer
+can explicitly select a budget through 512 MiB. The cooker checks the entire
+padded footprint before processing texels. This offline envelope is not a
+runtime device guarantee; callers still negotiate and budget the upload.
+
+The extended `tests/sdk_consumer/r9.cpp` fixture checks independent BC5 channel
+palettes in both interpolation modes, encoded index ordering, blue/alpha,
+small tail mips, array layers, a cube face and unaligned native base edges, then reads back the rendered
+pixels. It retains views after texture-owner destruction. Its patterned image
+uses 8240 texels when admitted, otherwise the actual lower enabled width, and
+up to 2049 admitted rows. Explicit row padding keeps its complete upload above
+64 MiB on lower dimension profiles; a 2048-limit WebGL regression checks this
+path and its pixels. It samples array layer 256 when enabled (otherwise the highest admitted
+layer of a reported 256-layer array) and a 512-deep volume mip chain when
+enabled, otherwise a reported lower volume depth. A WebGL browser regression
+reports a 256-texel volume limit and verifies the admitted mip chain and pixels. These prepared textures exercise the old ceilings
+without loading a reference scene. Unit tests cover copied
+required/preferred requests, unsupported BC5, enabled 8192/16384 limits,
+malformed mip/slice/pitch lengths, native rollback and resource-byte budgets.
+The `tests/sdk_consumer/r18c.cpp` installed-SDK fixture allocates a 67109120-byte
+storage buffer, binds a 16777472-byte range, and reads its far-end authored value
+in a compute graph with five storage and four uniform descriptors. GPU output
+readback must equal 20. Native Metal/Vulkan and real Chromium WebGPU exercise
+this producer/consumer path; WebGL explicitly lacks compute and separately
+qualifies the R9 textures. Exact-limit/over-limit and per-stage admission tests
+cover unpublished handles, resource-budget rollback and preferred diagnostics.
+These correctness fixtures do not complete R7b/R7c physical reference-scene
+qualification.
+
+Thanks to Microsoft, [Block Compression (Direct3D 10), BC5](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression),
+for the two-channel block contract; Apple, [Metal Feature Set Tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf),
+for the selected-family dimension guarantee; and W3C's
+[WebGPU device required limits](https://www.w3.org/TR/webgpu/#dom-gpudevicedescriptor-requiredlimits),
+for the adapter-to-enabled-device distinction; and Khronos Group,
+[Vulkan maintenance3 allocation limits](https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceMaintenance3Properties.html),
+for the enabled allocation bound. The milestone ownership and
+remaining binding/compute/ray/resource work live in the
+[canonical RHI/GDI assignment](../architecture/rhi-gdi.md#follow-up-milestones-r6r18).
 
 ## Attachment extensions (R10)
 

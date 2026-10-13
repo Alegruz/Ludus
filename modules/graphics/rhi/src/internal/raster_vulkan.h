@@ -496,6 +496,7 @@ VkFormat RasterPixelFormat(RasterFormat format) noexcept
 {
     return format == RasterFormat::Bc1RgbaUnorm   ? VK_FORMAT_BC1_RGBA_UNORM_BLOCK
            : format == RasterFormat::Bc3RgbaUnorm ? VK_FORMAT_BC3_UNORM_BLOCK
+           : format == RasterFormat::Bc5RgUnorm   ? VK_FORMAT_BC5_UNORM_BLOCK
            : format == RasterFormat::Rgba16Float  ? VK_FORMAT_R16G16B16A16_SFLOAT
            : format == RasterFormat::Rg8Unorm     ? VK_FORMAT_R8G8_UNORM
            : format == RasterFormat::R8Unorm      ? VK_FORMAT_R8_UNORM
@@ -509,7 +510,7 @@ VkFormat RasterPixelFormat(RasterFormat format) noexcept
 // https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceImageFormatProperties.html
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    if (gPhysical == VK_NULL_HANDLE || static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
+    if (gPhysical == VK_NULL_HANDLE || static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm))
     {
         return {};
     }
@@ -545,7 +546,8 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
+    result.HasUnalignedBlockExtents = internal::CompressedTexture(format);
     if (sampled.maxExtent.width < result.MaxSampledDimension2D)
     {
         result.MaxSampledDimension2D = sampled.maxExtent.width;
@@ -567,7 +569,7 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         result.MaxMipLevels = sampled.maxMipLevels;
     }
-    result.MaxArrayLayers = sampled.maxArrayLayers < 256 ? sampled.maxArrayLayers : 256;
+    result.MaxArrayLayers = sampled.maxArrayLayers;
     result.PartialViews = true;
     VkImageFormatProperties cube{}, volume{};
     if (vkGetPhysicalDeviceImageFormatProperties(gPhysical,
@@ -598,7 +600,7 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
                                                                                          0,
                                                                                          &volume) == VK_SUCCESS)
     {
-        result.MaxDimension3D = 256;
+        result.MaxDimension3D = volume.maxExtent.width;
         const uint32 bounds[]{volume.maxExtent.width, volume.maxExtent.height, volume.maxExtent.depth};
         for (const auto bound : bounds)
         {
@@ -631,6 +633,7 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     result.Uses.Blendable =
         attachment && (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0;
     result.SampleCounts = attachment ? static_cast<uint32>(color.sampleCounts & depth.sampleCounts) & 5U : 0U;
+    uint32 stencilDimension = 0;
     if (attachment)
     {
         VkImageFormatProperties stencil{};
@@ -653,12 +656,10 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
         }
         result.MaxAttachmentLayers =
             color.maxArrayLayers < depth.maxArrayLayers ? color.maxArrayLayers : depth.maxArrayLayers;
-        if (result.MaxAttachmentLayers > 256)
-        {
-            result.MaxAttachmentLayers = 256;
-        }
         if (result.StencilAttachment)
         {
+            stencilDimension =
+                stencil.maxExtent.width < stencil.maxExtent.height ? stencil.maxExtent.width : stencil.maxExtent.height;
             result.SampleCounts &= static_cast<uint32>(stencil.sampleCounts);
             if (stencil.maxMipLevels < result.MaxAttachmentMipLevels)
             {
@@ -673,18 +674,25 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     result.MaxAttachmentDimension2D = attachment ? result.MaxSampledDimension2D : 0;
     VkPhysicalDeviceProperties device{};
     vkGetPhysicalDeviceProperties(gPhysical, &device);
-    const uint32 bounds[]{color.maxExtent.width,
-                          color.maxExtent.height,
-                          depth.maxExtent.width,
-                          depth.maxExtent.height,
-                          device.limits.maxFramebufferWidth,
-                          device.limits.maxFramebufferHeight};
-    for (const auto bound : bounds)
+    constexpr usize ATTACHMENT_DIMENSION_BOUND_COUNT = 8;
+    const StaticArray<uint32, ATTACHMENT_DIMENSION_BOUND_COUNT> bounds{{color.maxExtent.width,
+                                                                        color.maxExtent.height,
+                                                                        depth.maxExtent.width,
+                                                                        depth.maxExtent.height,
+                                                                        device.limits.maxFramebufferWidth,
+                                                                        device.limits.maxFramebufferHeight,
+                                                                        device.limits.maxViewportDimensions[0],
+                                                                        device.limits.maxViewportDimensions[1]}};
+    for (const uint32 bound : bounds)
     {
         if (bound < result.MaxAttachmentDimension2D)
         {
             result.MaxAttachmentDimension2D = bound;
         }
+    }
+    if (result.StencilAttachment == true && stencilDimension < result.MaxAttachmentDimension2D)
+    {
+        result.MaxAttachmentDimension2D = stencilDimension;
     }
     if (attachment)
     {
@@ -809,18 +817,38 @@ BindingCapabilities BindingLimits() noexcept
     {
         textures = limits.maxDescriptorSetSampledImages;
     }
+    uint32 uniforms = limits.maxPerStageDescriptorUniformBuffers < limits.maxDescriptorSetUniformBuffers
+                          ? limits.maxPerStageDescriptorUniformBuffers
+                          : limits.maxDescriptorSetUniformBuffers;
+    uint32 samplers = limits.maxPerStageDescriptorSamplers < limits.maxDescriptorSetSamplers
+                          ? limits.maxPerStageDescriptorSamplers
+                          : limits.maxDescriptorSetSamplers;
+    uniforms = uniforms < internal::RASTER_BINDINGS ? uniforms : static_cast<uint32>(internal::RASTER_BINDINGS);
+    samplers = samplers < internal::RASTER_BINDINGS ? samplers : static_cast<uint32>(internal::RASTER_BINDINGS);
     return
     {
-        .MaxDynamicUniformBuffers =
-            limits.maxDescriptorSetUniformBuffersDynamic < 8 ? limits.maxDescriptorSetUniformBuffersDynamic : 8,
-        .MaxDynamicStorageBuffers =
-            limits.maxDescriptorSetStorageBuffersDynamic < 4 ? limits.maxDescriptorSetStorageBuffersDynamic : 4,
+        .MaxDynamicUniformBuffers = limits.maxDescriptorSetUniformBuffersDynamic < internal::RASTER_BINDINGS
+                                        ? limits.maxDescriptorSetUniformBuffersDynamic
+                                        : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxDynamicStorageBuffers = limits.maxDescriptorSetStorageBuffersDynamic < internal::RASTER_BINDINGS
+                                        ? limits.maxDescriptorSetStorageBuffersDynamic
+                                        : static_cast<uint32>(internal::RASTER_BINDINGS),
         .MaxTextureArrayElements = textures,
         .MaxDescriptorsPerSet = limits.maxPerStageResources < internal::CurrentStorageLimits().DescriptorsPerSet
                                     ? limits.maxPerStageResources
                                     : internal::CurrentStorageLimits().DescriptorsPerSet,
         .HasUniformTextureIndexing = gHasUniformTextureIndexing,
         .HasBindlessTextureIndexing = gHasBindlessTextureIndexing,
+        .MaxBindings = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxUniformBuffersPerStage = uniforms,
+        .MaxSampledTexturesPerStage = textures,
+        .MaxSamplersPerStage = samplers,
+        .MaxUniformBuffersPerSet = limits.maxDescriptorSetUniformBuffers < internal::RASTER_BINDINGS
+                                       ? limits.maxDescriptorSetUniformBuffers
+                                       : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxSamplersPerSet = limits.maxDescriptorSetSamplers < internal::RASTER_BINDINGS
+                                 ? limits.maxDescriptorSetSamplers
+                                 : static_cast<uint32>(internal::RASTER_BINDINGS),
     };
 }
 RasterCapabilities RasterLimits() noexcept
@@ -837,16 +865,31 @@ RasterCapabilities RasterLimits() noexcept
         gRasterHdr = (hdr.optimalTilingFeatures & required) == required;
         gRasterHdrProbed = true;
     }
-    const auto max = properties.limits.maxImageDimension2D;
+    const uint32 max = properties.limits.maxImageDimension2D;
     const usize alignment = properties.limits.minUniformBufferOffsetAlignment;
-    return {usize{64} * 1024 * 1024,
-            max < 4096 ? max : 4096,
+    // Thanks to Khronos Group, Vulkan Specification, maintenance3 allocation limits:
+    // https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceMaintenance3Properties.html
+    // Vulkan 1.1 is required; staging and buffer allocations share the enabled allocation bound.
+    VkPhysicalDeviceMaintenance3Properties allocation
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES,
+    };
+    VkPhysicalDeviceProperties2 extended
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &allocation,
+    };
+    vkGetPhysicalDeviceProperties2(gPhysical, &extended);
+    const usize bufferBytes = internal::GetResourceSizeLimit(allocation.maxMemoryAllocationSize);
+    return {bufferBytes,
+            max,
             alignment > 256 ? alignment : 256,
             properties.limits.maxUniformBufferRange < 16384 ? properties.limits.maxUniformBufferRange : 16384,
             internal::CurrentStorageLimits().ResourcesPerKind,
             internal::CurrentStorageLimits().DrawsPerFrame,
             properties.limits.maxVertexInputAttributes < 16 ? properties.limits.maxVertexInputAttributes : 16,
-            gRasterHdr};
+            gRasterHdr,
+            bufferBytes};
 }
 ComputeCapabilities ComputeLimits() noexcept
 {
@@ -861,11 +904,16 @@ ComputeCapabilities ComputeLimits() noexcept
     {
         return {};
     }
-    constexpr usize range = usize{16} * 1024 * 1024;
+    const usize range = RasterLimits().MaxBufferSize;
     ComputeCapabilities result;
     result.MaxStorageRange = limits.maxStorageBufferRange < range ? limits.maxStorageBufferRange : range;
     result.StorageOffsetAlignment =
         limits.minStorageBufferOffsetAlignment > 256 ? limits.minStorageBufferOffsetAlignment : 256;
+    const uint32 storageBindings = limits.maxPerStageDescriptorStorageBuffers < limits.maxDescriptorSetStorageBuffers
+                                       ? limits.maxPerStageDescriptorStorageBuffers
+                                       : limits.maxDescriptorSetStorageBuffers;
+    result.MaxStorageBindings =
+        storageBindings < internal::RASTER_BINDINGS ? storageBindings : static_cast<uint32>(internal::RASTER_BINDINGS);
     result.MaxWorkgroupInvocations = 256;
     const uint32 size[3]{256, 256, 64};
     for (usize i = 0; i < 3; ++i)

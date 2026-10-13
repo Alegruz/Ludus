@@ -83,3 +83,32 @@ class TextureCookerTests(unittest.TestCase):
             source['bake'][field][index]=2 ** -149
             self.assertEqual(len(cook(source)[1]),1)
             source['bake'][field][index]=0
+
+    def test_large_thin_image_is_cooked_without_device_clamping(self):
+        source = {'width':8240,'height':1,'format':'R8Unorm','semantic':'data',
+                  'mip_levels':1,'pixels':[127]*8240}
+        blob, levels = cook(source)
+        self.assertEqual(len(blob), 8240)
+        self.assertEqual(levels[0]['width'], 8240)
+        for dimension in (0, 32769, 2**32-1):
+            source['width'] = dimension
+            with self.assertRaisesRegex(ValueError, 'dimensions'):
+                cook(source)
+        source.update(width=8240, height=8200, format='Rgba8Unorm')
+        with self.assertRaisesRegex(ValueError, '64 MiB'):
+            cook(source)
+
+
+class ExpandedUploadBudgetTests(unittest.TestCase):
+    def test_explicit_budget_admits_large_footprint_before_texel_validation(self):
+        source = {'width':8240,'height':8200,'format':'Rgba8Unorm','semantic':'color',
+                  'mip_levels':1,'pixels':[], 'max_upload_bytes':512*1024*1024}
+        with self.assertRaisesRegex(ValueError, 'complete tightly packed'):
+            cook(source)
+        for invalid in (0, -1, True, 512*1024*1024+1):
+            source['max_upload_bytes'] = invalid
+            with self.assertRaisesRegex(ValueError, 'integer in 1..512 MiB'):
+                cook(source)
+        source['max_upload_bytes'] = 64*1024*1024
+        with self.assertRaisesRegex(ValueError, 'max_upload_bytes'):
+            cook(source)

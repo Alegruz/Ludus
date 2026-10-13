@@ -118,12 +118,15 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
+    result.HasUnalignedBlockExtents = internal::CompressedTexture(format);
     if (result.Uses.Sampled)
     {
-        result.MaxArrayLayers = 256;
+        // Thanks to Apple, Metal Feature Set Tables, Resources (Mac2/Apple4+):
+        // https://developer.apple.com/metal/limits/ — 2048 array layers and 3D texels.
+        result.MaxArrayLayers = 2048;
         result.MaxCubeDimension = result.MaxSampledDimension2D;
-        result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 256U;
+        result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 2048U;
         result.PartialViews = true;
     }
     if (result.Uses.ColorAttachment)
@@ -159,27 +162,34 @@ BindingCapabilities BindingLimits() noexcept
     }
     return
     {
-        .MaxDynamicUniformBuffers = 8,
-        .MaxDynamicStorageBuffers = 4,
+        .MaxDynamicUniformBuffers = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxDynamicStorageBuffers = static_cast<uint32>(internal::RASTER_BINDINGS),
         .MaxTextureArrayElements = 31,
         .MaxDescriptorsPerSet = internal::CurrentStorageLimits().DescriptorsPerSet,
         .HasUniformTextureIndexing = true,
         .HasBindlessTextureIndexing = internal::IsBindlessRequested(),
+        .MaxBindings = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxUniformBuffersPerStage = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxSampledTexturesPerStage = 31,
+        .MaxSamplersPerStage = 16,
+        .MaxUniformBuffersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxSamplersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
     };
 }
 RasterCapabilities RasterLimits() noexcept
 {
-    const usize max = usize{64} * 1024 * 1024;
+    const usize max = internal::GetResourceSizeLimit(gDevice.maxBufferLength);
     return
     {
         .MaxBufferSize = gDevice.maxBufferLength < max ? gDevice.maxBufferLength : max,
-        .MaxTextureDimension2D = 4096,
+        .MaxTextureDimension2D = MAX_DIMENSION,
         .UniformOffsetAlignment = 256,
         .MaxUniformRange = 16384,
         .ResourcesPerKind = internal::CurrentStorageLimits().ResourcesPerKind,
         .DrawsPerFrame = internal::CurrentStorageLimits().DrawsPerFrame,
         .MaxVertexAttributes = 16,
         .HdrColor = true,
+        .MaxTextureUploadBytes = max,
     };
 }
 // Thanks to Apple, "MTLComputeCommandEncoder" and Metal's tracked-resource
@@ -191,15 +201,16 @@ ComputeCapabilities ComputeLimits() noexcept
     {
         return {};
     }
-    const auto threads = gDevice.maxThreadsPerThreadgroup;
-    constexpr usize range = usize{16} * 1024 * 1024;
+    const MTLSize threads = gDevice.maxThreadsPerThreadgroup;
+    const usize range = RasterLimits().MaxBufferSize;
     return {gDevice.maxBufferLength < range ? gDevice.maxBufferLength : range,
             256,
             {static_cast<uint32>(threads.width < 256 ? threads.width : 256),
              static_cast<uint32>(threads.height < 256 ? threads.height : 256),
              static_cast<uint32>(threads.depth < 64 ? threads.depth : 64)},
             256,
-            {65535, 65535, 65535}};
+            {65535, 65535, 65535},
+            static_cast<uint32>(internal::RASTER_BINDINGS)};
 }
 RasterStatus ComputeCreatePipeline(usize slot, const internal::ComputePipelineInfo& info, uint32) noexcept
 {
@@ -264,6 +275,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
             texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Bc1RgbaUnorm   ? MTLPixelFormatBC1_RGBA
                                                : info.Format == RasterFormat::Bc3RgbaUnorm ? MTLPixelFormatBC3_RGBA
+                                               : info.Format == RasterFormat::Bc5RgUnorm   ? MTLPixelFormatBC5_RGUnorm
                                                : info.Format == RasterFormat::Rgba16Float  ? MTLPixelFormatRGBA16Float
                                                : info.Format == RasterFormat::Rg8Unorm     ? MTLPixelFormatRG8Unorm
                                                : info.Format == RasterFormat::R8Unorm      ? MTLPixelFormatR8Unorm

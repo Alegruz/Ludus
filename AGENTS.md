@@ -192,6 +192,9 @@ rejects the explicit `== true`/`== false` style.
 
 ### Declarations and representation constants
 
+- Mark short inline C++ accessors and methods with `LUDUS_INLINE`; include its
+  defining foundational header explicitly. Method size and suitability for
+  forced inlining are semantic review decisions, not lexical gate checks.
 - Declare one variable per statement in C++ and Slang. Never use comma-separated
   declarator lists, including members and loop initializers. Expression commas
   (arguments, aggregate values, loop increments) remain valid. The changed-source

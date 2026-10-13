@@ -2,6 +2,8 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/containers/static_array.hpp>
+
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/profile.h>
 #include <ludus/graphics/rhi/render.h>
@@ -11,9 +13,6 @@
 
 namespace ludus::graphics::rhi
 {
-/// Portable group-zero binding slots. Stage descriptor limits are separately negotiated.
-inline constexpr ludus::foundation::usize RASTER_BINDING_COUNT = 16;
-
 namespace internal
 {
 /// Private access to portable resource identities; not an application API.
@@ -258,7 +257,7 @@ struct TextureUpload final
     /// Rows in top-left image order, including optional padding between rows.
     std::span<const ludus::foundation::uint8> Bytes;
     /// Encoded row/block-row pitch, at least ceil(Width/blockWidth) * blockBytes.
-    /// Must be a multiple of four and of the format block byte count (eight for HDR/BC1, sixteen for BC3).
+    /// Must be a multiple of four and of the format block byte count (eight for HDR/BC1, sixteen for BC3/BC5).
     ludus::foundation::usize RowPitch = 0;
     /// Empty selects the legacy single-mip RowPitch. Otherwise exactly MipLevels
     /// descriptors; RowPitch must be zero. All metadata is consumed before return.
@@ -384,7 +383,7 @@ enum class RasterBindingIndexing : ludus::foundation::uint8
     /// Per-invocation indices; requires explicitly requested optional bindless support.
     NonUniform,
 };
-/// One immutable layout entry; binding numbers must be unique and less than eight.
+/// One immutable layout entry; binding numbers must be unique and below the enabled Interface.MaxBindings.
 struct RasterBinding final
 {
     /// Group/set-zero binding number.
@@ -411,8 +410,8 @@ struct RasterBinding final
 /// offset with checked arithmetic; the bound Size remains unchanged. Owner-thread only.
 struct RasterBindingOffsets final
 {
-    /// Additional byte offset for each portable binding number.
-    ludus::foundation::uint32 Bytes[RASTER_BINDING_COUNT]{};
+    /// Additional byte offset for each implemented binding number; unused entries must be zero.
+    ludus::foundation::StaticArray<ludus::foundation::uint32, RASTER_BINDING_COUNT> Bytes{};
 };
 /// Portable float vertex attribute width.
 enum class RasterVertexFormat : ludus::foundation::uint8
@@ -476,12 +475,12 @@ struct RasterShaderDescription final
     /// Binding requirements for this stage; copied before return.
     std::span<const RasterBinding> Bindings;
     /// GLSL ES uniform block names, indexed by binding number; empty for other kinds.
-    std::string_view UniformBlocks[RASTER_BINDING_COUNT]{};
+    ludus::foundation::StaticArray<std::string_view, RASTER_BINDING_COUNT> UniformBlocks{};
     /// Combined GLSL ES sampled-uniform names, indexed by texture binding number.
-    std::string_view TextureNames[RASTER_BINDING_COUNT]{};
+    ludus::foundation::StaticArray<std::string_view, RASTER_BINDING_COUNT> TextureNames{};
     /// Sampler binding paired with each GLSL ES texture; ~uint32{0} denotes an unfiltered depth/stencil load.
     /// Cooked browser descriptions retain this metadata for target selection.
-    ludus::foundation::uint32 TextureSamplers[RASTER_BINDING_COUNT]{};
+    ludus::foundation::StaticArray<ludus::foundation::uint32, RASTER_BINDING_COUNT> TextureSamplers{};
     /// Independently reflected local dimensions for Compute; ignored for raster.
     /// Positive dimensions/product must fit the negotiated compute limits.
     ludus::foundation::uint32 WorkgroupSize[3]{1, 1, 1};
@@ -756,7 +755,8 @@ CreateTextureView(DeviceHandle, TextureHandle, const TextureViewDescription&, Te
 /// Create a reflected stage. Pending owns its output; copied metadata survives caller storage.
 [[nodiscard]] RasterStatus
 CreateRasterShader(DeviceHandle, const RasterShaderDescription&, RasterShaderHandle&) noexcept;
-/// Create an immutable group-zero layout from at most eight unique entries.
+/// Create an immutable group-zero layout from at most Interface.MaxBindings unique entries; per-stage counts are
+/// checked independently.
 [[nodiscard]] RasterStatus
 CreateBindingLayout(DeviceHandle, std::span<const RasterBinding>, BindingLayoutHandle&) noexcept;
 /// Create an immutable snapshot containing every element of every layout entry.

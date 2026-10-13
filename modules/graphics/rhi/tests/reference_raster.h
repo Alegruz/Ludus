@@ -1,6 +1,7 @@
 #pragma once
 #include "internal/measurement.h"
 #include "internal/raster.h"
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/graphics/rhi/native_interop.h>
 namespace ludus::graphics::rhi::reference
 {
@@ -21,9 +22,11 @@ inline foundation::uint64 AllocationBytes = 128;
 inline bool ProfileAvailable = true;
 inline bool HdrAvailable = true;
 inline bool ComputeAvailable = true;
-inline bool FormatUnavailable[7]{};
+inline foundation::StaticArray<bool, RASTER_FORMAT_COUNT> FormatUnavailable{};
 inline bool FormatBlendUnavailable = false;
 inline bool OverrideRasterLimits = false;
+inline bool HasBindingLimitOverride = false;
+inline BindingCapabilities BindingLimitOverride;
 inline RasterCapabilities RasterLimitOverride;
 inline foundation::usize Dispatches = 0;
 inline RasterStatus ComputeResult = RasterStatus::Ready;

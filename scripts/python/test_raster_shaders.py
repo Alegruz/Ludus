@@ -13,7 +13,7 @@ class RasterReflectionTests(unittest.TestCase):
     def test_binding_slot_limit_matches_the_public_rhi_contract(self):
         import re
         from compile_raster import RASTER_BINDING_COUNT
-        source = (ROOT/'modules/graphics/rhi/include/ludus/graphics/rhi/raster.h').read_text()
+        source = (ROOT/'modules/graphics/rhi/include/ludus/graphics/rhi/profile.h').read_text()
         match = re.search(r'RASTER_BINDING_COUNT\s*=\s*(\d+)', source)
         self.assertIsNotNone(match)
         self.assertEqual(RASTER_BINDING_COUNT, int(match.group(1)))
@@ -254,7 +254,14 @@ class RasterReflectionTests(unittest.TestCase):
             resource=copy.deepcopy(data['parameters'][0]);resource['name']=f'records{i}';resource['binding']['index']=i
             data['parameters'].append(resource)
             data['entryPoints'][0]['bindings'].append({'name':resource['name'],'binding':{'used':1}})
-        with self.assertRaisesRegex(RuntimeError,'four storage'):raster_interface(data,'compute')
+        self.assertEqual(len(raster_interface(data,'compute')['entries']), 5)
+        for i in range(5,16):
+            resource=copy.deepcopy(data['parameters'][0]);resource['name']=f'records{i}';resource['binding']['index']=i
+            data['parameters'].append(resource)
+            data['entryPoints'][0]['bindings'].append({'name':resource['name'],'binding':{'used':1}})
+        self.assertEqual(len(raster_interface(data,'compute')['entries']), 16)
+        data['parameters'][-1]['binding']['index'] = 16
+        with self.assertRaisesRegex(RuntimeError,'bounded profile'):raster_interface(data,'compute')
 
 if __name__=='__main__':unittest.main()
 

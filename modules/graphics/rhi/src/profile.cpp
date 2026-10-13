@@ -15,14 +15,17 @@ bool Any(const TextureUses& uses) noexcept
 } // namespace
 bool ValidProfileRequirements(const DeviceProfileRequirements& requirements) noexcept
 {
-    if (requirements.FormatCount > 7)
+    if (requirements.FormatCount > RASTER_FORMAT_COUNT)
     {
         return false;
     }
     for (uint32 i = 0; i < requirements.FormatCount; ++i)
     {
-        const auto& entry = requirements.Formats[i];
-        if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm) || !Any(entry.Uses) ||
+        const FormatRequirement& entry = requirements.Formats[i];
+        if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm) ||
+            Any(entry.Uses) == false ||
+            (entry.RequiresUnalignedBlockExtents == true &&
+             (CompressedTexture(entry.Format) == false || entry.Uses.Sampled == false)) ||
             static_cast<uint8>(entry.Dimension) > static_cast<uint8>(TextureDimension::D3) ||
             ((entry.Uses.ColorAttachment || entry.Uses.Blendable) && entry.Dimension == TextureDimension::D3) ||
             (entry.Dimension == TextureDimension::D2 && entry.MinDepthOrLayers > 1) ||
@@ -44,16 +47,19 @@ bool ValidProfileRequirements(const DeviceProfileRequirements& requirements) noe
 }
 bool NeedsRaster(const DeviceProfileRequirements& requirements) noexcept
 {
-    const auto& r = requirements.Raster;
+    const RasterRequirements& r = requirements.Raster;
     return requirements.FormatCount != 0 || r.MinBufferSize != 0 || r.MinTextureDimension2D != 0 ||
            r.MaxUniformOffsetAlignment != 0 || r.MinUniformRange != 0 || r.MinResourcesPerKind != 0 ||
            r.MinDrawsPerFrame != 0 || r.MinBindings != 0 || r.MinVertexBuffers != 0 || r.MinVertexAttributes != 0 ||
-           r.MinVertexStride != 0 || r.MinColorAttachments != 0 || r.MinTextureLayers != 0;
+           r.MinVertexStride != 0 || r.MinColorAttachments != 0 || r.MinTextureLayers != 0 ||
+           r.MinTextureUploadBytes != 0 || r.MinUniformBindings != 0 || r.MinTextureBindings != 0 ||
+           r.MinSamplerBindings != 0 || r.MinUniformBindingsPerSet != 0 || r.MinSamplerBindingsPerSet != 0;
 }
 bool NeedsCompute(const DeviceProfileRequirements& requirements) noexcept
 {
-    const auto& c = requirements.Compute;
-    if (c.MinStorageRange != 0 || c.MaxStorageOffsetAlignment != 0 || c.MinWorkgroupInvocations != 0)
+    const ComputeRequirements& c = requirements.Compute;
+    if (c.MinStorageRange != 0 || c.MaxStorageOffsetAlignment != 0 || c.MinWorkgroupInvocations != 0 ||
+        c.MinStorageBindings != 0)
     {
         return true;
     }
@@ -187,6 +193,60 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
             .Available = profile.Interface.MaxTextureLayers,
         };
     }
+    if (requirements.Raster.MinTextureUploadBytes > profile.Raster.MaxTextureUploadBytes)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::TextureUploadBytes,
+            .Requested = requirements.Raster.MinTextureUploadBytes,
+            .Available = profile.Raster.MaxTextureUploadBytes,
+        };
+    }
+    if (requirements.Raster.MinUniformBindings > profile.Binding.MaxUniformBuffersPerStage)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::UniformBindings,
+            .Requested = requirements.Raster.MinUniformBindings,
+            .Available = profile.Binding.MaxUniformBuffersPerStage,
+        };
+    }
+    if (requirements.Raster.MinTextureBindings > profile.Binding.MaxSampledTexturesPerStage)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::TextureBindings,
+            .Requested = requirements.Raster.MinTextureBindings,
+            .Available = profile.Binding.MaxSampledTexturesPerStage,
+        };
+    }
+    if (requirements.Raster.MinSamplerBindings > profile.Binding.MaxSamplersPerStage)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::SamplerBindings,
+            .Requested = requirements.Raster.MinSamplerBindings,
+            .Available = profile.Binding.MaxSamplersPerStage,
+        };
+    }
+    if (requirements.Raster.MinUniformBindingsPerSet > profile.Binding.MaxUniformBuffersPerSet)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::UniformBindingsPerSet,
+            .Requested = requirements.Raster.MinUniformBindingsPerSet,
+            .Available = profile.Binding.MaxUniformBuffersPerSet,
+        };
+    }
+    if (requirements.Raster.MinSamplerBindingsPerSet > profile.Binding.MaxSamplersPerSet)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::SamplerBindingsPerSet,
+            .Requested = requirements.Raster.MinSamplerBindingsPerSet,
+            .Available = profile.Binding.MaxSamplersPerSet,
+        };
+    }
     if (requirements.Compute.MinStorageRange != 0 &&
         requirements.Compute.MinStorageRange > profile.Compute.MaxStorageRange)
     {
@@ -243,10 +303,28 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
             };
         }
     }
+    if (requirements.Compute.MinStorageBindings > profile.Compute.MaxStorageBindings)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::StorageBindings,
+            .Requested = requirements.Compute.MinStorageBindings,
+            .Available = profile.Compute.MaxStorageBindings,
+        };
+    }
     for (uint32 i = 0; i < requirements.FormatCount; ++i)
     {
-        const auto& request = requirements.Formats[i];
-        const auto& format = profile.Formats[static_cast<usize>(request.Format)];
+        const FormatRequirement& request = requirements.Formats[i];
+        const FormatCapabilities& format = profile.Formats[static_cast<usize>(request.Format)];
+        if (request.RequiresUnalignedBlockExtents == true && format.HasUnalignedBlockExtents == false)
+        {
+            return
+            {
+                .Requirement = ProfileRequirement::UnalignedBlockExtents,
+                .Format = request.Format,
+                .Requested = 1,
+            };
+        }
         if (request.Uses.Sampled && !format.Uses.Sampled)
         {
             return { .Requirement = ProfileRequirement::Sampled, .Format = request.Format, .Requested = 1 };
@@ -383,6 +461,11 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
     }
     return {};
 }
+foundation::usize GetResourceSizeLimit(foundation::uint64 nativeBytes) noexcept
+{
+    const foundation::uint64 hostMaximum = ~foundation::usize{0};
+    return static_cast<foundation::usize>(nativeBytes < hostMaximum ? nativeBytes : hostMaximum);
+}
 DeviceProfile QueryDeviceProfile() noexcept
 {
     DeviceProfile result;
@@ -400,15 +483,15 @@ DeviceProfile QueryDeviceProfile() noexcept
     {
         return {};
     }
-    result.Interface = {static_cast<uint32>(RASTER_BINDING_COUNT),
+    result.Binding = backend::BindingLimits();
+    result.Interface = {result.Binding.MaxBindings,
                         2,
                         result.Raster.MaxVertexAttributes,
                         backend::RasterVertexStrideLimit(),
                         backend::RasterColorAttachmentLimit(),
                         1};
     result.Compute = backend::ComputeLimits();
-    result.Binding = backend::BindingLimits();
-    for (usize i = 0; i < 7; ++i)
+    for (usize i = 0; i < RASTER_FORMAT_COUNT; ++i)
     {
         result.Formats[i] = backend::FormatLimits(static_cast<RasterFormat>(i));
         if (result.Formats[i].MaxArrayLayers > result.Interface.MaxTextureLayers)
@@ -422,16 +505,16 @@ DeviceProfile QueryDeviceProfile() noexcept
 FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabilities& limits) noexcept
 {
     if (limits.MaxUniformRange < 16384 || limits.MaxTextureDimension2D == 0 ||
-        static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
+        static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm))
     {
         return {};
     }
     const bool hdr = format == RasterFormat::Rgba16Float;
     const bool attachment =
-        !CompressedTexture(format) &&
+        CompressedTexture(format) == false &&
         ((hdr && limits.HdrColor) || format == RasterFormat::Rgba8Unorm || format == RasterFormat::Rgba8Srgb);
     uint32 levels = 1;
-    for (auto extent = limits.MaxTextureDimension2D; extent > 1; extent /= 2)
+    for (uint32 extent = limits.MaxTextureDimension2D; extent > 1; extent /= 2)
     {
         ++levels;
     }

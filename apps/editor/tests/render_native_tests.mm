@@ -1,6 +1,7 @@
 #include "internal/preview_viewport.h"
 #include "internal/readback.h"
 #include "internal/render_preview.h"
+#include "internal/world_workspace.h"
 #include "renderer_composite.h"
 #include "renderer_flat.h"
 #include <QQuickWindow>
@@ -8,11 +9,13 @@
 #import <Cocoa/Cocoa.h>
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QSize>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -24,6 +27,26 @@ using namespace ludus::editor;
 using namespace ludus::foundation;
 bool Frames(RenderPreview& preview, uint64 target)
 {
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport") && window->isExposed() == false)
+        {
+            // Qt suspends consumer presentation for occluded native children.
+            // Frame-progress assertions require an exposed test window.
+            QWindow* topLevel = window;
+            while (topLevel->parent() != nullptr)
+            {
+                topLevel = topLevel->parent();
+            }
+            topLevel->raise();
+            topLevel->requestActivate();
+            if (QTest::qWaitForWindowExposed(window, 5000) == false)
+            {
+                WARN("Native viewport could not become exposed for the frame-progress check");
+                return false;
+            }
+        }
+    }
     QElapsedTimer timer;
     timer.start();
     while (preview.Frames() < target && timer.elapsed() < 10000 && preview.Running())
@@ -33,6 +56,17 @@ bool Frames(RenderPreview& preview, uint64 target)
     if (preview.Frames() >= target)
     {
         QTest::qWait(100);
+    }
+    if (preview.Frames() < target)
+    {
+        WARN("Viewport frames " << preview.Frames() << " / " << target << "; pending=" << preview.HasPendingFrame());
+        for (QWindow* window : QGuiApplication::allWindows())
+        {
+            if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+            {
+                WARN("Native viewport exposed=" << window->isExposed() << "; visible=" << window->isVisible());
+            }
+        }
     }
     return preview.Frames() >= target;
 }
@@ -48,7 +82,82 @@ QImage ReadViewport()
     }
     return {};
 }
+QSize GetViewportPixelSize()
+{
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+        {
+            const float64 ratio = window->devicePixelRatio();
+            const int32 width = qRound(static_cast<float64>(window->width()) * ratio);
+            const int32 height = qRound(static_cast<float64>(window->height()) * ratio);
+            return {width, height};
+        }
+    }
+    return {};
+}
 } // namespace
+TEST_CASE("Supplied imported World remains visible in solid and albedo GPU views", "[.render-native]")
+{
+    const QString root = qEnvironmentVariable("LUDUS_VIEWPORT_TEST_PROJECT");
+    if (root.isEmpty() == true)
+    {
+        SUCCEED("Set LUDUS_VIEWPORT_TEST_PROJECT and LUDUS_VIEWPORT_TEST_WORLD for imported-World acceptance.");
+        return;
+    }
+    WorldWorkspace workspace;
+    workspace.resize(1200, 850);
+    workspace.show();
+    workspace.SetProject(root, 1);
+    REQUIRE(workspace.Open(QDir(root).filePath(qEnvironmentVariable("LUDUS_VIEWPORT_TEST_WORLD"))));
+    PreviewViewport* viewport =
+        static_cast<PreviewViewport*>(workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport")));
+    REQUIRE(viewport != nullptr);
+    QComboBox* shading = viewport->findChild<QComboBox*>(QStringLiteral("viewportShading"));
+    REQUIRE(shading != nullptr);
+    const QJsonObject draft = workspace.Document().Draft();
+    const QString imagePrefix = qEnvironmentVariable("LUDUS_VIEWPORT_TEST_IMAGE");
+    QImage previous;
+    for (int32 mode = 0; mode < 3; ++mode)
+    {
+        const uint64 target = viewport->PresentedFrames() + 2;
+        shading->setCurrentIndex(mode);
+        QElapsedTimer timer;
+        timer.start();
+        while (viewport->PresentedFrames() < target && timer.elapsed() < 15000)
+        {
+            QTest::qWait(20);
+        }
+        REQUIRE(viewport->PresentedFrames() >= target);
+        const QImage image = ReadViewport();
+        REQUIRE_FALSE(image.isNull());
+        if (mode == 0)
+        {
+            bool hasContrast = false;
+            const QColor first = image.pixelColor(0, 0);
+            for (int32 y = 0; y < image.height(); y += 16)
+            {
+                for (int32 x = 0; x < image.width(); x += 16)
+                {
+                    hasContrast = hasContrast || image.pixelColor(x, y) != first;
+                }
+            }
+            CHECK(hasContrast);
+        }
+        if (mode > 0)
+        {
+            CHECK(image != previous);
+        }
+        if (imagePrefix.isEmpty() == false)
+        {
+            REQUIRE(image.save(imagePrefix + QString::number(mode) + QStringLiteral(".png")));
+        }
+        previous = image;
+    }
+    CHECK(workspace.Document().Draft() == draft);
+    CHECK_FALSE(workspace.Dirty());
+    workspace.StopPreview();
+}
 TEST_CASE("Native World preview renders authored assets, cameras, culling, updates and resize", "[.render-native]")
 {
     REQUIRE(QApplication::platformName() == QStringLiteral("cocoa"));
@@ -84,6 +193,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     RenderPreview preview;
     PreviewViewport viewport(&preview);
     viewport.resize(640, 480);
+    // Exercise a child surface smaller than the widget on both 1x and Retina displays.
+    viewport.setContentsMargins(7, 11, 13, 17);
     viewport.show();
     REQUIRE(preview.SetScene(scene));
     preview.Navigate(0, 0, 0, 3, false);
@@ -94,12 +205,59 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     QImage embedded = ReadViewport();
     REQUIRE(viewport.PresentedFrames() >= 1);
     REQUIRE_FALSE(embedded.isNull());
-    CHECK(embedded.width() >= 640);
+    const QSize initialPixelSize = GetViewportPixelSize();
+    CHECK(embedded.size() == initialPixelSize);
+    CHECK(initialPixelSize.width() < qRound(static_cast<float64>(viewport.width()) * viewport.devicePixelRatioF()));
     CHECK(embedded.pixelColor(embedded.width() / 2, embedded.height() / 2) != embedded.pixelColor(0, 0));
     if (qEnvironmentVariableIsSet("LUDUS_GPU_VIEWPORT_IMAGE") == true)
     {
         REQUIRE(embedded.save(qEnvironmentVariable("LUDUS_GPU_VIEWPORT_IMAGE")));
     }
+    // Rebuilding a mode must retain the actual Qt GPU image throughout setup.
+    bool didResetFrames = false;
+    QObject::connect(&preview, &RenderPreview::ResettingFrames, &preview, [&didResetFrames]() {
+        didResetFrames = true;
+    });
+    preview.SetShading(PreviewShading::Albedo);
+    preview.Tick();
+    CHECK(didResetFrames == false);
+    CHECK(ReadViewport() == embedded);
+    REQUIRE(Frames(preview, 3));
+    const QImage albedo = ReadViewport();
+    CHECK(albedo != embedded);
+    CHECK(didResetFrames == false);
+    // Supersede preparation before its first ready frame; the active image stays.
+    preview.SetShading(PreviewShading::Lit);
+    preview.Tick();
+    preview.SetShading(PreviewShading::Solid);
+    CHECK(ReadViewport() == albedo);
+    REQUIRE(Frames(preview, 3));
+    CHECK(ReadViewport() == embedded);
+    CHECK(didResetFrames == false);
+    // The private admission boundary accepts this snapshot, but GPU texture
+    // creation rejects its empty pixels. Failure must preserve the presented view.
+    RenderScene invalidCandidate = scene;
+    invalidCandidate.Identity = QByteArray("invalid GPU candidate");
+    invalidCandidate.AssetsIdentity = invalidCandidate.Identity;
+    invalidCandidate.Textures[0].Pixels = {};
+    bool hasFailedPreparation = false;
+    QObject::connect(&preview, &RenderPreview::Failed, &preview, [&hasFailedPreparation](const QString&) {
+        hasFailedPreparation = true;
+    });
+    REQUIRE(preview.SetScene(invalidCandidate));
+    QElapsedTimer preparationTimer;
+    preparationTimer.start();
+    while (hasFailedPreparation == false && preparationTimer.elapsed() < 10000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(hasFailedPreparation == true);
+    CHECK(ReadViewport() == embedded);
+    CHECK(didResetFrames == false);
+    REQUIRE(preview.SetScene(scene));
+    REQUIRE(Frames(preview, 3));
+    CHECK(ReadViewport() == embedded);
+    CHECK(world.Draft() == original);
     // Native window events are forwarded to the persistent editor navigation model.
     for (QWindow* window : QGuiApplication::allWindows())
     {
@@ -151,7 +309,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
     embedded = ReadViewport();
-    CHECK(embedded.width() >= 720);
+    CHECK(embedded.size() == GetViewportPixelSize());
+    CHECK(embedded.width() > initialPixelSize.width());
     auto entity = world.Entity(QStringLiteral("starter.cube"));
     auto components = entity.value(QStringLiteral("components")).toObject();
     auto transform = components.value(QStringLiteral("transform")).toObject();
