@@ -13,6 +13,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <numbers>
+#include <utility>
 
 namespace ludus::content::scene_cook
 {
@@ -2135,7 +2136,7 @@ struct StoredParts final
         {
             return false;
         }
-        if (outStored.Textures.TryAdd(static_cast<String&&>(identity)) == false)
+        if (outStored.Textures.TryAdd(std::move(identity)) == false)
         {
             return inoutFailure.FailOutOfMemory();
         }
@@ -2169,7 +2170,7 @@ struct StoredParts final
         {
             return false;
         }
-        if (outStored.Materials.TryAdd(static_cast<String&&>(identity)) == false)
+        if (outStored.Materials.TryAdd(std::move(identity)) == false)
         {
             return inoutFailure.FailOutOfMemory();
         }
@@ -2186,7 +2187,7 @@ struct StoredParts final
         {
             return false;
         }
-        if (outStored.Meshes.TryAdd(static_cast<String&&>(identity)) == false)
+        if (outStored.Meshes.TryAdd(std::move(identity)) == false)
         {
             return inoutFailure.FailOutOfMemory();
         }
@@ -2323,7 +2324,10 @@ struct StoredParts final
     }
     CookResult cooked;
     CookError cookError;
-    if (Cook(source, cooked, cookError, options.CancelOrNull) == false)
+    const bool isCooked = options.CookOrNull != nullptr
+                              ? options.CookOrNull(source, cooked, cookError, options.CancelOrNull)
+                              : Cook(source, cooked, cookError, options.CancelOrNull);
+    if (isCooked == false)
     {
         return MapCookFailure(cookError, inoutFailure);
     }
@@ -3213,5 +3217,342 @@ bool WriteFileAtomically(std::string_view path, std::span<const uint8> data, Ass
 {
     Failure failure(outError);
     return PublishBytes(path, data, PublishMode::Replace, nullptr, failure);
+}
+namespace
+{
+void ReportStage(const EditorSceneRequest& request, std::string_view stage) noexcept
+{
+    const EditorSceneProgress* progress = request.ProgressOrNull;
+    if (progress != nullptr && progress->Report != nullptr)
+    {
+        progress->Report(progress->Context, stage);
+    }
+}
+
+[[nodiscard]] bool ParseHexDigest(std::string_view text, Digest& outDigest) noexcept
+{
+    if (text.size() != HEX_DIGEST_BYTES)
+    {
+        return false;
+    }
+    for (usize i = 0; i < sizeof(outDigest.Data); ++i)
+    {
+        uint8 value = 0;
+        for (usize half = 0; half < 2; ++half)
+        {
+            const char item = text[i * 2 + half];
+            uint8 nibble = 0;
+            if (item >= '0' && item <= '9')
+            {
+                nibble = static_cast<uint8>(item - '0');
+            }
+            else if (item >= 'a' && item <= 'f')
+            {
+                nibble = static_cast<uint8>(item - 'a' + 10);
+            }
+            else
+            {
+                return false;
+            }
+            value = static_cast<uint8>((value << 4) | nibble);
+        }
+        outDigest.Data[i] = value;
+    }
+    return true;
+}
+
+/// Sorted, de-duplicated manifest approximations of every imported scene.
+[[nodiscard]] bool CollectWarnings(std::string_view root,
+                                   const Document& level,
+                                   const Document& catalog,
+                                   JsonTree& inoutTree,
+                                   JsonIndex& outWarnings,
+                                   Failure& inoutFailure) noexcept
+{
+    Array<String> texts;
+    const JsonIndex resources = catalog.Tree.GetMember(catalog.Root, "resources");
+    const JsonIndex imports = level.Tree.GetMember(level.Root, "imports");
+    for (usize i = 0; i < level.Tree.GetCount(imports); ++i)
+    {
+        const JsonIndex record = catalog.Tree.GetMember(resources, level.Tree.GetText(level.Tree.GetItem(imports, i)));
+        const JsonIndex path = record == NO_JSON_NODE ? NO_JSON_NODE : catalog.Tree.GetMember(record, "path");
+        if (path == NO_JSON_NODE || catalog.Tree.GetKind(path) != JsonKind::String)
+        {
+            return inoutFailure.FailInvalid("Missing imported scene record");
+        }
+        String native;
+        Document manifest;
+        if (ResolveInside(root, catalog.Tree.GetText(path), native, inoutFailure) == false ||
+            LoadDocument(native.GetView(), manifest, inoutFailure) == false)
+        {
+            return false;
+        }
+        const JsonIndex approximations = manifest.Tree.GetKind(manifest.Root) == JsonKind::Object
+                                             ? manifest.Tree.GetMember(manifest.Root, "approximations")
+                                             : NO_JSON_NODE;
+        if (approximations == NO_JSON_NODE)
+        {
+            continue;
+        }
+        if (manifest.Tree.GetKind(approximations) != JsonKind::Array)
+        {
+            return inoutFailure.FailInvalid("Unsupported scene manifest approximations");
+        }
+        for (usize item = 0; item < manifest.Tree.GetCount(approximations); ++item)
+        {
+            const JsonIndex warning = manifest.Tree.GetItem(approximations, item);
+            if (manifest.Tree.GetKind(warning) != JsonKind::String)
+            {
+                return inoutFailure.FailInvalid("Unsupported scene manifest approximations");
+            }
+            String text;
+            if (text.TryAppend(manifest.Tree.GetText(warning)) != foundation::StringStatus::Ok ||
+                texts.TryAdd(std::move(text)) == false)
+            {
+                return inoutFailure.FailOutOfMemory();
+            }
+        }
+    }
+    // sorted(set(...)): byte order of UTF-8 equals code point order.
+    for (usize i = 1; i < texts.GetSize(); ++i)
+    {
+        for (usize j = i; j > 0 && texts[j].GetView() < texts[j - 1].GetView(); --j)
+        {
+            String swap = std::move(texts[j]);
+            texts[j] = std::move(texts[j - 1]);
+            texts[j - 1] = std::move(swap);
+        }
+    }
+    outWarnings = inoutTree.AddArray();
+    for (usize i = 0; i < texts.GetSize(); ++i)
+    {
+        if (i == 0 || texts[i].GetView() != texts[i - 1].GetView())
+        {
+            inoutTree.Append(outWarnings, inoutTree.AddString(texts[i].GetView()));
+        }
+    }
+    return inoutTree.IsOk() == true ? true : inoutFailure.FailOutOfMemory();
+}
+
+[[nodiscard]] bool ReadDiskDigest(std::string_view root,
+                                  std::string_view relative,
+                                  bool& outExists,
+                                  Array<uint8>& outBytes,
+                                  Failure& inoutFailure) noexcept
+{
+    String path;
+    if (ResolveInside(root, relative, path, inoutFailure) == false)
+    {
+        return false;
+    }
+    outExists = DoesPathExist(path.GetView());
+    outBytes.Clear();
+    return outExists == false || ReadBytes(path.GetView(), MAX_METADATA_BYTES, outBytes, inoutFailure) == true;
+}
+
+[[nodiscard]] bool OperateEditorSceneDocuments(const EditorSceneRequest& request,
+                                               const AssetOptions& options,
+                                               EditorSceneResult& outResult,
+                                               Failure& inoutFailure) noexcept
+{
+    const std::string_view root = request.Root;
+    const EditorSceneOperation operation = request.Operation;
+    Document level;
+    Document current;
+    const Document* currentOrNull = nullptr;
+    bool isCommitted = false;
+    bool hasExpectedCatalog = false;
+    Digest expectedCatalog;
+    Array<uint8> disk;
+    ReportStage(request, "validate");
+    if (operation == EditorSceneOperation::Open)
+    {
+        bool exists = false;
+        if (ReadDiskDigest(root, request.Path, exists, disk, inoutFailure) == false)
+        {
+            return false;
+        }
+        if (exists == false)
+        {
+            return inoutFailure.Fail(AssetErrorCode::AssetCorrupt, "No such file or directory");
+        }
+        if (OpenLevelDocument(root, request.Path, level, inoutFailure) == false)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        if (ParseInput(request.Level, level, inoutFailure) == false ||
+            ValidateLevelNode(level.Tree, level.Root, inoutFailure) == false)
+        {
+            return false;
+        }
+        if (operation == EditorSceneOperation::Import)
+        {
+            ReportStage(request, "import");
+            PreparedImport prepared;
+            if (PrepareImportDocuments(root, request.Source, level, options, prepared, inoutFailure) == false ||
+                WriteCanonical(prepared.Catalog.Tree, prepared.Catalog.Root, outResult.Catalog, inoutFailure) == false)
+            {
+                return false;
+            }
+            level = std::move(prepared.Level);
+            current = std::move(prepared.Catalog);
+            currentOrNull = &current;
+            hasExpectedCatalog = prepared.HasPublishedCatalog;
+            expectedCatalog = prepared.PublishedCatalog;
+        }
+        else if (operation == EditorSceneOperation::CommitImport)
+        {
+            ReportStage(request, "commit");
+            Digest published;
+            if (request.HasExpected == true && ParseHexDigest(request.Expected, published) == false)
+            {
+                return inoutFailure.FailInvalid("Unsupported editor scene protocol");
+            }
+            if (request.Catalog.empty() == true ||
+                ParseOptionalCatalog(request.Catalog, current, currentOrNull, inoutFailure) == false)
+            {
+                return request.Catalog.empty() == true ? inoutFailure.FailInvalid("Unsupported scene catalog") : false;
+            }
+            if (CommitImportDocuments(root,
+                                      level,
+                                      current,
+                                      request.HasExpected == true ? &published : nullptr,
+                                      request.Source,
+                                      options,
+                                      inoutFailure) == false)
+            {
+                return false;
+            }
+            isCommitted = true;
+        }
+        else if (operation == EditorSceneOperation::Save)
+        {
+            ReportStage(request, "save");
+            bool exists = false;
+            Array<uint8> previous;
+            if (ReadDiskDigest(root, request.Path, exists, previous, inoutFailure) == false)
+            {
+                return false;
+            }
+            HexDigest actual;
+            ComputeHexDigest(GetSpan(previous), actual);
+            const bool isExpected =
+                exists == request.HasExpected && (exists == false || actual.View() == request.Expected);
+            if (isExpected == false)
+            {
+                return inoutFailure.Fail(AssetErrorCode::Conflict, "Saved level changed on disk");
+            }
+            if (SaveLevelDocument(root,
+                                  request.Path,
+                                  level,
+                                  exists == true ? &previous : nullptr,
+                                  disk,
+                                  inoutFailure) == false)
+            {
+                return false;
+            }
+        }
+    }
+    if (IsCancelled(options) == true && isCommitted == false)
+    {
+        return inoutFailure.Fail(AssetErrorCode::InstallCancelled, "Scene import cancelled");
+    }
+    outResult.Scene.Clear();
+    if (isCommitted == false)
+    {
+        ReportStage(request, "assemble");
+        if (AssembleBundle(root, level.Tree, level.Root, currentOrNull, outResult.Scene, inoutFailure) == false)
+        {
+            return false;
+        }
+    }
+    Document closure;
+    if (ComputeClosure(root, level.Tree, level.Root, currentOrNull, closure, inoutFailure) == false)
+    {
+        return false;
+    }
+    JsonTree tree;
+    const JsonIndex response = tree.AddObject();
+    tree.SetMember(response, "schema", tree.AddInteger(1));
+    tree.SetMember(response, "ok", tree.AddBoolean(true));
+    tree.SetMember(response, "level", tree.CopyFrom(level.Tree, level.Root));
+    tree.SetMember(response, "committed", tree.AddBoolean(isCommitted));
+    const JsonIndex artifacts = tree.AddObject();
+    PythonSum total;
+    for (usize i = 0; i < closure.Tree.GetCount(closure.Root); ++i)
+    {
+        const JsonIndex record = closure.Tree.GetValue(closure.Root, i);
+        tree.SetMember(artifacts,
+                       closure.Tree.GetKey(closure.Root, i),
+                       tree.CopyFrom(closure.Tree, closure.Tree.GetMember(record, "key")));
+        total.Add(GetNumberMember(closure.Tree, record, "bytes"));
+    }
+    tree.SetMember(response, "artifacts", artifacts);
+    if (hasExpectedCatalog == true)
+    {
+        HexDigest text;
+        static constexpr char HEX[] = "0123456789abcdef";
+        for (usize i = 0; i < sizeof(expectedCatalog.Data); ++i)
+        {
+            text.Text[i * 2] = HEX[expectedCatalog.Data[i] >> 4];
+            text.Text[i * 2 + 1] = HEX[expectedCatalog.Data[i] & 0xf];
+        }
+        tree.SetMember(response, "catalog_expected", tree.AddString(text.View()));
+    }
+    else
+    {
+        tree.SetMember(response, "catalog_expected", tree.AddNull());
+    }
+    tree.SetMember(response, "resident_bytes", AddPythonNumber(tree, total.GetResult()));
+    Document published;
+    const Document* catalog = currentOrNull;
+    if (catalog == nullptr)
+    {
+        if (ReadCatalogDocument(root, published, inoutFailure) == false)
+        {
+            return false;
+        }
+        catalog = &published;
+    }
+    JsonIndex warnings = NO_JSON_NODE;
+    if (CollectWarnings(root, level, *catalog, tree, warnings, inoutFailure) == false)
+    {
+        return false;
+    }
+    tree.SetMember(response, "warnings", warnings);
+    if (operation == EditorSceneOperation::Open || operation == EditorSceneOperation::Save)
+    {
+        bool exists = false;
+        Array<uint8> now;
+        if (ReadDiskDigest(root, request.Path, exists, now, inoutFailure) == false)
+        {
+            return false;
+        }
+        if (exists == false || AreBytesEqual(GetSpan(now), GetSpan(disk)) == false)
+        {
+            return inoutFailure.Fail(AssetErrorCode::Conflict, "Saved level changed while preparing the response");
+        }
+        HexDigest digest;
+        ComputeHexDigest(GetSpan(disk), digest);
+        tree.SetMember(response, "disk", tree.AddString(digest.View()));
+    }
+    ReportStage(request, "done");
+    return WriteCanonical(tree, response, outResult.Response, inoutFailure);
+}
+} // namespace
+
+bool OperateEditorScene(const EditorSceneRequest& request,
+                        const AssetOptions& options,
+                        EditorSceneResult& outResult,
+                        AssetError& outError) noexcept
+{
+    Failure failure(outError);
+    outResult.Response.Clear();
+    outResult.Scene.Clear();
+    outResult.Catalog.Clear();
+    return OperateEditorSceneDocuments(request, options, outResult, failure);
 }
 } // namespace ludus::content::scene_cook
