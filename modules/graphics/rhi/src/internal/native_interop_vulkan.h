@@ -116,8 +116,10 @@ RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publ
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     barrier.image = texture.Object;
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    const VkPipelineStageFlags readers = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-                                         (gQueueCompute ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : 0U);
+    // ALL_COMMANDS includes every enabled shader stage supported by this queue,
+    // including a foreign geometry/tessellation/mesh consumer, without requiring
+    // those optional features merely to build the publication barrier.
+    constexpr VkPipelineStageFlags readers = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     vkCmdPipelineBarrier(read.Command,
                          texture.ColorStage | texture.ColorWriterStage,
                          readers,
@@ -189,7 +191,17 @@ void NativeTextureDestroy(usize slot) noexcept
 }
 void NativeInteropDetachSurface() noexcept
 {
-    ShutdownRendering();
+    // A borrowed context is headless: keep its private pools/targets until the
+    // last native pin retires. In particular, do not wait on a foreign consumer
+    // whose forward progress may depend on this shutdown returning to its owner.
+    if (gSurface == VK_NULL_HANDLE)
+    {
+        gWindow = {};
+        return;
+    }
+    RetireAcquiredImage();
+    WaitIdle();
+    gEncoding = false;
     ReleaseTargets();
     vkDestroyRenderPass(gDevice, gPass, nullptr);
     gPass = VK_NULL_HANDLE;

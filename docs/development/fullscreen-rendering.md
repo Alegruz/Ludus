@@ -1605,7 +1605,8 @@ existing texture allocations rather than allocating copied presentation images.
    `SubmissionToken`. `AcquireNativeTextureRead` requires that token to match the
    texture's most recent accepted RHI use. The producer may still be in flight.
 3. Acquire the read before the foreign command buffer is enqueued or submitted.
-   Vulkan records a producer-to-shader memory/layout barrier on the shared queue;
+   Vulkan records a memory/layout barrier that makes producer writes visible to
+   every supported shader stage on the shared queue;
    Metal uses tracked texture hazards and an ordered command-buffer publication.
    The descriptor carries the exact native image, extent, original format, RHI
    incarnation/state revision and Vulkan shader-read-only layout. Copying a
@@ -1629,7 +1630,10 @@ existing texture allocations rather than allocating copied presentation images.
 tokens. With native leases held, the bridge conservatively retains the old
 session's native allocations/device until all consumers complete and pins release.
 Owned presentation targets are detached at logical shutdown, so ordinary Platform
-window/view lifetime does not extend through that image retirement.
+window/view lifetime does not extend through that image retirement. Borrowed headless
+Vulkan pools/targets remain pinned until final retirement; admission and cleanup
+never drain the foreign device's unrelated queues. Maintenance waits cover only
+accepted RHI frame, texture-upload and transfer fences.
 `GetNativeDeviceInfo` then reports `Retiring`; no new reads may be acquired and
 new sessions reject while retirement remains pending. Texture/device backing
 therefore survives renderer destruction, resize/replacement and cancellation.
@@ -1674,7 +1678,10 @@ source cleanup and widget destruction with the source retain/release contract.
 `ludus_rhi_native_interop_consumer` and its relocated installed-SDK counterpart
 create a separately owned native device, admit that exact context into RHI,
 produce an oriented four-color image, and sample its original native texture
-through independent Metal/Vulkan GPU commands. They destroy ordinary texture and
+through independent Metal/Vulkan GPU commands. The Vulkan fixture additionally
+requires timeline semaphores (Vulkan 1.2) to keep foreign queue work blocked until
+after RHI admission and logical shutdown return; the bridge itself retains its
+Vulkan 1.1 minimum. They destroy ordinary texture and
 device owners before verifying all sixteen consumer pixels, then prove balanced
 source release after consumer completion. The fixture includes no RHI-private
 headers. Unit tests cover mismatched logical device/queue, preserved outputs,

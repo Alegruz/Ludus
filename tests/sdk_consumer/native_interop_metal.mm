@@ -51,6 +51,10 @@ bool CreateForeign(Foreign& fixture) noexcept
     fixture.Description.SerializedOwnerQueue = true;
     return true;
 }
+bool AllowProducer(Foreign&) noexcept
+{
+    return true;
+}
 bool RetireConsumers(Foreign& fixture) noexcept
 {
     auto* source = static_cast<Source*>(fixture.Context);

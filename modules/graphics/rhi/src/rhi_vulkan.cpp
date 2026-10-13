@@ -21,6 +21,8 @@
 namespace ludus::graphics::rhi::backend
 {
 void RasterFrameExtent() noexcept;
+void WaitRasterSubmissions() noexcept;
+void WaitLifetimeSubmissions() noexcept;
 void TimingBegin() noexcept;
 void TimingEnd() noexcept;
 void TimingSubmitted() noexcept;
@@ -36,6 +38,7 @@ struct Frame final
     VkCommandBuffer Command = VK_NULL_HANDLE;
     VkFence Fence = VK_NULL_HANDLE;
     VkSemaphore Acquired = VK_NULL_HANDLE;
+    bool Submitted = false;
 };
 struct Shader final
 {
@@ -122,7 +125,24 @@ void WaitIdle() noexcept
 {
     if (gDevice != VK_NULL_HANDLE)
     {
-        (void)Check(vkDeviceWaitIdle(gDevice));
+        if (gBorrowedDevice || internal::NativeInteropPinned())
+        {
+            // A foreign queue can wait for a later host submission. Drain only
+            // accepted RHI work, never the source device's unrelated submissions.
+            for (auto& frame : gFrames)
+            {
+                if (frame.Submitted && Check(vkWaitForFences(gDevice, 1, &frame.Fence, VK_TRUE, UINT64_MAX)))
+                {
+                    frame.Submitted = false;
+                }
+            }
+            WaitRasterSubmissions();
+            WaitLifetimeSubmissions();
+        }
+        else
+        {
+            (void)Check(vkDeviceWaitIdle(gDevice));
+        }
     }
 }
 bool Allocate(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags flags, VkDeviceMemory& memory) noexcept
@@ -175,7 +195,11 @@ void RetireAcquiredImage() noexcept
         submit.waitSemaphoreCount = 1;
         submit.pWaitSemaphores = &gFrames[gFrame].Acquired;
         submit.pWaitDstStageMask = &stage;
-        (void)Check(vkQueueSubmit(gQueue, 1, &submit, VK_NULL_HANDLE));
+        auto& frame = gFrames[gFrame];
+        if (Check(vkResetFences(gDevice, 1, &frame.Fence)))
+        {
+            frame.Submitted = Check(vkQueueSubmit(gQueue, 1, &submit, frame.Fence));
+        }
         gAcquiredWait = false;
     }
     WaitIdle();
@@ -1096,6 +1120,7 @@ FrameStatus Begin() noexcept
     {
         return Failure();
     }
+    frame.Submitted = false;
     // Harvest the captured query before its frame fence can be reset for later work.
     (void)TimingPoll();
     if (gDevice == VK_NULL_HANDLE)
@@ -1205,6 +1230,7 @@ FrameStatus End() noexcept
     {
         return Failure();
     }
+    frame.Submitted = true;
     TimingSubmitted();
     gAcquiredWait = false;
     gFrame = (gFrame + 1) % FRAMES;

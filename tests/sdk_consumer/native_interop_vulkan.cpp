@@ -66,6 +66,9 @@ using namespace ludus::foundation;
     X(vkCreateFence)                                                                                                   \
     X(vkDestroyFence)                                                                                                  \
     X(vkQueueSubmit)                                                                                                   \
+    X(vkCreateSemaphore)                                                                                               \
+    X(vkDestroySemaphore)                                                                                              \
+    X(vkSignalSemaphore)                                                                                               \
     X(vkWaitForFences)
 struct DeviceApi final
 {
@@ -102,6 +105,8 @@ struct Source final
     VkCommandPool Commands = VK_NULL_HANDLE;
     VkCommandBuffer Command = VK_NULL_HANDLE;
     VkFence Fence = VK_NULL_HANDLE;
+    VkSemaphore Gate = VK_NULL_HANDLE;
+    uint64 GateValue = 0;
     static bool Retain(void* context) noexcept
     {
         ++static_cast<Source*>(context)->Retained;
@@ -136,6 +141,24 @@ bool Allocate(Source& source,
         }
     }
     return false;
+}
+bool SignalGate(Source& source, uint64 value) noexcept
+{
+    if (source.Gate == VK_NULL_HANDLE || source.GateValue >= value)
+    {
+        return true;
+    }
+    VkSemaphoreSignalInfo signal{};
+    signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+    signal.semaphore = source.Gate;
+    signal.value = value;
+    const auto result = source.Api.vkSignalSemaphore(source.Device, &signal);
+    if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST)
+    {
+        return false;
+    }
+    source.GateValue = value;
+    return true;
 }
 void RetireSample(Source& source) noexcept
 {
@@ -207,7 +230,7 @@ bool CreateForeign(Foreign& fixture) noexcept
         reinterpret_cast<PFN_vkCreateInstance>(source->GetInstance(nullptr, "vkCreateInstance"));
     VkApplicationInfo application{};
     application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    application.apiVersion = VK_API_VERSION_1_1;
+    application.apiVersion = VK_API_VERSION_1_2;
     VkInstanceCreateInfo instance{};
     instance.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instance.pApplicationInfo = &application;
@@ -266,28 +289,81 @@ bool CreateForeign(Foreign& fixture) noexcept
     device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     device.queueCreateInfoCount = 1;
     device.pQueueCreateInfos = &queue;
+    const auto getFeatures = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+        source->GetInstance(source->Instance, "vkGetPhysicalDeviceFeatures2"));
+    const auto getProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(
+        source->GetInstance(source->Instance, "vkGetPhysicalDeviceProperties"));
+    VkPhysicalDeviceProperties properties{};
+    getProperties(source->Physical, &properties);
+    if (properties.apiVersion < VK_API_VERSION_1_2)
+    {
+        return false;
+    }
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline{};
+    timeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+    VkPhysicalDeviceFeatures2 features{};
+    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features.pNext = &timeline;
+    getFeatures(source->Physical, &features);
+    if (!timeline.timelineSemaphore)
+    {
+        return false;
+    }
+    device.pNext = &timeline;
     NATIVE_VK(createDevice(source->Physical, &device, nullptr, &source->Device));
 #define LOAD_NATIVE_API(name) source->Api.name = reinterpret_cast<PFN_##name>(getDevice(source->Device, #name));
     NATIVE_DEVICE_API(LOAD_NATIVE_API)
 #undef LOAD_NATIVE_API
     source->Api.vkGetDeviceQueue(source->Device, source->Family, 0, &source->Queue);
     memory(source->Physical, &source->Memory);
+    VkSemaphoreTypeCreateInfo type{};
+    type.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    VkSemaphoreCreateInfo semaphore{};
+    semaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphore.pNext = &type;
+    NATIVE_VK(source->Api.vkCreateSemaphore(source->Device, &semaphore, nullptr, &source->Gate));
+    // Thanks to Khronos, "Timeline semaphore", Vulkan Samples, host signalling
+    // and avoiding vkDeviceWaitIdle deadlocks. A legal wait-before-signal gate
+    // proves that RHI admission returns without draining foreign queue work.
+    // https://docs.vulkan.org/samples/latest/samples/extensions/timeline_semaphore/README.html
+    const uint64 value = 1;
+    const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkTimelineSemaphoreSubmitInfo gate{};
+    gate.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    gate.waitSemaphoreValueCount = 1;
+    gate.pWaitSemaphoreValues = &value;
+    VkSubmitInfo wait{};
+    wait.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    wait.pNext = &gate;
+    wait.waitSemaphoreCount = 1;
+    wait.pWaitSemaphores = &source->Gate;
+    wait.pWaitDstStageMask = &stage;
+    NATIVE_VK(source->Api.vkQueueSubmit(source->Queue, 1, &wait, VK_NULL_HANDLE));
     fixture.Description.Identity.Api = ludus::graphics::rhi::Backend::Vulkan;
     fixture.Description.Identity.Instance = source->Instance;
     fixture.Description.Identity.PhysicalDevice = source->Physical;
     fixture.Description.Identity.Device = source->Device;
     fixture.Description.Identity.CommandQueue = source->Queue;
     fixture.Description.Identity.QueueFamily = source->Family;
-    fixture.Description.InstanceApiVersion = VK_API_VERSION_1_1;
+    fixture.Description.InstanceApiVersion = VK_API_VERSION_1_2;
     fixture.Description.Lifetime = {source, Source::Retain, Source::Release};
     fixture.Description.SerializedOwnerQueue = true;
     return true;
+}
+bool AllowProducer(Foreign& fixture) noexcept
+{
+    return SignalGate(*static_cast<Source*>(fixture.Context), 1);
 }
 bool RetireConsumers(Foreign& fixture) noexcept
 {
     auto* source = static_cast<Source*>(fixture.Context);
     if (source != nullptr && source->Device != VK_NULL_HANDLE)
     {
+        if (!SignalGate(*source, 2))
+        {
+            return false;
+        }
         const auto result = source->Api.vkDeviceWaitIdle(source->Device);
         if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST)
         {
@@ -308,6 +384,7 @@ void DestroyForeign(Foreign& fixture) noexcept
     {
         (void)source->Api.vkDeviceWaitIdle(source->Device);
         RetireSample(*source);
+        source->Api.vkDestroySemaphore(source->Device, source->Gate, nullptr);
         source->Api.vkDestroyDevice(source->Device, nullptr);
     }
     if (source->Instance != VK_NULL_HANDLE)
@@ -568,12 +645,26 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &source.Command;
+    const uint64 value = 2;
+    const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    VkTimelineSemaphoreSubmitInfo gate{};
+    gate.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    gate.waitSemaphoreValueCount = 1;
+    gate.pWaitSemaphoreValues = &value;
+    submit.pNext = &gate;
+    submit.waitSemaphoreCount = 1;
+    submit.pWaitSemaphores = &source.Gate;
+    submit.pWaitDstStageMask = &stage;
     NATIVE_VK(api.vkQueueSubmit(source.Queue, 1, &submit, source.Fence));
     return true;
 }
 bool ReadSample(Foreign& fixture, ludus::foundation::uint8 (&pixels)[64]) noexcept
 {
     auto& source = *static_cast<Source*>(fixture.Context);
+    if (!SignalGate(source, 2))
+    {
+        return false;
+    }
     NATIVE_VK(source.Api.vkWaitForFences(source.Device, 1, &source.Fence, VK_TRUE, 5000000000ULL));
     void* mapped = nullptr;
     NATIVE_VK(source.Api.vkMapMemory(source.Device, source.OutputMemory, 0, 64, 0, &mapped));

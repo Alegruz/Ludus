@@ -154,6 +154,10 @@ RasterStatus CloseNativeRead(NativeTextureRead& handle, bool wait) noexcept
 } // namespace
 namespace internal
 {
+bool NativeInteropPinned() noexcept
+{
+    return gNativePins != 0;
+}
 bool NativeInteropBusy() noexcept
 {
     return gNativeCallback || gNativeRetiring;

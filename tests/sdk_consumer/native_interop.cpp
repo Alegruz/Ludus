@@ -60,6 +60,7 @@ bool Run() noexcept
     NATIVE_REQUIRE(
         rhi::CreateNativeDevice({}, session.Foreign.Description, description, 4, 4, session.Device, session.Surface) ==
         rhi::DeviceStatus::Ready);
+    NATIVE_REQUIRE(native_fixture::AllowProducer(session.Foreign));
     NATIVE_REQUIRE(native_fixture::Retains(session.Foreign) == 1);
     NATIVE_REQUIRE(native_fixture::Releases(session.Foreign) == 0);
     NATIVE_REQUIRE(rhi::AcquireNativeDevice(session.Device, session.Lease) == rhi::RasterStatus::Ready);

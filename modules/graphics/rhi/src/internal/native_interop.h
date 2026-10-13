@@ -12,6 +12,7 @@ struct NativeTexturePublication final
     foundation::usize Texture = 0;
 };
 bool NativeInteropBusy() noexcept;
+bool NativeInteropPinned() noexcept;
 bool DeferNativeInteropShutdown() noexcept;
 void FinishNativeInteropShutdown() noexcept;
 void ReleaseNativeDeviceSource() noexcept;
