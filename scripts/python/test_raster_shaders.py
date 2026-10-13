@@ -3,12 +3,63 @@ import copy
 import importlib.util
 from pathlib import Path
 import sys
+import struct
 import unittest
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'cmake/shaders'))
-from compile_raster import raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type
+from compile_raster import spirv_array_indexing, verify_native_metal_arrays, raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type
 
 class RasterReflectionTests(unittest.TestCase):
+    def test_native_arrays_require_fixed_color_counts_and_preserve_target_identity(self):
+        texture = {'kind': 'resource', 'baseShape': 'texture2D', 'resultType': {'kind': 'vector', 'elementType': {'scalarType': 'float32'}}}
+        document = {'parameters': [{'name': 'Images', 'binding': {'kind': 'descriptorTableSlot', 'index': 1}, 'type': {'kind': 'array', 'elementCount': 72, 'elementType': texture}}],
+                    'entryPoints': [{'stage': 'fragment', 'bindings': [{'name': 'Images', 'binding': {'used': 1}}]}]}
+        value = raster_interface(document, 'fragment', native_arrays=True)
+        self.assertEqual(value['entries'][0]['count'], 72)
+        with self.assertRaisesRegex(RuntimeError, 'native binding array profile'):
+            raster_interface(document, 'fragment')
+        for count in (0, None, -1, 0xffffffff):
+            invalid = copy.deepcopy(document)
+            invalid['parameters'][0]['type']['elementCount'] = count
+            with self.assertRaises(RuntimeError):
+                raster_interface(invalid, 'fragment', native_arrays=True)
+        for shape in ('texture3D', 'structuredBuffer'):
+            invalid = copy.deepcopy(document)
+            invalid['parameters'][0]['type']['elementType']['baseShape'] = shape
+            with self.assertRaises(RuntimeError):
+                raster_interface(invalid, 'fragment', native_arrays=True)
+        code = 'fragment float4 Main(array<texture2d<float>, 72> Images [[texture(1)]]) {}'
+        verify_native_metal_arrays(code, value)
+        for invalid in (code.replace('72', '71'), code.replace('texture(1)', 'texture(2)')):
+            with self.assertRaises(RuntimeError):
+                verify_native_metal_arrays(invalid, value)
+
+    def test_native_indexing_is_derived_and_unbounded_access_rejects(self):
+        def instruction(operation, *values):
+            return [(len(values) + 1) << 16 | operation, *values]
+        def target(index=5, upper=3, non_uniform=False, bounded=True):
+            words = [0x07230203, 0x00010300, 0, 1000, 0]
+            words += instruction(71, 1, 33, 1)  # Images binding 1
+            words += instruction(21, 2, 32, 0)  # uint
+            words += instruction(43, 2, 4, upper)
+            name = b'GLSL.std.450\0'
+            name += b'\0' * (-len(name) % 4)
+            words += instruction(11, 3, *struct.unpack('<' + 'I' * (len(name) // 4), name))
+            if bounded:
+                words += instruction(12, 2, 5, 3, 38, 999, 4)  # uint min(index, upper)
+            words += instruction(65, 10, 9, 1, index)
+            if non_uniform:
+                words += instruction(71, 9, 5300)
+            return struct.pack('<' + 'I' * len(words), *words)
+        for index, bounded, non_uniform, expected in ((4, False, False, 'Constant'), (5, True, False, 'Uniform'), (5, True, True, 'NonUniform')):
+            reflected = {'entries': [{'binding': 1, 'count': 4}]}
+            spirv_array_indexing(target(index=index, bounded=bounded, non_uniform=non_uniform), reflected)
+            self.assertEqual(reflected['entries'][0]['indexing'], expected)
+            self.assertTrue(reflected['entries'][0]['verified_bounds'])
+        for data in (target(upper=4), target(bounded=False), b'broken'):
+            with self.assertRaises(RuntimeError):
+                spirv_array_indexing(data, {'entries': [{'binding': 1, 'count': 4}]})
+
     def test_cluster_light_arrays_obey_uniform_byte_budget(self):
         vector = {'kind':'vector','elementCount':4,'elementType':{'kind':'scalar','scalarType':'float32'}}
         for count in (32,512,1024):

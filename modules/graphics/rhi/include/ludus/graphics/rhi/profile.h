@@ -45,6 +45,12 @@ struct StorageLimits final
 {
     /// Maximum live/pending/retained records of each general raster/compute resource kind.
     ludus::foundation::uint32 ResourcesPerKind = 64;
+    /// Maximum populated binding descriptors across live, pending and retained snapshots.
+    /// Independent of set-record capacity; exhausted creation publishes no ownership.
+    ludus::foundation::uint32 BindingDescriptors = 512;
+    /// Requested maximum populated descriptors per snapshot, backend-clamped at admission.
+    /// Payload storage grows only during creation and consumes HostBytes; no draw allocation.
+    ludus::foundation::uint32 DescriptorsPerSet = 256;
     /// Maximum live/pending/retained records of each optional RT0 resource kind.
     /// Native metadata uses stable budgeted pages, independent of raster resource counts.
     ludus::foundation::uint32 RayResourcesPerKind = 64;
@@ -193,6 +199,25 @@ struct RasterInterfaceCapabilities final
     /// Maximum enabled texture array layers across supported formats.
     ludus::foundation::uint32 MaxTextureLayers = 0;
 };
+/// Enabled R11 binding operations; arrays and indexing are independent capabilities.
+/// Counts are bounded engine limits, not reservations or a raw adapter catalog.
+struct BindingCapabilities final
+{
+    /// Maximum dynamic uniform bindings per pipeline layout; zero means unavailable.
+    ludus::foundation::uint32 MaxDynamicUniformBuffers = 0;
+    /// Maximum dynamic storage bindings per compute pipeline layout.
+    ludus::foundation::uint32 MaxDynamicStorageBuffers = 0;
+    /// Maximum fixed sampled color texture descriptors per binding; one means scalar only.
+    ludus::foundation::uint32 MaxTextureArrayElements = 0;
+    /// Maximum populated descriptors in one snapshot, including scalar buffers/samplers.
+    ludus::foundation::uint32 MaxDescriptorsPerSet = 0;
+    /// Dynamically uniform selection of fixed sampled texture arrays is enabled.
+    bool HasUniformTextureIndexing = false;
+    /// Non-uniform selection of fixed sampled texture arrays was explicitly requested
+    /// and enabled. Every element must be declared reachable and fully populated.
+    /// Does not enable runtime-sized arrays, sparse tables or update-after-bind.
+    bool HasBindlessTextureIndexing = false;
+};
 /// Immutable effective profile snapshot while the device is ready; zero otherwise.
 /// Formats are indexed by RasterFormat's underlying value, in declaration order.
 /// This describes enabled engine operations, not an unbounded raw adapter catalog.
@@ -204,10 +229,14 @@ struct DeviceProfile final
     RasterInterfaceCapabilities Interface;
     /// Negotiated bounded buffer-compute limits; zero if unavailable.
     ComputeCapabilities Compute;
+    /// Independently enabled descriptor arrays, dynamic offsets and optional indexing.
+    BindingCapabilities Binding;
     /// Immutable configured resource/plan/staging maxima and budgets; all zero outside Ready.
     StorageLimits Storage
     {
         .ResourcesPerKind = 0,
+        .BindingDescriptors = 0,
+        .DescriptorsPerSet = 0,
         .RayResourcesPerKind = 0,
         .RayInstances = 0,
         .DrawsPerFrame = 0,

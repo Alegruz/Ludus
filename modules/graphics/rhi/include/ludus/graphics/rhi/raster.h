@@ -371,18 +371,45 @@ enum class RasterVisibility : ludus::foundation::uint8
     /// Compute stage only; no raster/storage writes in this profile.
     Compute = 4,
 };
+/// Descriptor selection admitted by a reflected shader; array length alone grants no indexing mode.
+enum class RasterBindingIndexing : ludus::foundation::uint8
+{
+    /// Constant array indices only; does not require dynamic descriptor indexing.
+    Constant,
+    /// A dynamically uniform index; native support is separately negotiated.
+    Uniform,
+    /// Per-invocation indices; requires explicitly requested optional bindless support.
+    NonUniform,
+};
 /// One immutable layout entry; binding numbers must be unique and less than eight.
 struct RasterBinding final
 {
     /// Group/set-zero binding number.
     ludus::foundation::uint32 Binding = 0;
-    /// Resource type; descriptor arrays and storage textures are unsupported.
+    /// Resource type; storage textures remain outside the binding profile.
     RasterBindingKind Kind = RasterBindingKind::UniformBuffer;
     /// Stages allowed to use this entry.
     RasterVisibility Visibility = RasterVisibility::Both;
     /// Minimum occupied uniform bytes or storage element stride from target reflection;
     /// zero for textures/samplers. Storage ranges must contain at least one element.
     ludus::foundation::usize MinSize = 0;
+    /// Add the packet offset for this binding to the snapshot buffer offset.
+    /// Buffer bindings only; alignment and the final range are checked before encoding.
+    /// This layout property does not change shader reflection or buffer ownership.
+    bool HasDynamicOffset = false;
+    /// Fixed descriptor count, at least one. Arrays admit sampled color textures only;
+    /// every element must be populated and retained. Runtime-sized arrays are unsupported.
+    ludus::foundation::uint32 Count = 1;
+    /// Required shader selection mode, independently verified by target reflection.
+    RasterBindingIndexing Indexing = RasterBindingIndexing::Constant;
+};
+/// Byte offsets indexed by group-zero binding number, copied into each accepted packet.
+/// Non-dynamic and absent bindings require zero. Values are added to the snapshot
+/// offset with checked arithmetic; the bound Size remains unchanged. Owner-thread only.
+struct RasterBindingOffsets final
+{
+    /// Additional byte offset for each of the eight portable binding numbers.
+    ludus::foundation::uint32 Bytes[8]{};
 };
 /// Portable float vertex attribute width.
 enum class RasterVertexFormat : ludus::foundation::uint8
@@ -461,22 +488,41 @@ struct RasterShaderDescription final
     // Explicit default preserves existing aggregate callers under -Wmissing-field-initializers.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::span<const RasterUniformMember> UniformMembers{};
+    /// The native array cooker verified every descriptor index as an in-range
+    /// constant or bounded unsigned min/clamp in the emitted target. Required for
+    /// shaders declaring arrays. Hand-authored artifacts must independently verify
+    /// this same contract; false rejects before shader creation. Count changes reject.
+    bool HasVerifiedArrayBounds = false;
 };
 /// One immutable binding snapshot entry; exactly the resource matching Kind is used.
 struct RasterBindingResource final
 {
     /// Layout binding number.
     ludus::foundation::uint32 Binding = 0;
-    /// Uniform buffer identity; ignored for texture/sampler entries.
+    /// Uniform/storage buffer identity; ignored for texture/sampler entries.
     BufferHandle Buffer{};
-    /// Uniform byte offset, aligned to the enabled range alignment.
+    /// Buffer byte offset, aligned to the enabled uniform/storage range alignment.
     ludus::foundation::usize Offset = 0;
-    /// Uniform byte range, nonzero and at least the layout's reflected minimum.
+    /// Buffer byte range, nonzero and at least the layout's reflected minimum.
     ludus::foundation::usize Size = 0;
     /// Sampled view identity of the layout's exact dimension/aspect; writable views reject.
     TextureViewHandle Texture{};
     /// Sampler identity; ignored for other entries.
     SamplerHandle Sampler{};
+    /// Zero-based element of the fixed descriptor array; scalar entries require zero.
+    ludus::foundation::uint32 ArrayElement = 0;
+};
+/// Borrowed generation-checked descriptor index belonging to one immutable snapshot.
+/// Copying does not retain the set. Resolve through GetBindingArrayElement before
+/// publishing shader input; replacement snapshots never accept indices from older sets.
+struct RasterBindingIndex final
+{
+private:
+    BindingSetHandle mSet{};
+    ludus::foundation::uint32 mBinding = 0;
+    ludus::foundation::uint32 mElement = 0;
+    /// Allows the shared registry to construct and validate this borrowed index.
+    friend struct internal::RasterAccess;
 };
 /// One immutable vertex attribute; locations must be unique and below MaxVertexAttributes.
 struct RasterVertexAttribute final
@@ -658,6 +704,14 @@ struct RasterDraw final
     BufferHandle Indirect{};
     /// Four-byte-aligned command offset, covering IndexedIndirectArguments.
     ludus::foundation::usize IndirectOffset = 0;
+    /// Per-binding additional buffer offsets; copied for batches/graphs and submission.
+    RasterBindingOffsets BindingOffsets{};
+    /// Exhaustive reachable index declarations for every NonUniform array element.
+    /// Tokens must belong to Bindings, be unique and cover the complete fixed table.
+    /// Consumed/validated before admission; GDI additionally requires all corresponding
+    /// sampled uses. Empty is valid when the layout has no NonUniform arrays.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::span<const RasterBindingIndex> ReachableBindings{};
 };
 /// Query the enabled raster profile. Invalid owner preserves output; non-ready devices
 /// return their state and zero the capability value. All operations are owner-thread only.
@@ -702,10 +756,26 @@ CreateRasterShader(DeviceHandle, const RasterShaderDescription&, RasterShaderHan
 /// Create an immutable group-zero layout from at most eight unique entries.
 [[nodiscard]] RasterStatus
 CreateBindingLayout(DeviceHandle, std::span<const RasterBinding>, BindingLayoutHandle&) noexcept;
-/// Create an immutable snapshot containing exactly one resource for every layout entry.
+/// Create an immutable snapshot containing every element of every layout entry.
+/// Entries are the exhaustive reachable-resource table; holes and duplicates reject.
+/// Creation consumes StorageLimits::BindingDescriptors until physical retirement.
 /// It retains its layout and all resources even after public destruction.
 [[nodiscard]] RasterStatus
 CreateBindingSet(DeviceHandle, BindingLayoutHandle, std::span<const RasterBindingResource>, BindingSetHandle&) noexcept;
+/// Obtain a borrowed index into an owned, ready fixed texture array between or during frames.
+/// Invalid/stale set returns InvalidHandle; bad binding/element InvalidDescription.
+/// Failure preserves output. Does not retain resources or allocate. Owner-thread only.
+[[nodiscard]] RasterStatus GetBindingIndex(DeviceHandle,
+                                           BindingSetHandle,
+                                           ludus::foundation::uint32 binding,
+                                           ludus::foundation::uint32 element,
+                                           RasterBindingIndex&) noexcept;
+/// Resolve an index against the exact owned snapshot, preserving output on failure.
+/// Stale/foreign/replaced indices return InvalidHandle. Ready writes the bounded shader
+/// array element; shaders must keep accesses within the fully populated fixed array.
+/// No descriptor mutation, runtime-sized indexing or update-after-bind is implied.
+[[nodiscard]] RasterStatus
+GetBindingArrayElement(DeviceHandle, BindingSetHandle, const RasterBindingIndex&, ludus::foundation::uint32&) noexcept;
 /// Create an immutable triangle pipeline; dependencies must be ready. Binding contents
 /// are supplied independently at draw time. Failure leaves null output and rolls back reservation.
 [[nodiscard]] RasterStatus
