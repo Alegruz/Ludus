@@ -143,7 +143,7 @@ TEST_CASE("Required profile limits and formats fail before resource creation wit
     }
     SECTION("attachment capacity")
     {
-        request.RequiredProfile.Raster.MinColorAttachments = 2;
+        request.RequiredProfile.Raster.MinColorAttachments = 5;
         expected = ProfileRequirement::ColorAttachmentCount;
     }
     SECTION("uniform alignment is an upper bound")
@@ -188,10 +188,10 @@ TEST_CASE("Required profile limits and formats fail before resource creation wit
     SECTION("unsupported sample count")
     {
         request.RequiredProfile.FormatCount = 1;
-        request.RequiredProfile.Formats[0] = { .Uses = { .ColorAttachment = true }, .SampleCount = 4 };
+        request.RequiredProfile.Formats[0] = { .Uses = { .ColorAttachment = true }, .SampleCount = 8 };
         expected = ProfileRequirement::SampleCount;
     }
-    SECTION("same texture cannot have a mip chain and attachment use")
+    SECTION("multisampled attachments cannot have a mip chain")
     {
         request.RequiredProfile.FormatCount = 1;
         request.RequiredProfile.Formats[0] =
@@ -202,6 +202,7 @@ TEST_CASE("Required profile limits and formats fail before resource creation wit
                 .ColorAttachment = true,
             },
             .MinMipLevels = 2,
+            .SampleCount = 4,
         };
         expected = ProfileRequirement::MipCount;
     }
@@ -549,4 +550,39 @@ TEST_CASE("R9 format dimensions and partial view requirements negotiate before R
     REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
     CHECK(info.Startup.ProfileFailure.Requirement == expected);
     CHECK(info.Startup.ProfileFailure.Available == available);
+}
+
+TEST_CASE("R10 startup rejects unimplemented multisample dimension and sampled-use combinations", "[rhi][profile][r10]")
+{
+    ProfileFixture fixture;
+    DeviceDescription request;
+    request.RequiredProfile.FormatCount = 1;
+    auto& format = request.RequiredProfile.Formats[0];
+    format.Uses.ColorAttachment = true;
+    format.SampleCount = 4;
+    SECTION("array MSAA")
+    {
+        format.Dimension = TextureDimension::D2Array;
+        format.MinDepthOrLayers = 2;
+    }
+    SECTION("cube MSAA")
+    {
+        format.Dimension = TextureDimension::Cube;
+        format.MinDepthOrLayers = 6;
+    }
+    SECTION("sampled MSAA")
+    {
+        format.Uses.Sampled = true;
+    }
+    SECTION("private sampled depth MSAA")
+    {
+        format.DepthSampled = true;
+    }
+    REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+    fixture.Complete();
+    DeviceInfo info;
+    REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
+    CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::SampleCount);
+    CHECK(info.Startup.ProfileFailure.Requested == 4);
+    CHECK(info.Startup.ProfileFailure.Available == 1);
 }

@@ -74,7 +74,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Platform targets and compatibility](wiki/guides/platform-targets.md)
 - [Public rendering: fullscreen and portable raster](development/fullscreen-rendering.md)
 - [Read and publish files through the filesystem](wiki/guides/filesystem.md)
-- [Save, import and validate render graphs](development/render-graph-authoring.md)
+- [Save, validate and build render graphs](development/render-graph-authoring.md)
 - [Troubleshooting](wiki/guides/troubleshooting.md)
 - [Use deterministic randomness](wiki/guides/randomness.md)
 - [Use high-resolution time](wiki/guides/time.md)

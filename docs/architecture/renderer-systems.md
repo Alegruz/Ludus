@@ -1235,7 +1235,19 @@ finite UV scales before address arithmetic; invalid generated origins fail the
 uncommitted tile equally in CPU/native mode. Reconstruction error uses a conservative absolute
 FP32 affine-product allowance, geometric-normal projection and outward rounding;
 near-zero offsets use a minimum normal float to tolerate GPU flush-to-zero.
-This is not a proof of robustness for arbitrary unresolved thin geometry.
+Traversal uncertainty also includes twice the largest world-space triangle edge
+component, multiplied by this profile's `1e-6` allowance on every coordinate axis.
+Affine-only component bounds vanish along the normal of a coordinate-zero plane;
+the resulting minimum-float offset allowed CPU/native near-zero self-hits in the
+full-scene acceptance workload. The extent term preserves positive normal
+uncertainty even on those planes and is shared by both traversal modes. Thanks to
+Dirk Gerrit van Antwerpen, [*Solving Self-Intersection Artifacts in DirectX Raytracing*,
+Error bounds](https://developer.nvidia.com/blog/solving-self-intersection-artifacts-in-directx-raytracing/)
+(NVIDIA Technical Blog, 2023), for the cross-axis triangle-extent idea. This
+world-space allowance differs from that article's RTX-specific object-space
+constants; it is not a proof of robustness for arbitrary unresolved thin geometry
+or every native intersector. The shifted-plane GPU regression and prepared-scene
+CPU/native acceptance retain the original radiance tolerances.
 
 Philox addresses are `(pixel, committed sample, dimension)` with versioned profile,
 sampler and seed. Successful tiles publish compensated raw emission/direct/indirect
@@ -1664,6 +1676,14 @@ Record the consulted source sections and a concrete contract change or experimen
 before promoting a program description into an implementation decision.
 
 ## Implementation phases and acceptance
+
+Complete prepared-scene acceptance uses the existing installed-SDK reference
+consumer and an independent serialized-bundle verifier. See the
+[full prepared-scene renderer acceptance workflow](../examples/reference-scene.md#full-prepared-scene-renderer-acceptance)
+for exact resource/triangle accounting, source-order versus optimized raster
+pixels, detached-owner captures, optional native/CPU parity and provenance.
+Passing that admitted RGB profile does not qualify arbitrary source materials,
+scene-scale performance or the remaining L6 effects.
 
 These phases complement RHI R0–R5; they do not rename or claim completion of them.
 

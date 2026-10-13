@@ -13,6 +13,7 @@
 #include <QAction>
 #include <QByteArray>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -414,6 +415,7 @@ void MainWindow::ResetWorkspaceLayout()
 
 void MainWindow::SaveWorkspaceLayout() const
 {
+    SaveProjectWorkspace();
     if (WorkspaceSettingsFile_.isEmpty())
     {
         return;
@@ -438,6 +440,87 @@ void MainWindow::SaveWorkspaceLayout() const
         !file.commit())
     {
         LUDUS_LOG_TEXT(LOG_EDITOR_LAYOUT, Warning, "Could not save workspace layout; document saves are unaffected.");
+    }
+}
+
+void MainWindow::SaveProjectWorkspace() const
+{
+    if (ProjectLayoutRoot_.isEmpty() || WorkspaceSettingsFile_.isEmpty())
+    {
+        return;
+    }
+    const auto key = QCryptographicHash::hash(ProjectLayoutRoot_.toUtf8(), QCryptographicHash::Sha256).toHex();
+    const auto path = QFileInfo(WorkspaceSettingsFile_).absolutePath() + QStringLiteral("/projects/") +
+                      QString::fromLatin1(key) + QStringLiteral(".json");
+    QJsonObject object{{QStringLiteral("version"), LAYOUT_VERSION},
+                       {QStringLiteral("qtVersion"), QString::fromLatin1(qVersion())},
+                       {QStringLiteral("root"), ProjectLayoutRoot_},
+                       {QStringLiteral("state"), QString::fromLatin1(saveState(LAYOUT_VERSION).toBase64())},
+                       {QStringLiteral("tab"), WorkTabs_->currentWidget()->objectName()},
+                       {QStringLiteral("world"), World_->Session()}};
+    const auto bytes = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    QSaveFile file(path);
+    file.setDirectWriteFallback(false);
+    if (bytes.size() > MAX_SETTINGS_BYTES || !QDir().mkpath(QFileInfo(path).absolutePath()) ||
+        !file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+    {
+        LUDUS_LOG_TEXT(LOG_EDITOR_LAYOUT,
+                       Warning,
+                       "Could not save project viewport preferences; document saves are unaffected.");
+    }
+}
+void MainWindow::SetProjectWorkspace(const QString& root, bool restore)
+{
+    const auto canonical = root.isEmpty() ? QString() : QFileInfo(root).canonicalFilePath();
+    if (!restore)
+    {
+        if (canonical != ProjectLayoutRoot_)
+        {
+            SaveProjectWorkspace();
+            ProjectLayoutRoot_ = canonical;
+        }
+        return;
+    }
+    if (canonical.isEmpty() || WorkspaceSettingsFile_.isEmpty())
+    {
+        return;
+    }
+    const auto key = QCryptographicHash::hash(canonical.toUtf8(), QCryptographicHash::Sha256).toHex();
+    QFile file(QFileInfo(WorkspaceSettingsFile_).absolutePath() + QStringLiteral("/projects/") +
+               QString::fromLatin1(key) + QStringLiteral(".json"));
+    if (!file.open(QIODevice::ReadOnly) || file.size() > MAX_SETTINGS_BYTES)
+    {
+        return;
+    }
+    const auto bytes = file.read(MAX_SETTINGS_BYTES + 1);
+    if (file.error() != QFileDevice::NoError || bytes.size() > MAX_SETTINGS_BYTES)
+    {
+        return;
+    }
+    const auto document = QJsonDocument::fromJson(bytes);
+    const auto object = document.object();
+    if (!document.isObject() || object.value(QStringLiteral("version")).toInt() != LAYOUT_VERSION ||
+        object.value(QStringLiteral("qtVersion")).toString() != QString::fromLatin1(qVersion()) ||
+        object.value(QStringLiteral("root")).toString() != canonical)
+    {
+        return;
+    }
+    const auto encoded = object.value(QStringLiteral("state")).toString().toLatin1();
+    const auto state = QByteArray::fromBase64(encoded);
+    const auto previous = saveState(LAYOUT_VERSION);
+    if (!state.isEmpty() && state.size() <= MAX_STATE_BYTES && state.toBase64() == encoded &&
+        !restoreState(state, LAYOUT_VERSION))
+    {
+        (void)restoreState(previous, LAYOUT_VERSION);
+    }
+    World_->RestoreSession(object.value(QStringLiteral("world")).toObject());
+    const auto tab = object.value(QStringLiteral("tab")).toString();
+    for (int index = 0; index < WorkTabs_->count(); ++index)
+    {
+        if (WorkTabs_->widget(index)->objectName() == tab && WorkTabs_->isTabVisible(index))
+        {
+            WorkTabs_->setCurrentIndex(index);
+        }
     }
 }
 

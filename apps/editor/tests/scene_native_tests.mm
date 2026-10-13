@@ -138,10 +138,13 @@ TEST_CASE("Cocoa World authoring presents Metal frames and accepts native keyboa
         CHECK(process.exitStatus() == QProcess::NormalExit);
         CHECK(process.exitCode() == 1);
     }
-    preview.Stop();
+    CHECK(workspace.PreviewRunning());
+    workspace.StopPreview();
+    CHECK_FALSE(workspace.PreviewRunning());
     CHECK(document.Loaded());
     CHECK(workspace.Document().Draft() == reopened.Document().Draft());
-    REQUIRE(workspace.StartPreview());
+    workspace.ResumePreview();
+    CHECK(workspace.PreviewRunning());
     REQUIRE(Frames(preview, 2));
-    preview.Stop();
+    workspace.StopPreview();
 }

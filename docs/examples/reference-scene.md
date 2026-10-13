@@ -55,7 +55,14 @@ ctest --preset linux-clang-development
 
 The tests use synthetic geometry; the third-party scene is not required for CI.
 They check bounded source encodings, geometry/UV preservation, a complete
-reference capture and malformed-bundle rejection. Enable
+reference capture and malformed-bundle rejection. Complete-scene acceptance also
+submits 128 independently encoded objects using every admitted mesh/material,
+including 127 offscreen objects and a visible tail emitter. It compares optimized
+raster pixels with source-order submission, checks all source identities and
+triangle counts, checks an unlit object-ID pass, and finishes the capture after
+public resource owners detach.
+The acceptance driver's negative tests reject missing geometry, bad identities,
+changed pixels, incomplete samples and stale/mismatched provenance. Enable
 `LUDUS_SCENE_SANITIZERS=ON` to instrument the consumer with ASan/UBSan; its SDK
 libraries must separately be built with sanitizers for full engine coverage.
 
@@ -88,6 +95,9 @@ previous `capture.luhdr`. Exit steps distinguish usage (1), numeric arguments
 setup (6), program readiness (7), bundle admission (8), capture creation (9),
 completion/deadline (10), contribution validation (11), output allocation (12),
 HDR encoding (13), and publication (14).
+Acceptance raster setup, accounting, draw, completion or readback failure is step
+15. An optional fifth argument, `acceptance`, adds raster/submission evidence to
+the CPU capture; `native` requires native ray queries and never falls back.
 
 `manifest.json` records every consulted source file's SHA-256, the bundle hash,
 source and cooked geometry counts, camera, attribution and approximations.
@@ -139,6 +149,101 @@ Material approximations are explicit:
 - L6 surface emission is two-sided; PBRT diffuse area lights default to one-sided.
 - Source integrator, sampling and film choices are replaced by the explicit L6
   capture profile above.
+
+## Full prepared-scene renderer acceptance
+
+Use the same cooked bundle and installed sample; this check adds no importer or
+new scene format. From the repository root:
+
+```bash
+python3 examples/reference-scene/tests/acceptance.py \
+  --binary examples/reference-scene/out/build/linux-clang-development/reference_scene \
+  --bundle out/staircase2 --output out/staircase2-acceptance \
+  --extent 32 --samples 8
+```
+
+Add `--native` only on a device exposing the optional native query profile. It
+requires a second full capture and compares its raw RGB radiance with the CPU
+oracle under identical camera, seed, sample, depth and scene-fingerprint settings.
+Unsupported native traversal fails visibly. Configure
+`LUDUS_SCENE_NATIVE_ACCEPTANCE=ON` to require the synthetic native parity test in
+CTest; the default CPU-oracle tests run on native CI without assuming ray-capable
+hardware.
+
+Acceptance verifies all decoded textures, materials, meshes, vertices, stored
+triangles and instanced triangles against an independent serialized-bundle walk.
+The source-order raster path disables visibility/LOD/batching and must report
+every object identity in order. The optimized path must account for each object
+as visible or culled, emit unique valid identities, and match its raster bytes
+within one RGBA8 code value. Both paths use the same camera, depth and material
+profile. These linear, clamped RGBA8 raster images are structural comparisons;
+they are not compared against indirect path-traced radiance. An additional unlit
+snapshot encodes a distinct RGB identity for every source object, using the same
+geometry, transforms and depth. Its source-order and optimized images must also
+agree, every nonbackground pixel must name a submitted visible object, and the
+visible-object accounting must match the lit views. This checks dark surfaces
+without relying on lighting to reveal a missing wall. Both raster and
+reference captures must observe nonblack surface radiance, so an empty or wrongly
+framed scene cannot pass solely through matching black images.
+
+Every reference pixel must have exactly the requested sample count and zero
+invalid contributions before publication. CPU/native parity permits RGB-vector
+error at most `0.002 + 0.0001 * max(length(cpu), length(native))` per pixel; the
+report preserves maximum and RMS errors. This is a declared correctness tolerance
+for the admitted profile, not convergence to the source renderer or an FPS claim.
+
+`acceptance.json` records the selected backend and exposed adapter name, host,
+binary and bundle SHA-256, complete
+resource/triangle/submission counts, sample settings, artifact hashes and native
+parity disposition. If a cooker `manifest.json` exists, its bundle hash and cooked
+counts must agree; its source-file hashes, attribution and approximations are
+retained in the acceptance report. Each attempt runs in a fresh directory, and
+validation failure preserves the previous accepted report and retains the
+isolated `attempt-*/` artifacts with a `failure.txt` diagnostic. `acceptance.json` is
+published last; consumers must verify its artifact hashes rather than assume the
+output files form an atomic filesystem transaction. The retained files are
+`cpu/` (and optional `native/`) `capture.luhdr`, `raster-reference.rgba`,
+`raster-optimized.rgba`, `adapter-name.txt` and versioned `scene-acceptance.bin`.
+The object-ID pass adds `identity-reference.rgba`, `identity-optimized.rgba` and
+`identity-acceptance.bin`. `run.json` retains each path's verified observations;
+a failed native comparison additionally retains `native-parity.json` with failing
+pixel count, maximum/RMS error and the largest error locations.
+An empty adapter name is recorded as unavailable, not inferred from the backend.
+
+This stage accepts **all prepared geometry under the explicitly approximated RGB
+reflection profile**. It does not establish source-PBRT material fidelity,
+general scene-format support, browser traversal, animated geometry, real-time
+transport or physical-GPU performance qualification. Unsupported source features
+remain converter errors; unsupported prepared material/geometry remains renderer
+admission failure. No fixture is simplified merely to turn an acceptance failure
+into a pass.
+
+### Recorded acceptance and remaining gap
+
+The [Apple M5 prepared-scene evidence](../assets/renderer/scene-acceptance-metal.json)
+records the exact bundle/binary/capture hashes, source attribution and declared
+approximations. Staircase2 CPU-oracle acceptance at 64 × 64 and 32 samples/pixel
+accounts for all 17 objects, 85,554 vertices, 28,561 stored triangles and 28,831
+instanced triangles. Six meshes, eight materials and three textures are admitted.
+Both lit and object-ID optimized raster images match their source-order images
+with zero byte error. Sixteen objects are camera-visible and one is culled;
+occluded objects need not appear in the object-ID image.
+
+The 32 × 32, eight-sample native comparison passes with maximum RGB-vector error
+0.000239291 and RMS 0.0000106928. The denser 64 × 64, 32-sample comparison is
+**not qualified**: four pixels exceed the unchanged tolerance, maximum error is
+0.184945 and RMS is 0.00348437. Diagnostic ray comparisons include near-coincident
+primitive choices and near-origin disagreements; their full root cause remains
+open. Neither that run nor all resolutions/seeds/native adapters are marked
+accepted by the smaller passing fixture. The failing command exits nonzero and
+retains its evidence without replacing `acceptance.json`.
+
+Acceptance exposed a separate coordinate-zero self-intersection defect, corrected
+by the shared triangle-extent origin allowance described in the
+[reference rendering profile](../architecture/renderer-systems.md#reference-workflow-and-frozen-profile).
+The shifted-plane transport regression fails with the original calculation and
+passes with the correction under the existing radiance tolerance. It does not
+close the denser native qualification gap above.
 
 ## Attribution
 

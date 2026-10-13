@@ -8,8 +8,10 @@ namespace ludus::qa
 using namespace foundation;
 namespace rr = graphics::renderer;
 namespace rhi = graphics::rhi;
-inline rhi::RasterStatus
-BuildL6Snapshot(rr::Renderer& renderer, rr::MaterialProgram program, rr::Snapshot& snapshot) noexcept
+inline rhi::RasterStatus BuildL6Snapshot(rr::Renderer& renderer,
+                                         rr::MaterialProgram program,
+                                         rr::Snapshot& snapshot,
+                                         float32 worldZOffset = 0) noexcept
 {
     using S = rhi::RasterStatus;
     const math::Vector3 positions[]{{-2, -2, 0}, {2, -2, 0}, {2, 2, 0}, {-2, 2, 0}};
@@ -72,6 +74,10 @@ BuildL6Snapshot(rr::Renderer& renderer, rr::MaterialProgram program, rr::Snapsho
     items[2].Transform.Columns[0].X = .15F;
     items[2].Transform.Columns[1].Y = .15F;
     items[2].Transform.Translation = {-.8F, 1.5F, .2F};
+    for (auto& item : items)
+    {
+        item.Transform.Translation.Z += worldZOffset;
+    }
     status = renderer.CreateSnapshot(items, 3, snapshot);
     for (auto& material : materials)
     {

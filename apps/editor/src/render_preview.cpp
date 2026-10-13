@@ -105,7 +105,7 @@ RenderPreview::~RenderPreview()
 }
 platform::NativeWindowInfo RenderPreview::WindowInfo() const noexcept
 {
-    return Window_ ? Window_->GetNativeWindowInfo() : platform::NativeWindowInfo{};
+    return { .Width = RequestedWidth_, .Height = RequestedHeight_ };
 }
 bool RenderPreview::SetScene(const RenderScene& scene)
 {
@@ -159,7 +159,7 @@ bool RenderPreview::SetScene(const RenderScene& scene)
             sameGeometry = sameGeometry && old.Transform == next.Transform;
         }
     }
-    if (Scene_.Identity.isEmpty())
+    if (Scene_.Identity.isEmpty() && !RestoredOrbit_)
     {
         OrbitCenter_ = scene.Center;
         OrbitRadius_ = scene.Radius;
@@ -187,8 +187,23 @@ bool RenderPreview::SetScene(const RenderScene& scene)
     // Retire the previous lease and provider through the local owner.
     Residency_.Swap(residency);
     Scene_ = scene;
-    Status_ = QStringLiteral("Applied World preview data updated; preparing the renderer.");
-    Camera_ = -1;
+    if (!CameraId_.isEmpty())
+    {
+        Camera_ = -1;
+        for (int32 i = 0; i < Scene_.Cameras.size(); ++i)
+        {
+            if (Scene_.Cameras[i].Id == CameraId_)
+            {
+                Camera_ = i;
+            }
+        }
+    }
+    Status_ = QStringLiteral("World preview snapshot updated; preparing the renderer.");
+    if (Camera_ >= Scene_.Cameras.size())
+    {
+        Camera_ = -1;
+    }
+    CancelReadback();
     Frames_ = 0;
     if (OwnsDevice_)
     {
@@ -266,28 +281,15 @@ bool RenderPreview::Start()
         Q_EMIT Changed();
         return false;
     }
-    platform::WindowManager manager;
-    if (!Scene_.Lit &&
-        (!manager.Initialize({}) ||
-         !manager.CreateWindow(
-             { .Name = "Ludus World 3D preview - navigation is in the World panel", .Width = 960, .Height = 640 },
-             Window_)))
-    {
-        Status_ = QStringLiteral("Native preview window is unavailable. World editing remains available.");
-        Q_EMIT Changed();
-        return false;
-    }
     rhi::DeviceDescription description;
     description.Required.PortableRaster = true;
-    const auto started = rhi::CreateDevice({ .Name = "Ludus World preview", .Version = 1 },
-                                           Scene_.Lit ? platform::NativeWindowInfo{ .Width = 8, .Height = 8 }
-                                                      : Window_->GetNativeWindowInfo(),
+    const auto started = rhi::CreateDevice({ .Name = "Ludus embedded viewport", .Version = 1 },
+                                           { .Width = 8, .Height = 8 },
                                            description,
                                            Device_,
                                            Surface_);
     if (started != rhi::DeviceStatus::Ready && started != rhi::DeviceStatus::Pending)
     {
-        Window_.Reset();
         Status_ =
             QStringLiteral("Renderer admission failed. No game code was loaded; World editing remains available.");
         Q_EMIT Changed();
@@ -310,15 +312,17 @@ bool RenderPreview::Start()
 }
 void RenderPreview::Stop() noexcept
 {
-    const bool wasRunning = static_cast<bool>(Window_);
+    const bool wasRunning = OwnsDevice_;
     Timer_.stop();
     if (OwnsDevice_)
     {
+        CancelReadback();
+        (void)rhi::Destroy(Device_, Color_);
+        Color_ = {};
         RestartResources();
         (void)rhi::DestroyDevice(Device_);
     }
     OwnsDevice_ = false;
-    Window_.Reset();
     Device_ = {};
     Surface_ = {};
     Width_ = Height_ = 0;
@@ -332,19 +336,184 @@ void RenderPreview::FrameAll() noexcept
 {
     OrbitCenter_ = Scene_.Center;
     OrbitRadius_ = Scene_.Radius;
+    RestoredOrbit_ = false;
+    Navigate(-1, 25, 20, 3, false);
+    Q_EMIT NavigationChanged();
     ViewDirty_ = true;
+    if (Running())
+    {
+        Timer_.start();
+    }
 }
 void RenderPreview::Navigate(int32 camera, float32 yaw, float32 pitch, float32 zoom, bool reference)
 {
     if (Camera_ != camera || Yaw_ != yaw || Pitch_ != pitch || Zoom_ != zoom || Reference_ != reference)
     {
         Camera_ = camera;
+        CameraId_ = camera >= 0 && camera < Scene_.Cameras.size() ? Scene_.Cameras[camera].Id : QString();
         Yaw_ = yaw;
         Pitch_ = pitch;
         Zoom_ = zoom;
         Reference_ = reference;
         ViewDirty_ = true;
+        if (Running())
+        {
+            Timer_.start();
+        }
+        Q_EMIT NavigationChanged();
     }
+}
+void RenderPreview::Resize(int32 width, int32 height)
+{
+    if (width <= 0 || height <= 0)
+    {
+        return;
+    }
+    const auto scale = math::Min(1.0F, 1024.0F / static_cast<float32>(math::Max(width, height)));
+    RequestedWidth_ = math::Max(uint32{1}, static_cast<uint32>(static_cast<float32>(width) * scale));
+    RequestedHeight_ = math::Max(uint32{1}, static_cast<uint32>(static_cast<float32>(height) * scale));
+    if (Running())
+    {
+        Timer_.start();
+    }
+}
+void RenderPreview::Orbit(int32 dx, int32 dy)
+{
+    auto yaw = Yaw_ + static_cast<float32>(dx) * .5F;
+    while (yaw > 180)
+    {
+        yaw -= 360;
+    }
+    while (yaw < -180)
+    {
+        yaw += 360;
+    }
+    Navigate(-1, yaw, math::Clamp(Pitch_ + static_cast<float32>(dy) * .5F, -80.0F, 80.0F), Zoom_, Reference_);
+}
+void RenderPreview::Pan(int32 dx, int32 dy)
+{
+    const auto yaw = Yaw_ * .01745329252F, pitch = Pitch_ * .01745329252F;
+    const math::Vector3 right{math::Cos(yaw), 0, -math::Sin(yaw)};
+    const math::Vector3 up{-math::Sin(yaw) * math::Sin(pitch), math::Cos(pitch), -math::Cos(yaw) * math::Sin(pitch)};
+    OrbitCenter_ = OrbitCenter_ +
+                   (right * -static_cast<float32>(dx) + up * static_cast<float32>(dy)) * (OrbitRadius_ * Zoom_ * .002F);
+    RestoredOrbit_ = true;
+    Navigate(-1, Yaw_, Pitch_, Zoom_, Reference_);
+    ViewDirty_ = true;
+    if (Running())
+    {
+        Timer_.start();
+    }
+    Q_EMIT NavigationChanged();
+}
+void RenderPreview::Zoom(int32 steps)
+{
+    Navigate(-1, Yaw_, Pitch_, math::Clamp(Zoom_ - static_cast<float32>(steps) * .2F, 1.2F, 20.0F), Reference_);
+}
+QJsonObject RenderPreview::Navigation() const
+{
+    return {{QStringLiteral("yaw"), Yaw_},
+            {QStringLiteral("pitch"), Pitch_},
+            {QStringLiteral("zoom"), Zoom_},
+            {QStringLiteral("camera"), CameraId_},
+            {QStringLiteral("reference"), Reference_},
+            {QStringLiteral("x"), OrbitCenter_.X},
+            {QStringLiteral("y"), OrbitCenter_.Y},
+            {QStringLiteral("z"), OrbitCenter_.Z},
+            {QStringLiteral("radius"), OrbitRadius_}};
+}
+void RenderPreview::RestoreNavigation(const QJsonObject& state)
+{
+    const auto number = [&state](const QString& key, float32 fallback, float32 low, float32 high) {
+        const auto value = state.value(key).toDouble(static_cast<float64>(fallback));
+        return math::IsFinite(value) && value >= static_cast<float64>(low) && value <= static_cast<float64>(high)
+                   ? static_cast<float32>(value)
+                   : fallback;
+    };
+    Navigate(-1,
+             number(QStringLiteral("yaw"), 25, -180, 180),
+             number(QStringLiteral("pitch"), 20, -80, 80),
+             number(QStringLiteral("zoom"), 3, 1.2F, 20),
+             state.value(QStringLiteral("reference")).toBool());
+    CameraId_ = state.value(QStringLiteral("camera")).toString().left(256);
+    OrbitCenter_.X = number(QStringLiteral("x"), 0, -1000000, 1000000);
+    OrbitCenter_.Y = number(QStringLiteral("y"), 0, -1000000, 1000000);
+    OrbitCenter_.Z = number(QStringLiteral("z"), 0, -1000000, 1000000);
+    OrbitRadius_ = number(QStringLiteral("radius"), 1, .000001F, 1000000);
+    RestoredOrbit_ = state.value(QStringLiteral("radius")).isDouble() && state.value(QStringLiteral("x")).isDouble() &&
+                     state.value(QStringLiteral("y")).isDouble() && state.value(QStringLiteral("z")).isDouble() &&
+                     state.value(QStringLiteral("radius")).toDouble() > 0;
+    if (!RestoredOrbit_)
+    {
+        OrbitCenter_ = Scene_.Center;
+        OrbitRadius_ = Scene_.Radius;
+    }
+    ViewDirty_ = true;
+    Q_EMIT NavigationChanged();
+}
+void RenderPreview::CancelReadback() noexcept
+{
+    if (Reading_)
+    {
+        (void)rhi::Release(Device_, Readback_);
+    }
+    Reading_ = false;
+    ReadbackImage_ = {};
+    ReadbackRow_ = 0;
+}
+void RenderPreview::Fail(const QString& message)
+{
+    Stop();
+    Status_ = message;
+    Q_EMIT Changed();
+    Q_EMIT Failed(message);
+}
+bool RenderPreview::ReadFrame()
+{
+    // R8 staging slices are bounded to 256 KiB. Read one immutable frame in
+    // horizontal strips without blocking the UI or borrowing backend pixels.
+    const auto pitch = static_cast<usize>(ReadbackImage_.bytesPerLine());
+    if (Reading_)
+    {
+        const auto status = rhi::GetStatus(Device_, Readback_);
+        if (status == rhi::RasterStatus::Pending)
+        {
+            return true;
+        }
+        if (status != rhi::RasterStatus::Ready)
+        {
+            return false;
+        }
+        const auto copied = rhi::CopyReadback(Device_,
+                                              Readback_,
+                                              ReadbackImage_.scanLine(static_cast<int32>(ReadbackRow_)),
+                                              pitch * ReadbackRows_);
+        (void)rhi::Release(Device_, Readback_);
+        Reading_ = false;
+        if (copied != rhi::RasterStatus::Ready)
+        {
+            return false;
+        }
+        ReadbackRow_ += ReadbackRows_;
+        if (ReadbackRow_ == Height_)
+        {
+            const auto frame = ReadbackImage_;
+            ReadbackImage_ = {};
+            Timer_.setInterval(16);
+            // A receiver may stop or replace the preview while handling this signal.
+            Q_EMIT FrameReady(frame);
+            return true;
+        }
+    }
+    const auto packed = (pitch + 255) / 256 * 256;
+    ReadbackRows_ = math::Min(Height_ - ReadbackRow_, static_cast<uint32>((usize{256} * 1024) / packed));
+    const auto requested = rhi::RequestTextureReadback(Device_,
+                                                       Color_,
+                                                       { .Y = ReadbackRow_, .Width = Width_, .Height = ReadbackRows_ },
+                                                       pitch,
+                                                       Readback_);
+    Reading_ = requested == rhi::RasterStatus::Ready || requested == rhi::RasterStatus::Pending;
+    return Reading_ || requested == rhi::RasterStatus::CapacityExceeded;
 }
 bool RenderPreview::Prepare()
 {
@@ -602,47 +771,49 @@ void RenderPreview::Tick()
     {
         return;
     }
-    if (Window_ && !Window_->HandleEvent({}))
-    {
-        Stop();
-        Status_ = QStringLiteral("3D preview closed. Reopen it to continue; saved World data is unchanged.");
-        Q_EMIT Changed();
-        return;
-    }
     rhi::DeviceInfo device;
     const auto ready = rhi::GetDeviceInfo(Device_, device);
     if (ready == rhi::DeviceStatus::Pending)
     {
         return;
     }
+    if (Scene_.Lit)
+    {
+        const uint32 width = math::Max(uint32{1}, RequestedWidth_ * 256 / math::Max(RequestedWidth_, RequestedHeight_));
+        const uint32 height =
+            math::Max(uint32{1}, RequestedHeight_ * 256 / math::Max(RequestedWidth_, RequestedHeight_));
+        if (width != Width_ || height != Height_)
+        {
+            Width_ = width;
+            Height_ = height;
+            ViewDirty_ = true;
+        }
+        if (ViewDirty_ && CaptureStarted_)
+        {
+            (void)Renderer_.Release(Capture_);
+            CaptureStarted_ = false;
+            LastSamples_ = 0;
+        }
+    }
     bool good =
         ready == rhi::DeviceStatus::Ready && rhi::PollLifetime(Device_) == rhi::RasterStatus::Ready && Prepare();
-    if (good && Phase_ >= 5 && Scene_.Lit)
+    if (good && Phase_ == 6 && Scene_.Lit)
     {
         if (!CaptureStarted_)
         {
-            const auto& source = *Scene_.Definition;
-            foundation::math::Matrix4 view, projection;
             rr::ReferenceCaptureDescription capture;
-            if (foundation::math::TryLookAt(source.Eye, source.Target, source.Up, view) !=
-                    foundation::math::MathStatus::Success ||
-                foundation::math::TryPerspectiveReverseZ(source.VerticalFov, 1, .05F, 100, projection) !=
-                    foundation::math::MathStatus::Success)
-            {
-                good = false;
-            }
-            else
-            {
-                capture.WorldToClip = projection * view;
-                capture.CameraPosition = source.Eye;
-                capture.ReverseZ = true;
-                capture.Width = capture.Height = 256;
-                capture.TargetSamples = 64;
-                capture.Seed = 871;
-                good = Pixels_.TryResize(usize{256} * 256) &&
-                       Accepted(Renderer_.BeginReferenceCapture(Snapshot_, capture, Capture_));
-                CaptureStarted_ = good;
-            }
+            capture.WorldToClip = Description_.WorldToClip;
+            capture.CameraPosition = Description_.CameraPosition;
+            capture.ReverseZ = Description_.Depth == rr::DepthConvention::ReverseZ;
+            capture.InfiniteFar = Description_.InfiniteFar;
+            capture.OrthographicCamera = Description_.OrthographicCamera;
+            capture.Width = Width_;
+            capture.Height = Height_;
+            capture.TargetSamples = 64;
+            capture.Seed = 871;
+            good = Pixels_.TryResize(static_cast<usize>(Width_) * Height_) &&
+                   Accepted(Renderer_.BeginReferenceCapture(Snapshot_, capture, Capture_));
+            CaptureStarted_ = good;
         }
         if (good)
         {
@@ -667,7 +838,7 @@ void RenderPreview::Tick()
                     rhi::RasterStatus::Ready)
             {
                 LastSamples_ = info.MinimumSamples;
-                QImage image(256, 256, QImage::Format_RGB32);
+                QImage image(static_cast<int32>(Width_), static_cast<int32>(Height_), QImage::Format_RGB32);
                 if (image.isNull())
                 {
                     good = false;
@@ -679,12 +850,12 @@ void RenderPreview::Tick()
                         value = foundation::math::EncodeSrgb(value);
                         return static_cast<int32>(foundation::math::Clamp(value * 255, 0.0F, 255.0F));
                     };
-                    for (int32 y = 0; y < 256; ++y)
+                    for (int32 y = 0; y < static_cast<int32>(Height_); ++y)
                     {
                         auto* row = reinterpret_cast<QRgb*>(image.scanLine(y));
-                        for (int32 x = 0; x < 256; ++x)
+                        for (int32 x = 0; x < static_cast<int32>(Width_); ++x)
                         {
-                            const auto color = Pixels_[static_cast<usize>(y) * 256 + static_cast<usize>(x)].Radiance;
+                            const auto color = Pixels_[static_cast<usize>(y) * Width_ + static_cast<usize>(x)].Radiance;
                             row[x] = qRgb(channel(color.X), channel(color.Y), channel(color.Z));
                         }
                     }
@@ -693,7 +864,9 @@ void RenderPreview::Tick()
                         Timer_.stop();
                     }
                     Q_EMIT FrameReady(image);
-                    Status_ = QStringLiteral("Rendered viewport · 256×256 · %1/64 samples · CPU reference traversal")
+                    Status_ = QStringLiteral("Rendered viewport · %1×%2 · %3/64 samples · CPU reference traversal")
+                                  .arg(Width_)
+                                  .arg(Height_)
                                   .arg(info.MinimumSamples);
                     Q_EMIT Changed();
                 }
@@ -706,8 +879,44 @@ void RenderPreview::Tick()
     }
     if (good && Phase_ >= 5 && !Scene_.Lit)
     {
-        const auto window = Window_->GetNativeWindowInfo();
-        const auto target = rhi::SetFrameTarget(Device_, Surface_, { .Width = window.Width, .Height = window.Height });
+        if (!ReadbackImage_.isNull())
+        {
+            if (!ReadFrame())
+            {
+                Fail(QStringLiteral("Viewport readback failed. Editing remains available."));
+            }
+            return;
+        }
+        if (Width_ != RequestedWidth_ || Height_ != RequestedHeight_)
+        {
+            (void)rhi::Destroy(Device_, Color_);
+            Color_ = {};
+            const auto created =
+                rhi::CreateTexture(Device_,
+                                   { .Width = RequestedWidth_, .Height = RequestedHeight_, .Attachment = true },
+                                   {},
+                                   Color_);
+            if (!Accepted(created))
+            {
+                Fail(QStringLiteral("Viewport attachment allocation failed. Editing remains available."));
+                return;
+            }
+            Width_ = RequestedWidth_;
+            Height_ = RequestedHeight_;
+            ViewDirty_ = true;
+            return;
+        }
+        const auto attachment = rhi::GetStatus(Device_, Color_);
+        if (attachment == rhi::RasterStatus::Pending)
+        {
+            return;
+        }
+        if (attachment != rhi::RasterStatus::Ready)
+        {
+            Fail(QStringLiteral("Viewport attachment is unavailable. Editing remains available."));
+            return;
+        }
+        const auto target = rhi::SetFrameTarget(Device_, Surface_, { .Width = 8, .Height = 8 });
         if (target == rhi::DeviceStatus::Skipped)
         {
             return;
@@ -723,13 +932,15 @@ void RenderPreview::Tick()
             rhi::FrameInfo frame;
             good = rhi::GetFrameInfo(Device_, Surface_, frame) == rhi::DeviceStatus::Ready;
             bool drew = false;
-            if (good && frame.Width == Width_ && frame.Height == Height_ && Phase_ == 6)
+            if (good && Phase_ == 6)
             {
                 const auto status = Renderer_.GetStatus(View_);
                 if (status == rhi::RasterStatus::Ready)
                 {
-                    good = Renderer_.DrawView(View_, { .Clear = {0.035F, 0.045F, 0.06F, 1}, .ClearDepth = 0 }) ==
-                           rhi::RasterStatus::Ready;
+                    good =
+                        Renderer_.DrawView(View_,
+                                           { .Color = Color_, .Clear = {0.035F, 0.045F, 0.06F, 1}, .ClearDepth = 0 }) ==
+                        rhi::RasterStatus::Ready;
                     drew = good;
                 }
                 else
@@ -739,14 +950,17 @@ void RenderPreview::Tick()
             }
             else if (good)
             {
-                Width_ = frame.Width;
-                Height_ = frame.Height;
                 ViewDirty_ = true;
             }
             const auto ended = rhi::EndFrame(Device_);
             good = good && ended == rhi::DeviceStatus::Ready;
             if (good && drew)
             {
+                ReadbackImage_ =
+                    QImage(static_cast<int32>(Width_), static_cast<int32>(Height_), QImage::Format_RGBA8888);
+                ReadbackRow_ = 0;
+                good = !ReadbackImage_.isNull();
+                Timer_.setInterval(1);
                 ++Frames_;
                 if (FreshReport_ || Frames_ == 1 || Frames_ % 60 == 0)
                 {

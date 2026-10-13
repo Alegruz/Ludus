@@ -67,6 +67,7 @@ bool RasterAllocationBytes(internal::RasterKind, foundation::usize, foundation::
 RasterCapabilities RasterLimits() noexcept;
 RasterStatus RasterGrow(internal::RasterKind, foundation::usize) noexcept;
 RasterStatus RasterPrepareStorage() noexcept;
+ludus::foundation::uint32 RasterColorAttachmentLimit() noexcept;
 ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;
 ComputeCapabilities ComputeLimits() noexcept;
@@ -135,6 +136,7 @@ bool RasterAllocationBytes(internal::RasterKind, foundation::usize, foundation::
 RasterCapabilities RasterLimits() noexcept;
 RasterStatus RasterGrow(internal::RasterKind, foundation::usize) noexcept;
 RasterStatus RasterPrepareStorage() noexcept;
+ludus::foundation::uint32 RasterColorAttachmentLimit() noexcept;
 ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;
 ComputeCapabilities ComputeLimits() noexcept;

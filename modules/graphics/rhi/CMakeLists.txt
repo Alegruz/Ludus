@@ -177,6 +177,15 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN AND LUDUS_SLANG_COMPILER AND (APPLE OR L
     ludus_apply_project_defaults(ludus_rhi_r8_consumer)
     ludus_compile_shader(TARGET ludus_rhi_r8_consumer NAME raster RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    add_executable(ludus_rhi_r10_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r10.cpp")
+    target_link_libraries(ludus_rhi_r10_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
+    ludus_apply_project_defaults(ludus_rhi_r10_consumer)
+    foreach(entry write mask sample depth stencil)
+        ludus_compile_shader(TARGET ludus_rhi_r10_consumer NAME r10${entry} RASTER
+            SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r10.slang" VERTEX vertexMain FRAGMENT ${entry}Main)
+    endforeach()
+    add_test(NAME ludus_rhi_r10_consumer COMMAND ludus_rhi_r10_consumer)
+    set_tests_properties(ludus_rhi_r10_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
     add_executable(ludus_rhi_r9_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r9.cpp")
     target_link_libraries(ludus_rhi_r9_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
     ludus_apply_project_defaults(ludus_rhi_r9_consumer)

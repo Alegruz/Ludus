@@ -1,0 +1,27 @@
+{
+  "source_sha256": "5bcc0843da8c57f736fb8cc9f009da0285257d141253f9ee3d67451c1b7f5dbb",
+  "upload_sha256": "642c9fb4838ee48e2c2ba8d39a7183b8a8fadae6f8b0d0c399bf7ecc46080f43",
+  "semantic": "color",
+  "format": "Rgba8Srgb",
+  "levels": [
+    {
+      "width": 5,
+      "height": 3,
+      "offset": 0,
+      "row_pitch": 20
+    },
+    {
+      "width": 2,
+      "height": 1,
+      "offset": 60,
+      "row_pitch": 8
+    },
+    {
+      "width": 1,
+      "height": 1,
+      "offset": 68,
+      "row_pitch": 4
+    }
+  ],
+  "bake": null
+}

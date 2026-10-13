@@ -51,6 +51,23 @@ class RasterReflectionTests(unittest.TestCase):
             data['parameters'][0]['type']['multisample']=True
             with self.assertRaises(RuntimeError): raster_interface(data,'fragment')
 
+    def test_r10_scalar_aspects_verify_type_and_reject_filtered_sampling(self):
+        for scalar, kind, wgsl, sampler in [('float32','TextureDepth2D','f32','sampler2D'),('uint32','TextureStencil2D','u32','usampler2D')]:
+            data={'parameters':[{'name':'image','binding':{'kind':'descriptorTableSlot','index':2},'type':{'kind':'resource','baseShape':'texture2D','resultType':{'kind':'scalar','scalarType':scalar}}}], 'entryPoints':[{'stage':'fragment','bindings':[{'name':'image','binding':{'used':1}}]}]}
+            value=raster_interface(data,'fragment')
+            self.assertEqual(value['entries'][0]['kind'],kind)
+            code=f'@binding(2) @group(0) var image_0 : texture_2d<{wgsl}>;'
+            self.assertEqual(wgsl_contract(code,value,'fragment'),code)
+            with self.assertRaisesRegex(RuntimeError,'dimension differs'):
+                wgsl_contract(code.replace(wgsl,'i32'),value,'fragment')
+            with self.assertRaisesRegex(RuntimeError,'unfiltered loads'):
+                wgsl_contract(code+' textureSampleLevel(image_0, sampler_0, uv, 0);',value,'fragment')
+            cross={'separate_images':[{'name':'image','binding':2}]}
+            emitted=f'#version 300 es\nuniform highp {sampler} SPIRV_Cross_CombinedimageSPIRV_Cross_DummySampler; void main() {{}}'
+            self.assertEqual(glsl_interface(emitted,value,cross)[1][2]['sampler'],0xffffffff)
+            data['parameters'][0]['type']['array']=True
+            with self.assertRaisesRegex(RuntimeError,'2D aspect view'):raster_interface(data,'fragment')
+
     def test_missing_stage_usage_is_rejected(self):
         data=self.fixture();data['entryPoints'][0]['bindings'][0]['binding']={}
         with self.assertRaisesRegex(RuntimeError,'compile stages separately'):raster_interface(data,'fragment')

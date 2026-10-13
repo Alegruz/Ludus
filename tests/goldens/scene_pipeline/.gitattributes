@@ -1,0 +1,3 @@
+# Golden bytes must never be line-ending normalized.
+source/** -text
+expected/files/** -text

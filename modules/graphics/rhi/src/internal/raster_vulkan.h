@@ -69,6 +69,7 @@ struct ComputeVulkanPipeline final
 internal::StorageTable<ComputeVulkanPipeline> gComputePipelines;
 internal::StorageTable<RasterVulkanTexture> gRasterTextures;
 internal::StorageTable<VkImageView> gRasterViews;
+internal::StorageTable<VkImageView> gRasterViewDepths;
 internal::StorageTable<VkSampler> gRasterSamplers;
 internal::StorageTable<RasterVulkanShader> gRasterShaders;
 internal::StorageTable<VkDescriptorSetLayout> gRasterLayouts;
@@ -85,8 +86,20 @@ struct RasterVkPass final
     VkFormat Format = VK_FORMAT_UNDEFINED;
     RasterPassDescription State;
     bool Surface = false;
+    internal::RasterPassInfo Advanced;
 };
 internal::StorageTable<RasterVkPass> gRasterPasses;
+struct RasterVkFramebuffer final
+{
+    VkFramebuffer Object = VK_NULL_HANDLE;
+    VkRenderPass Pass = VK_NULL_HANDLE;
+    VkImageView Views[9]{};
+    usize Count = 0;
+    uint32 Width = 0, Height = 0;
+};
+internal::StorageTable<RasterVkFramebuffer> gRasterAdvancedFrames;
+internal::RasterPassInfo gRasterNativePass;
+VkFormat RasterPixelFormat(RasterFormat) noexcept;
 RasterStatus RasterError(VkResult result) noexcept
 {
     if (result == VK_SUCCESS)
@@ -152,9 +165,10 @@ RasterVkRenderPass(VkFormat format, bool surface, const RasterPassDescription& s
             }
             continue;
         }
-        if (pass.Format == format && pass.Surface == surface && cached.ColorLoad == state.ColorLoad &&
-            cached.ColorStore == state.ColorStore && cached.DepthLoad == state.DepthLoad &&
-            cached.DepthStore == state.DepthStore && cached.DepthReadOnly == state.DepthReadOnly)
+        if (pass.Advanced.ColorCount == 0 && pass.Format == format && pass.Surface == surface &&
+            cached.ColorLoad == state.ColorLoad && cached.ColorStore == state.ColorStore &&
+            cached.DepthLoad == state.DepthLoad && cached.DepthStore == state.DepthStore &&
+            cached.DepthReadOnly == state.DepthReadOnly)
         {
             output = pass.Object;
             return VK_SUCCESS;
@@ -214,6 +228,198 @@ RasterVkRenderPass(VkFormat format, bool surface, const RasterPassDescription& s
         available->Format = format;
         available->Surface = surface;
         available->State = state;
+        output = available->Object;
+    }
+    return result;
+}
+// Thanks to Khronos, Vulkan Specification, "Render Pass", color resolves and
+// compatibility: https://docs.vulkan.org/spec/latest/chapters/renderpass.html
+// Keep explicit load/store/resolve operations at pass boundaries; R13 retains whole-image barriers.
+VkAttachmentLoadOp RasterVkLoad(RasterLoad load) noexcept
+{
+    return load == RasterLoad::Clear  ? VK_ATTACHMENT_LOAD_OP_CLEAR
+           : load == RasterLoad::Load ? VK_ATTACHMENT_LOAD_OP_LOAD
+                                      : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+}
+VkAttachmentStoreOp RasterVkStore(RasterStore store) noexcept
+{
+    return store == RasterStore::Store ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+}
+VkResult RasterVkAdvancedPass(const internal::RasterPassInfo& info, VkRenderPass& output) noexcept
+{
+    const auto limit = internal::CurrentStorageLimits().RasterPassStates;
+    if (!gRasterPasses.EnsureSlots(limit))
+    {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    RasterVkPass* available = nullptr;
+    for (usize i = 0; i < limit; ++i)
+    {
+        auto& cached = gRasterPasses[i];
+        if (cached.Object == VK_NULL_HANDLE)
+        {
+            if (!available)
+            {
+                available = &cached;
+            }
+            continue;
+        }
+        const auto& other = cached.Advanced;
+        bool same = other.ColorCount == info.ColorCount && other.SampleCount == info.SampleCount &&
+                    other.Stencil == info.Stencil && other.Description.DepthLoad == info.Description.DepthLoad &&
+                    other.Description.DepthStore == info.Description.DepthStore &&
+                    other.Description.DepthReadOnly == info.Description.DepthReadOnly &&
+                    other.Description.StencilLoad == info.Description.StencilLoad &&
+                    other.Description.StencilStore == info.Description.StencilStore &&
+                    other.Description.StencilReadOnly == info.Description.StencilReadOnly;
+        for (usize c = 0; c < info.ColorCount && same; ++c)
+        {
+            same = other.Colors[c].Format == info.Colors[c].Format && other.Colors[c].Load == info.Colors[c].Load &&
+                   other.Colors[c].Store == info.Colors[c].Store &&
+                   (other.Colors[c].ResolveView != internal::RASTER_INVALID) ==
+                       (info.Colors[c].ResolveView != internal::RASTER_INVALID);
+        }
+        if (same)
+        {
+            output = cached.Object;
+            return VK_SUCCESS;
+        }
+    }
+    if (!available)
+    {
+        return VK_ERROR_TOO_MANY_OBJECTS;
+    }
+    VkAttachmentDescription attachments[9]{};
+    VkAttachmentReference colors[4]{}, resolves[4]{};
+    const auto count = static_cast<uint32>(info.ColorCount);
+    for (uint32 i = 0; i < count; ++i)
+    {
+        auto& a = attachments[i];
+        const auto& c = info.Colors[i];
+        a.format = RasterPixelFormat(c.Format);
+        a.samples = static_cast<VkSampleCountFlagBits>(info.SampleCount);
+        a.loadOp = RasterVkLoad(c.Load);
+        a.storeOp = RasterVkStore(c.Store);
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colors[i] = {i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        resolves[i] = {VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    }
+    auto& depth = attachments[count];
+    depth.format = info.Stencil ? VK_FORMAT_D32_SFLOAT_S8_UINT : gDepthFormat;
+    depth.samples = static_cast<VkSampleCountFlagBits>(info.SampleCount);
+    depth.loadOp = RasterVkLoad(info.Description.DepthLoad);
+    depth.storeOp = RasterVkStore(info.Description.DepthStore);
+    depth.stencilLoadOp = info.Stencil ? RasterVkLoad(info.Description.StencilLoad) : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth.stencilStoreOp =
+        info.Stencil ? RasterVkStore(info.Description.StencilStore) : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.initialLayout = depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference depthRef{count, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    uint32 total = count + 1;
+    bool hasResolve = false;
+    for (uint32 i = 0; i < count; ++i)
+    {
+        if (info.Colors[i].ResolveView != internal::RASTER_INVALID)
+        {
+            auto& a = attachments[total];
+            a = attachments[i];
+            a.samples = VK_SAMPLE_COUNT_1_BIT;
+            a.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            resolves[i].attachment = total++;
+            hasResolve = true;
+        }
+    }
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = count;
+    subpass.pColorAttachments = colors;
+    subpass.pDepthStencilAttachment = &depthRef;
+    subpass.pResolveAttachments = hasResolve ? resolves : nullptr;
+    VkRenderPassCreateInfo create{};
+    create.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    create.attachmentCount = total;
+    create.pAttachments = attachments;
+    create.subpassCount = 1;
+    create.pSubpasses = &subpass;
+    const auto result = vkCreateRenderPass(gDevice, &create, nullptr, &available->Object);
+    if (result == VK_SUCCESS)
+    {
+        available->Advanced = info;
+        output = available->Object;
+    }
+    return result;
+}
+VkResult
+RasterVkAdvancedFramebuffer(const internal::RasterPassInfo& info, VkRenderPass pass, VkFramebuffer& output) noexcept
+{
+    VkImageView views[9]{};
+    usize count = 0;
+    for (usize i = 0; i < info.ColorCount; ++i)
+    {
+        views[count++] = gRasterViews[info.Colors[i].View];
+    }
+    views[count++] = gRasterViewDepths[info.Colors[0].View];
+    for (usize i = 0; i < info.ColorCount; ++i)
+    {
+        if (info.Colors[i].ResolveView != internal::RASTER_INVALID)
+        {
+            views[count++] = gRasterViews[info.Colors[i].ResolveView];
+        }
+    }
+    const auto limit = internal::CurrentStorageLimits().RasterPassStates;
+    if (!gRasterAdvancedFrames.EnsureSlots(limit))
+    {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    RasterVkFramebuffer* available = nullptr;
+    for (usize i = 0; i < limit; ++i)
+    {
+        auto& frame = gRasterAdvancedFrames[i];
+        if (frame.Object == VK_NULL_HANDLE)
+        {
+            if (!available)
+            {
+                available = &frame;
+            }
+            continue;
+        }
+        bool same =
+            frame.Pass == pass && frame.Count == count && frame.Width == info.Width && frame.Height == info.Height;
+        for (usize v = 0; v < count && same; ++v)
+        {
+            same = frame.Views[v] == views[v];
+        }
+        if (same)
+        {
+            output = frame.Object;
+            return VK_SUCCESS;
+        }
+    }
+    if (!available)
+    {
+        return VK_ERROR_TOO_MANY_OBJECTS;
+    }
+    VkFramebufferCreateInfo create{};
+    create.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    create.renderPass = pass;
+    create.attachmentCount = static_cast<uint32>(count);
+    create.pAttachments = views;
+    create.width = info.Width;
+    create.height = info.Height;
+    create.layers = 1;
+    const auto result = vkCreateFramebuffer(gDevice, &create, nullptr, &available->Object);
+    if (result == VK_SUCCESS)
+    {
+        available->Pass = pass;
+        available->Count = count;
+        available->Width = info.Width;
+        available->Height = info.Height;
+        for (usize i = 0; i < count; ++i)
+        {
+            available->Views[i] = views[i];
+        }
         output = available->Object;
     }
     return result;
@@ -400,14 +606,54 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
                                                                      gDepthFormat,
                                                                      VK_IMAGE_TYPE_2D,
                                                                      VK_IMAGE_TILING_OPTIMAL,
-                                                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                                                         VK_IMAGE_USAGE_SAMPLED_BIT,
                                                                      0,
                                                                      &depth) == VK_SUCCESS &&
                             (color.sampleCounts & depth.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0;
     result.Uses.ColorAttachment = attachment;
     result.Uses.Blendable =
         attachment && (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0;
-    result.SampleCounts = attachment ? 1U : 0U;
+    result.SampleCounts = attachment ? static_cast<uint32>(color.sampleCounts & depth.sampleCounts) & 5U : 0U;
+    if (attachment)
+    {
+        VkImageFormatProperties stencil{};
+        result.StencilAttachment = vkGetPhysicalDeviceImageFormatProperties(
+                                       gPhysical,
+                                       VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                       VK_IMAGE_TYPE_2D,
+                                       VK_IMAGE_TILING_OPTIMAL,
+                                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                       0,
+                                       &stencil) == VK_SUCCESS;
+        result.DepthSampled = true;
+        result.StencilSampled = result.StencilAttachment;
+        result.AttachmentViews = true;
+        result.MaxAttachmentMipLevels =
+            color.maxMipLevels < depth.maxMipLevels ? color.maxMipLevels : depth.maxMipLevels;
+        if (result.MaxAttachmentMipLevels > result.MaxMipLevels)
+        {
+            result.MaxAttachmentMipLevels = result.MaxMipLevels;
+        }
+        result.MaxAttachmentLayers =
+            color.maxArrayLayers < depth.maxArrayLayers ? color.maxArrayLayers : depth.maxArrayLayers;
+        if (result.MaxAttachmentLayers > 256)
+        {
+            result.MaxAttachmentLayers = 256;
+        }
+        if (result.StencilAttachment)
+        {
+            result.SampleCounts &= static_cast<uint32>(stencil.sampleCounts);
+            if (stencil.maxMipLevels < result.MaxAttachmentMipLevels)
+            {
+                result.MaxAttachmentMipLevels = stencil.maxMipLevels;
+            }
+            if (stencil.maxArrayLayers < result.MaxAttachmentLayers)
+            {
+                result.MaxAttachmentLayers = stencil.maxArrayLayers;
+            }
+        }
+    }
     result.MaxAttachmentDimension2D = attachment ? result.MaxSampledDimension2D : 0;
     VkPhysicalDeviceProperties device{};
     vkGetPhysicalDeviceProperties(gPhysical, &device);
@@ -424,7 +670,85 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
             result.MaxAttachmentDimension2D = bound;
         }
     }
+    if (attachment)
+    {
+        VkImageFormatProperties colorCube{}, depthCube{}, stencilCube{};
+        const auto depthUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                     pixel,
+                                                     VK_IMAGE_TYPE_2D,
+                                                     VK_IMAGE_TILING_OPTIMAL,
+                                                     usage | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                                     VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                                                     &colorCube) == VK_SUCCESS &&
+            vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                     gDepthFormat,
+                                                     VK_IMAGE_TYPE_2D,
+                                                     VK_IMAGE_TILING_OPTIMAL,
+                                                     depthUsage,
+                                                     VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                                                     &depthCube) == VK_SUCCESS &&
+            (!result.StencilAttachment || vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                                                   VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                                                                   VK_IMAGE_TYPE_2D,
+                                                                                   VK_IMAGE_TILING_OPTIMAL,
+                                                                                   depthUsage,
+                                                                                   VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                                                                                   &stencilCube) == VK_SUCCESS))
+        {
+            result.MaxAttachmentCubeDimension = result.MaxAttachmentDimension2D;
+            const uint32 cubeBounds[]{colorCube.maxExtent.width,
+                                      colorCube.maxExtent.height,
+                                      depthCube.maxExtent.width,
+                                      depthCube.maxExtent.height};
+            for (auto bound : cubeBounds)
+            {
+                if (bound < result.MaxAttachmentCubeDimension)
+                {
+                    result.MaxAttachmentCubeDimension = bound;
+                }
+            }
+            if (result.StencilAttachment)
+            {
+                if (stencilCube.maxExtent.width < result.MaxAttachmentCubeDimension)
+                {
+                    result.MaxAttachmentCubeDimension = stencilCube.maxExtent.width;
+                }
+                if (stencilCube.maxExtent.height < result.MaxAttachmentCubeDimension)
+                {
+                    result.MaxAttachmentCubeDimension = stencilCube.maxExtent.height;
+                }
+            }
+        }
+        if (result.StencilAttachment)
+        {
+            VkImageFormatProperties stencil{};
+            if (vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                         VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                                         VK_IMAGE_TYPE_2D,
+                                                         VK_IMAGE_TILING_OPTIMAL,
+                                                         depthUsage,
+                                                         0,
+                                                         &stencil) == VK_SUCCESS)
+            {
+                if (stencil.maxExtent.width < result.MaxAttachmentDimension2D)
+                {
+                    result.MaxAttachmentDimension2D = stencil.maxExtent.width;
+                }
+                if (stencil.maxExtent.height < result.MaxAttachmentDimension2D)
+                {
+                    result.MaxAttachmentDimension2D = stencil.maxExtent.height;
+                }
+            }
+        }
+    }
     return result;
+}
+uint32 RasterColorAttachmentLimit() noexcept
+{
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(gPhysical, &properties);
+    return properties.limits.maxColorAttachments < 4 ? properties.limits.maxColorAttachments : 4;
 }
 uint32 RasterVertexStrideLimit() noexcept
 {
@@ -634,7 +958,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     image.extent = {info.Width, info.Height, info.Dimension == TextureDimension::D3 ? info.DepthOrLayers : 1U};
     image.mipLevels = info.MipLevels;
     image.arrayLayers = info.Dimension == TextureDimension::D3 ? 1U : info.DepthOrLayers;
-    image.samples = VK_SAMPLE_COUNT_1_BIT;
+    image.samples = static_cast<VkSampleCountFlagBits>(info.SampleCount);
     image.tiling = VK_IMAGE_TILING_OPTIMAL;
     image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                   (info.Format == RasterFormat::Rgba8Unorm ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0U) |
@@ -648,8 +972,8 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     }
     if (info.Attachment)
     {
-        image.format = gDepthFormat;
-        image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        image.format = info.Stencil ? VK_FORMAT_D32_SFLOAT_S8_UINT : gDepthFormat;
+        image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         result =
             vmaCreateImage(gRasterAllocator, &image, &allocation, &texture.Depth, &texture.DepthAllocation, nullptr);
         VkImageViewCreateInfo view{};
@@ -663,11 +987,16 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
             result = vkCreateImageView(gDevice, &view, nullptr, &texture.ColorView);
         }
         view.image = texture.Depth;
-        view.format = gDepthFormat;
-        view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        view.format = image.format;
+        view.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | (info.Stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0U);
         if (result == VK_SUCCESS)
         {
             result = vkCreateImageView(gDevice, &view, nullptr, &texture.DepthView);
+        }
+        if (info.SampleCount != 1 || info.Stencil || info.MipLevels != 1 || info.Dimension != TextureDimension::D2)
+        {
+            return RasterError(result);
         }
         VkRenderPass pass = VK_NULL_HANDLE;
         if (result == VK_SUCCESS)
@@ -836,20 +1165,35 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
 }
 RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& source, uint32) noexcept
 {
-    VkImageViewCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    info.image = gRasterTextures[source.Texture].Object;
-    info.viewType = source.View.Dimension == TextureDimension::D2Array ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
-                    : source.View.Dimension == TextureDimension::Cube  ? VK_IMAGE_VIEW_TYPE_CUBE
-                    : source.View.Dimension == TextureDimension::D3    ? VK_IMAGE_VIEW_TYPE_3D
-                                                                       : VK_IMAGE_VIEW_TYPE_2D;
-    info.format = RasterPixelFormat(gRasterTextures[source.Texture].Info.Format);
-    info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT,
-                             source.View.BaseMip,
-                             source.View.MipCount,
-                             source.View.BaseLayer,
-                             source.View.LayerCount};
-    return RasterError(vkCreateImageView(gDevice, &info, nullptr, &gRasterViews[slot]));
+    auto& texture = gRasterTextures[source.Texture];
+    const auto& range = source.View;
+    VkImageViewCreateInfo view{};
+    view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view.viewType = range.Dimension == TextureDimension::D2Array ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                    : range.Dimension == TextureDimension::Cube  ? VK_IMAGE_VIEW_TYPE_CUBE
+                    : range.Dimension == TextureDimension::D3    ? VK_IMAGE_VIEW_TYPE_3D
+                                                                 : VK_IMAGE_VIEW_TYPE_2D;
+    view.image = range.Aspect == TextureAspect::Color ? texture.Object : texture.Depth;
+    view.format = range.Aspect == TextureAspect::Color ? RasterPixelFormat(texture.Info.Format)
+                  : texture.Info.Stencil               ? VK_FORMAT_D32_SFLOAT_S8_UINT
+                                                       : gDepthFormat;
+    view.subresourceRange = {range.Aspect == TextureAspect::Color   ? VK_IMAGE_ASPECT_COLOR_BIT
+                             : range.Aspect == TextureAspect::Depth ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                                    : VK_IMAGE_ASPECT_STENCIL_BIT,
+                             range.BaseMip,
+                             range.MipCount,
+                             range.BaseLayer,
+                             range.LayerCount};
+    auto result = vkCreateImageView(gDevice, &view, nullptr, &gRasterViews[slot]);
+    if (result == VK_SUCCESS && range.Attachment)
+    {
+        view.image = texture.Depth;
+        view.format = texture.Info.Stencil ? VK_FORMAT_D32_SFLOAT_S8_UINT : gDepthFormat;
+        view.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | (texture.Info.Stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0U);
+        result = vkCreateImageView(gDevice, &view, nullptr, &gRasterViewDepths[slot]);
+    }
+    return RasterError(result);
 }
 RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32) noexcept
 {
@@ -956,8 +1300,15 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
                                   {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0}};
     for (usize i = 0; i < layout.Count; ++i)
     {
-        const auto kind = static_cast<usize>(layout.Entries[i].Kind);
-        ++sizes[kind > 2 ? 3 : kind].descriptorCount;
+        const auto type = RasterDescriptor(layout.Entries[i].Kind);
+        for (auto& size : sizes)
+        {
+            if (size.type == type)
+            {
+                ++size.descriptorCount;
+                break;
+            }
+        }
     }
     VkDescriptorPoolSize used[4]{};
     uint32 count = 0;
@@ -1082,10 +1433,11 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     VkPipelineRasterizationStateCreateInfo raster{};
     raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     raster.polygonMode = VK_POLYGON_MODE_FILL;
+    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // Canonical clip-space CCW with the negative-height viewport.
     raster.lineWidth = 1;
     VkPipelineMultisampleStateCreateInfo samples{};
     samples.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    samples.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    samples.rasterizationSamples = static_cast<VkSampleCountFlagBits>(info.SampleCount);
     VkPipelineDepthStencilStateCreateInfo depth{};
     depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depth.depthTestEnable = info.Depth;
@@ -1096,6 +1448,35 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
                                     VK_COMPARE_OP_GREATER_OR_EQUAL,
                                     VK_COMPARE_OP_ALWAYS};
     depth.depthCompareOp = comparisons[static_cast<usize>(info.DepthCompare)];
+    depth.stencilTestEnable = info.Stencil;
+    const VkCompareOp stencilCompare[]{VK_COMPARE_OP_NEVER,
+                                       VK_COMPARE_OP_LESS,
+                                       VK_COMPARE_OP_EQUAL,
+                                       VK_COMPARE_OP_LESS_OR_EQUAL,
+                                       VK_COMPARE_OP_GREATER,
+                                       VK_COMPARE_OP_NOT_EQUAL,
+                                       VK_COMPARE_OP_GREATER_OR_EQUAL,
+                                       VK_COMPARE_OP_ALWAYS};
+    const VkStencilOp ops[]{VK_STENCIL_OP_KEEP,
+                            VK_STENCIL_OP_ZERO,
+                            VK_STENCIL_OP_REPLACE,
+                            VK_STENCIL_OP_INCREMENT_AND_CLAMP,
+                            VK_STENCIL_OP_DECREMENT_AND_CLAMP,
+                            VK_STENCIL_OP_INVERT,
+                            VK_STENCIL_OP_INCREMENT_AND_WRAP,
+                            VK_STENCIL_OP_DECREMENT_AND_WRAP};
+    const RasterStencilFace faces[]{info.StencilFront, info.StencilBack};
+    VkStencilOpState* output[]{&depth.front, &depth.back};
+    for (usize i = 0; i < 2; ++i)
+    {
+        output[i]->compareOp = stencilCompare[static_cast<usize>(faces[i].Compare)];
+        output[i]->failOp = ops[static_cast<usize>(faces[i].Fail)];
+        output[i]->depthFailOp = ops[static_cast<usize>(faces[i].DepthFail)];
+        output[i]->passOp = ops[static_cast<usize>(faces[i].Pass)];
+        output[i]->compareMask = info.StencilReadMask;
+        output[i]->writeMask = info.StencilWriteMask;
+        output[i]->reference = info.StencilReference;
+    }
     VkPipelineColorBlendAttachmentState color{};
     color.colorWriteMask = 15;
     color.blendEnable = info.Blend;
@@ -1103,8 +1484,13 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     color.dstColorBlendFactor = color.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     VkPipelineColorBlendStateCreateInfo blend{};
     blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blend.attachmentCount = 1;
-    blend.pAttachments = &color;
+    VkPipelineColorBlendAttachmentState colors[4]{};
+    for (auto& entry : colors)
+    {
+        entry = color;
+    }
+    blend.attachmentCount = info.ColorCount == 0 ? 1 : static_cast<uint32>(info.ColorCount);
+    blend.pAttachments = colors;
     const VkDynamicState states[2]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic{};
     dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -1132,6 +1518,22 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
                                     false,
                                     {},
                                     create.renderPass);
+        if (result != VK_SUCCESS)
+        {
+            return RasterError(result);
+        }
+    }
+    if (info.ColorCount != 0)
+    {
+        internal::RasterPassInfo pass;
+        pass.ColorCount = info.ColorCount;
+        pass.SampleCount = info.SampleCount;
+        pass.Stencil = info.Stencil;
+        for (usize i = 0; i < info.ColorCount; ++i)
+        {
+            pass.Colors[i].Format = info.ColorFormats[i];
+        }
+        result = RasterVkAdvancedPass(pass, create.renderPass);
         if (result != VK_SUCCESS)
         {
             return RasterError(result);
@@ -1176,6 +1578,21 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             gRasterTextures[slot] = {};
             break;
         case internal::RasterKind::View:
+            for (auto& frame : gRasterAdvancedFrames)
+            {
+                bool uses = false;
+                for (usize i = 0; i < frame.Count; ++i)
+                {
+                    uses |= frame.Views[i] == gRasterViews[slot] || frame.Views[i] == gRasterViewDepths[slot];
+                }
+                if (uses && frame.Object != VK_NULL_HANDLE)
+                {
+                    vkDestroyFramebuffer(gDevice, frame.Object, nullptr);
+                    frame = {};
+                }
+            }
+            vkDestroyImageView(gDevice, gRasterViewDepths[slot], nullptr);
+            gRasterViewDepths[slot] = VK_NULL_HANDLE;
             vkDestroyImageView(gDevice, gRasterViews[slot], nullptr);
             gRasterViews[slot] = VK_NULL_HANDLE;
             break;
@@ -1289,6 +1706,23 @@ void RasterEndPass() noexcept
     }
     vkCmdEndRenderPass(gFrames[gFrame].Command);
     gEncoding = false;
+    if (gRasterNativePass.ColorCount != 0)
+    {
+        for (usize i = 0; i < gRasterNativePass.ColorCount; ++i)
+        {
+            for (const auto slot : {gRasterNativePass.Colors[i].Texture, gRasterNativePass.Colors[i].ResolveTexture})
+            {
+                if (slot != internal::RASTER_INVALID)
+                {
+                    auto& texture = gRasterTextures[slot];
+                    texture.ColorLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                    texture.ColorStage = texture.ColorWriterStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                    texture.ColorAccess = texture.ColorWriterAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                    texture.SampleVisibility = 0;
+                }
+            }
+        }
+    }
     if (gRasterActiveTexture != internal::RASTER_INVALID)
     {
         auto& texture = gRasterTextures[gRasterActiveTexture];
@@ -1305,6 +1739,46 @@ void RasterTextureBarrier(usize slot, RasterTextureUse use) noexcept
 {
     auto& texture = gRasterTextures[slot];
     const bool color = use == RasterTextureUse::ColorAttachment;
+    if (texture.Depth != VK_NULL_HANDLE)
+    {
+        const auto depthLayout =
+            color ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        const VkPipelineStageFlags tests =
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        const VkPipelineStageFlags shaders =
+            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        VkImageMemoryBarrier depth{};
+        depth.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        depth.image = texture.Depth;
+        depth.oldLayout = texture.DepthLayout;
+        depth.newLayout = depthLayout;
+        depth.srcQueueFamilyIndex = depth.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depth.srcAccessMask =
+            texture.DepthLayout == VK_IMAGE_LAYOUT_UNDEFINED ? 0U
+            : texture.DepthLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                ? VK_ACCESS_SHADER_READ_BIT
+                : VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depth.dstAccessMask =
+            color ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                  : VK_ACCESS_SHADER_READ_BIT;
+        depth.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT | (texture.Info.Stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0U),
+                                  0,
+                                  texture.Info.MipLevels,
+                                  0,
+                                  texture.Info.DepthOrLayers};
+        vkCmdPipelineBarrier(gFrames[gFrame].Command,
+                             texture.DepthLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+                                                                              : tests | shaders,
+                             color ? tests : shaders,
+                             0,
+                             0,
+                             nullptr,
+                             0,
+                             nullptr,
+                             1,
+                             &depth);
+        texture.DepthLayout = depthLayout;
+    }
     const VkPipelineStageFlags stage =
         color                                    ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
         : use == RasterTextureUse::SampledVertex ? VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
@@ -1355,7 +1829,13 @@ RasterStatus RasterPreparePass(const internal::RasterPassInfo& info) noexcept
     VkRenderPass pass = VK_NULL_HANDLE;
     const bool surface = info.Texture == internal::RASTER_INVALID;
     const auto format = surface ? gFormat : RasterPixelFormat(gRasterTextures[info.Texture].Info.Format);
-    const auto result = RasterVkRenderPass(format, surface, info.Description, pass);
+    auto result = info.ColorCount == 0 ? RasterVkRenderPass(format, surface, info.Description, pass)
+                                       : RasterVkAdvancedPass(info, pass);
+    if (result == VK_SUCCESS && info.ColorCount != 0)
+    {
+        VkFramebuffer frame = VK_NULL_HANDLE;
+        result = RasterVkAdvancedFramebuffer(info, pass, frame);
+    }
     return result == VK_ERROR_TOO_MANY_OBJECTS ? RasterStatus::CapacityExceeded : RasterError(result);
 }
 RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
@@ -1363,7 +1843,8 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     const bool surface = info.Texture == internal::RASTER_INVALID;
     VkRenderPass pass = VK_NULL_HANDLE;
     const auto format = surface ? gFormat : RasterPixelFormat(gRasterTextures[info.Texture].Info.Format);
-    const auto prepared = RasterVkRenderPass(format, surface, info.Description, pass);
+    const auto prepared = info.ColorCount == 0 ? RasterVkRenderPass(format, surface, info.Description, pass)
+                                               : RasterVkAdvancedPass(info, pass);
     if (prepared != VK_SUCCESS)
     {
         return RasterError(prepared);
@@ -1372,6 +1853,24 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     gRasterExtent =
         surface ? gExtent
                 : VkExtent2D{gRasterTextures[info.Texture].Info.Width, gRasterTextures[info.Texture].Info.Height};
+    gRasterNativePass = info;
+    if (info.ColorCount != 0)
+    {
+        const auto result = RasterVkAdvancedFramebuffer(info, pass, framebuffer);
+        if (result != VK_SUCCESS)
+        {
+            return RasterError(result);
+        }
+        gRasterExtent = {info.Width, info.Height};
+        for (usize i = 0; i < info.ColorCount; ++i)
+        {
+            RasterTextureBarrier(info.Colors[i].Texture, RasterTextureUse::ColorAttachment);
+            if (info.Colors[i].ResolveTexture != internal::RASTER_INVALID)
+            {
+                RasterTextureBarrier(info.Colors[i].ResolveTexture, RasterTextureUse::ColorAttachment);
+            }
+        }
+    }
     gRasterRegion = info.Description;
     gRasterActiveTexture = info.Texture;
     if (!surface)
@@ -1388,7 +1887,11 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
         depth.dstAccessMask =
             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         depth.image = texture.Depth;
-        depth.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+        depth.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT | (texture.Info.Stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0U),
+                                  0,
+                                  texture.Info.MipLevels,
+                                  0,
+                                  texture.Info.DepthOrLayers};
         const auto stages = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
         vkCmdPipelineBarrier(gFrames[gFrame].Command,
                              texture.DepthLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
@@ -1408,13 +1911,22 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
         clear[0].color.float32[i] = info.Description.Clear[i];
     }
     clear[1].depthStencil = {info.Description.ClearDepth, 0};
+    VkClearValue advancedClear[9]{};
+    for (usize i = 0; i < info.ColorCount; ++i)
+    {
+        for (usize c = 0; c < 4; ++c)
+        {
+            advancedClear[i].color.float32[c] = info.Colors[i].Clear[c];
+        }
+    }
+    advancedClear[info.ColorCount].depthStencil = {info.Description.ClearDepth, info.Description.ClearStencil};
     VkRenderPassBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     begin.renderPass = pass;
     begin.framebuffer = framebuffer;
     begin.renderArea.extent = gRasterExtent;
-    begin.clearValueCount = 2;
-    begin.pClearValues = clear;
+    begin.clearValueCount = info.ColorCount == 0 ? 2 : static_cast<uint32>(info.ColorCount + 1);
+    begin.pClearValues = info.ColorCount == 0 ? clear : advancedClear;
     vkCmdBeginRenderPass(gFrames[gFrame].Command, &begin, VK_SUBPASS_CONTENTS_INLINE);
     gEncoding = true;
     return RasterStatus::Ready;
@@ -1483,6 +1995,14 @@ void RasterReset() noexcept
 {
     gRasterHdrProbed = gRasterHdr = false;
     WaitIdle();
+    for (auto& frame : gRasterAdvancedFrames)
+    {
+        if (gDevice != VK_NULL_HANDLE)
+        {
+            vkDestroyFramebuffer(gDevice, frame.Object, nullptr);
+        }
+        frame = {};
+    }
     for (auto& ordinal : gRasterOrdinals)
     {
         ordinal = 0;
@@ -1515,7 +2035,8 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
         case internal::RasterKind::Texture:
             return gRasterTextures.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
         case internal::RasterKind::View:
-            return gRasterViews.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+            return gRasterViews.EnsureSlots(count) && gRasterViewDepths.EnsureSlots(count) ? RasterStatus::Ready
+                                                                                           : internal::StorageFailure();
         case internal::RasterKind::Sampler:
             return gRasterSamplers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
         case internal::RasterKind::Shader:
@@ -1534,7 +2055,9 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
 }
 RasterStatus RasterPrepareStorage() noexcept
 {
-    return gRasterPasses.EnsureSlots(internal::CurrentStorageLimits().RasterPassStates) ? RasterStatus::Ready
-                                                                                        : internal::StorageFailure();
+    return (gRasterPasses.EnsureSlots(internal::CurrentStorageLimits().RasterPassStates) &&
+            gRasterAdvancedFrames.EnsureSlots(internal::CurrentStorageLimits().RasterPassStates))
+               ? RasterStatus::Ready
+               : internal::StorageFailure();
 }
 } // namespace ludus::graphics::rhi::backend

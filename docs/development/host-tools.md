@@ -37,3 +37,6 @@ no Qt or engine checkout. Explicit uploads use `project publish upload`; see the
 
 Existing-project Editor setup, browser packaging and CI uploading: see
 [Editor-managed game releases](editor-game-releases.md).
+
+RG1 shader/schema packages use the same installed backend. See [build sources,
+pinned SDK helper and immutable publication](render-graph-authoring.md#build-explicit-shader-packages-rg1).

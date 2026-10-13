@@ -73,6 +73,9 @@ TEST_CASE("World demo uses World fields history save recovery and runtime data",
     view.SetProject(directory.path(), 1);
     REQUIRE(view.Open(path));
     REQUIRE(IsWorldDemo(view.Document()));
+    auto* boundViewport = view.findChild<QWidget*>(QStringLiteral("worldViewport"));
+    REQUIRE(boundViewport != nullptr);
+    CHECK(boundViewport->isHidden());
     CHECK(view.findChild<QListWidget*>(QStringLiteral("worldEntities"))->count() == 5);
     Select(view, QStringLiteral("player-start"));
     const auto original = view.Document().Draft();

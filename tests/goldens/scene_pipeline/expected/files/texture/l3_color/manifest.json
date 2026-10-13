@@ -1,0 +1,21 @@
+{
+  "source_sha256": "0228a4241994e812af7fa4001c726c074c3375ea99f28d099c54feca60496bef",
+  "upload_sha256": "2ccf6516b994847c00ea51ededb5d97eab2d3569ef7fa58f882dbcce818d4ef5",
+  "semantic": "color",
+  "format": "Rgba8Srgb",
+  "levels": [
+    {
+      "width": 2,
+      "height": 2,
+      "offset": 0,
+      "row_pitch": 8
+    },
+    {
+      "width": 1,
+      "height": 1,
+      "offset": 16,
+      "row_pitch": 4
+    }
+  ],
+  "bake": null
+}

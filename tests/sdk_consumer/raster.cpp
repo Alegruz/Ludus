@@ -187,10 +187,11 @@ bool Create() noexcept
         return false;
     rhi::FormatCapabilities format;
     if (rhi::GetFormatCapabilities(gDevice, rhi::RasterFormat::Rgba8Unorm, format) != rhi::RasterStatus::Ready ||
-        !format.Uses.Sampled || !format.Uses.Blendable || format.SampleCounts != 1 || format.Uses.Storage ||
+        !format.Uses.Sampled || !format.Uses.Blendable || (format.SampleCounts & 1U) == 0 || format.Uses.Storage ||
         !format.Uses.CopySource || !format.Uses.CopyDestination ||
         info.UnmetProfilePreference.Requirement != rhi::ProfileRequirement::ColorAttachmentCount ||
-        info.UnmetProfilePreference.Requested != 2 || info.UnmetProfilePreference.Available != 1 ||
+        info.UnmetProfilePreference.Requested != 5 ||
+        info.UnmetProfilePreference.Available != info.Profile.Interface.MaxColorAttachments ||
         info.UnmetPreferences.Compute == info.Enabled.Compute)
     {
         return false;
@@ -728,7 +729,7 @@ int main()
     };
     description.Required.Compute = Variant() == 7;
     description.Preferred.Compute = true;
-    description.PreferredProfile.Raster.MinColorAttachments = 2;
+    description.PreferredProfile.Raster.MinColorAttachments = 5;
     description.Selection = Selection() == 1   ? rhi::BackendSelection::WebGPU
                             : Selection() == 2 ? rhi::BackendSelection::WebGL2
                                                : rhi::BackendSelection::Auto;

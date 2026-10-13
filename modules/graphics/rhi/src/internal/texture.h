@@ -10,7 +10,8 @@ namespace ludus::graphics::rhi::internal
 {
 inline bool TextureBinding(RasterBindingKind kind) noexcept
 {
-    return kind == RasterBindingKind::Texture2D || kind == RasterBindingKind::Texture2DArray ||
+    return kind == RasterBindingKind::TextureDepth2D || kind == RasterBindingKind::TextureStencil2D ||
+           kind == RasterBindingKind::Texture2D || kind == RasterBindingKind::Texture2DArray ||
            kind == RasterBindingKind::TextureCube || kind == RasterBindingKind::Texture3D;
 }
 inline RasterBindingKind TextureBindingType(TextureDimension dimension) noexcept

@@ -1,9 +1,10 @@
 # Render graph authoring, shader builds and pipeline management
 
-Status: RG0 offline contract slice implemented, October 12, 2026; RG1-RG4 remain
-proposed. This defines the renderer authoring/compiler contract; it does not
-claim an implemented graph editor, shader-function compiler or new RHI capability.
-Baseline: `5c44d19`. See [RG0 usage and source format](../development/render-graph-authoring.md).
+Status: RG0 contracts and RG1 bounded offline shader builds implemented,
+October 12, 2026; RG2-RG4 remain proposed. This defines the renderer
+authoring/compiler contract; it does not claim a graph editor, unrestricted
+shader composition or new RHI capability.
+Baseline design: `5c44d19`. See [usage and source formats](../development/render-graph-authoring.md).
 The existing [Renderer](renderer-systems.md), [RHI/GDI](rhi-gdi.md),
 [editor](editor-architecture.md) and [game reload](project-live-reload.md) retain
 their implementation and lifetime contracts.
@@ -540,9 +541,20 @@ serial plan. The same asset connects to offscreen Export or Present contract
 roots; no implicit shader configuration arises from an unused Color output.
 All closure interfaces are checked; resource initialization and camera routes
 require a selected closed root. The plan reports ShaderBuild, DeviceCapabilities,
-SceneCoverage and GpuExecution pending. These are RG1/RG2 integration gates,
+SceneCoverage and GpuExecution pending. ShaderBuild is discharged by the bounded RG1 package build; the other checks are RG2 integration gates,
 not checks that an offline contract validator can establish. Current RHI's private
 depth attachments are not represented as already executable exported depth images.
+
+RG1 is delivered in `ludus_tools.render_graph_build`, the installed CLI and the
+existing SDK shader-helper boundary. It generates scalar/vector shared schemas,
+read-only uniform bindings and entry wrappers, independently validates target
+packing/stage links, cooks explicitly enumerated raster techniques and bounded
+portable pipeline recipes, and publishes content-addressed generations through
+one atomic pointer. Program caches check full identities and artifact integrity;
+source/tool snapshots, cancellation and failed jobs preserve prior publication.
+See [source format, admitted profile and acceptance](../development/render-graph-authoring.md#build-explicit-shader-packages-rg1).
+This initial profile rejects unqualified matrix/array/resource/stage extensions;
+shader packages do not establish device pipeline readiness or GPU execution.
 
 Run representative native and browser raster fixtures under pinned tools, SDK
 consumer checks, warning/format/tidy gates and sanitizers for implementation.
