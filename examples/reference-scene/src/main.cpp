@@ -367,22 +367,32 @@ bool GpuEvidence(rr::Renderer& renderer,
     {
         status = renderer.GetGpuPreviewInfo(preview, info);
         if (status == Status::Pending)
+        {
             continue;
+        }
         if (status != Status::Ready)
+        {
             return false;
+        }
         if (!info.Complete)
         {
             rhi::SubmissionToken producer;
             if (renderer.AdvanceGpuPreview(preview, surface, producer) != Status::Ready)
+            {
                 return false;
+            }
         }
     }
     if (!info.Complete)
+    {
         return false;
+    }
     rr::GpuPreviewFrame frame;
     rr::GpuPreviewImage image;
     if (renderer.AcquireGpuPreviewFrame(preview, frame, image) != Status::Ready)
+    {
         return false;
+    }
     // Offline SDK acceptance exports evidence. Interactive presentation retains
     // this exact texture and producer dependency; it never performs this readback.
     rhi::ReadbackTicket ticket;
@@ -400,7 +410,9 @@ bool GpuEvidence(rr::Renderer& renderer,
     if (status != Status::Ready || !bytes.TryResize(usize(image.Width) * image.Height * 4) ||
         rhi::CopyReadback(device, ticket, bytes.GetData(), bytes.GetSize()) != Status::Ready ||
         !directory.Publish("gpu-preview.rgba", {bytes.GetData(), bytes.GetSize()}).Outcome.Succeeded())
+    {
         return false;
+    }
     uint8 metadata[32]{};
     if (!core::TryWriteLittleEndian<uint32>(image.Width, {metadata, 4}) ||
         !core::TryWriteLittleEndian<uint32>(image.Height, {metadata + 4, 4}) ||
@@ -408,7 +420,9 @@ bool GpuEvidence(rr::Renderer& renderer,
         !core::TryWriteLittleEndian<uint64>(info.SceneFingerprintLow, {metadata + 16, 8}) ||
         !core::TryWriteLittleEndian<uint64>(info.SceneFingerprintHigh, {metadata + 24, 8}) ||
         !directory.Publish("gpu-preview.bin", {metadata, sizeof(metadata)}).Outcome.Succeeded())
+    {
         return false;
+    }
     return rhi::Release(device, ticket) == Status::Ready && renderer.Release(preview) == Status::Ready &&
            renderer.Release(frame) == Status::Ready;
 }
