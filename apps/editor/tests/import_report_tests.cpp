@@ -172,8 +172,8 @@ TEST_CASE("World shows the import preview, imports on confirmation and shows the
     WorldWorkspace workspace(MakeSceneTools(), nullptr);
     workspace.SetProject(root, 1);
     REQUIRE(workspace.Create(QDir(root).filePath(QStringLiteral("main.world.json"))) == true);
-    auto* preview = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportPreview"));
-    auto* report = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportReport"));
+    QPlainTextEdit* preview = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportPreview"));
+    QPlainTextEdit* report = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportReport"));
     REQUIRE(preview != nullptr);
     REQUIRE(report != nullptr);
 

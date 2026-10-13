@@ -145,7 +145,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     connect(&DemoPreview_, &ScenePreview::Changed, this, &WorldWorkspace::WorldDemoChanged);
     files->addStretch();
     layout->addLayout(files);
-    auto* previewRow = new QHBoxLayout;
+    QHBoxLayout* previewRow = new QHBoxLayout;
     ImportPreview_ = new QPlainTextEdit(this);
     ImportPreview_->setObjectName(QStringLiteral("worldImportPreview"));
     ImportPreview_->setAccessibleName(QStringLiteral("Import preview"));
@@ -158,7 +158,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     DiscardImport_ = new QPushButton(QStringLiteral("Discard preview"), this);
     DiscardImport_->setObjectName(QStringLiteral("worldImportDiscard"));
     DiscardImport_->hide();
-    auto* previewActions = new QVBoxLayout;
+    QVBoxLayout* previewActions = new QVBoxLayout;
     previewActions->addWidget(ConfirmImport_);
     previewActions->addWidget(DiscardImport_);
     previewActions->addStretch();

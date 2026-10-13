@@ -117,11 +117,11 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
         {
             return;
         }
-        auto* confirm = new QMessageBox(QMessageBox::Question,
-                                        QStringLiteral("Import preview"),
-                                        DescribeImportPreview(ImportPreview_),
-                                        QMessageBox::Ok | QMessageBox::Cancel,
-                                        this);
+        QMessageBox* confirm = new QMessageBox(QMessageBox::Question,
+                                               QStringLiteral("Import preview"),
+                                               DescribeImportPreview(ImportPreview_),
+                                               QMessageBox::Ok | QMessageBox::Cancel,
+                                               this);
         confirm->setObjectName(QStringLiteral("levelImportPreview"));
         confirm->button(QMessageBox::Ok)->setText(QStringLiteral("Import"));
         confirm->setAttribute(Qt::WA_DeleteOnClose);
