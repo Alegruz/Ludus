@@ -76,7 +76,7 @@ void WriteJsonString(std::string_view text) noexcept
     WriteAll(1, "\"");
     for (const char item : text)
     {
-        const auto value = static_cast<uint8>(item);
+        const uint8 value = static_cast<uint8>(item);
         if (item == '"' || item == '\\')
         {
             const char escaped[2] = {'\\', item};

@@ -48,7 +48,7 @@ constexpr float64 TWO_POW_127 = 170141183460469231731687303715884105728.0;
     {
         return 1;
     }
-    const auto truncated = static_cast<__int128>(floor);
+    const __int128 truncated = static_cast<__int128>(floor);
     if (integer < truncated)
     {
         return -1;
@@ -141,7 +141,7 @@ void AppendCodePoint(Array<char>& inoutText, uint32 codePoint, bool& inoutIsOk) 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 [[nodiscard]] bool DecodeUtf8(std::string_view text, usize& inoutOffset, uint32& outCodePoint) noexcept
 {
-    const auto lead = static_cast<uint8>(text[inoutOffset]);
+    const uint8 lead = static_cast<uint8>(text[inoutOffset]);
     usize count = 0;
     uint32 value = 0;
     uint32 minimum = 0;
@@ -179,7 +179,7 @@ void AppendCodePoint(Array<char>& inoutText, uint32 codePoint, bool& inoutIsOk) 
     }
     for (usize i = 1; i <= count; ++i)
     {
-        const auto next = static_cast<uint8>(text[inoutOffset + i]);
+        const uint8 next = static_cast<uint8>(text[inoutOffset + i]);
         if ((next & 0xc0u) != 0x80u)
         {
             return false;
@@ -454,7 +454,7 @@ private:
             {
                 return fail("Unterminated string starting at");
             }
-            const auto value = static_cast<uint8>(mText[mOffset]);
+            const uint8 value = static_cast<uint8>(mText[mOffset]);
             if (value == '"')
             {
                 ++mOffset;

@@ -106,7 +106,7 @@ std::map<std::string, GoldenRecord> ReadGoldenOutputs()
 void CheckGolden(const std::map<std::string, GoldenRecord>& goldens, const std::string& name, const std::string& data)
 {
     INFO(name);
-    const auto found = goldens.find(name);
+    const std::map<std::string, GoldenRecord>::const_iterator found = goldens.find(name);
     REQUIRE(found != goldens.end());
     CHECK(data.size() == found->second.Bytes);
     CHECK(HexOf(data) == found->second.Sha256);
@@ -120,7 +120,7 @@ void CheckGolden(const std::map<std::string, GoldenRecord>& goldens, const std::
 std::map<std::string, std::string> ReadTree(const std::filesystem::path& root)
 {
     std::map<std::string, std::string> files;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(root))
+    for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root))
     {
         if (entry.is_regular_file())
         {
@@ -136,7 +136,7 @@ struct SequentialUuids
     uint64 Next = 0;
     static void Generate(void* context, uint8 (&outBytes)[16]) noexcept
     {
-        auto* self = static_cast<SequentialUuids*>(context);
+        SequentialUuids* self = static_cast<SequentialUuids*>(context);
         const uint64 value = ++self->Next;
         for (usize i = 0; i < 16; ++i)
         {
@@ -302,22 +302,23 @@ TEST_CASE("Scene asset pipeline is byte-identical to the Python goldens", "[scen
     CheckGolden(goldens, "dump/main.json", ToText(dump));
     usize expectedProject = 0;
     usize expectedRelease = 0;
-    for (const auto& [name, record] : goldens)
+    for (const std::pair<const std::string, GoldenRecord>& item : goldens)
     {
+        const std::string& name = item.first;
         expectedProject += name.starts_with("project/") ? 1 : 0;
         expectedRelease += name.starts_with("release/") ? 1 : 0;
     }
-    const auto project = ReadTree(golden.Project);
-    const auto releaseFiles = ReadTree(release);
+    const std::map<std::string, std::string> project = ReadTree(golden.Project);
+    const std::map<std::string, std::string> releaseFiles = ReadTree(release);
     CHECK(project.size() == expectedProject);
     CHECK(releaseFiles.size() == expectedRelease);
-    for (const auto& [name, data] : project)
+    for (const std::pair<const std::string, std::string>& item : project)
     {
-        CheckGolden(goldens, "project/" + name, data);
+        CheckGolden(goldens, "project/" + item.first, item.second);
     }
-    for (const auto& [name, data] : releaseFiles)
+    for (const std::pair<const std::string, std::string>& item : releaseFiles)
     {
-        CheckGolden(goldens, "release/" + name, data);
+        CheckGolden(goldens, "release/" + item.first, item.second);
     }
 }
 
@@ -350,7 +351,8 @@ TEST_CASE("Corrupt artifacts and existing release directories are rejected", "[s
                              error));
     CHECK(error.Code == AssetErrorCode::DestinationExists);
 
-    for (const auto& entry : std::filesystem::directory_iterator(golden.Project / "assets/objects"))
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(golden.Project / "assets/objects"))
     {
         if (entry.file_size() < 100)
         {
@@ -381,7 +383,7 @@ TEST_CASE("Saved-level import publishes the catalog and level together", "[scene
     Array<uint8> reopened;
     REQUIRE(OpenLevel(golden.Project.string(), "scenes/main.lulevel", reopened, error));
     CHECK(ToText(reopened) == ToText(imported));
-    for (const auto& entry : std::filesystem::directory_iterator(golden.Project / "scenes"))
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(golden.Project / "scenes"))
     {
         CHECK(entry.path().filename().string().starts_with(".scene-import-") == false);
     }
