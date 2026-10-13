@@ -564,11 +564,24 @@ Native parallel recording and compute assignment remain optional future work.
 
 ### Clustered lighting and inspection
 
-Cook `renderer_clustered.slang` with `VertexMain`/`FragmentMain` and a separate
-`vertexMain`/`ShadowMain` artifact, then use `PrewarmLitProgram`. When cooking,
-list `renderer_lit.slang` in `ludus_compile_shader(DEPENDS ...)`: the clustered
-source includes the existing BRDF/alpha/bake/shadow implementation. The installed
-SDK [scaling consumer](../../tests/sdk_consumer/renderer_scaling.cpp) demonstrates
+Cook the centralized `renderer_clustered` and `renderer_clustered_shadow`
+recipes, then use `PrewarmLitProgram`:
+
+```cmake
+ludus_compile_renderer_shaders(TARGET game SHADERS
+    renderer_clustered renderer_clustered_shadow)
+```
+
+The renderer-owned [recipe manifest](../../modules/graphics/renderer/shaders/recipes.json)
+and separate installed `LudusRendererShaders.cmake` helper own source paths,
+entry points, and FoundationMath/RHI include roots. Engine targets, editor,
+installed SDK consumers and reference-scene use the same recipes. Unknown or
+repeated recipes fail configure; changes to the manifest trigger reconfigure,
+and the offline compiler's depfile tracks included Slang sources. Custom shaders
+still use `ludus_compile_shader`; neither helper acquires tools or compiles at
+runtime. Recipes preserve artifact names and shader layouts, including
+`VertexMain`/`ShadowMain` for clustered shadows. The installed SDK
+[scaling consumer](../../tests/sdk_consumer/renderer_scaling.cpp) demonstrates
 this sequence without private renderer access.
 
 Set `LitMaterialDescription::Clusters` to a borrowed `LightClusterDescription`;

@@ -186,6 +186,26 @@ when created. Adopted today: `modules/content/scene_cook`,
 `readability-simplify-boolean-expr` is disabled repository-wide because it
 rejects the explicit `== true`/`== false` style.
 
+### Declarations and representation constants
+
+- Declare one variable per statement in C++ and Slang. Never use comma-separated
+  declarator lists, including members and loop initializers. Expression commas
+  (arguments, aggregate values, loop increments) remain valid. The changed-source
+  gate checks ordinary declarations; unusual declarators still require review.
+- Name representation tags, versions, strides and serialized record widths in
+  their owner. Share host/shader layout constants rather than repeating literals;
+  derive serialized widths from their explicit field schema, never host padding.
+  Numerical tolerances and algorithm coefficients need units/purpose in their
+  owner; lexical checks cannot establish their meaning.
+- Built-in renderer shader recipes belong to the renderer manifest and installed
+  `ludus_compile_renderer_shaders` helper. Consumers choose recipe names, not
+  duplicated source paths/entry points or regex-based naming guesses. Custom
+  shader programs use the general offline compiler. Validate both source and SDK.
+- Read-only Slang vector inputs use `in` (copy-in, also the default). Use `out` or
+  `inout` only for required output/update semantics; do not treat them as C++
+  const references or assume they improve generated GPU code. Verify emitted
+  artifacts before making performance claims.
+
 ### Explicit types and shader source
 
 - Spell C++ variable types by default, including range-for element types. Use
@@ -212,7 +232,8 @@ rejects the explicit `== true`/`== false` style.
 - Run `python3 scripts/python/source_policy.py --base <base-commit-or-ref>`.
   CI checks added/modified lines against the PR base, including standalone
   samples and tests, without a debt baseline. Existing violations do not permit
-  new ones. This lexical gate checks explicit declarations, shader case/out
+  new ones. This lexical gate checks explicit types, single-variable declarations, built-in
+  CMake recipe ownership, shader case/out
   names, coordinate member labels and interface annotation placement; compiler,
   reflection tests, formatting, tidy and semantic review remain required.
 

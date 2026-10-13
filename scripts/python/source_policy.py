@@ -11,7 +11,7 @@ from pathlib import Path
 from formatting import TOKENS, format_source
 
 CPP = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".mm"}
-ROOTS = {"modules", "apps", "examples", "tests", "tools"}
+ROOTS = {"modules", "apps", "examples", "tests", "tools", "cmake"}
 BINDING_BOUNDARY = "modules/graphics/rhi/shaders/raster_bindings.slang"
 
 
@@ -46,6 +46,45 @@ def added_lines(before: str, after: str) -> set[int]:
     return lines
 
 
+def declaration_commas(code: str) -> list[int]:
+    """Recognize ordinary declarations and their top-level declarator commas.
+
+    Nested calls, lists, templates and loop increment expressions are excluded.
+    This is a lexical ratchet, not a C++/Slang parser; unusual declarators still
+    require review. Offsets refer to code_only's comment/literal-masked input.
+    """
+    commas = []
+    pattern = re.compile(
+        r"(?:^|(?<=[;{}])|\bfor\s*\()\s*"
+        r"(?:(?:const|static|constexpr|inline|volatile)\s+)*"
+        r"(?!return\b|else\b|case\b|using\b)"
+        r"[A-Za-z_]\w*(?:::\w+)*(?:<[^;{}]*?>)?(?:\s+|(?=[*&]))"
+        r"[*&]*\s*[A-Za-z_]\w*\s*(?=[=,;\[{])",
+    )
+    for declaration in pattern.finditer(code):
+        stack = []
+        for index in range(declaration.end(), len(code)):
+            token = code[index]
+            if token in "([{":
+                stack.append(token)
+            elif token in ")]}":
+                if not stack:
+                    break
+                stack.pop()
+            elif token == "<" and index and code[index - 1].isalnum():
+                # Template calls such as Make<Pair<int,int>>(); comparison
+                # expressions normally have whitespace or no closing angle.
+                if re.match(r"[^;{}]*>", code[index + 1 :]):
+                    stack.append(token)
+            elif token == ">" and stack and stack[-1] == "<":
+                stack.pop()
+            elif not stack and token == ";":
+                break
+            elif not stack and token == ",":
+                commas.append(index)
+    return sorted(set(commas))
+
+
 def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str]]:
     """Check lexical conventions, not semantic coordinate correctness or C++ types."""
     code = code_only(source)
@@ -55,6 +94,22 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
         line = code.count("\n", 0, offset) + 1
         if line in changed:
             found.append((line, message))
+
+    if Path(path).suffix == ".cmake" or Path(path).name == "CMakeLists.txt":
+        for match in re.finditer(
+            r"\bludus_compile_shader\s*\([^)]*?\bNAME\s+(renderer_\w+)", code
+        ):
+            report(
+                match.start(1),
+                "select built-in renderer recipes through ludus_compile_renderer_shaders",
+            )
+        return found
+
+    for offset in declaration_commas(code):
+        report(
+            offset,
+            "declare one variable per statement; comma-separated declarations are forbidden",
+        )
 
     if Path(path).suffix in CPP:
         for match in re.finditer(
@@ -172,10 +227,11 @@ def check(
     failures = []
     for name in sorted(set(names)):
         path = Path(name)
+        is_cmake = path.suffix == ".cmake" or path.name == "CMakeLists.txt"
         if (
             not path.parts
-            or path.parts[0] not in ROOTS
-            or path.suffix not in CPP | {".slang"}
+            or (path.parts[0] not in ROOTS and name != "CMakeLists.txt")
+            or (path.suffix not in CPP | {".slang"} and not is_cmake)
         ):
             continue
         source = (
@@ -191,6 +247,7 @@ def check(
         )
         if (
             clang_format
+            and not is_cmake
             and format_source(source, (root / path).resolve(), clang_format) != source
         ):
             failures.append(

@@ -116,14 +116,16 @@ float3 EvaluateBrdf(float3 baseColor,
                     float roughness,
                     bool isBakedDiffuse)
 {
-    float nv = max(dot(normalWorld, viewDirectionWorld), 0), nl = max(dot(normalWorld, lightDirectionWorld), 0);
+    float nv = max(dot(normalWorld, viewDirectionWorld), 0);
+    float nl = max(dot(normalWorld, lightDirectionWorld), 0);
     float3 halfSumWorld = viewDirectionWorld + lightDirectionWorld;
     if (nv <= 0 || nl <= 0 || dot(halfSumWorld, halfSumWorld) < 1e-12)
         return float3(0);
     float3 halfDirectionWorld = NormalizeOrZero(halfSumWorld);
-    float nh = saturate(dot(normalWorld, halfDirectionWorld)),
-          lh = saturate(dot(lightDirectionWorld, halfDirectionWorld));
-    float a = roughness * roughness, a2 = a * a;
+    float nh = saturate(dot(normalWorld, halfDirectionWorld));
+    float lh = saturate(dot(lightDirectionWorld, halfDirectionWorld));
+    float a = roughness * roughness;
+    float a2 = a * a;
     float d = (1 - nh * nh) + nh * nh * a2;
     float distribution = a2 / (3.141592653589793 * d * d);
     float visibility = 0.5 / max(nl * sqrt(nv * nv * (1 - a2) + a2) + nv * sqrt(nl * nl * (1 - a2) + a2), 1e-6);
@@ -181,10 +183,11 @@ float4 SampleBaseTexel(Varying input)
 [shader("fragment")] float4 FragmentMain(Varying input) : SV_Target
 {
     float4 baseColor = SampleBaseTexel(input);
-    float3 normalWorld = NormalizeOrZero(input.NormalWorld),
-           viewDirectionWorld = input.EyeWorld.w >= 2 ? NormalizeOrZero(input.EyeWorld.xyz)
+    float3 normalWorld = NormalizeOrZero(input.NormalWorld);
+    float3 viewDirectionWorld = input.EyeWorld.w >= 2 ? NormalizeOrZero(input.EyeWorld.xyz)
                                                       : NormalizeOrZero(input.EyeWorld.xyz - input.PositionWorld);
-    float metallic = material.Pbr.x, roughness = material.Pbr.y;
+    float metallic = material.Pbr.x;
+    float roughness = material.Pbr.y;
 #ifdef LUDUS_SURFACE_FIDELITY
     if (material.SurfaceMap.y > .5)
     {
@@ -264,8 +267,10 @@ float4 SampleBaseTexel(Varying input)
         if (i >= int(material.Pbr.z))
             break;
 #endif
-        float4 color = material.Lights[i * 4], position = material.Lights[i * 4 + 1],
-               direction = material.Lights[i * 4 + 2], extra = material.Lights[i * 4 + 3];
+        float4 color = material.Lights[i * 4];
+        float4 position = material.Lights[i * 4 + 1];
+        float4 direction = material.Lights[i * 4 + 2];
+        float4 extra = material.Lights[i * 4 + 3];
         float3 lightDirectionWorld = -direction.xyz;
         float attenuation = 1;
         if (color.w != 0)

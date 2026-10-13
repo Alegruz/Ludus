@@ -47,8 +47,8 @@ Status PackGpuScene(const ReferenceJob& job,
     const uint64 orderWide = nodesWide + uint64(scene.Nodes.GetSize()) * 3;
     const uint64 emittersWide = orderWide + scene.Order.GetSize();
     const uint64 surfacesWide = emittersWide + scene.Emitters.GetSize();
-    const uint64 lightsWide = surfacesWide + uint64(scene.InstanceCount) * 8;
-    const uint64 sizeWide = lightsWide + uint64(job.Description.LightCount) * 4;
+    const uint64 lightsWide = surfacesWide + uint64(scene.InstanceCount) * LUDUS_GPU_PREVIEW_SURFACE_WORDS;
+    const uint64 sizeWide = lightsWide + uint64(job.Description.LightCount) * LUDUS_GPU_PREVIEW_LIGHT_WORDS;
     if (sizeWide > ~uint32{0})
     {
         return Status::CapacityExceeded;
@@ -144,7 +144,7 @@ Status PackGpuScene(const ReferenceJob& job,
     {
         const internal::ReferenceInstance& instance = scene.Instances[i];
         const internal::ReferenceSurfaceData& s = *instance.Surface;
-        math::Vector4* out = data.GetData() + surfaces + i * 8;
+        math::Vector4* out = data.GetData() + surfaces + i * LUDUS_GPU_PREVIEW_SURFACE_WORDS;
         out[0] = GpuVector(s.Bsdf.BaseColor, s.Bsdf.Metallic);
         out[1] = {s.Bsdf.Roughness, s.AlphaCutoff, GpuBits(instance.Texture.Width), GpuBits(instance.Texture.Height)};
         out[2] = s.Tint;
@@ -213,7 +213,7 @@ Status PackGpuScene(const ReferenceJob& job,
     for (usize i = 0; i < job.Description.LightCount; ++i)
     {
         const DirectLight& light = job.Lights[i];
-        math::Vector4* outLight = data.GetData() + static_cast<usize>(lightsWide) + i * 4;
+        math::Vector4* outLight = data.GetData() + static_cast<usize>(lightsWide) + i * LUDUS_GPU_PREVIEW_LIGHT_WORDS;
         outLight[0] = GpuVector(light.Color * light.Intensity, static_cast<float32>(light.Kind));
         outLight[1] = GpuVector(light.Position, light.Range);
         outLight[2] = GpuVector(light.Direction, light.OuterCos);
@@ -240,9 +240,9 @@ Status PackGpuScene(const ReferenceJob& job,
                           (job.Description.CenterRays ? 4U : 0U);
     uniform.Sampling[3] = job.Description.TargetSamples;
     uniform.Environment = GpuVector(job.Description.Environment);
-    uniform.SurfaceLayout[0] = 8;
+    uniform.SurfaceLayout[0] = LUDUS_GPU_PREVIEW_SURFACE_WORDS;
     uniform.SurfaceLayout[1] = static_cast<uint32>(lightsWide);
-    uniform.SurfaceLayout[2] = 2; // Private surface/analytic-light kernel ABI.
+    uniform.SurfaceLayout[2] = LUDUS_GPU_PREVIEW_KERNEL_VERSION;
     uniform.Options.X = job.Description.SecondaryDistance;
     uniform.BoundsMinimumWorld = GpuVector(scene.Bounds.Min);
     uniform.BoundsMaximumWorld = GpuVector(scene.Bounds.Max);

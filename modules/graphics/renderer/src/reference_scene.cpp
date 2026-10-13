@@ -247,7 +247,8 @@ math::Vector4 SampleReferenceImage(const ReferenceSurfaceData& surface,
                                                            : math::Clamp(uv.X, 0.0F, 1.0F);
     uv.Y = surface.Sampler.V == rhi::RasterAddress::Repeat ? uv.Y - static_cast<float32>(math::Floor(float64(uv.Y)))
                                                            : math::Clamp(uv.Y, 0.0F, 1.0F);
-    const float32 x = uv.X * float32(texture.Width), y = uv.Y * float32(texture.Height);
+    const float32 x = uv.X * float32(texture.Width);
+    const float32 y = uv.Y * float32(texture.Height);
     if (surface.Sampler.Filter == rhi::RasterFilter::Nearest)
     {
         return Texel(texture,
@@ -255,9 +256,12 @@ math::Vector4 SampleReferenceImage(const ReferenceSurfaceData& surface,
                      static_cast<int32>(math::Floor(float64(x))),
                      static_cast<int32>(math::Floor(float64(y))));
     }
-    const float32 px = x - 0.5F, py = y - 0.5F;
-    const int32 ix = static_cast<int32>(math::Floor(float64(px))), iy = static_cast<int32>(math::Floor(float64(py)));
-    const float32 tx = px - float32(ix), ty = py - float32(iy);
+    const float32 px = x - 0.5F;
+    const float32 py = y - 0.5F;
+    const int32 ix = static_cast<int32>(math::Floor(float64(px)));
+    const int32 iy = static_cast<int32>(math::Floor(float64(py)));
+    const float32 tx = px - float32(ix);
+    const float32 ty = py - float32(iy);
     const math::Vector4 a =
         Texel(texture, surface.Sampler, ix, iy) * (1 - tx) + Texel(texture, surface.Sampler, ix + 1, iy) * tx;
     const math::Vector4 b =

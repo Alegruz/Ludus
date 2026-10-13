@@ -36,7 +36,8 @@ struct ReferenceSurfaceData final
     rhi::SamplerDescription Sampler;
     MaterialAlpha Alpha = MaterialAlpha::Opaque;
     float32 AlphaCutoff = 0.5F;
-    bool HasTexture = false, HasSurfaceMap = false;
+    bool HasTexture = false;
+    bool HasSurfaceMap = false;
     float32 NormalScale = 1;
 };
 struct ReferenceTriangle final
@@ -50,7 +51,8 @@ struct ReferenceTriangle final
 struct ReferenceInstance final
 {
     const ReferenceSurfaceData* Surface = nullptr;
-    rhi::TextureCpuContent Texture, SurfaceMap;
+    rhi::TextureCpuContent Texture;
+    rhi::TextureCpuContent SurfaceMap;
     usize FirstTriangle = 0, TriangleCount = 0;
     uint64 SourceId = 0;
 };

@@ -13,8 +13,13 @@ bool HasPositiveComponent(float3 v)
 }
 void MultiplyWide(uint a, uint b, out uint outLo, out uint outHi)
 {
-    uint al = a & 65535, ah = a >> 16, bl = b & 65535, bh = b >> 16;
-    uint t = al * bl, low = t & 65535, carry = t >> 16;
+    uint al = a & 65535;
+    uint ah = a >> 16;
+    uint bl = b & 65535;
+    uint bh = b >> 16;
+    uint t = al * bl;
+    uint low = t & 65535;
+    uint carry = t >> 16;
     t = ah * bl + carry;
     uint middle = t & 65535;
     outHi = t >> 16;
@@ -32,7 +37,10 @@ uint RandomBits(uint pixel, uint sample, uint dimension, uint2 key, uint attempt
     uint2 k = key;
     for (uint r = 0; r < 10; ++r)
     {
-        uint a, b, x, y;
+        uint a;
+        uint b;
+        uint x;
+        uint y;
         MultiplyWide(0xd2511f53, c.x, a, b);
         MultiplyWide(0xcd9e8d57, c.z, x, y);
         c = uint4(y ^ c.y ^ k.x, x, b ^ c.w ^ k.y, a);
@@ -45,12 +53,16 @@ uint RandomBits(uint pixel, uint sample, uint dimension, uint2 key, uint attempt
 // docs/architecture/renderer-systems.md#material-and-lighting-fidelity.
 // Orthonormalizes against the supplied unit normal, preserving mirrored UV sign.
 // Numerically degenerate frames return the original normal without perturbation.
-float3 ApplyNormalWorld(float3 normalWorld,
-                        float3 normalTangent,
-                        float3 edgeUWorld,
-                        float3 edgeVWorld,
-                        float2 edgeUUv,
-                        float2 edgeVUv)
+// Input vectors use Slang copy-in semantics; local edge normalization does not
+// modify the caller. Do not use inout to express read-only input or avoid copies.
+// Thanks to the Slang project, Language Reference, "Declarations", Parameters:
+// https://docs.shader-slang.org/en/stable/external/slang/docs/language-reference/declarations.html#parameters
+float3 ApplyNormalWorld(in float3 normalWorld,
+                        in float3 normalTangent,
+                        in float3 edgeUWorld,
+                        in float3 edgeVWorld,
+                        in float2 edgeUUv,
+                        in float2 edgeVUv)
 {
     // Normalize edge magnitudes before solving; this makes admission independent
     // of pixel footprint, triangle size and uniform UV tiling scale.

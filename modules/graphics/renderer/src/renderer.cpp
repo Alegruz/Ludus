@@ -335,15 +335,21 @@ struct Renderer::State final
     };
     struct ProgramRecord final : SlotIdentity
     {
-        rhi::RasterShaderHandle Vertex{}, Fragment{}, ShadowFragment{};
+        rhi::RasterShaderHandle Vertex{};
+        rhi::RasterShaderHandle Fragment{};
+        rhi::RasterShaderHandle ShadowFragment{};
         rhi::BindingLayoutHandle Layout{};
         rhi::TextureHandle White{};
         rhi::RasterPipelineHandle ShadowPipeline{};
-        bool Lit = false, Hdr = false, Clustered = false, HasSurfaceMapProfile = false;
+        bool Lit = false;
+        bool Hdr = false;
+        bool Clustered = false;
+        bool HasSurfaceMapProfile = false;
         uint32 VariantCount = 6;
         rhi::PipelineRequest Requests[7]{};
         rhi::RasterPipelineHandle Pipelines[6]{};
-        uint32 References = 0, Phase = 0;
+        uint32 References = 0;
+        uint32 Phase = 0;
         Status Setup = Status::Pending;
     };
     struct MaterialRecord final : SlotIdentity
@@ -358,11 +364,17 @@ struct Renderer::State final
         MaterialAlpha Alpha = MaterialAlpha::Opaque;
         bool BindingCreated = false;
         Status Setup = Status::Pending;
-        bool Lit = false, HasBake = false, Clustered = false, ClusterViewCreated = false;
+        bool Lit = false;
+        bool HasBake = false;
+        bool Clustered = false;
+        bool ClusterViewCreated = false;
         rhi::TextureHandle ClusterTexture{};
         rhi::TextureViewHandle ClusterView{};
-        usize ParameterSize = 48, ShadowSlot = NO_SHADOW;
-        rhi::TextureViewHandle BakeTexture{}, ShadowTexture{}, SurfaceTexture{};
+        usize ParameterSize = 48;
+        usize ShadowSlot = NO_SHADOW;
+        rhi::TextureViewHandle BakeTexture{};
+        rhi::TextureViewHandle ShadowTexture{};
+        rhi::TextureViewHandle SurfaceTexture{};
         rhi::SamplerHandle ShadowSampler{};
         BakedLighting Bake;
     };
@@ -3369,10 +3381,21 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     // Explicit vec4 packing is independently verified for every cooked target.
     struct Parameters final
     {
-        math::Vector4 Tint, UvTransform, Options, Pbr, Emission, EnvironmentIrradiance, EnvironmentRadiance, BakeScale,
-            BakeUv;
-        math::Vector4 Lights[512]{}, ShadowData[24]{};
-        math::Vector4 GridRows[3]{}, GridMinimum{}, GridScale{}, SurfaceMap{};
+        math::Vector4 Tint;
+        math::Vector4 UvTransform;
+        math::Vector4 Options;
+        math::Vector4 Pbr;
+        math::Vector4 Emission;
+        math::Vector4 EnvironmentIrradiance;
+        math::Vector4 EnvironmentRadiance;
+        math::Vector4 BakeScale;
+        math::Vector4 BakeUv;
+        math::Vector4 Lights[512]{};
+        math::Vector4 ShadowData[24]{};
+        math::Vector4 GridRows[3]{};
+        math::Vector4 GridMinimum{};
+        math::Vector4 GridScale{};
+        math::Vector4 SurfaceMap{};
     };
     static_assert(sizeof(Parameters) == CLUSTER_BYTES + 16);
     Parameters parameters{};

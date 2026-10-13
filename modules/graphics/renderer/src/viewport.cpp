@@ -22,15 +22,22 @@ struct RasterViewport::State final
 {
     Renderer* SceneRenderer = nullptr;
     rhi::DeviceHandle Device{};
-    rhi::TextureHandle SceneColor{}, Images[2]{};
+    rhi::TextureHandle SceneColor{};
+    rhi::TextureHandle Images[2]{};
     rhi::SubmissionToken Producers[2]{};
     Presentation Display{};
     ViewMapping Mapping;
-    PreparedView View{}, PendingView{};
+    PreparedView View{};
+    PreparedView PendingView{};
     bool HasPendingView = false;
-    uint64 Owner = 0, Generations[2]{1, 1};
-    uint32 Width = 0, Height = 0, Latest = 0;
-    bool Leased[2]{}, Written[2]{}, Submitted[2]{};
+    uint64 Owner = 0;
+    uint64 Generations[2]{1, 1};
+    uint32 Width = 0;
+    uint32 Height = 0;
+    uint32 Latest = 0;
+    bool Leased[2]{};
+    bool Written[2]{};
+    bool Submitted[2]{};
     bool DisplayCreated = false;
     bool FrameOpen = false;
     uint32 Producing = 0;

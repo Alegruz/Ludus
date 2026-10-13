@@ -172,3 +172,5 @@ function(ludus_cook_texture)
     target_sources("${TEX_TARGET}" PRIVATE "${output}/${TEX_NAME}.h")
     target_include_directories("${TEX_TARGET}" PRIVATE "${output}")
 endfunction()
+
+include("${CMAKE_CURRENT_LIST_DIR}/LudusRendererShaders.cmake")

@@ -1932,7 +1932,8 @@ TEST_CASE("UV frames preserve mirrored direction, scale invariance and degenerat
     triangle.Uvs[1] = {1, 0};
     triangle.Uvs[2] = {0, 1};
     reference::ReferenceSurfaceData surface;
-    const math::Vector3 normalWorld{0, 0, -1}, normalTangent{.6F, 0, .8F};
+    const math::Vector3 normalWorld{0, 0, -1};
+    const math::Vector3 normalTangent{.6F, 0, .8F};
     const math::Vector3 forward = reference::ApplyReferenceNormal(triangle, surface, normalWorld, normalTangent);
     CHECK(math::Length(forward - math::Vector3{.6F, 0, -.8F}) < 1e-6F);
     surface.UvTransform.X = -1;

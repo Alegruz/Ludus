@@ -355,7 +355,8 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
     REQUIRE(renderer.InitializeLighting(shaders::renderer_output::Vertex(),
                                         shaders::renderer_output::Fragment(),
                                         shaders::renderer_shadow::Fragment()) == S::Ready);
-    rr::MaterialProgram program, clusteredProgram;
+    rr::MaterialProgram program;
+    rr::MaterialProgram clusteredProgram;
     const auto waitProgram = [&renderer](const rr::MaterialProgram& value, S status) {
         const uint64 start = time::NowTicks();
         while (status == S::Pending && time::NowTicks() - start < 10 * time::NANOSECONDS_PER_SECOND)
