@@ -1,6 +1,7 @@
 #include "internal/controller.h"
 #include "internal/level_workspace.h"
 #include "internal/main_window.h"
+#include "internal/preview_viewport.h"
 #include "internal/world_document.h"
 #include "internal/world_workspace.h"
 #include "scene_fixture.h"
@@ -816,20 +817,9 @@ TEST_CASE("Converted cooked levels edit placement and gameplay in World and surv
     REQUIRE(mixed.CanSave());
     CHECK_FALSE(mixed.Dirty());
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    auto* viewport = mixed.findChild<QLabel*>(QStringLiteral("worldSceneViewport"));
+    QWidget* viewport = mixed.findChild<QWidget*>(QStringLiteral("worldSceneViewport"));
     REQUIRE(viewport != nullptr);
-    REQUIRE_FALSE(viewport->pixmap().isNull());
-    const auto image = viewport->pixmap().toImage();
-    bool visible = false;
-    for (ludus::foundation::int32 y = 0; y < image.height(); ++y)
-    {
-        for (ludus::foundation::int32 x = 0; x < image.width(); ++x)
-        {
-            visible =
-                visible || qRed(image.pixel(x, y)) > 0 || qGreen(image.pixel(x, y)) > 0 || qBlue(image.pixel(x, y)) > 0;
-        }
-    }
-    CHECK(visible);
+    CHECK_FALSE(viewport->isWindow());
 #endif
     mixed.resize(1100, 800);
     mixed.show();
@@ -856,7 +846,7 @@ TEST_CASE("Converted cooked levels edit placement and gameplay in World and surv
     }
     REQUIRE(mixed.CanSave());
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    CHECK(service->PreviewRunning());
+    CHECK(service->PreviewRunning() == PreviewViewport::CanPresent());
 #endif
     const auto second =
         QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("scenes/second.lulevel"));

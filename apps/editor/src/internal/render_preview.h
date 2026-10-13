@@ -4,14 +4,15 @@
 
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/renderer/viewport.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/native_interop.h>
 #include <ludus/graphics/rhi/raster.h>
 #include <ludus/platform/native_window.h>
 
 #include "internal/render_scene.h"
 
-#include <QImage>
 #include <QJsonObject>
 #include <QObject>
 #include <QTimer>
@@ -28,6 +29,7 @@ public:
     // Reject malformed private snapshots before touching fixed GPU handle arrays.
     [[nodiscard]] bool SetScene(const RenderScene& scene);
     [[nodiscard]] bool Start();
+    [[nodiscard]] bool AdmitDevice(const graphics::rhi::NativeDeviceDescription& native);
     void Stop() noexcept;
     void Navigate(foundation::int32 camera,
                   foundation::float32 yaw,
@@ -44,7 +46,7 @@ public:
     void Tick();
     [[nodiscard]] bool Running() const noexcept
     {
-        return OwnsDevice_;
+        return OwnsDevice_ || mIsStarting;
     }
     [[nodiscard]] foundation::uint64 Frames() const noexcept
     {
@@ -68,38 +70,47 @@ public:
     }
     [[nodiscard]] bool FrameAvailable() const noexcept
     {
-        return LastSamples_ != 0;
+        return mHasFrame;
     }
     [[nodiscard]] platform::NativeWindowInfo WindowInfo() const noexcept;
+    [[nodiscard]] bool TakeFrame(graphics::renderer::ViewportFrame& outFrame,
+                                 graphics::renderer::ViewportImage& outImage) noexcept;
+    void ReleaseFrame(graphics::renderer::ViewportFrame& inoutFrame) noexcept;
+    [[nodiscard]] graphics::rhi::RasterStatus PinDevice(graphics::rhi::NativeDeviceLease& outLease) noexcept;
+    [[nodiscard]] bool HasPendingFrame() const noexcept
+    {
+        return mHasPendingFrame;
+    }
 Q_SIGNALS:
     void Changed();
     void NavigationChanged();
-    void FrameReady(const QImage& frame);
+    void FrameReady();
+    void DeviceRequested();
+    void ResettingFrames();
     void Stopped();
     void Failed(const QString& error);
 
 private:
     struct Residency;
     foundation::UniquePtr<Residency> Residency_;
-    graphics::renderer::ReferenceCapture Capture_;
-    foundation::Array<graphics::renderer::ReferencePixel> Pixels_;
     bool LightingInitialized_ = false;
-    bool CaptureStarted_ = false;
-    foundation::uint32 LastSamples_ = 0;
-    [[nodiscard]] bool Prepare();
-    void RestartResources() noexcept;
+    graphics::renderer::RasterViewport mViewport;
+    graphics::renderer::ViewportFrame mPendingFrame;
+    graphics::renderer::ViewportImage mPendingImage;
+    graphics::rhi::SubmissionToken mProducer;
+    bool mHasPendingFrame = false;
+    bool mHasFrame = false;
+    bool mHasViewport = false;
+    bool mIsAwaitingProducer = false;
+    [[nodiscard]] bool prepare();
+    void restartResources() noexcept;
     RenderScene Scene_;
-    graphics::rhi::TextureHandle Color_{};
-    graphics::rhi::ReadbackTicket Readback_{};
-    QImage ReadbackImage_;
-    foundation::uint32 ReadbackRow_ = 0, ReadbackRows_ = 0;
     foundation::uint32 RequestedWidth_ = 640, RequestedHeight_ = 480;
-    bool Reading_ = false;
     bool RestoredOrbit_ = false;
     QString CameraId_;
-    void CancelReadback() noexcept;
-    void Fail(const QString& message);
-    [[nodiscard]] bool ReadFrame();
+    void resetFrames() noexcept;
+    void fail(const QString& message);
+
     graphics::rhi::DeviceHandle Device_{};
     graphics::rhi::SurfaceHandle Surface_{};
     graphics::renderer::Renderer Renderer_;
@@ -108,7 +119,6 @@ private:
     graphics::renderer::MaterialVersion Materials_[8]{};
     graphics::renderer::MaterialProgram Program_{};
     graphics::renderer::Snapshot Snapshot_{};
-    graphics::renderer::PreparedView View_{};
     graphics::renderer::ViewReport Report_{};
     graphics::renderer::ViewDescription Description_{};
     foundation::math::Vector3 OrbitCenter_{};
@@ -122,6 +132,7 @@ private:
     bool ViewDirty_ = true;
     bool FreshReport_ = true;
     bool OwnsDevice_ = false;
+    bool mIsStarting = false;
     bool AssetsCreated_ = false;
     QTimer Timer_;
     QString Status_;

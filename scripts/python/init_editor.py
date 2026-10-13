@@ -11,6 +11,7 @@ import cmake_targets
 SUPPORTED_PRESETS = tuple(f"{family}-clang-{flavor}" for family in ("linux", "macos")
                           for flavor in ("debug", "development", "asan-ubsan"))
 QT_PACKAGES = ("qt6-base-dev", "qt6-wayland")
+QT_PREVIEW_PACKAGES = ("qt6-declarative-dev",)
 
 
 def supported_host() -> bool:
@@ -58,7 +59,7 @@ def setup_editor(args, engine) -> None:
         if not args.no_system_install:
             if not brew:
                 raise engine.EngineError("Install Qt 6.4+ manually, or install Homebrew, then rerun editor setup")
-            engine.run([brew, "install", "qtbase"], cwd=root)
+            engine.run([brew, "install", "qtbase", *(["qtdeclarative"] if args.with_editor_preview else [])], cwd=root)
         else:
             print("Using existing Qt 6.4+ with the Cocoa plugin (--no-system-install).")
         # Homebrew Qt is optional and may be keg-only. Keep its machine path in
@@ -68,6 +69,12 @@ def setup_editor(args, engine) -> None:
             status, output = engine.capture_command_quiet([brew, "--prefix", "qtbase"], cwd=root)
             if status == 0 and (Path(output.strip()) / "lib/cmake/Qt6").is_dir():
                 qt_args = [f"-DQt6_DIR={output.strip()}/lib/cmake/Qt6"]
+            if args.with_editor_preview:
+                status, output = engine.capture_command_quiet([brew, "--prefix", "qtdeclarative"], cwd=root)
+                quick_directory = Path(output.strip()) / "lib/cmake/Qt6Quick"
+                if status == 0 and quick_directory.is_dir():
+                    # Homebrew's split formula is not beneath qtbase's Qt6_DIR.
+                    qt_args.append(f"-DQt6Quick_DIR={quick_directory}")
         cmake_targets.query_codemodel(engine.build_dir_for_preset(root, args.preset), "ludus-editor")
         engine.cmake_configure(root, args.preset, ["-DLUDUS_BUILD_EDITOR=ON", *preview_args, *qt_args])
         engine.cmake_build(root, args.preset, ["--target", "ludus_editor"])
@@ -76,7 +83,7 @@ def setup_editor(args, engine) -> None:
         if not engine.host_supports_apt_install():
             raise engine.EngineError("Automatic editor prerequisites require Ubuntu/Debian; install Qt 6.4+ manually and use --no-system-install")
         missing = []
-        for package in QT_PACKAGES:
+        for package in (*QT_PACKAGES, *(QT_PREVIEW_PACKAGES if args.with_editor_preview else ())):
             status, output = engine.capture_command_quiet(
                 ["dpkg-query", "--show", "--showformat=${Status}", package], cwd=root)
             if status != 0 or output.strip() != "install ok installed":

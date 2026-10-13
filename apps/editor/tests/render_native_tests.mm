@@ -1,7 +1,9 @@
+#include "internal/preview_viewport.h"
 #include "internal/readback.h"
 #include "internal/render_preview.h"
 #include "renderer_composite.h"
 #include "renderer_flat.h"
+#include <QQuickWindow>
 
 #import <Cocoa/Cocoa.h>
 
@@ -33,6 +35,18 @@ bool Frames(RenderPreview& preview, uint64 target)
         QTest::qWait(100);
     }
     return preview.Frames() >= target;
+}
+QImage ReadViewport()
+{
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+        {
+            // Independent test-only Qt framebuffer readback; product presentation never reads pixels.
+            return static_cast<QQuickWindow*>(window)->grabWindow();
+        }
+    }
+    return {};
 }
 } // namespace
 TEST_CASE("Native World preview renders authored assets, cameras, culling, updates and resize", "[.render-native]")
@@ -68,19 +82,42 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(RenderScene::Load(root, world, scene, error));
     const auto original = world.Draft();
     RenderPreview preview;
+    PreviewViewport viewport(&preview);
+    viewport.resize(640, 480);
+    viewport.show();
     REQUIRE(preview.SetScene(scene));
     preview.Navigate(0, 0, 0, 3, false);
-    QImage embedded;
-    QObject::connect(&preview, &RenderPreview::FrameReady, &preview, [&embedded](const QImage& frame) {
-        embedded = frame;
-    });
     REQUIRE(preview.Start());
     const bool presented = Frames(preview, 3);
     INFO(preview.Status().toStdString());
     REQUIRE(presented);
+    QImage embedded = ReadViewport();
+    REQUIRE(viewport.PresentedFrames() >= 1);
     REQUIRE_FALSE(embedded.isNull());
-    CHECK(embedded.size() == QSize(640, 480));
-    CHECK(embedded.pixelColor(320, 240) != embedded.pixelColor(0, 0));
+    CHECK(embedded.width() >= 640);
+    CHECK(embedded.pixelColor(embedded.width() / 2, embedded.height() / 2) != embedded.pixelColor(0, 0));
+    if (qEnvironmentVariableIsSet("LUDUS_GPU_VIEWPORT_IMAGE") == true)
+    {
+        REQUIRE(embedded.save(qEnvironmentVariable("LUDUS_GPU_VIEWPORT_IMAGE")));
+    }
+    // Native window events are forwarded to the persistent editor navigation model.
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+        {
+            QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
+            QTest::mouseMove(window, QPoint(145, 120));
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(145, 120));
+        }
+    }
+    REQUIRE(Frames(preview, preview.Frames() + 3));
+    CHECK(preview.Navigation().value(QStringLiteral("yaw")).toDouble() != 0);
+    const QJsonObject navigation = preview.Navigation();
+    preview.Navigate(-1, 70, 30, 4, false);
+    preview.RestoreNavigation(navigation);
+    CHECK(preview.Navigation() == navigation);
+    preview.Navigate(0, 0, 0, 3, false);
+    REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Submitted == 1);
     CHECK(preview.Report().Visible == 1);
     CHECK(preview.Report().Draws == 1);
@@ -110,10 +147,11 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     CHECK_FALSE(world.Dirty());
     CHECK(preview.WindowInfo().System == ludus::platform::WindowSystem::Headless);
     CHECK(preview.WindowInfo().CocoaWindow == nullptr);
-    preview.Resize(720, 480);
+    viewport.resize(720, 480);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
-    CHECK(embedded.size() == QSize(720, 480));
+    embedded = ReadViewport();
+    CHECK(embedded.width() >= 720);
     auto entity = world.Entity(QStringLiteral("starter.cube"));
     auto components = entity.value(QStringLiteral("components")).toObject();
     auto transform = components.value(QStringLiteral("transform")).toObject();
@@ -127,7 +165,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Culled == 1);
     CHECK(preview.Report().Visible == 0);
-    CHECK(embedded.pixelColor(360, 240) == embedded.pixelColor(0, 0));
+    embedded = ReadViewport();
+    CHECK(embedded.pixelColor(embedded.width() / 2, embedded.height() / 2) == embedded.pixelColor(0, 0));
     preview.Navigate(0, 0, 0, 3, true);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
@@ -170,23 +209,23 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(preview.Start());
     REQUIRE(Frames(preview, 3));
     preview.Stop();
-    // Readback delivery keeps its pixels alive even when an earlier receiver stops rendering.
+    // A receiver can stop before Qt samples the candidate without losing later signal delivery.
     RenderPreview closing;
-    QImage closingFrame;
+    PreviewViewport closingViewport(&closing);
+    closingViewport.show();
+    bool hasNotification = false;
     REQUIRE(closing.SetScene(scene));
-    QObject::connect(&closing, &RenderPreview::FrameReady, &closing, [&closing](const QImage&) { closing.Stop(); });
-    QObject::connect(&closing, &RenderPreview::FrameReady, &closing, [&closingFrame](const QImage& frame) {
-        closingFrame = frame;
-    });
+    QObject::connect(&closing, &RenderPreview::FrameReady, &closing, [&closing]() { closing.Stop(); });
+    QObject::connect(&closing, &RenderPreview::FrameReady, &closing, [&hasNotification]() { hasNotification = true; });
     REQUIRE(closing.Start());
     QElapsedTimer closingTimer;
     closingTimer.start();
-    while (closing.Running() && closingTimer.elapsed() < 10000)
+    while (closing.Running() == true && closingTimer.elapsed() < 10000)
     {
         QTest::qWait(10);
     }
     REQUIRE_FALSE(closing.Running());
-    REQUIRE_FALSE(closingFrame.isNull());
+    REQUIRE(hasNotification);
     // A headless Metal pixel oracle complements the embedded viewport lifecycle:
     // render an extracted red cube and independently check foreground/background.
     entity = world.Entity(QStringLiteral("starter.cube"));

@@ -2,56 +2,33 @@
 
 #include "internal/render_preview.h"
 
-#include <QLabel>
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QWheelEvent>
+#include <QWidget>
 
 namespace ludus::editor
 {
 // One embedded presentation surface for both World bindings and cooked scenes.
-class PreviewViewport final : public QLabel
+class PreviewViewport final : public QWidget
 {
 public:
-    explicit PreviewViewport(RenderPreview* preview, QWidget* parent = nullptr, bool automatic = true)
-        : QLabel(parent), Preview_(preview)
-    {
-        setMinimumSize(160, 160);
-        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-        setAlignment(Qt::AlignCenter);
-        setTextFormat(Qt::PlainText);
-        setWordWrap(true);
-        setFocusPolicy(Qt::StrongFocus);
-        setText(QStringLiteral("Open a World to render it here."));
-        setToolTip(
-            QStringLiteral("Drag to orbit · middle/Shift-drag to pan · wheel to zoom · double-click to frame all"));
-        if (automatic)
-        {
-            connect(preview, &RenderPreview::FrameReady, this, [this](const QImage& frame) {
-                Frame_ = frame;
-                Present();
-            });
-        }
-    }
-    void ShowFrame(const QImage& frame)
-    {
-        Frame_ = frame;
-        Present();
-    }
-    void ClearFrame(const QString& text)
-    {
-        Frame_ = {};
-        setText(text);
-    }
+    explicit PreviewViewport(RenderPreview* preview, QWidget* parentOrNull = nullptr, bool isAutomatic = true);
+    ~PreviewViewport() override;
+    void ShowFrame();
+    void ClearFrame(const QString& text);
+    [[nodiscard]] foundation::uint64 PresentedFrames() const noexcept;
+    [[nodiscard]] static bool CanPresent() noexcept;
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override
     {
-        QLabel::resizeEvent(event);
-        const auto ratio = devicePixelRatioF();
+        QWidget::resizeEvent(event);
+        const foundation::float64 ratio = devicePixelRatioF();
         Preview_->Resize(qRound(static_cast<foundation::float64>(width()) * ratio),
                          qRound(static_cast<foundation::float64>(height()) * ratio));
-        Present();
+        resizeSurface();
     }
     void mousePressEvent(QMouseEvent* event) override
     {
@@ -61,8 +38,8 @@ protected:
     }
     void mouseMoveEvent(QMouseEvent* event) override
     {
-        const auto point = event->position().toPoint();
-        const auto delta = point - Last_;
+        const QPoint point = event->position().toPoint();
+        const QPoint delta = point - Last_;
         Last_ = point;
         if (event->buttons().testFlag(Qt::MiddleButton) ||
             (event->buttons().testFlag(Qt::LeftButton) && event->modifiers().testFlag(Qt::ShiftModifier)))
@@ -89,21 +66,10 @@ protected:
     }
 
 private:
-    void Present()
-    {
-        if (!Frame_.isNull())
-        {
-            const auto ratio = devicePixelRatioF();
-            auto pixmap = QPixmap::fromImage(Frame_).scaled(qRound(static_cast<foundation::float64>(width()) * ratio),
-                                                            qRound(static_cast<foundation::float64>(height()) * ratio),
-                                                            Qt::KeepAspectRatio,
-                                                            Qt::SmoothTransformation);
-            pixmap.setDevicePixelRatio(ratio);
-            setPixmap(pixmap);
-        }
-    }
+    struct State;
+    foundation::UniquePtr<State> mState;
+    void resizeSurface();
     RenderPreview* Preview_;
-    QImage Frame_;
     QPoint Last_;
     foundation::int32 WheelRemainder_ = 0;
 };

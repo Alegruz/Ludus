@@ -55,6 +55,16 @@ if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     set(editor_scene_preview_source src/scene_preview.cpp)
 endif()
 
+set(editor_viewport_sources src/preview_viewport.cpp)
+if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
+    if(APPLE)
+        list(APPEND editor_viewport_sources src/qt_viewport_device_metal.mm)
+    else()
+        list(APPEND editor_viewport_sources src/qt_viewport_device_vulkan.cpp)
+    endif()
+endif()
+
 # --- Shared editor logic library ---------------------------------------------
 # The transition function, project store, tool-process protocol framing and log
 # buffer live in a library so offscreen tests can exercise them without creating
@@ -98,6 +108,7 @@ qt_add_executable(ludus_editor
     src/internal/render_preview.h
     src/internal/render_panel.h
     src/internal/preview_viewport.h
+    ${editor_viewport_sources}
     src/render_scene.cpp
     src/render_preview.cpp
     src/render_panel.cpp
@@ -192,7 +203,7 @@ if(NOT EMSCRIPTEN)
 endif()
 if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     target_compile_definitions(ludus_editor PRIVATE LUDUS_EDITOR_NATIVE_PREVIEW=1)
-    target_link_libraries(ludus_editor PRIVATE Ludus::GraphicsRhi)
+    target_link_libraries(ludus_editor PRIVATE Ludus::GraphicsRhi Qt6::Quick)
     ludus_compile_renderer_shaders(TARGET ludus_editor SHADERS
         renderer_flat renderer_composite renderer_material renderer_lit renderer_output renderer_shadow)
     ludus_compile_renderer_shaders(TARGET ludus_editor SHADERS renderer_lit_shadow)
@@ -215,6 +226,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/internal/render_preview.h
         src/internal/render_panel.h
         src/internal/preview_viewport.h
+        ${editor_viewport_sources}
         src/render_scene.cpp
         src/render_preview.cpp
         src/render_panel.cpp
@@ -314,7 +326,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     target_link_libraries(ludus_editor_tests PRIVATE Ludus::SceneCook)
     if(LUDUS_EDITOR_RENDER_PREVIEW)
         target_compile_definitions(ludus_editor_tests PRIVATE LUDUS_EDITOR_NATIVE_PREVIEW=1)
-        target_link_libraries(ludus_editor_tests PRIVATE Ludus::GraphicsRhi)
+        target_link_libraries(ludus_editor_tests PRIVATE Ludus::GraphicsRhi Qt6::Quick)
         ludus_compile_renderer_shaders(TARGET ludus_editor_tests SHADERS
             renderer_flat renderer_composite renderer_material renderer_lit renderer_output renderer_shadow)
         ludus_compile_renderer_shaders(TARGET ludus_editor_tests SHADERS renderer_lit_shadow)

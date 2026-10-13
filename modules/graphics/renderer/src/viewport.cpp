@@ -92,13 +92,15 @@ Status RasterViewport::Initialize(Renderer& renderer,
                                   rhi::DeviceHandle device,
                                   uint32 width,
                                   uint32 height,
-                                  float32 exposure) noexcept
+                                  float32 exposure,
+                                  ViewportColorMode colorMode) noexcept
 {
     if (mState)
     {
         return Status::InvalidState;
     }
-    if (width == 0 || height == 0 || !math::IsFinite(exposure) || exposure < .000001F || exposure > 1000)
+    if (width == 0 || height == 0 || math::IsFinite(exposure) == false || exposure < .000001F || exposure > 1000 ||
+        (colorMode != ViewportColorMode::PreferHdr && colorMode != ViewportColorMode::Linear8))
     {
         return Status::InvalidDescription;
     }
@@ -127,7 +129,9 @@ Status RasterViewport::Initialize(Renderer& renderer,
     {
         return admitted;
     }
-    texture.Format = capabilities.HdrColor ? rhi::RasterFormat::Rgba16Float : rhi::RasterFormat::Rgba8Unorm;
+    texture.Format = capabilities.HdrColor == true && colorMode == ViewportColorMode::PreferHdr
+                         ? rhi::RasterFormat::Rgba16Float
+                         : rhi::RasterFormat::Rgba8Unorm;
     Status status = rhi::CreateTexture(device, texture, {}, candidate->SceneColor);
     if (!Accepted(status))
     {

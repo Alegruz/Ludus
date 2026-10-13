@@ -18,6 +18,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import cmake_targets
 import editor_project
@@ -262,10 +263,10 @@ class ProtocolClient:
         try:
             while time.monotonic() < deadline:
                 ready = sel.select(timeout=0.1)
-                if not ready:
-                    if not self._thread.is_alive():
-                        break
+                if not ready and self._thread.is_alive():
                     continue
+                # Thread completion does not prove that its output pipe is empty.
+                # Drain buffered frames through EOF even if readiness arrives late.
                 try:
                     chunk = os.read(self._out_read, 65536)
                 except (BlockingIOError, InterruptedError):
@@ -288,6 +289,27 @@ class ProtocolClient:
                 os.close(fd)
             except OSError:
                 pass
+
+
+class ProtocolClientTests(unittest.TestCase):
+    def test_finished_writer_is_drained_without_readiness_notification(self) -> None:
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        expected = [{"type": "runtime_started", "pid": 123},
+                    {"type": "result", "cleanup_confirmed": True}]
+        try:
+            os.write(write_fd, b"".join((json.dumps(event) + "\n").encode() for event in expected))
+        finally:
+            os.close(write_fd)
+        client = ProtocolClient.__new__(ProtocolClient)
+        client._out_read = read_fd
+        client._thread = Mock()
+        client._thread.is_alive.return_value = False
+        selector = Mock()
+        selector.select.return_value = []
+        with patch("selectors.DefaultSelector", return_value=selector):
+            self.assertEqual(client.events(), expected)
+        client._thread.join.assert_called_once()
 
 
 FAKE_CMAKE = r'''#!/usr/bin/env python3
@@ -696,7 +718,8 @@ class RealProcessTests(unittest.TestCase):
         events = client.events()
         result = events[-1]
         # The run completes (leader exited 0) only after the descendant is gone.
-        self.assertTrue(result["cleanup_confirmed"])
+        self.assertEqual(result.get("type"), "result", events)
+        self.assertTrue(result["cleanup_confirmed"], events)
         self._assert_dead_within(writer_pid, 6.0)
 
     def test_simultaneous_stdout_and_stderr_are_both_delivered(self) -> None:

@@ -22,6 +22,14 @@ struct ViewportImage final
     ludus::foundation::uint32 Width = 0;  ///< Physical width in pixels, top-left origin.
     ludus::foundation::uint32 Height = 0; ///< Physical height in pixels.
 };
+/// Linear scene attachment policy; display images always remain encoded RGBA8.
+enum class ViewportColorMode : ludus::foundation::uint8
+{
+    /// Prefer HDR when enabled, otherwise use linear RGBA8. Lit materials support both.
+    PreferHdr,
+    /// Use linear RGBA8 for unlit textured material programs, which do not support HDR targets.
+    Linear8,
+};
 /// Interactive raster output for the current extracted World snapshot and camera.
 /// Uses ordinary PrepareView/DrawView and authored material lighting, with no
 /// compute/ray capability, reference capture, CPU pixel readback or accumulation.
@@ -41,13 +49,16 @@ public:
     /// Renderer lighting/views must be Ready. Positive dimensions are physical
     /// pixels; exposure follows LightingOutput. Output is tone-mapped/sRGB-encoded RGB;
     /// the consumer preserves the display values without a second encoding. Ready/Pending owns setup.
+    /// Color mode chooses the linear scene target; PreferHdr cannot draw unlit textured
+    /// material programs into an HDR attachment. Use Linear8 for those snapshots.
     /// Failure leaves this empty. Resize by preparing a separate candidate, then
     /// retiring this instance after its producers/consumers finish.
     [[nodiscard]] rhi::RasterStatus Initialize(Renderer& renderer,
                                                rhi::DeviceHandle device,
                                                ludus::foundation::uint32 width,
                                                ludus::foundation::uint32 height,
-                                               ludus::foundation::float32 exposure = 1) noexcept;
+                                               ludus::foundation::float32 exposure = 1,
+                                               ViewportColorMode colorMode = ViewportColorMode::PreferHdr) noexcept;
     /// Poll setup/producer completion and publish a pending view only when Ready.
     /// A failed candidate is discarded, preserving the prior drawable view.
     /// Returns that failure once; a later poll may use the preserved view.

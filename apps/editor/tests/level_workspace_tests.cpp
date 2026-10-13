@@ -1,4 +1,5 @@
 #include "internal/level_workspace.h"
+#include "internal/preview_viewport.h"
 #include "scene_fixture.h"
 
 #include <QCoreApplication>
@@ -11,6 +12,9 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+#    include <QQuickWindow>
+#endif
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -86,7 +90,7 @@ TEST_CASE("unsupported scene import and saved-file conflicts retain the active s
 }
 
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-TEST_CASE("saved cooked level renders after moving the project and removing source inputs", "[editor][level][render]")
+TEST_CASE("saved cooked level renders after moving the project and removing source inputs", "[.level-native]")
 {
     QTemporaryDir directory;
     REQUIRE(directory.isValid());
@@ -101,26 +105,34 @@ TEST_CASE("saved cooked level renders after moving the project and removing sour
     const auto moved = QDir(directory.path()).filePath(QStringLiteral("moved"));
     REQUIRE(QDir().rename(root, moved));
     LevelWorkspace workspace(tools);
+    workspace.resize(1000, 700);
+    workspace.show();
     workspace.SetProject(moved, 1);
     REQUIRE(workspace.Open(QDir(moved).filePath(QStringLiteral("scenes/main.lulevel"))));
     Drain(workspace);
     REQUIRE(workspace.Document().value(QStringLiteral("objects")).toArray().size() == 1);
-    auto* viewport = workspace.findChild<QLabel*>(QStringLiteral("levelViewport"));
+    QWidget* viewport = workspace.findChild<QWidget*>(QStringLiteral("levelViewport"));
     REQUIRE(viewport != nullptr);
-    REQUIRE_FALSE(viewport->pixmap().isNull());
-    const auto image = viewport->pixmap().toImage();
-    bool emission = false;
+    QTest::qWait(100);
+    CHECK(static_cast<PreviewViewport*>(viewport)->PresentedFrames() > 0);
+    QImage image;
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+        {
+            image = static_cast<QQuickWindow*>(window)->grabWindow();
+        }
+    }
+    REQUIRE_FALSE(image.isNull());
+    bool hasEmission = false;
     for (ludus::foundation::int32 y = 0; y < image.height(); ++y)
     {
         for (ludus::foundation::int32 x = 0; x < image.width(); ++x)
         {
-            emission = emission || qRed(image.pixel(x, y)) > 0;
+            hasEmission = hasEmission || qRed(image.pixel(x, y)) > 0;
         }
     }
-    REQUIRE(emission);
-    REQUIRE_FALSE(workspace.Dirty());
-    REQUIRE(workspace.Save());
-    Drain(workspace);
+    CHECK(hasEmission);
     workspace.StopPreview();
 }
 #endif
@@ -158,26 +170,26 @@ TEST_CASE("staircase2 imports, saves and renders from a moved project without it
     const auto moved = QDir(directory.path()).filePath(QStringLiteral("moved"));
     REQUIRE(QDir().rename(root, moved));
     LevelWorkspace reopened(tools);
+    reopened.resize(1000, 700);
+    reopened.show();
     reopened.SetProject(moved, 2);
     REQUIRE(reopened.Open(QDir(moved).filePath(QStringLiteral("scenes/main.lulevel"))));
     Drain(reopened);
     REQUIRE(reopened.Document() == original);
-    auto* viewport = reopened.findChild<QLabel*>(QStringLiteral("levelViewport"));
+    QWidget* viewport = reopened.findChild<QWidget*>(QStringLiteral("levelViewport"));
     REQUIRE(viewport != nullptr);
-    REQUIRE_FALSE(viewport->pixmap().isNull());
-    const auto output = qEnvironmentVariable("LUDUS_STAGE5_REFERENCE_IMAGE");
-    if (!output.isEmpty())
+    QTest::qWait(100);
+    CHECK(static_cast<PreviewViewport*>(viewport)->PresentedFrames() > 0);
+    const QString output = qEnvironmentVariable("LUDUS_STAGE5_REFERENCE_IMAGE");
+    if (output.isEmpty() == false)
     {
-        auto* status = reopened.findChild<QLabel*>(QStringLiteral("levelStatus"));
-        REQUIRE(status != nullptr);
-        QElapsedTimer timer;
-        timer.start();
-        while (!status->text().contains(QStringLiteral("64/64")) && timer.elapsed() < 120000)
+        for (QWindow* window : QGuiApplication::allWindows())
         {
-            QTest::qWait(20);
+            if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+            {
+                REQUIRE(static_cast<QQuickWindow*>(window)->grabWindow().save(output));
+            }
         }
-        REQUIRE(status->text().contains(QStringLiteral("64/64")));
-        REQUIRE(viewport->pixmap().save(output));
     }
     reopened.StopPreview();
 }

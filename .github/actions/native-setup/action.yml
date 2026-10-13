@@ -31,7 +31,7 @@ runs:
         if [[ "$WITH_EDITOR" == true ]]; then
           # Preview is included in editor setup; offscreen rendering tests
           # still need a Vulkan loader and Mesa's software device.
-          packages+=(qt6-base-dev qt6-wayland libvulkan1 mesa-vulkan-drivers)
+          packages+=(qt6-base-dev qt6-declarative-dev qt6-wayland libvulkan1 mesa-vulkan-drivers)
         fi
         # Stalled package mirrors must fail promptly so the job can be retried.
         apt_options=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)

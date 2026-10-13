@@ -1700,6 +1700,9 @@ as a game runtime does. It must not substitute a fixed acceptance scene or an
 offline capture for the selected World.
 
 `RasterViewport` packages that existing raster path into GPU output textures.
+Its `ViewportColorMode::Linear8` mode supports unlit textured snapshots using a
+linear RGBA8 scene attachment; the default prefers HDR for lit snapshots when
+enabled. Unlit textured material programs cannot draw into HDR attachments.
 Initialize views/lighting on the renderer, then initialize the viewport with
 physical dimensions and exposure. On a World edit, publish a complete replacement
 snapshot; on a camera change, supply its current `WorldToClip` and camera values.

@@ -1802,6 +1802,10 @@ source retain.
 
 ### Qt integration boundary
 
+The editor adapter embeds a native `QQuickWindow` in its World splitter and
+admits the device/queue actually returned by Qt. Its basic render loop serializes
+all engine and Qt submissions on the GUI owner thread. Texture wrappers remain
+read-only and retain RHI leases through consumer submission/completion.
 Qt-specific code belongs in the editor adapter. Qt's
 [Metal texture import](https://doc.qt.io/qt-6/qnativeinterface-qsgmetaltexture.html)
 and [Vulkan texture import](https://doc.qt.io/qt-6/qnativeinterface-qsgvulkantexture.html)
