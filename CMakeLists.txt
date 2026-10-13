@@ -183,6 +183,8 @@ add_subdirectory(modules/content/scene_format)
 # Scene cooker (pbrt-reference-v1). The library builds for every target; its
 # file I/O reports Unsupported where Ludus::Content has no native file access,
 # and the ludus-cook CLI plus golden tests are native-host only.
+# Private pinned stb_image (PNG decoding for the best-effort scene importer).
+add_subdirectory(third_party/stb)
 add_subdirectory(modules/content/scene_cook)
 add_subdirectory(modules/audio/content)
 add_subdirectory(modules/runtime/resources)

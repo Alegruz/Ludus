@@ -1,0 +1,10 @@
+{
+  "name": "stb_image",
+  "version": "2.30",
+  "license": "MIT or public domain (dual)",
+  "release_url": "https://github.com/nothings/stb/blob/2c980bb59875b0d32144a71867fbdebb2f77cd20/stb_image.h",
+  "files": {
+    "stb_image.h": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3"
+  },
+  "notes": "Vendored single header at a pinned commit. CMake verifies exact bytes without network access. Built as one C translation unit with PNG only, no stdio, no SIMD, so it compiles unchanged for native and Emscripten targets. Used privately by Ludus::SceneCook; no stb types appear in public headers."
+}
