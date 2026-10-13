@@ -1,6 +1,7 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
 #include "internal/measurement.h"
+#include "internal/native_interop.h"
 #include "internal/raster.h"
 #include "internal/ray_backend.h"
 #include "internal/resources.h"
@@ -234,7 +235,22 @@ bool Initialize(const ApplicationInfo&) noexcept
         {
             return gQueue != nil;
         }
-        gDevice = MTLCreateSystemDefaultDevice();
+        const auto* imported = internal::NativeDeviceRequest();
+        if (imported != nullptr)
+        {
+            gDevice = (__bridge id<MTLDevice>)imported->Identity.Device.GetObject();
+            gQueue = (__bridge id<MTLCommandQueue>)imported->Identity.CommandQueue.GetObject();
+            if (gQueue.device != gDevice)
+            {
+                gQueue = nil;
+                gDevice = nil;
+                return false;
+            }
+        }
+        else
+        {
+            gDevice = MTLCreateSystemDefaultDevice();
+        }
         // Thanks to Apple's "Metal Feature Set Tables" (resource limits),
         // https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf:
         // Mac2 / Apple4 and later guarantee the conservative 16384 texture limit.
@@ -244,7 +260,10 @@ bool Initialize(const ApplicationInfo&) noexcept
             gDevice = nil;
             return false;
         }
-        gQueue = [gDevice newCommandQueue];
+        if (gQueue == nil)
+        {
+            gQueue = [gDevice newCommandQueue];
+        }
         return gQueue != nil;
     }
 }
@@ -669,3 +688,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 #include "internal/ray_metal.h"
 
 #include "internal/measurement_metal.h"
+
+#include "internal/native_interop_metal.h"

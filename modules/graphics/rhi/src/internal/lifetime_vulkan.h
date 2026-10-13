@@ -522,9 +522,23 @@ void LifetimeReleaseTransfer(bool readback, usize slot) noexcept
 {
     gLifetimeVulkan[readback ? 1 : 0][slot].Busy = false;
 }
+void WaitLifetimeSubmissions() noexcept
+{
+    for (const auto& direction : gLifetimeVulkan)
+    {
+        for (const auto& transfer : direction)
+        {
+            if (transfer.Busy)
+            {
+                (void)Check(vkWaitForFences(gDevice, 1, &transfer.Fence, VK_TRUE, UINT64_MAX));
+            }
+        }
+    }
+}
 void LifetimeReset() noexcept
 {
-    // RasterReset has already waited the one owned Vulkan queue idle or lost.
+    // RasterReset has already drained accepted RHI frame/upload/transfer fences
+    // (or an owned device idle/lost), without waiting unrelated foreign work.
     for (auto& direction : gLifetimeVulkan)
     {
         for (auto& transfer : direction)

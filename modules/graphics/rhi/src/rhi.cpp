@@ -1,6 +1,7 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
 #include "internal/measurement.h"
+#include "internal/native_interop.h"
 #include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/resources.h"
@@ -70,7 +71,7 @@ void SetDeviceOwner(ludus::foundation::uint64 owner) noexcept
 }
 bool SessionBusy() noexcept
 {
-    return gLegacy || gStartup.State != StartupState::Idle;
+    return gLegacy || gStartup.State != StartupState::Idle || NativeInteropBusy();
 }
 void SetFallback(FallbackHandler handler) noexcept
 {
@@ -106,9 +107,14 @@ void Fail(uint32 token, StartupError error) noexcept
         gStartup.ProfileFailure = {};
     }
     gFrame = false;
-    internal::ReleaseRasterResources();
-    internal::ReleaseResources();
-    backend::Shutdown();
+    if (DeferNativeInteropShutdown())
+    {
+        backend::NativeInteropDetachSurface();
+    }
+    else
+    {
+        FinishNativeInteropShutdown();
+    }
 }
 void FaultRasterSession() noexcept
 {
@@ -375,6 +381,10 @@ FrameStatus EndFrameStatus() noexcept
 }
 bool Initialize(const ApplicationInfo& app) noexcept
 {
+    if (internal::NativeInteropBusy())
+    {
+        return false;
+    }
     if (gStartup.State != StartupState::Idle)
     {
         return false;
@@ -413,14 +423,30 @@ void Shutdown() noexcept
     gRayProfileRequest = false;
     gFallback = nullptr;
     gToken = 0;
-    internal::ReleaseRasterResources();
-    internal::ReleaseResources();
-    backend::Shutdown();
+    if (internal::DeferNativeInteropShutdown())
+    {
+        backend::NativeInteropDetachSurface();
+    }
+    else
+    {
+        internal::FinishNativeInteropShutdown();
+    }
     gStartup = {};
     gLegacy = false;
     gRendering = false;
     gFrame = false;
 }
+namespace internal
+{
+void FinishNativeInteropShutdown() noexcept
+{
+    ReleaseRasterResources();
+    ReleaseResources();
+    backend::NativeInteropReset();
+    backend::Shutdown();
+    NativeInteropShutdownFinished();
+}
+} // namespace internal
 bool BeginFrame() noexcept
 {
     return gLegacy ? (gRendering && backend::BeginFrame()) : BeginFrameStatus() == FrameStatus::Ready;

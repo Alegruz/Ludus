@@ -500,7 +500,8 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     }
     VkPhysicalDeviceFeatures enabled{};
     vkGetPhysicalDeviceFeatures(gPhysical, &enabled);
-    if (internal::CompressedTexture(format) && enabled.textureCompressionBC != VK_TRUE)
+    if (internal::CompressedTexture(format) &&
+        (internal::NativeDeviceRequest() != nullptr || enabled.textureCompressionBC != VK_TRUE))
     {
         return {};
     }
@@ -1990,6 +1991,17 @@ uint64 RasterCompleted() noexcept
         }
     }
     return gRasterCompleted;
+}
+void WaitRasterSubmissions() noexcept
+{
+    for (const auto& texture : gRasterTextures)
+    {
+        // This fence is retained only after an accepted asynchronous upload.
+        if (texture.Fence != VK_NULL_HANDLE)
+        {
+            (void)Check(vkWaitForFences(gDevice, 1, &texture.Fence, VK_TRUE, UINT64_MAX));
+        }
+    }
 }
 void RasterReset() noexcept
 {

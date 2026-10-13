@@ -1,12 +1,17 @@
 #include "reference_raster.h"
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/native_interop.h"
 #include "internal/profile.h"
 #include <cstring>
 namespace ludus::graphics::rhi::reference
 {
 void Reset() noexcept
 {
+    NativeAvailable = true;
+    NativePending = NativeLost = false;
+    NativePublishResult = RasterStatus::Ready;
+    NativePublications = NativeReleases = NativeRetirements = 0;
     ProfileAvailable = true;
     HdrAvailable = true;
     ComputeAvailable = true;
@@ -491,4 +496,85 @@ void RasterReset() noexcept
     reference::Submitted = 0;
     reference::Completed = 0;
 }
+} // namespace ludus::graphics::rhi::backend
+
+namespace ludus::graphics::rhi::backend
+{
+bool NativeInteropSupported() noexcept
+{
+    return reference::NativeAvailable && (Kind() == Backend::Vulkan || Kind() == Backend::Metal);
+}
+RasterStatus NativeDeviceSnapshot(NativeDeviceInfo& output) noexcept
+{
+    if (!NativeInteropSupported())
+    {
+        return RasterStatus::Unsupported;
+    }
+    if (const auto* source = internal::NativeDeviceRequest())
+    {
+        output = { .Identity = source->Identity, .InstanceApiVersion = source->InstanceApiVersion };
+    }
+    else
+    {
+        output =
+        {
+            .Identity =
+            {
+                .Api = Kind(),
+                .Instance = NativeInstance{&reference::NativeObjects[0]},
+                .PhysicalDevice = NativePhysicalDevice{&reference::NativeObjects[1]},
+                .Device = NativeLogicalDevice{&reference::NativeObjects[2]},
+                .CommandQueue = NativeCommandQueue{&reference::NativeObjects[3]},
+            },
+            .InstanceApiVersion = (1U << 22) | (1U << 12),
+        };
+    }
+    return RasterStatus::Ready;
+}
+RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publication,
+                                  NativeTextureInfo& output) noexcept
+{
+    const auto slot = publication.Lease;
+    const auto textureSlot = publication.Texture;
+    if (reference::NativePublishResult != RasterStatus::Ready)
+    {
+        return reference::NativePublishResult;
+    }
+    if (!reference::NativeReadReleased.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
+    reference::NativeReadReleased[slot] = false;
+    output.VulkanImage = NativeVulkanImage{textureSlot + 1};
+    output.VulkanLayout = 5;
+    ++reference::NativePublications;
+    return RasterStatus::Ready;
+}
+RasterStatus NativeTextureRelease(usize slot) noexcept
+{
+    if (!reference::NativeReadReleased[slot])
+    {
+        reference::NativeReadReleased[slot] = true;
+        ++reference::NativeReleases;
+    }
+    return reference::NativeLost ? RasterStatus::DeviceLost : RasterStatus::Pending;
+}
+RasterStatus NativeTexturePoll(usize slot, bool wait) noexcept
+{
+    if (reference::NativeLost)
+    {
+        return RasterStatus::DeviceLost;
+    }
+    if (!reference::NativeReadReleased[slot])
+    {
+        return RasterStatus::Pending;
+    }
+    return wait || !reference::NativePending ? RasterStatus::Ready : RasterStatus::Pending;
+}
+void NativeTextureDestroy(usize) noexcept
+{
+    ++reference::NativeRetirements;
+}
+void NativeInteropDetachSurface() noexcept {}
+void NativeInteropReset() noexcept {}
 } // namespace ludus::graphics::rhi::backend

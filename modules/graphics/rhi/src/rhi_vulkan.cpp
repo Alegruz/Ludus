@@ -1,6 +1,7 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
 #include "internal/measurement.h"
+#include "internal/native_interop.h"
 #include "internal/raster.h"
 #include "internal/ray_backend.h"
 #include "internal/resources.h"
@@ -20,6 +21,8 @@
 namespace ludus::graphics::rhi::backend
 {
 void RasterFrameExtent() noexcept;
+void WaitRasterSubmissions() noexcept;
+void WaitLifetimeSubmissions() noexcept;
 void TimingBegin() noexcept;
 void TimingEnd() noexcept;
 void TimingSubmitted() noexcept;
@@ -35,6 +38,7 @@ struct Frame final
     VkCommandBuffer Command = VK_NULL_HANDLE;
     VkFence Fence = VK_NULL_HANDLE;
     VkSemaphore Acquired = VK_NULL_HANDLE;
+    bool Submitted = false;
 };
 struct Shader final
 {
@@ -101,6 +105,8 @@ uint32 gMaxDimension = 0;
 uint32 gMaxUniformSize = 0;
 WindowInfo gWindow;
 bool gHeadless = false;
+bool gBorrowedDevice = false;
+uint32 gNativeInstanceVersion = VK_API_VERSION_1_1;
 bool gEncoding = false;
 bool gResize = true;
 VkResult gLastResult = VK_SUCCESS;
@@ -119,7 +125,24 @@ void WaitIdle() noexcept
 {
     if (gDevice != VK_NULL_HANDLE)
     {
-        (void)Check(vkDeviceWaitIdle(gDevice));
+        if (gBorrowedDevice || internal::NativeInteropPinned())
+        {
+            // A foreign queue can wait for a later host submission. Drain only
+            // accepted RHI work, never the source device's unrelated submissions.
+            for (auto& frame : gFrames)
+            {
+                if (frame.Submitted && Check(vkWaitForFences(gDevice, 1, &frame.Fence, VK_TRUE, UINT64_MAX)))
+                {
+                    frame.Submitted = false;
+                }
+            }
+            WaitRasterSubmissions();
+            WaitLifetimeSubmissions();
+        }
+        else
+        {
+            (void)Check(vkDeviceWaitIdle(gDevice));
+        }
     }
 }
 bool Allocate(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags flags, VkDeviceMemory& memory) noexcept
@@ -172,7 +195,11 @@ void RetireAcquiredImage() noexcept
         submit.waitSemaphoreCount = 1;
         submit.pWaitSemaphores = &gFrames[gFrame].Acquired;
         submit.pWaitDstStageMask = &stage;
-        (void)Check(vkQueueSubmit(gQueue, 1, &submit, VK_NULL_HANDLE));
+        auto& frame = gFrames[gFrame];
+        if (Check(vkResetFences(gDevice, 1, &frame.Fence)))
+        {
+            frame.Submitted = Check(vkQueueSubmit(gQueue, 1, &submit, frame.Fence));
+        }
         gAcquiredWait = false;
     }
     WaitIdle();
@@ -512,6 +539,54 @@ bool Supports(BackendSelection selection) noexcept
 }
 bool Initialize(const ApplicationInfo& app) noexcept
 {
+    if (const auto* imported = internal::NativeDeviceRequest())
+    {
+        if (volkInitialize() != VK_SUCCESS)
+        {
+            return false;
+        }
+        gBorrowedDevice = true;
+        gInstance = static_cast<VkInstance>(imported->Identity.Instance.GetObject());
+        volkLoadInstance(gInstance);
+        gDevice = static_cast<VkDevice>(imported->Identity.Device.GetObject());
+        gPhysical = static_cast<VkPhysicalDevice>(imported->Identity.PhysicalDevice.GetObject());
+        gQueue = static_cast<VkQueue>(imported->Identity.CommandQueue.GetObject());
+        gFamily = imported->Identity.QueueFamily;
+        gNativeInstanceVersion = imported->InstanceApiVersion;
+        volkLoadDevice(gDevice);
+        uint32 count = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(gPhysical, &count, nullptr);
+        if (count > 32 || gFamily >= count)
+        {
+            return false;
+        }
+        VkQueueFamilyProperties families[32]{};
+        vkGetPhysicalDeviceQueueFamilyProperties(gPhysical, &count, families);
+        if ((families[gFamily].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0 ||
+            imported->Identity.QueueIndex >= families[gFamily].queueCount)
+        {
+            return false;
+        }
+        // The source contract guarantees that this queue was created on this device.
+        VkQueue actual = VK_NULL_HANDLE;
+        vkGetDeviceQueue(gDevice, gFamily, imported->Identity.QueueIndex, &actual);
+        if (actual != gQueue)
+        {
+            return false;
+        }
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(gPhysical, &properties);
+        if (properties.apiVersion < VK_API_VERSION_1_1)
+        {
+            return false;
+        }
+        gMaxDimension = properties.limits.maxImageDimension2D;
+        gMaxUniformSize = properties.limits.maxUniformBufferRange;
+        gQueueCompute = (families[gFamily].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+        gRayEnabled = gRayApiAvailable = false;
+        gHeadless = true;
+        return true;
+    }
     if (gInstance != VK_NULL_HANDLE)
     {
         return true;
@@ -561,6 +636,7 @@ bool Initialize(const ApplicationInfo& app) noexcept
     }
     gRayApiAvailable = internal::RequestsRayProfile() && loaderVersion >= VK_API_VERSION_1_2;
     application.apiVersion = gRayApiAvailable ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
+    gNativeInstanceVersion = application.apiVersion;
     VkInstanceCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     info.pApplicationInfo = &application;
@@ -579,6 +655,19 @@ bool ConnectWindow(const WindowInfo& window) noexcept
     if (gInstance == VK_NULL_HANDLE)
     {
         return false;
+    }
+    if (gBorrowedDevice && gPass == VK_NULL_HANDLE)
+    {
+        gWindow = window;
+        gHeadless = true;
+        gTarget.Width = window.Width;
+        gTarget.Height = window.Height;
+        if (window.Width == 0 || window.Height == 0 || window.Width > gMaxDimension || window.Height > gMaxDimension)
+        {
+            return false;
+        }
+        gRequestedExtent = { .width = window.Width, .height = window.Height };
+        return CreateTargets();
     }
     if (gDevice != VK_NULL_HANDLE)
     {
@@ -949,7 +1038,10 @@ void Shutdown() noexcept
     {
         vkDestroyRenderPass(gDevice, gPass, nullptr);
         gPass = VK_NULL_HANDLE;
-        vkDestroyDevice(gDevice, nullptr);
+        if (!gBorrowedDevice)
+        {
+            vkDestroyDevice(gDevice, nullptr);
+        }
         gDevice = VK_NULL_HANDLE;
     }
     if (gInstance != VK_NULL_HANDLE)
@@ -959,10 +1051,15 @@ void Shutdown() noexcept
             vkDestroySurfaceKHR(gInstance, gSurface, nullptr);
         }
         gSurface = VK_NULL_HANDLE;
-        vkDestroyInstance(gInstance, nullptr);
+        if (!gBorrowedDevice)
+        {
+            vkDestroyInstance(gInstance, nullptr);
+        }
         gInstance = VK_NULL_HANDLE;
         volkFinalize();
     }
+    gBorrowedDevice = false;
+    gNativeInstanceVersion = VK_API_VERSION_1_1;
     gPhysical = VK_NULL_HANDLE;
     gRayEnabled = gRayApiAvailable = false;
     gRayProperties = {};
@@ -1023,6 +1120,7 @@ FrameStatus Begin() noexcept
     {
         return Failure();
     }
+    frame.Submitted = false;
     // Harvest the captured query before its frame fence can be reset for later work.
     (void)TimingPoll();
     if (gDevice == VK_NULL_HANDLE)
@@ -1132,6 +1230,7 @@ FrameStatus End() noexcept
     {
         return Failure();
     }
+    frame.Submitted = true;
     TimingSubmitted();
     gAcquiredWait = false;
     gFrame = (gFrame + 1) % FRAMES;
@@ -1554,3 +1653,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 #include "internal/ray_vulkan.h"
 
 #include "internal/measurement_vulkan.h"
+
+#include "internal/native_interop_vulkan.h"

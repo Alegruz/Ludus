@@ -4,6 +4,7 @@
 #include "internal/device.h"
 #include "internal/lifecycle.h"
 #include "internal/measurement.h"
+#include "internal/native_interop.h"
 #include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/ray_backend.h"
@@ -196,6 +197,44 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     DeviceAccess::Set(device, owner);
     DeviceAccess::Set(surface, owner);
     return result == StartStatus::Ready ? DeviceStatus::Ready : DeviceStatus::Pending;
+}
+DeviceStatus CreateNativeDevice(const ApplicationInfo& application,
+                                const NativeDeviceDescription& native,
+                                const DeviceDescription& description,
+                                foundation::uint32 width,
+                                foundation::uint32 height,
+                                DeviceHandle& device,
+                                SurfaceHandle& surface) noexcept
+{
+    if (DeviceAccess::Owner(device) != 0 || DeviceAccess::Owner(surface) != 0 || internal::SessionBusy())
+    {
+        return DeviceStatus::InvalidState;
+    }
+    if (width == 0 || height == 0)
+    {
+        return DeviceStatus::InvalidDescription;
+    }
+    const auto valid = ValidateDeviceDescription(description);
+    if (valid != DeviceStatus::Ready)
+    {
+        return valid;
+    }
+    if (native.Identity.Api == Backend::Vulkan && description.Required.RayQueries)
+    {
+        return DeviceStatus::Unsupported;
+    }
+    const auto prepared = internal::PrepareNativeDeviceSource(native);
+    if (prepared != DeviceStatus::Ready)
+    {
+        return prepared;
+    }
+    const WindowInfo window{ .Width = width, .Height = height };
+    const auto result = CreateDevice(application, window, description, device, surface);
+    if (result != DeviceStatus::Ready && result != DeviceStatus::Pending)
+    {
+        internal::ReleaseNativeDeviceSource();
+    }
+    return result;
 }
 DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
 {

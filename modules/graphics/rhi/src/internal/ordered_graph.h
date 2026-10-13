@@ -398,6 +398,10 @@ RasterStatus ValidatePassDescription(const RasterPassDescription& description, R
         {
             return RasterStatus::InvalidHandle;
         }
+        if (texture->ExternalReads != 0)
+        {
+            return RasterStatus::InvalidState;
+        }
         if (!texture->Texture.Attachment)
         {
             return RasterStatus::InvalidDescription;
@@ -441,6 +445,10 @@ RasterStatus ValidatePassDescription(const RasterPassDescription& description, R
                 return view->Status == RasterStatus::Pending ? RasterStatus::NotReady : view->Status;
             }
             const auto& destination = At(RasterKind::Texture, view->TextureSlot);
+            if (destination.ExternalReads != 0)
+            {
+                return RasterStatus::InvalidState;
+            }
             if (pass.SampleCount != 4 || destination.Texture.SampleCount != 1 ||
                 destination.Texture.Format != color.Format ||
                 TextureMipExtent(destination.Texture.Width, view->View.BaseMip) != width ||

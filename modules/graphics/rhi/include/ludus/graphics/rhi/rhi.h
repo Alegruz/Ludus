@@ -176,7 +176,9 @@ struct FrameTarget final
 [[nodiscard]] bool ConnectWindow(const WindowInfo& windowInfo) noexcept;
 [[nodiscard]] bool InitializeRendering() noexcept;
 void ShutdownRendering() noexcept;
-/// Idempotent; invalidates pending callbacks before releasing backend handles.
+/// Idempotent; invalidates callbacks and ordinary RHI handles before native cleanup.
+/// Native interop device/read leases defer physical cleanup until consumer GPU completion
+/// and final lease release. Startup remains Busy while that retirement is pending.
 void Shutdown() noexcept;
 [[nodiscard]] bool BeginFrame() noexcept;
 [[nodiscard]] bool EndFrame() noexcept;

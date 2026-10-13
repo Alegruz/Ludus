@@ -59,3 +59,8 @@ if(EMSCRIPTEN)
     set_target_properties(ludus_sdk_r10_consumer PROPERTIES OUTPUT_NAME r10 SUFFIX ".js")
     configure_file(../r10.html r10.html COPYONLY)
 endif()
+
+if(NOT EMSCRIPTEN)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../native_interop.cmake")
+    ludus_add_native_interop_fixture(ludus_sdk_native_interop_consumer "${CMAKE_CURRENT_SOURCE_DIR}/..")
+endif()
