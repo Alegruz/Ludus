@@ -104,8 +104,16 @@ QSGTexture* QtViewportDevice::WrapTexture(QQuickWindow& inoutWindow, const graph
     {
         return nullptr;
     }
+#if VK_USE_64_BIT_PTR_DEFINES
+    // Reconstruct Vulkan's opaque handle from the RHI's borrowed native bits.
+    // Qt forwards this identity to Vulkan; neither consumer dereferences it.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    const VkImage nativeImage = reinterpret_cast<VkImage>(image.VulkanImage.GetBits());
+#else
+    const VkImage nativeImage = image.VulkanImage.GetBits();
+#endif
     return QNativeInterface::QSGVulkanTexture::fromNative(
-        reinterpret_cast<VkImage>(image.VulkanImage.GetBits()),
+        nativeImage,
         static_cast<VkImageLayout>(image.VulkanLayout),
         &inoutWindow,
         QSize(static_cast<foundation::int32>(image.Width), static_cast<foundation::int32>(image.Height)));
