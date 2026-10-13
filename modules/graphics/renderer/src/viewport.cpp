@@ -22,14 +22,22 @@ struct RasterViewport::State final
 {
     Renderer* SceneRenderer = nullptr;
     rhi::DeviceHandle Device{};
-    rhi::TextureHandle SceneColor{}, Images[2]{};
+    rhi::TextureHandle SceneColor{};
+    rhi::TextureHandle Images[2]{};
     rhi::SubmissionToken Producers[2]{};
     Presentation Display{};
     ViewMapping Mapping;
     PreparedView View{};
-    uint64 Owner = 0, Generations[2]{1, 1};
-    uint32 Width = 0, Height = 0, Latest = 0;
-    bool Leased[2]{}, Written[2]{}, Submitted[2]{};
+    PreparedView PendingView{};
+    bool HasPendingView = false;
+    uint64 Owner = 0;
+    uint64 Generations[2]{1, 1};
+    uint32 Width = 0;
+    uint32 Height = 0;
+    uint32 Latest = 0;
+    bool Leased[2]{};
+    bool Written[2]{};
+    bool Submitted[2]{};
     bool DisplayCreated = false;
     bool FrameOpen = false;
     uint32 Producing = 0;
@@ -64,6 +72,7 @@ struct RasterViewport::State final
     float32 Exposure = 1;
     ~State() noexcept
     {
+        static_cast<void>(SceneRenderer->Release(PendingView));
         static_cast<void>(SceneRenderer->Release(View));
         static_cast<void>(SceneRenderer->Release(Display));
         static_cast<void>(rhi::Destroy(Device, SceneColor));
@@ -201,6 +210,23 @@ Status RasterViewport::Poll() noexcept
             return producer;
         }
     }
+    if (state.HasPendingView == true)
+    {
+        const Status candidate = state.SceneRenderer->GetStatus(state.PendingView);
+        if (candidate == Status::Ready)
+        {
+            static_cast<void>(state.SceneRenderer->Release(state.View));
+            state.View = state.PendingView;
+            state.PendingView = {};
+            state.HasPendingView = false;
+        }
+        else if (candidate != Status::Pending)
+        {
+            static_cast<void>(state.SceneRenderer->Release(state.PendingView));
+            state.HasPendingView = false;
+            return candidate;
+        }
+    }
     return Status::Ready;
 }
 Status RasterViewport::Update(Snapshot snapshot, const ViewDescription& view, ViewReport& report) noexcept
@@ -217,8 +243,17 @@ Status RasterViewport::Update(Snapshot snapshot, const ViewDescription& view, Vi
     {
         return status;
     }
-    static_cast<void>(mState->SceneRenderer->Release(mState->View));
-    mState->View = candidate;
+    static_cast<void>(mState->SceneRenderer->Release(mState->PendingView));
+    mState->HasPendingView = status == Status::Pending;
+    if (status == Status::Ready)
+    {
+        static_cast<void>(mState->SceneRenderer->Release(mState->View));
+        mState->View = candidate;
+    }
+    else
+    {
+        mState->PendingView = candidate;
+    }
     report = candidateReport;
     return status;
 }
@@ -241,7 +276,7 @@ Status RasterViewport::Render(rhi::SurfaceHandle surface, rhi::SubmissionToken& 
     const Status ready = state.SceneRenderer->GetStatus(state.View);
     if (ready != Status::Ready)
     {
-        return ready;
+        return state.HasPendingView == true && ready == Status::InvalidHandle ? Status::NotReady : ready;
     }
     uint32 index = (state.Latest + 1) % 2;
     if (state.Leased[index] || state.Generations[index] == ~uint64{0})

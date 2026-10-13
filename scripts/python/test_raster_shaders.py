@@ -7,9 +7,19 @@ import struct
 import unittest
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'cmake/shaders'))
-from compile_raster import spirv_array_indexing, verify_native_metal_arrays, raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type
+from compile_raster import spirv_array_indexing, verify_native_metal_arrays, raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type, external_text_source
 
 class RasterReflectionTests(unittest.TestCase):
+    def test_external_large_shader_preserves_exact_utf8_and_terminator(self):
+        import re
+        text = "// café\n" + "void Compute() {}\n" * 5000
+        declaration, definition = external_text_source("large_shader", "METAL_COMPUTE", text)
+        body = definition.split("= {\n", 1)[1].split("\n};", 1)[0]
+        values = [int(value) for value in re.findall(r"\d+", body)]
+        self.assertEqual(bytes(values), text.encode("utf-8") + b"\0")
+        self.assertIn(f"[{len(values)}]", declaration)
+        self.assertNotIn('R"', definition)
+
     def test_native_arrays_require_fixed_color_counts_and_preserve_target_identity(self):
         texture = {'kind': 'resource', 'baseShape': 'texture2D', 'resultType': {'kind': 'vector', 'elementType': {'scalarType': 'float32'}}}
         document = {'parameters': [{'name': 'Images', 'binding': {'kind': 'descriptorTableSlot', 'index': 1}, 'type': {'kind': 'array', 'elementCount': 72, 'elementType': texture}}],

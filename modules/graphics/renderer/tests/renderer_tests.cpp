@@ -1,6 +1,8 @@
+#include "../src/internal/reference_data.h"
 #include "internal/lifecycle.h"
 #include "reference_raster.h"
 #include "resource_mesh.h"
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
 #include <ludus/foundation/math/scalar.hpp>
@@ -1794,7 +1796,7 @@ TEST_CASE("Cancelled GPU producers retain budget until completion", "[renderer][
     rr::Renderer renderer;
     session.Initialize(renderer);
     const rhi::RasterBinding bindings[]{
-        {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Compute, 208},
+        {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Compute, 224},
         {1, rhi::RasterBindingKind::StorageRead, rhi::RasterVisibility::Compute, 16},
         {2, rhi::RasterBindingKind::StorageReadWrite, rhi::RasterVisibility::Compute, 16},
         {3, rhi::RasterBindingKind::StorageReadWrite, rhi::RasterVisibility::Compute, 16},
@@ -1894,4 +1896,159 @@ TEST_CASE("Raster viewport works without compute and retries an exhausted frame 
     REQUIRE(viewport.Release(frame) == rhi::RasterStatus::Ready);
     viewport.Reset();
     REQUIRE(session.Renderer.Release(earlierView) == rhi::RasterStatus::Ready);
+}
+
+TEST_CASE("Linear surface-map decoding preserves contracts and handles the normal disk", "[renderer][fidelity]")
+{
+    rr::SurfaceParameters parameters;
+    REQUIRE(rr::DecodeSurfaceParameters({.8F, .5F, .5F, .25F}, .8F, .6F, 1, parameters) == rhi::RasterStatus::Ready);
+    CHECK(parameters.Metallic == Catch::Approx(.2F));
+    CHECK(parameters.Roughness == Catch::Approx(.3F));
+    CHECK(parameters.NormalTangent.X == Catch::Approx(.6F));
+    CHECK(parameters.NormalTangent.Y == 0);
+    CHECK(parameters.NormalTangent.Z == Catch::Approx(.8F));
+    REQUIRE(rr::DecodeSurfaceParameters({1, 1, 0, 0}, 1, 1, 0, parameters) == rhi::RasterStatus::Ready);
+    CHECK(parameters.NormalTangent == math::Vector3{0, 0, 1});
+    CHECK(parameters.Roughness == .045F);
+    REQUIRE(rr::DecodeSurfaceParameters({1, 1, 1, 1}, 1, 1, 8, parameters) == rhi::RasterStatus::Ready);
+    CHECK(math::Dot(parameters.NormalTangent, parameters.NormalTangent) == Catch::Approx(1));
+    CHECK(parameters.NormalTangent.Z == 0);
+    const rr::SurfaceParameters saved = parameters;
+    CHECK(rr::DecodeSurfaceParameters({-1, 0, 0, 0}, 1, 1, 1, parameters) == rhi::RasterStatus::InvalidDescription);
+    CHECK(rr::DecodeSurfaceParameters({0, 0, 0, 0}, 1, 1, 9, parameters) == rhi::RasterStatus::InvalidDescription);
+    CHECK(parameters.NormalTangent == saved.NormalTangent);
+    CHECK(parameters.Metallic == saved.Metallic);
+    CHECK(parameters.Roughness == saved.Roughness);
+}
+
+TEST_CASE("UV frames preserve mirrored direction, scale invariance and degenerate fallback", "[renderer][fidelity]")
+{
+    namespace reference = ludus::graphics::renderer::internal;
+    reference::ReferenceTriangle triangle;
+    triangle.Positions[0] = {0, 0, 0};
+    triangle.Positions[1] = {2, 0, 0};
+    triangle.Positions[2] = {0, 3, 0};
+    triangle.Uvs[0] = {0, 0};
+    triangle.Uvs[1] = {1, 0};
+    triangle.Uvs[2] = {0, 1};
+    reference::ReferenceSurfaceData surface;
+    const math::Vector3 normalWorld{0, 0, -1};
+    const math::Vector3 normalTangent{.6F, 0, .8F};
+    const math::Vector3 forward = reference::ApplyReferenceNormal(triangle, surface, normalWorld, normalTangent);
+    CHECK(math::Length(forward - math::Vector3{.6F, 0, -.8F}) < 1e-6F);
+    surface.UvTransform.X = -1;
+    const math::Vector3 mirrored = reference::ApplyReferenceNormal(triangle, surface, normalWorld, normalTangent);
+    CHECK(math::Length(mirrored - math::Vector3{-.6F, 0, -.8F}) < 1e-6F);
+    surface.UvTransform.X = 1e-12F;
+    surface.UvTransform.Y = 1e-12F;
+    CHECK(math::Length(reference::ApplyReferenceNormal(triangle, surface, normalWorld, normalTangent) - forward) <
+          1e-6F);
+    surface.UvTransform.X = 0;
+    CHECK(reference::ApplyReferenceNormal(triangle, surface, normalWorld, normalTangent) == normalWorld);
+}
+
+TEST_CASE("Surface map admission preserves outputs and rejects incompatible programs and encoding",
+          "[renderer][fidelity]")
+{
+    Session session;
+    LitFixture fixture;
+    fixture.Enable(session);
+    rr::MaterialProgram legacy = fixture.Prewarm(session);
+    const uint8 bytes[]{128, 128, 255, 255};
+    rhi::TextureHandle map;
+    REQUIRE(rhi::CreateTexture(session.Device, {1, 1, rhi::RasterFormat::Rgba8Unorm}, {bytes, 4}, map) ==
+            rhi::RasterStatus::Ready);
+    rr::LitMaterialDescription material;
+    material.SurfaceMap = map;
+    rr::MaterialVersion version;
+    rr::LightSelection report;
+    report.Count = 77;
+    CHECK(session.Renderer.CreateLitMaterial(legacy, material, version, report) == rhi::RasterStatus::Unsupported);
+    CHECK(report.Count == 77);
+    REQUIRE(session.Renderer.Release(legacy) == rhi::RasterStatus::Ready);
+    // A reflected optional surface profile extends the old ABI by one vec4 and texture.
+    rhi::RasterUniformMember members[12];
+    for (usize i = 0; i < 11; ++i)
+    {
+        members[i] = fixture.Members[i];
+    }
+    members[11] = {0, "SurfaceMap", 1040, rhi::RasterUniformShape::Float4};
+    fixture.Bindings[0].MinSize = 1056;
+    fixture.Bindings[6] = {6, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0};
+    fixture.Fragment.Bindings = {fixture.Bindings, 7};
+    fixture.Fragment.UniformMembers = members;
+    fixture.Shadow.Bindings = {fixture.Bindings, 3};
+    fixture.Shadow.UniformMembers = members;
+    rr::MaterialProgram program = fixture.Prewarm(session);
+    material.NormalScale = 9;
+    CHECK(session.Renderer.CreateLitMaterial(program, material, version, report) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(report.Count == 77);
+    material.NormalScale = 1;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, material, version, report) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(version) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::Destroy(session.Device, map) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::CreateTexture(session.Device, {1, 1, rhi::RasterFormat::Rgba8Srgb}, {bytes, 4}, map) ==
+            rhi::RasterStatus::Ready);
+    material.SurfaceMap = map;
+    report.Count = 77;
+    CHECK(session.Renderer.CreateLitMaterial(program, material, version, report) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(report.Count == 77);
+    CHECK(session.Renderer.GetStatus(version) == rhi::RasterStatus::InvalidHandle);
+    REQUIRE(rhi::Destroy(session.Device, map) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(program) == rhi::RasterStatus::Ready);
+}
+
+TEST_CASE("Pending viewport replacements retain the drawable view through failure and success", "[renderer][viewport]")
+{
+    Session session;
+    LitFixture lighting;
+    lighting.Enable(session);
+    const rr::SceneItem first = session.Item(7);
+    rr::Snapshot original;
+    REQUIRE(session.Renderer.CreateSnapshot(&first, 1, original) == rhi::RasterStatus::Ready);
+    rr::RasterViewport viewport;
+    REQUIRE(viewport.Initialize(session.Renderer, session.Device, 8, 8) == rhi::RasterStatus::Ready);
+    rr::ViewReport report;
+    REQUIRE(viewport.Update(original, {}, report) == rhi::RasterStatus::Ready);
+    const math::Vector3 positions[]{{-.1F, -.1F, .5F}, {.1F, -.1F, .5F}, {0, .1F, .5F}};
+    const uint32 indices[]{0, 1, 2};
+    rr::Mesh other;
+    REQUIRE(session.Renderer.CreateMesh({positions, 3, indices, 3}, other) == rhi::RasterStatus::Ready);
+    rr::SceneItem items[]{first, session.Item(8, {.5F, 0, 0})};
+    items[1].Geometry = other;
+    rr::Snapshot replacement;
+    REQUIRE(session.Renderer.CreateSnapshot(items, 2, replacement) == rhi::RasterStatus::Ready);
+    rr::ViewDescription scheduled;
+    scheduled.ScheduledUpload = true;
+    const auto draw = [&](usize expectedDraws) {
+        const usize before = rhi::reference::Draws;
+        rhi::SubmissionToken producer;
+        REQUIRE(viewport.Render(session.Surface, producer) == rhi::RasterStatus::Ready);
+        CHECK(rhi::reference::Draws - before == expectedDraws);
+        rhi::reference::Completed = rhi::reference::Submitted;
+    };
+    REQUIRE(viewport.Update(replacement, scheduled, report) == rhi::RasterStatus::Pending);
+    CHECK(report.Visible == 2); // Accepted candidate report; the prior image is still drawable.
+    draw(2);                    // One old scene draw and presentation, while upload is pending.
+    for (rhi::RasterStatus& status : rhi::reference::Transfers[0])
+    {
+        status = rhi::RasterStatus::Failed;
+    }
+    REQUIRE(rhi::PollLifetime(session.Device) == rhi::RasterStatus::Ready);
+    CHECK(viewport.Poll() == rhi::RasterStatus::Failed);
+    draw(2); // Failed replacement has not destroyed the last drawable snapshot.
+    REQUIRE(viewport.Update(replacement, scheduled, report) == rhi::RasterStatus::Pending);
+    for (rhi::RasterStatus& status : rhi::reference::Transfers[0])
+    {
+        status = rhi::RasterStatus::Ready;
+    }
+    REQUIRE(rhi::PollLifetime(session.Device) == rhi::RasterStatus::Ready);
+    REQUIRE(viewport.Poll() == rhi::RasterStatus::Ready);
+    draw(3); // Both distinct mesh packets become visible after successful publication.
+    viewport.Reset();
+    REQUIRE(session.Renderer.Release(replacement) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(original) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(other) == rhi::RasterStatus::Ready);
 }

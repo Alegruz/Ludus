@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../shaders/renderer_gpu_preview_layout.h"
 #include "reference_data.h"
 
 #include <ludus/foundation/base/pointer.hpp>
@@ -21,9 +22,11 @@ struct GpuPreviewUniform final
     uint32 Sampling[4]{};
     math::Vector4 Environment;
     math::Vector4 Options;
-    math::Vector4 BoundsMinimumWorld, BoundsMaximumWorld;
+    math::Vector4 BoundsMinimumWorld;
+    math::Vector4 BoundsMaximumWorld;
+    uint32 SurfaceLayout[4]{};
 };
-static_assert(sizeof(GpuPreviewUniform) == 208);
+static_assert(sizeof(GpuPreviewUniform) == 224);
 struct GpuFrameRecord final
 {
     uint64 Generation = 1;
@@ -35,15 +38,27 @@ struct GpuFrameRecord final
 struct GpuPreviewRecord final
 {
     uint64 Generation = 1;
-    bool Used = false, Owned = false;
-    rhi::BufferHandle Data{}, Texels{}, Parameters{}, Accumulation{}, Colors{}, ImageParameters{};
-    rhi::BindingSetHandle ComputeBindings{}, ImageBindings{};
+    bool Used = false;
+    bool Owned = false;
+    rhi::BufferHandle Data{};
+    rhi::BufferHandle Texels{};
+    rhi::BufferHandle Parameters{};
+    rhi::BufferHandle Accumulation{};
+    rhi::BufferHandle Colors{};
+    rhi::BufferHandle ImageParameters{};
+    rhi::BindingSetHandle ComputeBindings{};
+    rhi::BindingSetHandle ImageBindings{};
     GpuFrameRecord Frames[2];
     GpuPreviewInfo Info;
-    uint32 Width = 0, Height = 0, PendingFrame = 0, LatestFrame = 0;
+    uint32 Width = 0;
+    uint32 Height = 0;
+    uint32 PendingFrame = 0;
+    uint32 LatestFrame = 0;
     bool HasImage = false;
-    usize DataBytes = 0, TexelBytes = 0;
-    bool ComputeBindingsCreated = false, ImageBindingsCreated = false;
+    usize DataBytes = 0;
+    usize TexelBytes = 0;
+    bool ComputeBindingsCreated = false;
+    bool ImageBindingsCreated = false;
     rhi::RasterStatus Setup = rhi::RasterStatus::Pending;
     usize GpuBytes = 0;
 };
@@ -51,13 +66,18 @@ struct GpuPreviewState final
 {
     GpuPreviewOptions Options;
     uint32 Phase = 0;
-    bool QuadCreated = false, IndicesCreated = false;
+    bool QuadCreated = false;
+    bool IndicesCreated = false;
     rhi::RasterStatus Setup = rhi::RasterStatus::Pending;
-    rhi::RasterShaderHandle ComputeShader{}, VertexShader{}, FragmentShader{};
-    rhi::BindingLayoutHandle ComputeLayout{}, ImageLayout{};
+    rhi::RasterShaderHandle ComputeShader{};
+    rhi::RasterShaderHandle VertexShader{};
+    rhi::RasterShaderHandle FragmentShader{};
+    rhi::BindingLayoutHandle ComputeLayout{};
+    rhi::BindingLayoutHandle ImageLayout{};
     rhi::ComputePipelineHandle ComputePipeline{};
     rhi::RasterPipelineHandle ImagePipeline{};
-    rhi::BufferHandle Quad{}, Indices{};
+    rhi::BufferHandle Quad{};
+    rhi::BufferHandle Indices{};
     GpuPreviewRecord Jobs[4];
     usize GpuBytes = 0;
 };

@@ -14,6 +14,59 @@ class SourcePolicyTests(unittest.TestCase):
             "modules/example/source" + suffix, text, set(range(1, text.count("\n") + 2))
         )
 
+    def test_shader_else_if_is_control_flow(self):
+        self.assertFalse(
+            self.diagnose("void Shade() { if (x) {} else if (y) {} }", ".slang")
+        )
+
+    def test_one_variable_per_declaration(self):
+        for suffix in [".cpp", ".slang"]:
+            for text in [
+                "usize first = 0, second = 0;",
+                "uint first, second;",
+                "struct Pair { float3 PositionWorld, NormalWorld; };",
+                "const uint32 first[] = {1, 2}, second[] = {3, 4};",
+                "void Run() { usize first = F(1, 2),\n second = 0; }",
+                "for (uint first = 0, second = 1; first < 2; ++first) {}",
+                "uint first = 0; uint second = 1, third = 2;",
+                "Handle* first = nullptr, second = nullptr;",
+            ]:
+                with self.subTest(text=text, suffix=suffix):
+                    self.assertTrue(self.diagnose(text, suffix))
+
+    def test_expression_commas_are_not_declarations(self):
+        for text in [
+            "uint first = F(1, 2); uint second = 0;",
+            "const Pair value = {1, 2};",
+            "Pair<int, int> value = Make<Pair<int, int>>(1, 2);",
+            "void Run(uint first, uint second) { F(first, second); }",
+            "for (uint i = 0; i < 2; ++i, Update()) {}",
+            "uint value = [] { return F(1, 2); }();",
+            '// uint first, second;\nconst char* text = "uint first, second;";',
+        ]:
+            with self.subTest(text=text):
+                self.assertFalse(self.diagnose(text))
+
+    def test_builtin_shader_recipes_have_one_owner(self):
+        self.assertTrue(
+            self.diagnose(
+                'ludus_compile_shader(TARGET app NAME renderer_lit RASTER SOURCE "lit.slang")',
+                ".cmake",
+            )
+        )
+        self.assertFalse(
+            self.diagnose(
+                "ludus_compile_renderer_shaders(TARGET app SHADERS renderer_lit)",
+                ".cmake",
+            )
+        )
+        self.assertFalse(
+            self.diagnose(
+                'ludus_compile_shader(TARGET app NAME custom SOURCE "custom.slang")',
+                ".cmake",
+            )
+        )
+
     def test_explicit_values_and_unspellable_lambdas(self):
         self.assertFalse(
             self.diagnose(

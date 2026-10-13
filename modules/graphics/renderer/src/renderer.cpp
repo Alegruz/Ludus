@@ -335,15 +335,21 @@ struct Renderer::State final
     };
     struct ProgramRecord final : SlotIdentity
     {
-        rhi::RasterShaderHandle Vertex{}, Fragment{}, ShadowFragment{};
+        rhi::RasterShaderHandle Vertex{};
+        rhi::RasterShaderHandle Fragment{};
+        rhi::RasterShaderHandle ShadowFragment{};
         rhi::BindingLayoutHandle Layout{};
         rhi::TextureHandle White{};
         rhi::RasterPipelineHandle ShadowPipeline{};
-        bool Lit = false, Hdr = false, Clustered = false;
+        bool Lit = false;
+        bool Hdr = false;
+        bool Clustered = false;
+        bool HasSurfaceMapProfile = false;
         uint32 VariantCount = 6;
         rhi::PipelineRequest Requests[7]{};
         rhi::RasterPipelineHandle Pipelines[6]{};
-        uint32 References = 0, Phase = 0;
+        uint32 References = 0;
+        uint32 Phase = 0;
         Status Setup = Status::Pending;
     };
     struct MaterialRecord final : SlotIdentity
@@ -358,11 +364,17 @@ struct Renderer::State final
         MaterialAlpha Alpha = MaterialAlpha::Opaque;
         bool BindingCreated = false;
         Status Setup = Status::Pending;
-        bool Lit = false, HasBake = false, Clustered = false, ClusterViewCreated = false;
+        bool Lit = false;
+        bool HasBake = false;
+        bool Clustered = false;
+        bool ClusterViewCreated = false;
         rhi::TextureHandle ClusterTexture{};
         rhi::TextureViewHandle ClusterView{};
-        usize ParameterSize = 48, ShadowSlot = NO_SHADOW;
-        rhi::TextureViewHandle BakeTexture{}, ShadowTexture{};
+        usize ParameterSize = 48;
+        usize ShadowSlot = NO_SHADOW;
+        rhi::TextureViewHandle BakeTexture{};
+        rhi::TextureViewHandle ShadowTexture{};
+        rhi::TextureViewHandle SurfaceTexture{};
         rhi::SamplerHandle ShadowSampler{};
         BakedLighting Bake;
     };
@@ -547,6 +559,7 @@ struct Renderer::State final
             static_cast<void>(rhi::Destroy(Device, m.Sampler));
             static_cast<void>(rhi::Destroy(Device, m.Parameters));
             static_cast<void>(rhi::Destroy(Device, m.BakeTexture));
+            static_cast<void>(rhi::Destroy(Device, m.SurfaceTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowSampler));
             static_cast<void>(rhi::Destroy(Device, m.ClusterView));
@@ -1549,7 +1562,18 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
                                 MaterialProgram& output) noexcept
 {
     const bool lit = shadow != nullptr;
+    bool hasSurfaceMapProfile = false;
+    for (const rhi::RasterUniformMember& member : fragment.UniformMembers)
+    {
+        hasSurfaceMapProfile = hasSurfaceMapProfile || member.Name == "SurfaceMap";
+    }
+    if (hasSurfaceMapProfile == true && lit == false)
+    {
+        return Status::InvalidDescription;
+    }
     const bool clustered = lit && fragment.Bindings.size() == 8;
+    const usize bindingCount = clustered ? 8U : lit ? (hasSurfaceMapProfile ? 7U : 6U) : 3U;
+    const usize memberCount = (clustered ? 14U : lit ? 11U : 3U) + (hasSurfaceMapProfile ? 1U : 0U);
     if (!mState || mState->Setup != Status::Ready || (lit && mState->LightingSetup != Status::Ready))
     {
         return Status::NotReady;
@@ -1559,14 +1583,9 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
         return Status::InvalidState;
     }
     if (vertex.Artifact.Stage != rhi::ShaderStage::Vertex || fragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
-        vertex.Inputs.size() != (lit ? 16U : 7U) || !vertex.Bindings.empty() || !vertex.UniformMembers.empty() ||
-        !fragment.Inputs.empty() ||
-        fragment.Bindings.size() != (clustered ? 8U
-                                     : lit     ? 6U
-                                               : 3U) ||
-        fragment.UniformMembers.size() != (clustered ? 14U
-                                           : lit     ? 11U
-                                                     : 3U))
+        vertex.Inputs.size() != (lit == true ? 16U : 7U) || vertex.Bindings.empty() == false ||
+        vertex.UniformMembers.empty() == false || fragment.Inputs.empty() == false ||
+        fragment.Bindings.size() != bindingCount || fragment.UniformMembers.size() != memberCount)
     {
         return Status::InvalidDescription;
     }
@@ -1580,7 +1599,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
             return Status::InvalidDescription;
         }
     }
-    const usize byteSize = clustered ? CLUSTER_BYTES : lit ? LIT_BYTES : 48;
+    const usize byteSize = (clustered ? CLUSTER_BYTES : lit ? LIT_BYTES : 48) + (hasSurfaceMapProfile ? 16U : 0U);
     const rhi::RasterBinding expected[]{
         {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, byteSize},
         {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
@@ -1589,8 +1608,11 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
         {4, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
         {5, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
         {6, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
-        {7, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
-    for (usize i = 0; i < (clustered ? 8U : lit ? 6U : 3U); ++i)
+        {7,
+         hasSurfaceMapProfile ? rhi::RasterBindingKind::Texture2D : rhi::RasterBindingKind::Sampler,
+         rhi::RasterVisibility::Fragment,
+         0}};
+    for (usize i = 0; i < bindingCount; ++i)
     {
         bool found = false;
         for (const auto& binding : fragment.Bindings)
@@ -1632,6 +1654,20 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
             found |= member.Binding == 0 && member.Name == names[i] && member.Offset == offset && member.Shape == shape;
         }
         if (!found)
+        {
+            return Status::InvalidDescription;
+        }
+    }
+    if (hasSurfaceMapProfile)
+    {
+        bool hasSurfaceMap = false;
+        for (const rhi::RasterUniformMember& member : fragment.UniformMembers)
+        {
+            hasSurfaceMap = hasSurfaceMap || (member.Binding == 0 && member.Name == "SurfaceMap" &&
+                                              member.Offset == (clustered ? CLUSTER_BYTES : LIT_BYTES) &&
+                                              member.Shape == rhi::RasterUniformShape::Float4);
+        }
+        if (hasSurfaceMap == false)
         {
             return Status::InvalidDescription;
         }
@@ -1691,6 +1727,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     p.Used = p.Owned = true;
     p.Lit = lit;
     p.Clustered = clustered;
+    p.HasSurfaceMapProfile = hasSurfaceMapProfile;
     p.Hdr = lit && s.Hdr;
     p.VariantCount = lit && !p.Hdr ? 3U : 6U;
     status = rhi::CreateRasterShader(s.Device, vertex, p.Vertex);
@@ -1704,7 +1741,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     }
     if (Accepted(status))
     {
-        status = rhi::CreateBindingLayout(s.Device, {expected, clustered ? 8U : lit ? 6U : 3U}, p.Layout);
+        status = rhi::CreateBindingLayout(s.Device, {expected, bindingCount}, p.Layout);
     }
     const uint8 white[]{255, 255, 255, 255};
     rhi::TextureDescription texture{1, 1, rhi::RasterFormat::Rgba8Unorm};
@@ -2000,6 +2037,12 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
             status = rhi::CreateSampler(s.Device, {}, m.ShadowSampler);
         }
     }
+    if (Accepted(status) && lighting != nullptr && s.Programs[m.ProgramSlot].HasSurfaceMapProfile)
+    {
+        const rhi::TextureHandle mapSource =
+            rhi::IsNull(lighting->SurfaceMap) ? s.Programs[m.ProgramSlot].White : lighting->SurfaceMap;
+        status = rhi::CreateTextureView(s.Device, mapSource, m.SurfaceTexture);
+    }
     if (Accepted(status) && clusters != nullptr)
     {
         status = rhi::CreateTexture(s.Device,
@@ -2077,6 +2120,18 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
             }
         }
     }
+    if (s.Programs[m->ProgramSlot].HasSurfaceMapProfile)
+    {
+        const Status ready = rhi::GetStatus(s.Device, m->SurfaceTexture);
+        if (ready != Status::Ready)
+        {
+            if (ready != Status::Pending)
+            {
+                m->Setup = ready;
+            }
+            return ready;
+        }
+    }
     if (m->Clustered)
     {
         const auto texture = rhi::GetStatus(s.Device, m->ClusterTexture);
@@ -2109,19 +2164,25 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
     }
     if (!m->BindingCreated)
     {
+        const bool hasSurfaceMapProfile = s.Programs[m->ProgramSlot].HasSurfaceMapProfile;
         const rhi::RasterBindingResource values[]{{0, m->Parameters, 0, m->ParameterSize, {}, {}},
                                                   {1, {}, 0, 0, m->Texture, {}},
                                                   {2, {}, 0, 0, {}, m->Sampler},
                                                   {3, {}, 0, 0, m->BakeTexture, {}},
                                                   {4, {}, 0, 0, m->ShadowTexture, {}},
                                                   {5, {}, 0, 0, {}, m->ShadowSampler},
-                                                  {6, {}, 0, 0, m->ClusterView, {}},
-                                                  {7, {}, 0, 0, {}, m->ShadowSampler}};
+                                                  {6, {}, 0, 0, m->Clustered ? m->ClusterView : m->SurfaceTexture, {}},
+                                                  {7,
+                                                   {},
+                                                   0,
+                                                   0,
+                                                   hasSurfaceMapProfile ? m->SurfaceTexture : rhi::TextureViewHandle{},
+                                                   hasSurfaceMapProfile ? rhi::SamplerHandle{} : m->ShadowSampler}};
         const auto created = rhi::CreateBindingSet(s.Device,
                                                    s.Programs[m->ProgramSlot].Layout,
                                                    {values,
                                                     m->Clustered ? 8U
-                                                    : m->Lit     ? 6U
+                                                    : m->Lit     ? (hasSurfaceMapProfile ? 7U : 6U)
                                                                  : 3U},
                                                    m->Bindings);
         if (!Accepted(created))
@@ -3191,6 +3252,34 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         return Status::InvalidDescription;
     }
+    if (math::IsFinite(description.NormalScale) == false || description.NormalScale < 0 || description.NormalScale > 8)
+    {
+        return Status::InvalidDescription;
+    }
+    if (rhi::IsNull(description.SurfaceMap) == false)
+    {
+        if (p->HasSurfaceMapProfile == false)
+        {
+            return Status::Unsupported;
+        }
+        rhi::TextureDescription texture;
+        Status ready = rhi::GetTextureDescription(s.Device, description.SurfaceMap, texture);
+        if (ready != Status::Ready)
+        {
+            return ready;
+        }
+        if (texture.Format != rhi::RasterFormat::Rgba8Unorm || texture.Attachment == true ||
+            (description.Surface.Lod != -1 &&
+             (description.Surface.Lod < 0 || description.Surface.Lod > static_cast<float32>(texture.MipLevels - 1))))
+        {
+            return Status::InvalidDescription;
+        }
+        ready = rhi::GetStatus(s.Device, description.SurfaceMap);
+        if (ready != Status::Ready)
+        {
+            return ready == Status::Pending ? Status::NotReady : ready;
+        }
+    }
     const bool clustered = description.Clusters != nullptr;
     if (p->Clustered != clustered)
     {
@@ -3292,12 +3381,23 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     // Explicit vec4 packing is independently verified for every cooked target.
     struct Parameters final
     {
-        math::Vector4 Tint, UvTransform, Options, Pbr, Emission, EnvironmentIrradiance, EnvironmentRadiance, BakeScale,
-            BakeUv;
-        math::Vector4 Lights[512]{}, ShadowData[24]{};
-        math::Vector4 GridRows[3]{}, GridMinimum{}, GridScale{};
+        math::Vector4 Tint;
+        math::Vector4 UvTransform;
+        math::Vector4 Options;
+        math::Vector4 Pbr;
+        math::Vector4 Emission;
+        math::Vector4 EnvironmentIrradiance;
+        math::Vector4 EnvironmentRadiance;
+        math::Vector4 BakeScale;
+        math::Vector4 BakeUv;
+        math::Vector4 Lights[512]{};
+        math::Vector4 ShadowData[24]{};
+        math::Vector4 GridRows[3]{};
+        math::Vector4 GridMinimum{};
+        math::Vector4 GridScale{};
+        math::Vector4 SurfaceMap{};
     };
-    static_assert(sizeof(Parameters) == CLUSTER_BYTES);
+    static_assert(sizeof(Parameters) == CLUSTER_BYTES + 16);
     Parameters parameters{};
     parameters.Tint = description.Surface.Tint;
     parameters.UvTransform = description.Surface.UvTransform;
@@ -3320,6 +3420,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                                       0};
     parameters.BakeScale = {bake.Scale.X, bake.Scale.Y, bake.Scale.Z, 0};
     parameters.BakeUv = bake.UvTransform;
+    parameters.SurfaceMap = {description.NormalScale, rhi::IsNull(description.SurfaceMap) ? 0.0F : 1.0F, 0, 0};
     for (usize i = 0; i < selected.Count; ++i)
     {
         const auto& light = selected.Lights[i];
@@ -3355,7 +3456,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
             parameters.ShadowData[i * 6 + 5] = {region.Bias, static_cast<float32>(index), 1 / w, 1 / h};
         }
     }
-    uint8 legacy[LIT_BYTES]{};
+    uint8 legacy[LIT_BYTES + 16]{};
     if (clustered)
     {
         const auto& grid = *description.Clusters;
@@ -3372,11 +3473,12 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         std::memcpy(legacy, &parameters, 656);
         std::memcpy(legacy + 656, parameters.ShadowData, sizeof(parameters.ShadowData));
+        std::memcpy(legacy + LIT_BYTES, &parameters.SurfaceMap, 16);
     }
     status = CreateMaterialData(program,
                                 description.Surface,
                                 clustered ? reinterpret_cast<const uint8*>(&parameters) : legacy,
-                                clustered ? sizeof(parameters) : sizeof(legacy),
+                                (clustered ? CLUSTER_BYTES : LIT_BYTES) + (p->HasSurfaceMapProfile ? 16U : 0U),
                                 &description,
                                 output,
                                 clustered ? clusters : nullptr);
