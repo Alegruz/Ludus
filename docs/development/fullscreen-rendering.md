@@ -1523,7 +1523,9 @@ palettes in both interpolation modes, encoded index ordering, blue/alpha,
 small tail mips, array layers, a cube face and unaligned native base edges, then reads back the rendered
 pixels. It retains views after texture-owner destruction. Its patterned image
 uses 8240 texels when admitted, otherwise the actual lower enabled width, and
-2049 rows: its complete upload exceeds 64 MiB. It samples array layer 256 when enabled (otherwise the highest admitted
+up to 2049 admitted rows. Explicit row padding keeps its complete upload above
+64 MiB on lower dimension profiles; a 2048-limit WebGL regression checks this
+path and its pixels. It samples array layer 256 when enabled (otherwise the highest admitted
 layer of a reported 256-layer array) and a 512-deep volume mip chain when
 enabled, otherwise a reported lower volume depth. A WebGL browser regression
 reports a 256-texel volume limit and verifies the admitted mip chain and pixels. These prepared textures exercise the old ceilings

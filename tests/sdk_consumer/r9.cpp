@@ -197,26 +197,42 @@ bool CreateExtendedTextures() noexcept
     {
         return false;
     }
-    // Thin images exercise the reference texture's 8240 width without large CI allocations.
-    // A lower enabled device uses its admitted width and reports that result explicitly.
-    gLargeWidth = info.Profile.Formats[static_cast<usize>(rhi::RasterFormat::Rgba8Unorm)].MaxSampledDimension2D;
-    gLargeWidth = gLargeWidth < 8240 ? gLargeWidth : 8240;
-    constexpr uint32 LARGE_HEIGHT = 2049;
-    Array<uint8> large;
-    if (large.TryResize(usize{gLargeWidth} * LARGE_HEIGHT * 4) == false)
+    // Exercise the reference width when enabled. Lower dimension profiles use
+    // explicit caller-authored row padding to retain an upload above 64 MiB.
+    const uint32 dimension =
+        info.Profile.Formats[static_cast<usize>(rhi::RasterFormat::Rgba8Unorm)].MaxSampledDimension2D;
+    gLargeWidth = dimension < 8240 ? dimension : 8240;
+    const uint32 largeHeight = dimension < 2049 ? dimension : 2049;
+    if (gLargeWidth == 0 || largeHeight == 0)
     {
         return false;
     }
-    for (usize pixel = 0; pixel < large.GetSize() / 4; ++pixel)
+    constexpr usize UPLOAD_ALIGNMENT = 4;
+    constexpr usize MIN_UPLOAD_BYTES = usize{64} * 1024 * 1024 + UPLOAD_ALIGNMENT;
+    const usize minimumRowBytes = MIN_UPLOAD_BYTES / largeHeight + (MIN_UPLOAD_BYTES % largeHeight != 0 ? 1U : 0U);
+    const usize paddedRowBytes = (minimumRowBytes + UPLOAD_ALIGNMENT - 1) / UPLOAD_ALIGNMENT * UPLOAD_ALIGNMENT;
+    const usize tightRowBytes = usize{gLargeWidth} * UPLOAD_ALIGNMENT;
+    const usize rowPitch = tightRowBytes > paddedRowBytes ? tightRowBytes : paddedRowBytes;
+    Array<uint8> large;
+    if (large.TryResize(rowPitch * largeHeight) == false)
     {
-        large[pixel * 4] = static_cast<uint8>(((pixel % gLargeWidth) * 8 / gLargeWidth) * 31);
-        large[pixel * 4 + 1] = 67;
-        large[pixel * 4 + 2] = 149;
-        large[pixel * 4 + 3] = 255;
+        return false;
+    }
+    std::memset(large.GetData(), 0, large.GetSize());
+    for (usize row = 0; row < largeHeight; ++row)
+    {
+        for (usize x = 0; x < gLargeWidth; ++x)
+        {
+            const usize pixel = row * rowPitch + x * UPLOAD_ALIGNMENT;
+            large[pixel] = static_cast<uint8>((x * 8 / gLargeWidth) * 31);
+            large[pixel + 1] = 67;
+            large[pixel + 2] = 149;
+            large[pixel + 3] = 255;
+        }
     }
     if (Accepted(rhi::CreateTexture(gDevice,
-                                    { .Width = gLargeWidth, .Height = LARGE_HEIGHT },
-                                    {large, usize{gLargeWidth} * 4},
+                                    { .Width = gLargeWidth, .Height = largeHeight },
+                                    {large, rowPitch},
                                     gTextures[8])) == false)
     {
         return false;

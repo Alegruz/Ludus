@@ -333,13 +333,19 @@ try {
     report.cases.push({scenario:'r18c-webgpu',bufferBytes:67109120,storageRangeBytes:16777472,storageBindings:5,totalBindings:9,gpuValue:20});
     await context.close();
   }
-  for (const backend of ['webgpu','webgl2','auto','fallback','webgl2-volume-256']) {
+  for (const backend of ['webgpu','webgl2','auto','fallback','webgl2-volume-256','webgl2-dimension-2048']) {
     const context = await browser.newContext();
     if (backend === 'fallback') await context.addInitScript(() => Object.defineProperty(navigator,'gpu',{get:() => undefined}));
     if (backend === 'webgl2-volume-256') await context.addInitScript(() => {
       const getParameter = WebGL2RenderingContext.prototype.getParameter;
       WebGL2RenderingContext.prototype.getParameter = function(parameter) {
         return parameter === this.MAX_3D_TEXTURE_SIZE ? 256 : getParameter.call(this, parameter);
+      };
+    });
+    if (backend === 'webgl2-dimension-2048') await context.addInitScript(() => {
+      const getParameter = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+        return parameter === this.MAX_TEXTURE_SIZE ? 2048 : getParameter.call(this, parameter);
       };
     });
     const page = await context.newPage(); lastPage = page;
@@ -386,6 +392,10 @@ try {
     }
     if (backend === 'webgl2-volume-256') {
       assert.ok(report.console.some(message => message.scenario === `r9-${backend}` && message.text.includes('volume depth 256')));
+    }
+    if (backend === 'webgl2-dimension-2048') {
+      assert.ok(report.console.some(message => message.scenario === `r9-${backend}` && message.text.includes('sampled width 2048 device limit 2048')));
+      assert.ok(report.console.some(message => message.scenario === `r9-${backend}` && message.text.includes('complete upload 67117056 bytes')));
     }
     report.cases.push({scenario:`r9-${backend}`,frames:20,pixelReadbacks:20,textureLimitRequests});
     await context.close();
