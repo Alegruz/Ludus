@@ -20,8 +20,13 @@ struct RasterGlPipeline final
     GLuint Object = 0;
     GLuint Array = 0;
     internal::RasterPipelineInfo Info;
-    GLint Textures[8]{-1, -1, -1, -1, -1, -1, -1, -1};
-    uint32 Samplers[8]{};
+    GLint Textures[internal::RASTER_BINDINGS]{};
+    uint32 Samplers[internal::RASTER_BINDINGS]{};
+    RasterGlPipeline() noexcept
+    {
+        for (GLint& location : Textures)
+            location = -1;
+    }
 };
 struct RasterGlCompletion final
 {
@@ -171,7 +176,7 @@ bool RasterGlProgram(GLuint program, RasterGlPipeline& pipeline) noexcept
         GLsizei length = 0;
         glGetActiveUniformBlockName(program, static_cast<GLuint>(i), sizeof(name), &length, name);
         bool found = false;
-        for (usize binding = 0; binding < 8; ++binding)
+        for (usize binding = 0; binding < internal::RASTER_BINDINGS; ++binding)
         {
             if (std::strcmp(name, vertex.UniformBlocks[binding]) == 0 ||
                 std::strcmp(name, fragment.UniformBlocks[binding]) == 0)
@@ -207,7 +212,7 @@ bool RasterGlProgram(GLuint program, RasterGlPipeline& pipeline) noexcept
             return false;
         }
         bool found = false;
-        for (usize binding = 0; binding < 8; ++binding)
+        for (usize binding = 0; binding < internal::RASTER_BINDINGS; ++binding)
         {
             if (std::strcmp(name, vertex.TextureNames[binding]) == 0 ||
                 std::strcmp(name, fragment.TextureNames[binding]) == 0)

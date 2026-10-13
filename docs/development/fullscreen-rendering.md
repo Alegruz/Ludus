@@ -373,7 +373,7 @@ The original R1 profile:
 | Textures | RGBA8 linear or sRGB sampling, at most 4096 in each dimension or the lower enabled limit; one mip/layer/sample |
 | Uploads | Complete top-left RGBA8 rows, explicit pitch divisible by four; caller bytes consumed/copied before return; aggregate upload at most the maximum buffer size |
 | Views | Complete original-format sampled views; no reinterpretation, partial sampled range or attachment view |
-| Bindings | One group/set, at most eight unique binding numbers below eight; uniform ranges, sampled 2D textures and non-comparison samplers |
+| Bindings | One group/set, at most sixteen unique binding numbers below sixteen; physical descriptor/stage limits are separately admitted; uniform ranges, sampled 2D textures and non-comparison samplers |
 | Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride divisible by four, 4..256 on native/WebGPU and 4..252 on WebGL 2; up to the queried maximum (at most sixteen) unique float2/3/4 attributes |
 | Draw | Triangle list, Index16/Index32, zero base vertex/first instance, configured `Storage.DrawsPerFrame` (default 1024); fixed primitive-restart indices are rejected |
 | State | No culling, one color target, one sample; explicit depth comparison/write and premultiplied-alpha blend; defaults retain less-than |

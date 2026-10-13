@@ -92,7 +92,7 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     CHECK(info.Enabled.Compute);
     CHECK(info.Profile.Storage.ResourcesPerKind == 64);
     CHECK(info.Profile.Storage.HostBytes == StorageLimits{}.HostBytes);
-    CHECK(info.Profile.Interface.MaxBindings == 8);
+    CHECK(info.Profile.Interface.MaxBindings == RASTER_BINDING_COUNT);
     REQUIRE(GetFormatCapabilities(fixture.Device, RasterFormat::Rg8Unorm, format) == RasterStatus::Ready);
     CHECK(format.Uses.Filterable);
     CHECK_FALSE(format.Uses.ColorAttachment);
@@ -138,7 +138,7 @@ TEST_CASE("Required profile limits and formats fail before resource creation wit
     }
     SECTION("binding capacity")
     {
-        request.RequiredProfile.Raster.MinBindings = 9;
+        request.RequiredProfile.Raster.MinBindings = static_cast<ludus::foundation::uint32>(RASTER_BINDING_COUNT + 1);
         expected = ProfileRequirement::BindingCount;
     }
     SECTION("attachment capacity")

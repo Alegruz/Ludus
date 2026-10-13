@@ -43,12 +43,13 @@ Status PackGpuScene(const ReferenceJob& job,
                     internal::GpuPreviewUniform& uniform) noexcept
 {
     const internal::ReferenceSceneData& scene = job.Scene;
-    const uint64 nodesWide = uint64(scene.Triangles.GetSize()) * 10;
+    const uint64 nodesWide = uint64(scene.Triangles.GetSize()) * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS;
     const uint64 orderWide = nodesWide + uint64(scene.Nodes.GetSize()) * 3;
     const uint64 emittersWide = orderWide + scene.Order.GetSize();
     const uint64 surfacesWide = emittersWide + scene.Emitters.GetSize();
     const uint64 lightsWide = surfacesWide + uint64(scene.InstanceCount) * LUDUS_GPU_PREVIEW_SURFACE_WORDS;
-    const uint64 sizeWide = lightsWide + uint64(job.Description.LightCount) * LUDUS_GPU_PREVIEW_LIGHT_WORDS;
+    const uint64 environmentWide = lightsWide + uint64(job.Description.LightCount) * LUDUS_GPU_PREVIEW_LIGHT_WORDS;
+    const uint64 sizeWide = environmentWide + (job.Environment != nullptr ? 1 + job.Environment->Pixels.GetSize() : 0);
     if (sizeWide > ~uint32{0})
     {
         return Status::CapacityExceeded;
@@ -58,9 +59,12 @@ Status PackGpuScene(const ReferenceJob& job,
     const usize dataSize = math::Max(static_cast<usize>(sizeWide), usize{1});
     usize size = 0;
     Array<usize> textures;
-    const usize textureCount = scene.InstanceCount * 2;
+    const usize textureCount = scene.InstanceCount * LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE;
     const auto getImage = [&scene](usize index) noexcept -> const rhi::TextureCpuContent& {
-        return index % 2 == 0 ? scene.Instances[index / 2].Texture : scene.Instances[index / 2].SurfaceMap;
+        const internal::ReferenceInstance& instance = scene.Instances[index / LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE];
+        return index % LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE == 0   ? instance.Texture
+               : index % LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE == 1 ? instance.SurfaceMap
+                                                                     : instance.EmissionMap;
     };
     if (textureCount * sizeof(usize) > budget || textures.TryResize(textureCount) == false)
     {
@@ -111,7 +115,7 @@ Status PackGpuScene(const ReferenceJob& job,
     for (usize i = 0; i < scene.Triangles.GetSize(); ++i)
     {
         const internal::ReferenceTriangle& t = scene.Triangles[i];
-        math::Vector4* out = data.GetData() + i * 10;
+        math::Vector4* out = data.GetData() + i * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS;
         out[0] = GpuVector(t.Positions[0], GpuBits(t.Instance));
         out[1] = GpuVector(t.Positions[1], t.Area);
         out[2] = GpuVector(t.Positions[2], GpuBits(t.Primitive));
@@ -123,6 +127,11 @@ Status PackGpuScene(const ReferenceJob& job,
         out[7] = {t.Uvs[2].X, t.Uvs[2].Y, 0, 0};
         out[8] = GpuVector(t.GeometricNormal);
         out[9] = GpuVector(t.Error);
+        for (usize corner = 0; corner < 3; ++corner)
+        {
+            out[10 + corner] = t.Tangents[corner];
+            out[13 + corner] = t.Colors[corner];
+        }
     }
     for (usize i = 0; i < scene.Nodes.GetSize(); ++i)
     {
@@ -154,7 +163,7 @@ Status PackGpuScene(const ReferenceJob& job,
                              (s.Sampler.U == rhi::RasterAddress::Repeat ? 2U : 0U) |
                              (s.Sampler.V == rhi::RasterAddress::Repeat ? 4U : 0U) |
                              (instance.Texture.Format == rhi::RasterFormat::Rgba8Srgb ? 8U : 0U);
-        out[5] = {GpuBits(static_cast<uint32>(textures[i * 2])),
+        out[5] = {GpuBits(static_cast<uint32>(textures[i * LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE])),
                   GpuBits(flags),
                   GpuBits(s.Alpha == MaterialAlpha::Masked ? 1U : 0U),
                   0};
@@ -162,7 +171,14 @@ Status PackGpuScene(const ReferenceJob& job,
                   GpuBits(instance.SurfaceMap.Width),
                   GpuBits(instance.SurfaceMap.Height),
                   GpuBits(s.HasSurfaceMap ? 1U : 0U)};
-        out[7] = {GpuBits(static_cast<uint32>(textures[i * 2 + 1])), GpuBits(flags & 7U), 0, 0};
+        out[7] = {GpuBits(static_cast<uint32>(textures[i * LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE + 1])),
+                  GpuBits(flags & 7U),
+                  GpuBits(s.AreAuthoredInputsEnabled ? 1U : 0U),
+                  0};
+        out[8] = {GpuBits(static_cast<uint32>(textures[i * LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE + 2])),
+                  GpuBits((flags & 7U) | (instance.EmissionMap.Format == rhi::RasterFormat::Rgba8Srgb ? 8U : 0U)),
+                  GpuBits(instance.EmissionMap.Width),
+                  GpuBits(instance.EmissionMap.Height)};
     }
     for (usize i = 0; i < textureCount; ++i)
     {
@@ -230,6 +246,22 @@ Status PackGpuScene(const ReferenceJob& job,
     uniform.Offsets[1] = static_cast<uint32>(order);
     uniform.Offsets[2] = static_cast<uint32>(emitters);
     uniform.Offsets[3] = static_cast<uint32>(surfaces);
+    if (job.Environment != nullptr)
+    {
+        const internal::EnvironmentData& environment = *job.Environment;
+        const usize start = static_cast<usize>(environmentWide);
+        data[start] = {GpuBits(environment.Width), GpuBits(environment.Height), 0, 0};
+        for (usize pixel = 0; pixel < environment.Pixels.GetSize(); ++pixel)
+        {
+            data[start + 1 + pixel] = environment.Pixels[pixel];
+            data[start + 1 + pixel].W =
+                environment.Weight > 0
+                    ? static_cast<float32>(environment.Distribution[pixel] / environment.Weight)
+                    : static_cast<float32>(pixel + 1) / static_cast<float32>(environment.Pixels.GetSize());
+        }
+        uniform.SurfaceLayout[3] =
+            static_cast<uint32>(environmentWide) + 1; // Zero denotes absent; offset zero remains representable.
+    }
     uniform.Counts[0] = static_cast<uint32>(scene.Triangles.GetSize());
     uniform.Counts[1] = static_cast<uint32>(scene.Nodes.GetSize());
     uniform.Counts[2] = static_cast<uint32>(scene.Emitters.GetSize());

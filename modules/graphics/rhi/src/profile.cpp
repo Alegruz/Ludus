@@ -400,7 +400,7 @@ DeviceProfile QueryDeviceProfile() noexcept
     {
         return {};
     }
-    result.Interface = {8,
+    result.Interface = {static_cast<uint32>(RASTER_BINDING_COUNT),
                         2,
                         result.Raster.MaxVertexAttributes,
                         backend::RasterVertexStrideLimit(),

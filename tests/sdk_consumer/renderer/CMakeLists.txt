@@ -90,3 +90,12 @@ endif()
 if(NOT EMSCRIPTEN AND LUDUS_SPIRV_CROSS)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/reference-scene" reference-scene)
 endif()
+
+# Installed authored/HDR declarations and recipe dependencies must compile together.
+if(NOT EMSCRIPTEN)
+    add_executable(ludus_sdk_renderer_authored_consumer ../renderer_authored.cpp)
+    target_link_libraries(ludus_sdk_renderer_authored_consumer PRIVATE Ludus::GraphicsRenderer Ludus::FoundationTime)
+    target_compile_options(ludus_sdk_renderer_authored_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
+    ludus_compile_renderer_shaders(TARGET ludus_sdk_renderer_authored_consumer SHADERS
+        renderer_flat renderer_composite renderer_output renderer_shadow renderer_authored renderer_authored_shadow)
+endif()

@@ -6,6 +6,7 @@
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
+#include <ludus/graphics/renderer/environment.hpp>
 #include <ludus/graphics/renderer/materials.hpp>
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/raster.h>
@@ -158,8 +159,22 @@ struct LitMaterialDescription final
     /// Tangent normal XY strength [0,8]; zero disables perturbation, preserving
     /// roughness/metallic sampling. Degenerate UV frames preserve the mesh normal.
     ludus::foundation::float32 NormalScale = 1;
+    /// Opt-in authored tangent/color/UV profile; requires an authored shader recipe.
+    /// False preserves legacy geometry semantics. Authored normals are not regenerated.
+    bool AreAuthoredInputsEnabled = false;
+    /// Base/surface-map material UV channel, 0 or 1. Both maps share the transform.
+    /// UV1 requires AreAuthoredInputsEnabled; independently transformed maps must be cooked.
+    ludus::foundation::uint32 MaterialUvSet = 0;
+    /// Optional ready HDR map on the same device, retained during creation.
+    /// Requires an authored recipe. Its SH/prefiltered specular replace the constant
+    /// environment terms; baked diffuse still takes precedence. Null uses constants.
+    const EnvironmentMap* Environment = nullptr;
     /// Linear surface emission in [0,10000]; does not create a scene light.
     ludus::foundation::math::Vector3 Emission{};
+    /// Optional ready RGBA8 linear/sRGB RGB multiplier for Emission; alpha ignored.
+    /// Authored recipes only. Shares the selected material UV transform and sampler.
+    /// Creation retains its exact view; reference requires CPU bytes at TextureMip.
+    rhi::TextureHandle EmissionMap{};
     /// Constant diffuse irradiance in [0,10000], used when a baked chart is absent/invalid.
     ludus::foundation::math::Vector3 EnvironmentIrradiance{};
     /// Constant filtered environment radiance in [0,10000]; single-scatter Fresnel approximation.

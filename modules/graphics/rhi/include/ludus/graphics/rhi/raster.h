@@ -11,6 +11,9 @@
 
 namespace ludus::graphics::rhi
 {
+/// Portable group-zero binding slots. Stage descriptor limits are separately negotiated.
+inline constexpr ludus::foundation::usize RASTER_BINDING_COUNT = 16;
+
 namespace internal
 {
 /// Private access to portable resource identities; not an application API.
@@ -408,8 +411,8 @@ struct RasterBinding final
 /// offset with checked arithmetic; the bound Size remains unchanged. Owner-thread only.
 struct RasterBindingOffsets final
 {
-    /// Additional byte offset for each of the eight portable binding numbers.
-    ludus::foundation::uint32 Bytes[8]{};
+    /// Additional byte offset for each portable binding number.
+    ludus::foundation::uint32 Bytes[RASTER_BINDING_COUNT]{};
 };
 /// Portable float vertex attribute width.
 enum class RasterVertexFormat : ludus::foundation::uint8
@@ -473,12 +476,12 @@ struct RasterShaderDescription final
     /// Binding requirements for this stage; copied before return.
     std::span<const RasterBinding> Bindings;
     /// GLSL ES uniform block names, indexed by binding number; empty for other kinds.
-    std::string_view UniformBlocks[8]{};
+    std::string_view UniformBlocks[RASTER_BINDING_COUNT]{};
     /// Combined GLSL ES sampled-uniform names, indexed by texture binding number.
-    std::string_view TextureNames[8]{};
+    std::string_view TextureNames[RASTER_BINDING_COUNT]{};
     /// Sampler binding paired with each GLSL ES texture; ~uint32{0} denotes an unfiltered depth/stencil load.
     /// Cooked browser descriptions retain this metadata for target selection.
-    ludus::foundation::uint32 TextureSamplers[8]{};
+    ludus::foundation::uint32 TextureSamplers[RASTER_BINDING_COUNT]{};
     /// Independently reflected local dimensions for Compute; ignored for raster.
     /// Positive dimensions/product must fit the negotiated compute limits.
     ludus::foundation::uint32 WorkgroupSize[3]{1, 1, 1};

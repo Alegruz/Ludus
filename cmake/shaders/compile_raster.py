@@ -38,6 +38,10 @@ def external_text_source(namespace, label, data):
     return declaration, definition
 
 
+# Must match rhi::RASTER_BINDING_COUNT; covered by shader-tool regression tests.
+RASTER_BINDING_COUNT = 16
+
+
 def raster_interface(document, stage, metal=False, native_arrays=False):
     points = [x for x in document['entryPoints'] if x['stage'] == stage]
     if len(points) != 1:
@@ -61,7 +65,7 @@ def raster_interface(document, stage, metal=False, native_arrays=False):
         if len(descriptors) != 1 or descriptors[0].get('space', 0) != 0:
             raise RuntimeError('Raster resources require one descriptor in group/set zero')
         index = descriptors[0]['index']
-        if not 0 <= index < 8 or any(e['binding'] == index for e in entries):
+        if not 0 <= index < RASTER_BINDING_COUNT or any(e['binding'] == index for e in entries):
             raise RuntimeError('Raster binding is duplicated or outside the bounded profile')
         resource_type = resource['type']
         count = 1
@@ -681,7 +685,7 @@ def compile_raster(args, lock):
                 a, b = interfaces[('wgsl', stage)], interfaces[('glsl', stage)]
                 if [(x['binding'], x['kind'], x['size'], x.get('offsets')) for x in a['entries']] != [(x['binding'], x['kind'], x['size'], x.get('offsets')) for x in b['entries']] or a['inputs'] != b['inputs']:
                     raise RuntimeError('Browser raster uniform/layout packing differs between WGSL and GLSL ES')
-                header += ' for (foundation::usize i = 0; i < 8; ++i) { result.UniformBlocks[i] = glsl.UniformBlocks[i]; result.TextureNames[i] = glsl.TextureNames[i]; result.TextureSamplers[i] = glsl.TextureSamplers[i]; }\n'
+                header += ' for (foundation::usize i = 0; i < graphics::rhi::RASTER_BINDING_COUNT; ++i) { result.UniformBlocks[i] = glsl.UniformBlocks[i]; result.TextureNames[i] = glsl.TextureNames[i]; result.TextureSamplers[i] = glsl.TextureSamplers[i]; }\n'
             header += f' return result;\n#else\n return Spirv{stage.title()}();\n#endif\n}}\n'
     header += '}\n'
     manifest = {'compiler': lock['slang'], 'commands': commands, 'interfaces': {backend + '_' + stage: info for (backend, stage), info in interfaces.items()},

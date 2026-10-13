@@ -10,6 +10,18 @@ sys.path.insert(0,str(ROOT/'cmake/shaders'))
 from compile_raster import spirv_array_indexing, verify_native_metal_arrays, raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type, external_text_source
 
 class RasterReflectionTests(unittest.TestCase):
+    def test_binding_slot_limit_matches_the_public_rhi_contract(self):
+        import re
+        from compile_raster import RASTER_BINDING_COUNT
+        source = (ROOT/'modules/graphics/rhi/include/ludus/graphics/rhi/raster.h').read_text()
+        match = re.search(r'RASTER_BINDING_COUNT\s*=\s*(\d+)', source)
+        self.assertIsNotNone(match)
+        self.assertEqual(RASTER_BINDING_COUNT, int(match.group(1)))
+        document = self.fixture()
+        document['parameters'][0]['binding']['index'] = RASTER_BINDING_COUNT - 1
+        result = raster_interface(document, 'fragment')
+        self.assertEqual(result['entries'][0]['binding'], RASTER_BINDING_COUNT - 1)
+
     def test_external_large_shader_preserves_exact_utf8_and_terminator(self):
         import re
         text = "// café\n" + "void Compute() {}\n" * 5000
@@ -151,7 +163,7 @@ class RasterReflectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'compile stages separately'):raster_interface(data,'fragment')
     def test_stage_usage_and_descriptor_identity(self):
         data=self.fixture();self.assertEqual(raster_interface(data,'fragment')['entries'][0]['offsets'],{'color':0})
-        for change in ({'space':1},{'index':8}):
+        for change in ({'space':1},{'index':16}):
             invalid=copy.deepcopy(data);invalid['parameters'][0]['binding'].update(change)
             with self.assertRaises(RuntimeError):raster_interface(invalid,'fragment')
         data['entryPoints'][0]['bindings'][0]['binding']['used']=0

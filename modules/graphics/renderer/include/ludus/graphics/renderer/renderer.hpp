@@ -100,6 +100,17 @@ struct MeshDescription final
     const ludus::foundation::math::Vector3* Normals = nullptr;
     /// Optional finite bake-chart UVs, exactly VertexCount records; null uses Texcoords.
     const ludus::foundation::math::Vector2* BakeTexcoords = nullptr;
+    /// Optional authored tangent XYZ and handedness W (+1/-1), one per vertex.
+    /// Requires normals; finite nonzero XYZ is normalized/orthogonalized on copy.
+    /// W=0 explicitly marks an unavailable vertex tangent and selects UV fallback.
+    /// Null keeps the UV-derived frame. Mirrored object transforms adjust handedness.
+    const ludus::foundation::math::Vector4* Tangents = nullptr;
+    /// Optional linear RGBA multiplier [0,1], one per vertex; null supplies white.
+    /// Used by authored material programs, including alpha acceptance.
+    const ludus::foundation::math::Vector4* Colors = nullptr;
+    /// Optional second material UV set, one per vertex; null copies Texcoords.
+    /// Independent of BakeTexcoords; authored material programs select UV0 or UV1.
+    const ludus::foundation::math::Vector2* MaterialTexcoords1 = nullptr;
 };
 /// Ordinary scene values; renderer has no ECS, gameplay camera or UI dependency.
 struct SceneItem final
@@ -325,7 +336,7 @@ public:
     /// overlay items are excluded. No
     /// baked/atlas lighting, transmission or deformation. Target <=4096, depth <=8,
     /// pixel count <=2^24; negotiated storage limits can be tighter.
-    /// Emissive triangles and constant environment only; analytic lights reject.
+    /// RGB emissive triangles, up to 128 analytic lights and constant/HDR environment.
     /// Ready/Pending publish ownership into a null output; rejection preserves it. All caller
     /// owners may detach after success. Changing camera/content/exposure creates a
     /// new job and restarts accumulation. Setup can allocate/upload; never shades.

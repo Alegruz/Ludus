@@ -17,12 +17,13 @@ using internal::ReferenceStage;
 using internal::ReferenceTriangle;
 // Padding-free fingerprint schema: binary32/u32 = 4 bytes, u64 = 8 bytes.
 // Triangle: positions/normals, UVs, geometric normal/error, area and two IDs.
-// Instance: source ID, row pitch/hash, 14 scalars and seven enum/image words.
+// Instance: source ID, color/emission pitches and hashes, 14 scalars, 13 enum/image words.
 // Map extension: pitch/hash, normal strength, tag/format/dimensions/reserved.
 // Light: source ID/kind, RGB/intensity, position/direction/range/cone scalars.
 constexpr usize FINGERPRINT_TRIANGLE_BYTES = sizeof(float32) * 3 * 3 * 2 + sizeof(float32) * 3 * 2 +
-                                             sizeof(float32) * 2 * 3 + sizeof(float32) + 2 * sizeof(uint32);
-constexpr usize FINGERPRINT_INSTANCE_BYTES = 4 * sizeof(uint64) + 14 * sizeof(float32) + 7 * sizeof(uint32);
+                                             sizeof(float32) * 2 * 3 + sizeof(float32) + 2 * sizeof(uint32) +
+                                             sizeof(float32) * 3 * 2 * 4;
+constexpr usize FINGERPRINT_INSTANCE_BYTES = 7 * sizeof(uint64) + 14 * sizeof(float32) + 13 * sizeof(uint32);
 constexpr usize FINGERPRINT_SURFACE_MAP_BYTES = 3 * sizeof(uint64) + sizeof(float32) + 5 * sizeof(uint32);
 constexpr usize FINGERPRINT_LIGHT_BYTES = sizeof(uint64) + sizeof(uint32) + 13 * sizeof(float32);
 constexpr usize FINGERPRINT_ENVIRONMENT_BYTES = 3 * sizeof(float32);
@@ -42,7 +43,8 @@ bool SameReferenceIntegral(const ReferenceJob& a,
     if (d.WorldToClip != b.WorldToClip || d.CameraPosition != b.CameraPosition ||
         d.OrthographicCamera != b.OrthographicCamera || d.ReverseZ != b.ReverseZ || d.InfiniteFar != b.InfiniteFar ||
         d.Width != b.Width || d.Height != b.Height || d.MaxDepth != b.MaxDepth || d.RouletteDepth != b.RouletteDepth ||
-        d.SecondaryDistance != b.SecondaryDistance || d.Environment != b.Environment || d.TextureMip != b.TextureMip ||
+        d.SecondaryDistance != b.SecondaryDistance || d.Environment != b.Environment ||
+        a.Environment != Access::GetEnvironment(b.EnvironmentTexture) || d.TextureMip != b.TextureMip ||
         d.Seed != b.Seed || d.CenterRays != b.CenterRays || d.LightCount != lights.Count)
     {
         return false;
@@ -87,7 +89,8 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
     // Hashes are diagnostics; exact retained identities/parameters control resets.
     const usize triangleBytes = job.Scene.Triangles.GetSize() * FINGERPRINT_TRIANGLE_BYTES;
     usize bytes = triangleBytes + job.Scene.InstanceCount * FINGERPRINT_INSTANCE_BYTES +
-                  job.Description.LightCount * FINGERPRINT_LIGHT_BYTES + FINGERPRINT_ENVIRONMENT_BYTES;
+                  job.Description.LightCount * FINGERPRINT_LIGHT_BYTES + FINGERPRINT_ENVIRONMENT_BYTES +
+                  (job.Environment != nullptr ? 2 * sizeof(uint64) + 2 * sizeof(uint32) : 0);
     for (usize i = 0; i < job.Scene.InstanceCount; ++i)
     {
         if (job.Scene.Instances[i].Surface->HasSurfaceMap)
@@ -138,6 +141,13 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         scalar(triangle.Area);
         word(triangle.Instance);
         word(triangle.Primitive);
+        for (usize corner = 0; corner < 3; ++corner)
+        {
+            vector({triangle.Tangents[corner].X, triangle.Tangents[corner].Y, triangle.Tangents[corner].Z});
+            scalar(triangle.Tangents[corner].W);
+            vector({triangle.Colors[corner].X, triangle.Colors[corner].Y, triangle.Colors[corner].Z});
+            scalar(triangle.Colors[corner].W);
+        }
     }
     for (usize i = 0; i < job.Scene.InstanceCount; ++i)
     {
@@ -156,6 +166,20 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         scalar(surface.UvTransform.W);
         scalar(surface.AlphaCutoff);
         word(static_cast<uint32>(surface.Alpha));
+        word(surface.AreAuthoredInputsEnabled ? 1U : 0U);
+        word(surface.MaterialUvSet);
+        word(surface.HasEmissionMap ? 1U : 0U);
+        word(instance.EmissionMap.Width);
+        word(instance.EmissionMap.Height);
+        word(static_cast<uint32>(instance.EmissionMap.Format));
+        Put64(stream.GetData() + offset, instance.EmissionMap.RowPitch);
+        offset += sizeof(uint64);
+        const foundation::Fingerprint128 emissionFingerprint =
+            foundation::StableFingerprint128({instance.EmissionMap.Bytes, instance.EmissionMap.Size});
+        Put64(stream.GetData() + offset, emissionFingerprint.Low);
+        offset += sizeof(uint64);
+        Put64(stream.GetData() + offset, emissionFingerprint.High);
+        offset += sizeof(uint64);
         word(static_cast<uint32>(surface.Sampler.Filter));
         word(static_cast<uint32>(surface.Sampler.U));
         word(static_cast<uint32>(surface.Sampler.V));
@@ -203,6 +227,15 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         scalar(light.OuterCos);
     }
     vector(job.Description.Environment);
+    if (job.Environment != nullptr)
+    {
+        Put64(stream.GetData() + offset, job.Environment->FingerprintLow);
+        offset += sizeof(uint64);
+        Put64(stream.GetData() + offset, job.Environment->FingerprintHigh);
+        offset += sizeof(uint64);
+        word(job.Environment->Width);
+        word(job.Environment->Height);
+    }
     if (offset != bytes)
     {
         return false;
@@ -251,7 +284,7 @@ Status Renderer::State::PrepareReferenceMesh(const MeshDescription& input,
             return Status::Unsupported;
         }
     }
-    const auto bytesPerVertex = sizeof(math::Vector3) * 2 + sizeof(math::Vector2);
+    const usize bytesPerVertex = sizeof(math::Vector3) * 2 + sizeof(math::Vector2) * 2 + sizeof(math::Vector4) * 2;
     const auto remaining = Reference->Options.CpuByteBudget - Reference->CpuBytes;
     if (input.VertexCount > remaining / bytesPerVertex)
     {
@@ -271,7 +304,10 @@ Status Renderer::State::PrepareReferenceMesh(const MeshDescription& input,
     core::UniquePtr<internal::ReferenceMeshData> data(allocation);
     data->Device = Device;
     if (!data->Positions.TryResize(input.VertexCount) || !data->Normals.TryResize(input.VertexCount) ||
-        !data->Uvs.TryResize(input.VertexCount) || !data->Indices.TryAddRange({input.Indices, input.IndexCount}))
+        data->MaterialUvs1.TryResize(input.VertexCount) == false ||
+        data->Tangents.TryResize(input.VertexCount) == false || data->Colors.TryResize(input.VertexCount) == false ||
+        data->Uvs.TryResize(input.VertexCount) == false ||
+        data->Indices.TryAddRange({input.Indices, input.IndexCount}) == false)
     {
         return Status::OutOfMemory;
     }
@@ -280,6 +316,9 @@ Status Renderer::State::PrepareReferenceMesh(const MeshDescription& input,
         data->Positions[i] = vertices[i].Position;
         data->Normals[i] = vertices[i].Normal;
         data->Uvs[i] = vertices[i].Uv;
+        data->MaterialUvs1[i] = vertices[i].MaterialUv1;
+        data->Tangents[i] = vertices[i].Tangent;
+        data->Colors[i] = vertices[i].Color;
     }
     data->CpuBytes = sizeof(internal::ReferenceMeshData) + vertexBytes + input.IndexCount * sizeof(uint32);
     data->NativeStatus = Status::Ready;
@@ -338,6 +377,9 @@ Status Renderer::State::PrepareReferenceSurface(const MaterialDescription& surfa
     data->Emission = lighting->Emission;
     data->HasTexture = !rhi::IsNull(surface.Texture);
     data->HasSurfaceMap = rhi::IsNull(lighting->SurfaceMap) == false;
+    data->HasEmissionMap = rhi::IsNull(lighting->EmissionMap) == false;
+    data->AreAuthoredInputsEnabled = lighting->AreAuthoredInputsEnabled;
+    data->MaterialUvSet = lighting->MaterialUvSet;
     data->NormalScale = lighting->NormalScale;
     output.Reset(data);
     return Status::Ready;
@@ -478,6 +520,19 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
     {
         return status;
     }
+    internal::EnvironmentData* environment = Access::GetEnvironment(description.EnvironmentTexture);
+    if (description.EnvironmentTexture != nullptr)
+    {
+        if (environment == nullptr || rhi::GetStatus(Device, environment->Texture) == Status::InvalidHandle)
+        {
+            return Status::InvalidDescription;
+        }
+        const Status ready = description.EnvironmentTexture->GetStatus();
+        if (ready != Status::Ready)
+        {
+            return ready == Status::Pending ? Status::NotReady : ready;
+        }
+    }
     const auto& snapshot = SnapshotRecords[snapshotSlot];
     usize triangles = 0;
     usize instances = 0;
@@ -495,6 +550,12 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
             !Materials[item.MaterialSlot].Reference || !MeshRecords[item.MeshSlot].Reference)
         {
             return Status::Unsupported;
+        }
+        if (Reference->Options.Traversal == ReferenceTraversal::NativeQueries && gpuSetup == false &&
+            Materials[item.MaterialSlot].Reference->AreAuthoredInputsEnabled &&
+            Materials[item.MaterialSlot].Reference->Alpha == MaterialAlpha::Masked)
+        {
+            return Status::Unsupported; // Native opacity has no authored per-vertex alpha/UV routing yet.
         }
         const auto& transform = item.Input.Transform;
         for (auto column : transform.Columns)
@@ -567,10 +628,10 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         uint64(pixels) * sizeof(internal::ReferenceAccumulator) + uint64(tile) * sizeof(internal::ReferencePath) +
         uint64(tile) * 2 * (sizeof(rhi::RayInput) + sizeof(rhi::RayResult)) +
         uint64(triangles) * sizeof(ReferenceTriangle) + bvhBytes + uint64(emitters) * sizeof(uint32);
-    const uint64 signatureBytes = uint64(triangles) * FINGERPRINT_TRIANGLE_BYTES +
-                                  uint64(instances) * FINGERPRINT_INSTANCE_BYTES +
-                                  uint64(surfaceMaps) * FINGERPRINT_SURFACE_MAP_BYTES +
-                                  uint64(lights.Count) * FINGERPRINT_LIGHT_BYTES + FINGERPRINT_ENVIRONMENT_BYTES;
+    const uint64 signatureBytes =
+        uint64(triangles) * FINGERPRINT_TRIANGLE_BYTES + uint64(instances) * FINGERPRINT_INSTANCE_BYTES +
+        uint64(surfaceMaps) * FINGERPRINT_SURFACE_MAP_BYTES + uint64(lights.Count) * FINGERPRINT_LIGHT_BYTES +
+        FINGERPRINT_ENVIRONMENT_BYTES + (environment != nullptr ? 2 * sizeof(uint64) + 2 * sizeof(uint32) : 0);
     const uint64 nativeSetup =
         oracle ? 0
                : uint64(instances) * (sizeof(rhi::RayInstanceDescription) + sizeof(Array<float32>)) +
@@ -595,8 +656,11 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         return Status::OutOfMemory;
     }
     core::UniquePtr<ReferenceJob> job(allocation);
+    job->Environment = environment;
+    internal::RetainEnvironment(environment);
     job->Device = Device;
     job->Description = description;
+    job->Description.EnvironmentTexture = nullptr;
     job->Description.Lights = job->Lights;
     job->Description.LightCount = lights.Count;
     for (usize i = 0; i < lights.Count; ++i)
@@ -649,6 +713,17 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
                 return status;
             }
         }
+        if (instance.Surface->HasEmissionMap)
+        {
+            status = rhi::GetTextureCpuContent(Device,
+                                               material.EmissionTexture,
+                                               description.TextureMip,
+                                               instance.EmissionMap);
+            if (status != Status::Ready)
+            {
+                return status;
+            }
+        }
         math::Matrix3 normalMatrix;
         if (math::TryNormalMatrix(item.Input.Transform, {}, normalMatrix) != math::MathStatus::Success)
         {
@@ -664,7 +739,20 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
                 const auto vertex = mesh.Indices[primitive * 3 + corner];
                 triangle.Positions[corner] = math::TransformPoint(item.Input.Transform, mesh.Positions[vertex]);
                 triangle.Normals[corner] = internal::ReferenceNormalize(normalMatrix * mesh.Normals[vertex]);
-                triangle.Uvs[corner] = mesh.Uvs[vertex];
+                triangle.Uvs[corner] =
+                    instance.Surface->MaterialUvSet == 1 ? mesh.MaterialUvs1[vertex] : mesh.Uvs[vertex];
+                const math::Vector4 tangent = mesh.Tangents[vertex];
+                const math::Vector3 tangentWorld =
+                    math::TransformVector(item.Input.Transform, {tangent.X, tangent.Y, tangent.Z});
+                const float32 determinant =
+                    math::Dot(item.Input.Transform.Columns[0],
+                              math::Cross(item.Input.Transform.Columns[1], item.Input.Transform.Columns[2]));
+                triangle.Tangents[corner] = {tangentWorld.X,
+                                             tangentWorld.Y,
+                                             tangentWorld.Z,
+                                             tangent.W * (determinant < 0 ? -1.0F : 1.0F)};
+                triangle.Colors[corner] =
+                    instance.Surface->AreAuthoredInputsEnabled ? mesh.Colors[vertex] : math::Vector4{1, 1, 1, 1};
                 const auto p = triangle.Positions[corner];
                 if (!math::IsFinite(p) || math::Abs(p.X) > 1000000 || math::Abs(p.Y) > 1000000 ||
                     math::Abs(p.Z) > 1000000)
