@@ -35,6 +35,25 @@ bool Accepted(rhi::RasterStatus s) noexcept
 }
 #endif
 } // namespace
+// A generation stays alive until Qt releases every display-image lease. The
+// viewport must retire before its renderer and externally owned textures.
+struct RenderPreview::GpuResources final
+{
+    rhi::DeviceHandle Device{};
+    rr::Renderer Renderer;
+    rr::RasterViewport Viewport;
+    rhi::TextureHandle Textures[8]{};
+    uint32 ExternalLeases = 0;
+    ~GpuResources() noexcept
+    {
+        Viewport.Reset();
+        Renderer.Reset();
+        for (rhi::TextureHandle& texture : Textures)
+        {
+            static_cast<void>(rhi::Destroy(Device, texture));
+        }
+    }
+};
 struct RenderPreview::Residency final
 {
     QSharedPointer<resources::SceneDefinition> Definition;
@@ -196,17 +215,17 @@ bool RenderPreview::SetScene(const RenderScene& scene)
     }
     if (mHasPendingFrame == true)
     {
-        static_cast<void>(mViewport.Release(mPendingFrame));
+        static_cast<void>(mResources->Viewport.Release(mPendingFrame));
         mHasPendingFrame = false;
     }
     Frames_ = 0;
     if (OwnsDevice_)
     {
-        if (sameResources && Phase_ >= 5)
+        if (sameResources == true && Phase_ >= 5 && mHasPreparationFailed == false)
         {
             if (!sameGeometry)
             {
-                (void)Renderer_.Release(Snapshot_);
+                (void)mResources->Renderer.Release(Snapshot_);
                 Phase_ = 4;
             }
             ViewDirty_ = true;
@@ -221,19 +240,48 @@ bool RenderPreview::SetScene(const RenderScene& scene)
 }
 void RenderPreview::restartResources() noexcept
 {
-    resetFrames();
-    LightingInitialized_ = false;
-    Renderer_.Reset();
-    for (auto& texture : Textures_)
+    mNeedsResourceRestart = true;
+    mHasPreparationFailed = false;
+    Timer_.start();
+}
+bool RenderPreview::beginResourceRestart() noexcept
+{
+    // Bound staging to two generations. If Qt still samples both, keep the
+    // latest requested scene/mode queued until the oldest consumer retires.
+    if (mRetiredResources.Get() != nullptr && mResources.Get() != nullptr && mResources->ExternalLeases != 0)
     {
-        (void)rhi::Destroy(Device_, texture);
-        texture = {};
+        return false;
     }
-    for (auto& mesh : Meshes_)
+    foundation::UniquePtr<GpuResources> candidate;
+    candidate.Reset(new (std::nothrow) GpuResources);
+    if (candidate.Get() == nullptr)
+    {
+        fail(QStringLiteral("GPU preview staging allocation failed. Previous view retained."));
+        return false;
+    }
+    candidate->Device = Device_;
+    if (mHasPendingFrame == true)
+    {
+        static_cast<void>(mResources->Viewport.Release(mPendingFrame));
+    }
+    mPendingFrame = {};
+    mPendingImage = {};
+    mHasPendingFrame = false;
+    if (mResources.Get() != nullptr && mResources->ExternalLeases != 0)
+    {
+        mRetiredResources.Swap(mResources);
+    }
+    mResources.Swap(candidate);
+    mHasViewport = false;
+    mProducer = {};
+    mIsAwaitingProducer = false;
+    mNeedsResourceRestart = false;
+    LightingInitialized_ = false;
+    for (rr::Mesh& mesh : Meshes_)
     {
         mesh = {};
     }
-    for (auto& material : Materials_)
+    for (rr::MaterialVersion& material : Materials_)
     {
         material = {};
     }
@@ -241,8 +289,10 @@ void RenderPreview::restartResources() noexcept
     Snapshot_ = {};
     Report_ = {};
     Phase_ = 0;
+    Frames_ = 0;
     AssetsCreated_ = false;
     ViewDirty_ = true;
+    return true;
 }
 bool RenderPreview::Start()
 {
@@ -321,7 +371,8 @@ void RenderPreview::Stop() noexcept
     if (OwnsDevice_)
     {
         resetFrames();
-        restartResources();
+        mResources.Reset();
+        mRetiredResources.Reset();
         (void)rhi::DestroyDevice(Device_);
     }
     OwnsDevice_ = false;
@@ -484,13 +535,17 @@ void RenderPreview::resetFrames() noexcept
     Q_EMIT ResettingFrames();
     if (mHasPendingFrame == true)
     {
-        static_cast<void>(mViewport.Release(mPendingFrame));
+        static_cast<void>(mResources->Viewport.Release(mPendingFrame));
     }
     mPendingFrame = {};
     mPendingImage = {};
     mHasPendingFrame = false;
     mHasFrame = false;
-    mViewport.Reset();
+    if (mResources.Get() != nullptr)
+    {
+        mResources->Viewport.Reset();
+    }
+    mRetiredResources.Reset();
     mHasViewport = false;
     mProducer = {};
     mIsAwaitingProducer = false;
@@ -501,6 +556,7 @@ bool RenderPreview::TakeFrame(rr::ViewportFrame& outFrame, rr::ViewportImage& ou
     {
         return false;
     }
+    ++mResources->ExternalLeases;
     outFrame = mPendingFrame;
     outImage = mPendingImage;
     mPendingFrame = {};
@@ -510,7 +566,21 @@ bool RenderPreview::TakeFrame(rr::ViewportFrame& outFrame, rr::ViewportImage& ou
 }
 void RenderPreview::ReleaseFrame(rr::ViewportFrame& inoutFrame) noexcept
 {
-    static_cast<void>(mViewport.Release(inoutFrame));
+    if (mResources.Get() != nullptr && mResources->Viewport.Release(inoutFrame) == rhi::RasterStatus::Ready)
+    {
+        LUDUS_REQUIRE(mResources->ExternalLeases != 0);
+        --mResources->ExternalLeases;
+    }
+    else if (mRetiredResources.Get() != nullptr &&
+             mRetiredResources->Viewport.Release(inoutFrame) == rhi::RasterStatus::Ready)
+    {
+        LUDUS_REQUIRE(mRetiredResources->ExternalLeases != 0);
+        --mRetiredResources->ExternalLeases;
+        if (mRetiredResources->ExternalLeases == 0)
+        {
+            mRetiredResources.Reset();
+        }
+    }
 }
 rhi::RasterStatus RenderPreview::PinDevice(rhi::NativeDeviceLease& outLease) noexcept
 {
@@ -518,7 +588,17 @@ rhi::RasterStatus RenderPreview::PinDevice(rhi::NativeDeviceLease& outLease) noe
 }
 void RenderPreview::fail(const QString& message)
 {
-    Stop();
+    if ((mRetiredResources.Get() != nullptr && mRetiredResources->ExternalLeases != 0) ||
+        (mResources.Get() != nullptr && mResources->ExternalLeases != 0))
+    {
+        Timer_.stop();
+        mHasPreparationFailed = true;
+        mNeedsResourceRestart = false;
+    }
+    else
+    {
+        Stop();
+    }
     Status_ = message;
     Q_EMIT Changed();
     Q_EMIT Failed(message);
@@ -536,35 +616,36 @@ bool RenderPreview::prepare()
     };
     if (Phase_ == 0)
     {
-        return advance(Renderer_.Initialize(Device_,
-                                            ludus::shaders::renderer_flat::Vertex(),
-                                            ludus::shaders::renderer_flat::Fragment()));
+        return advance(mResources->Renderer.Initialize(Device_,
+                                                       ludus::shaders::renderer_flat::Vertex(),
+                                                       ludus::shaders::renderer_flat::Fragment()));
     }
     if (Phase_ == 1)
     {
-        const auto s = Renderer_.Poll();
+        const rhi::RasterStatus s = mResources->Renderer.Poll();
         return s == rhi::RasterStatus::Pending ||
                (s == rhi::RasterStatus::Ready &&
-                advance(Renderer_.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
-                                                  ludus::shaders::renderer_composite::Fragment())));
+                advance(mResources->Renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                                             ludus::shaders::renderer_composite::Fragment())));
     }
     if (Phase_ == 2)
     {
-        const auto s = Renderer_.PollViews();
+        const rhi::RasterStatus s = mResources->Renderer.PollViews();
         if (s == rhi::RasterStatus::Ready)
         {
             if (!LightingInitialized_)
             {
-                const auto lighting = Renderer_.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
-                                                                   ludus::shaders::renderer_output::Fragment(),
-                                                                   ludus::shaders::renderer_shadow::Fragment());
+                const rhi::RasterStatus lighting =
+                    mResources->Renderer.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
+                                                            ludus::shaders::renderer_output::Fragment(),
+                                                            ludus::shaders::renderer_shadow::Fragment());
                 if (!Accepted(lighting))
                 {
                     return false;
                 }
                 LightingInitialized_ = true;
             }
-            const auto lighting = Renderer_.PollLighting();
+            const rhi::RasterStatus lighting = mResources->Renderer.PollLighting();
             if (lighting == rhi::RasterStatus::Pending)
             {
                 return true;
@@ -573,24 +654,25 @@ bool RenderPreview::prepare()
             {
                 return false;
             }
-            return advance(usesLitMaterials() == true
-                               ? Renderer_.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
+            return advance(
+                usesLitMaterials() == true
+                    ? mResources->Renderer.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
                                                              ludus::shaders::renderer_lit::Fragment(),
                                                              ludus::shaders::renderer_lit_shadow::Fragment(),
                                                              Program_)
-                               : Renderer_.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
+                    : mResources->Renderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
                                                                   ludus::shaders::renderer_material::Fragment(),
                                                                   Program_));
         }
         return s == rhi::RasterStatus::Pending ||
                (s == rhi::RasterStatus::Ready &&
-                advance(Renderer_.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
-                                                         ludus::shaders::renderer_material::Fragment(),
-                                                         Program_)));
+                advance(mResources->Renderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
+                                                                    ludus::shaders::renderer_material::Fragment(),
+                                                                    Program_)));
     }
     if (Phase_ == 3)
     {
-        const auto programStatus = Renderer_.GetStatus(Program_);
+        const rhi::RasterStatus programStatus = mResources->Renderer.GetStatus(Program_);
         if (programStatus == rhi::RasterStatus::Pending)
         {
             return true;
@@ -624,7 +706,7 @@ bool RenderPreview::prepare()
                     description.Texcoords = mesh.Uvs.constData();
                     description.Normals = mesh.Normals.isEmpty() ? nullptr : mesh.Normals.constData();
                 }
-                if (!Accepted(Renderer_.CreateMesh(description, Meshes_[i])))
+                if (Accepted(mResources->Renderer.CreateMesh(description, Meshes_[i])) == false)
                 {
                     return false;
                 }
@@ -644,7 +726,7 @@ bool RenderPreview::prepare()
                                                .Bytes = {image.constBits(), static_cast<usize>(image.sizeInBytes())},
                                                .RowPitch = static_cast<usize>(image.bytesPerLine()),
                                            },
-                                           Textures_[i])))
+                                           mResources->Textures[i])))
                 {
                     return false;
                 }
@@ -653,7 +735,7 @@ bool RenderPreview::prepare()
         }
         for (int32 i = 0; i < Scene_.Meshes.size(); ++i)
         {
-            const auto s = Renderer_.GetStatus(Meshes_[i]);
+            const rhi::RasterStatus s = mResources->Renderer.GetStatus(Meshes_[i]);
             if (!Accepted(s))
             {
                 return false;
@@ -665,7 +747,7 @@ bool RenderPreview::prepare()
         }
         for (int32 i = 0; i < Scene_.Textures.size(); ++i)
         {
-            const auto s = rhi::GetStatus(Device_, Textures_[i]);
+            const rhi::RasterStatus s = rhi::GetStatus(Device_, mResources->Textures[i]);
             if (!Accepted(s))
             {
                 return false;
@@ -681,7 +763,7 @@ bool RenderPreview::prepare()
             rr::MaterialDescription description;
             if (surface.Texture >= 0)
             {
-                description.Texture = Textures_[surface.Texture];
+                description.Texture = mResources->Textures[surface.Texture];
             }
             description.Tint = surface.Tint;
             if (mShading == PreviewShading::Solid)
@@ -716,8 +798,8 @@ bool RenderPreview::prepare()
             }
             rr::LightSelection selection;
             if (Accepted(usesLitMaterials() == true
-                             ? Renderer_.CreateLitMaterial(Program_, lit, Materials_[i], selection)
-                             : Renderer_.CreateMaterial(Program_, description, Materials_[i])) == false)
+                             ? mResources->Renderer.CreateLitMaterial(Program_, lit, Materials_[i], selection)
+                             : mResources->Renderer.CreateMaterial(Program_, description, Materials_[i])) == false)
             {
                 return false;
             }
@@ -738,7 +820,7 @@ bool RenderPreview::prepare()
             item.SourceId = static_cast<uint64>(i) + 1;
             if (Scene_.Lit || object.Texture >= 0)
             {
-                const auto s = Renderer_.GetStatus(Materials_[object.Surface]);
+                const rhi::RasterStatus s = mResources->Renderer.GetStatus(Materials_[object.Surface]);
                 if (!Accepted(s))
                 {
                     return false;
@@ -750,7 +832,9 @@ bool RenderPreview::prepare()
                 item.Surface = Materials_[object.Surface];
             }
         }
-        if (!Accepted(Renderer_.CreateSnapshot(items, static_cast<usize>(Scene_.Objects.size()), Snapshot_)))
+        if (Accepted(
+                mResources->Renderer.CreateSnapshot(items, static_cast<usize>(Scene_.Objects.size()), Snapshot_)) ==
+            false)
         {
             return false;
         }
@@ -778,7 +862,7 @@ bool RenderPreview::prepare()
             return false;
         }
         Description_ = description;
-        if (Accepted(mViewport.Update(Snapshot_, description, Report_)) == false)
+        if (Accepted(mResources->Viewport.Update(Snapshot_, description, Report_)) == false)
         {
             return false;
         }
@@ -786,7 +870,7 @@ bool RenderPreview::prepare()
         FreshReport_ = true;
         Phase_ = 6;
     }
-    return Accepted(mViewport.Poll());
+    return Accepted(mResources->Viewport.Poll());
 #else
     return false;
 #endif
@@ -794,7 +878,7 @@ bool RenderPreview::prepare()
 void RenderPreview::Tick()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    if (OwnsDevice_ == false)
+    if (OwnsDevice_ == false || mHasPreparationFailed == true)
     {
         return;
     }
@@ -809,7 +893,7 @@ void RenderPreview::Tick()
         // RasterViewport retains recording when completion admission is full.
         // Retry that owned frame before lifetime service or new setup work.
         mProducer = {};
-        const rhi::RasterStatus retried = mViewport.Render(Surface_, mProducer);
+        const rhi::RasterStatus retried = mResources->Viewport.Render(Surface_, mProducer);
         rhi::DeviceInfo after;
         if (rhi::GetDeviceInfo(Device_, after) == rhi::DeviceStatus::Ready && after.FrameOpen == true)
         {
@@ -842,10 +926,10 @@ void RenderPreview::Tick()
         }
         if (mHasPendingFrame == true)
         {
-            static_cast<void>(mViewport.Release(mPendingFrame));
+            static_cast<void>(mResources->Viewport.Release(mPendingFrame));
             mHasPendingFrame = false;
         }
-        if (mViewport.Acquire(mPendingFrame, mPendingImage) != rhi::RasterStatus::Ready)
+        if (mResources->Viewport.Acquire(mPendingFrame, mPendingImage) != rhi::RasterStatus::Ready)
         {
             fail(QStringLiteral("GPU viewport image is unavailable. World edits are preserved."));
             return;
@@ -862,13 +946,20 @@ void RenderPreview::Tick()
             return;
         }
     }
+    if (mNeedsResourceRestart == true && beginResourceRestart() == false)
+    {
+        return;
+    }
     if (Phase_ >= 5 && (mHasViewport == false || Width_ != RequestedWidth_ || Height_ != RequestedHeight_))
     {
-        resetFrames();
+        if (mHasViewport == true)
+        {
+            resetFrames();
+        }
         Width_ = RequestedWidth_;
         Height_ = RequestedHeight_;
-        const rhi::RasterStatus created = mViewport.Initialize(
-            Renderer_,
+        const rhi::RasterStatus created = mResources->Viewport.Initialize(
+            mResources->Renderer,
             Device_,
             Width_,
             Height_,
@@ -891,7 +982,7 @@ void RenderPreview::Tick()
     {
         return;
     }
-    const rhi::RasterStatus configured = mViewport.Poll();
+    const rhi::RasterStatus configured = mResources->Viewport.Poll();
     if (configured == rhi::RasterStatus::Pending)
     {
         return;
@@ -902,7 +993,7 @@ void RenderPreview::Tick()
         return;
     }
     mProducer = {};
-    const rhi::RasterStatus rendered = mViewport.Render(Surface_, mProducer);
+    const rhi::RasterStatus rendered = mResources->Viewport.Render(Surface_, mProducer);
     if (rendered == rhi::RasterStatus::NotReady || rendered == rhi::RasterStatus::Pending)
     {
         return;

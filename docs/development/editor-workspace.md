@@ -731,7 +731,10 @@ directional fill and ambient contribution, so imported rooms remain visible for
 inspection and editing. **Albedo — unlit surface colors** displays base-color textures and material tints; emitting meshes
 with black authored albedo remain black in this view.
 **Lit — scene lighting** displays the existing material-lighting path, including
-emission. Switching modes keeps the World, camera and layout; the shading choice
+emission. During resource preparation, the viewport retains its last drawable GPU
+image until Qt presents the replacement. A failed replacement reports its error
+without clearing that image; a later scene or shading change can retry preparation.
+Switching modes keeps the World, camera and layout; the shading choice
 is restored with the project's viewport preferences. Older preferences without a
 shading choice open in Solid mode. These visualization overrides do not change
 authored materials or add lights to the World. Solid lighting is a navigation

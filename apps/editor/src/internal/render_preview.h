@@ -109,10 +109,15 @@ private:
         return Scene_.Lit == true && mShading != PreviewShading::Albedo;
     }
     PreviewShading mShading = PreviewShading::Solid;
+    struct GpuResources;
+    foundation::UniquePtr<GpuResources> mResources;
+    foundation::UniquePtr<GpuResources> mRetiredResources;
+    bool mNeedsResourceRestart = false;
+    bool mHasPreparationFailed = false;
+    [[nodiscard]] bool beginResourceRestart() noexcept;
     struct Residency;
     foundation::UniquePtr<Residency> Residency_;
     bool LightingInitialized_ = false;
-    graphics::renderer::RasterViewport mViewport;
     graphics::renderer::ViewportFrame mPendingFrame;
     graphics::renderer::ViewportImage mPendingImage;
     graphics::rhi::SubmissionToken mProducer;
@@ -131,9 +136,7 @@ private:
 
     graphics::rhi::DeviceHandle Device_{};
     graphics::rhi::SurfaceHandle Surface_{};
-    graphics::renderer::Renderer Renderer_;
     graphics::renderer::Mesh Meshes_[6]{};
-    graphics::rhi::TextureHandle Textures_[8]{};
     graphics::renderer::MaterialVersion Materials_[8]{};
     graphics::renderer::MaterialProgram Program_{};
     graphics::renderer::Snapshot Snapshot_{};

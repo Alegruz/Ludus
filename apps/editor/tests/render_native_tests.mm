@@ -213,6 +213,51 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     {
         REQUIRE(embedded.save(qEnvironmentVariable("LUDUS_GPU_VIEWPORT_IMAGE")));
     }
+    // Rebuilding a mode must retain the actual Qt GPU image throughout setup.
+    bool didResetFrames = false;
+    QObject::connect(&preview, &RenderPreview::ResettingFrames, &preview, [&didResetFrames]() {
+        didResetFrames = true;
+    });
+    preview.SetShading(PreviewShading::Albedo);
+    preview.Tick();
+    CHECK(didResetFrames == false);
+    CHECK(ReadViewport() == embedded);
+    REQUIRE(Frames(preview, 3));
+    const QImage albedo = ReadViewport();
+    CHECK(albedo != embedded);
+    CHECK(didResetFrames == false);
+    // Supersede preparation before its first ready frame; the active image stays.
+    preview.SetShading(PreviewShading::Lit);
+    preview.Tick();
+    preview.SetShading(PreviewShading::Solid);
+    CHECK(ReadViewport() == albedo);
+    REQUIRE(Frames(preview, 3));
+    CHECK(ReadViewport() == embedded);
+    CHECK(didResetFrames == false);
+    // The private admission boundary accepts this snapshot, but GPU texture
+    // creation rejects its empty pixels. Failure must preserve the presented view.
+    RenderScene invalidCandidate = scene;
+    invalidCandidate.Identity = QByteArray("invalid GPU candidate");
+    invalidCandidate.AssetsIdentity = invalidCandidate.Identity;
+    invalidCandidate.Textures[0].Pixels = {};
+    bool hasFailedPreparation = false;
+    QObject::connect(&preview, &RenderPreview::Failed, &preview, [&hasFailedPreparation](const QString&) {
+        hasFailedPreparation = true;
+    });
+    REQUIRE(preview.SetScene(invalidCandidate));
+    QElapsedTimer preparationTimer;
+    preparationTimer.start();
+    while (hasFailedPreparation == false && preparationTimer.elapsed() < 10000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(hasFailedPreparation == true);
+    CHECK(ReadViewport() == embedded);
+    CHECK(didResetFrames == false);
+    REQUIRE(preview.SetScene(scene));
+    REQUIRE(Frames(preview, 3));
+    CHECK(ReadViewport() == embedded);
+    CHECK(world.Draft() == original);
     // Native window events are forwarded to the persistent editor navigation model.
     for (QWindow* window : QGuiApplication::allWindows())
     {
