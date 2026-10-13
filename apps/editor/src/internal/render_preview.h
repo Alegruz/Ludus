@@ -19,6 +19,13 @@
 
 namespace ludus::editor
 {
+// Editor-only visualization; does not modify authored materials or scene lights.
+enum class PreviewShading : foundation::uint8
+{
+    Solid,
+    Albedo,
+    Lit,
+};
 // Main-thread renderer/device owner. Never destroys another preview's session.
 class RenderPreview final : public QObject
 {
@@ -37,6 +44,11 @@ public:
                   foundation::float32 zoom,
                   bool reference);
     void FrameAll() noexcept;
+    void SetShading(PreviewShading shading);
+    [[nodiscard]] PreviewShading GetShading() const noexcept
+    {
+        return mShading;
+    }
     void Resize(foundation::int32 width, foundation::int32 height);
     void Orbit(foundation::int32 dx, foundation::int32 dy);
     void Pan(foundation::int32 dx, foundation::int32 dy);
@@ -91,6 +103,11 @@ Q_SIGNALS:
     void Failed(const QString& error);
 
 private:
+    [[nodiscard]] bool usesLitMaterials() const noexcept
+    {
+        return Scene_.Lit == true && mShading != PreviewShading::Albedo;
+    }
+    PreviewShading mShading = PreviewShading::Solid;
     struct Residency;
     foundation::UniquePtr<Residency> Residency_;
     bool LightingInitialized_ = false;

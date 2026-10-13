@@ -334,6 +334,23 @@ void RenderPreview::Stop() noexcept
         Q_EMIT Stopped();
     }
 }
+void RenderPreview::SetShading(PreviewShading shading)
+{
+    if ((shading != PreviewShading::Solid && shading != PreviewShading::Albedo && shading != PreviewShading::Lit) ||
+        shading == mShading)
+    {
+        return;
+    }
+    mShading = shading;
+    if (OwnsDevice_ == true)
+    {
+        restartResources();
+        Frames_ = 0;
+        Timer_.start();
+    }
+    Q_EMIT NavigationChanged();
+    Q_EMIT Changed();
+}
 void RenderPreview::FrameAll() noexcept
 {
     OrbitCenter_ = Scene_.Center;
@@ -419,6 +436,10 @@ QJsonObject RenderPreview::Navigation() const
             {QStringLiteral("zoom"), Zoom_},
             {QStringLiteral("camera"), CameraId_},
             {QStringLiteral("reference"), Reference_},
+            {QStringLiteral("shading"),
+             mShading == PreviewShading::Lit
+                 ? QStringLiteral("lit")
+                 : (mShading == PreviewShading::Albedo ? QStringLiteral("albedo") : QStringLiteral("solid"))},
             {QStringLiteral("x"), OrbitCenter_.X},
             {QStringLiteral("y"), OrbitCenter_.Y},
             {QStringLiteral("z"), OrbitCenter_.Z},
@@ -437,6 +458,11 @@ void RenderPreview::RestoreNavigation(const QJsonObject& state)
              number(QStringLiteral("pitch"), 20, -80, 80),
              number(QStringLiteral("zoom"), 3, 1.2F, 20),
              state.value(QStringLiteral("reference")).toBool());
+    SetShading(state.value(QStringLiteral("shading")).toString() == QStringLiteral("lit")
+                   ? PreviewShading::Lit
+                   : (state.value(QStringLiteral("shading")).toString() == QStringLiteral("albedo")
+                          ? PreviewShading::Albedo
+                          : PreviewShading::Solid));
     CameraId_ = state.value(QStringLiteral("camera")).toString().left(256);
     OrbitCenter_.X = number(QStringLiteral("x"), 0, -1000000, 1000000);
     OrbitCenter_.Y = number(QStringLiteral("y"), 0, -1000000, 1000000);
@@ -547,7 +573,7 @@ bool RenderPreview::prepare()
             {
                 return false;
             }
-            return advance(Scene_.Lit == true
+            return advance(usesLitMaterials() == true
                                ? Renderer_.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
                                                              ludus::shaders::renderer_lit::Fragment(),
                                                              ludus::shaders::renderer_lit_shadow::Fragment(),
@@ -658,6 +684,14 @@ bool RenderPreview::prepare()
                 description.Texture = Textures_[surface.Texture];
             }
             description.Tint = surface.Tint;
+            if (mShading == PreviewShading::Solid)
+            {
+                description.Texture = {};
+                description.Tint = {.6F, .6F, .6F, 1};
+            }
+            description.Sampler.Filter = rhi::RasterFilter::Linear;
+            description.Sampler.U = description.Sampler.V =
+                surface.Repeat == true ? rhi::RasterAddress::Repeat : rhi::RasterAddress::Clamp;
             rr::LitMaterialDescription lit;
             lit.Surface = description;
             lit.Surface.Sampler.Filter = rhi::RasterFilter::Linear;
@@ -666,9 +700,24 @@ bool RenderPreview::prepare()
             lit.Metallic = surface.Metallic;
             lit.Roughness = surface.Roughness;
             lit.Emission = surface.Emission;
+            rr::DirectLight previewLight;
+            if (mShading == PreviewShading::Solid)
+            {
+                // Explicit editor visualization; these values never enter the World.
+                previewLight.SourceId = 1;
+                previewLight.Intensity = 3;
+                previewLight.Direction = {.4F, -.8F, -.5F};
+                lit.Lights = &previewLight;
+                lit.LightCount = 1;
+                lit.Metallic = 0;
+                lit.Roughness = 1;
+                lit.Emission = {};
+                lit.EnvironmentIrradiance = {.5F, .5F, .5F};
+            }
             rr::LightSelection selection;
-            if (!Accepted(Scene_.Lit ? Renderer_.CreateLitMaterial(Program_, lit, Materials_[i], selection)
-                                     : Renderer_.CreateMaterial(Program_, description, Materials_[i])))
+            if (Accepted(usesLitMaterials() == true
+                             ? Renderer_.CreateLitMaterial(Program_, lit, Materials_[i], selection)
+                             : Renderer_.CreateMaterial(Program_, description, Materials_[i])) == false)
             {
                 return false;
             }
@@ -685,7 +734,7 @@ bool RenderPreview::prepare()
             auto& item = items[i];
             item.Geometry = Meshes_[object.Mesh];
             item.Transform = object.Transform;
-            item.Material.Color = object.Tint;
+            item.Material.Color = mShading == PreviewShading::Solid ? math::Vector4{1, 1, 1, 1} : object.Tint;
             item.SourceId = static_cast<uint64>(i) + 1;
             if (Scene_.Lit || object.Texture >= 0)
             {
@@ -818,13 +867,13 @@ void RenderPreview::Tick()
         resetFrames();
         Width_ = RequestedWidth_;
         Height_ = RequestedHeight_;
-        const rhi::RasterStatus created = mViewport.Initialize(Renderer_,
-                                                               Device_,
-                                                               Width_,
-                                                               Height_,
-                                                               1,
-                                                               Scene_.Lit == true ? rr::ViewportColorMode::PreferHdr
-                                                                                  : rr::ViewportColorMode::Linear8);
+        const rhi::RasterStatus created = mViewport.Initialize(
+            Renderer_,
+            Device_,
+            Width_,
+            Height_,
+            1,
+            usesLitMaterials() == true ? rr::ViewportColorMode::PreferHdr : rr::ViewportColorMode::Linear8);
         if (Accepted(created) == false)
         {
             fail(QStringLiteral("GPU viewport allocation failed. World edits are preserved."));
@@ -868,14 +917,20 @@ void RenderPreview::Tick()
     if (FreshReport_ == true || Frames_ % 60 == 0)
     {
         FreshReport_ = false;
-        Status_ = QStringLiteral("GPU raster viewport · %1×%2 · visible %3 · draws %4%5")
-                      .arg(Width_)
-                      .arg(Height_)
-                      .arg(Report_.Visible)
-                      .arg(Report_.Draws)
-                      .arg(Scene_.Lit == true
-                               ? QStringLiteral(" · authored material lighting; emissive indirect lighting unavailable")
-                               : QString());
+        Status_ =
+            QStringLiteral("GPU raster viewport · %1×%2 · visible %3 · draws %4%5")
+                .arg(Width_)
+                .arg(Height_)
+                .arg(Report_.Visible)
+                .arg(Report_.Draws)
+                .arg(Scene_.Lit == true
+                         ? (mShading == PreviewShading::Lit
+                                ? QStringLiteral(" · Lit: emission only; imported area-light illumination unavailable")
+                                : (mShading == PreviewShading::Solid
+                                       ? QStringLiteral(" · Solid: neutral preview shading")
+                                       : QStringLiteral(" · Albedo: unlit surface colors")))
+                         : (mShading == PreviewShading::Solid ? QStringLiteral(" · Solid: neutral preview shading")
+                                                              : QStringLiteral(" · Albedo: unlit surface colors")));
         Q_EMIT Changed();
     }
 #endif

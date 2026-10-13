@@ -1,6 +1,7 @@
 #include "internal/preview_viewport.h"
 #include "internal/readback.h"
 #include "internal/render_preview.h"
+#include "internal/world_workspace.h"
 #include "renderer_composite.h"
 #include "renderer_flat.h"
 #include <QQuickWindow>
@@ -8,6 +9,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -34,6 +36,17 @@ bool Frames(RenderPreview& preview, uint64 target)
     {
         QTest::qWait(100);
     }
+    if (preview.Frames() < target)
+    {
+        WARN("Viewport frames " << preview.Frames() << " / " << target << "; pending=" << preview.HasPendingFrame());
+        for (QWindow* window : QGuiApplication::allWindows())
+        {
+            if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+            {
+                WARN("Native viewport exposed=" << window->isExposed() << "; visible=" << window->isVisible());
+            }
+        }
+    }
     return preview.Frames() >= target;
 }
 QImage ReadViewport()
@@ -49,6 +62,67 @@ QImage ReadViewport()
     return {};
 }
 } // namespace
+TEST_CASE("Supplied imported World remains visible in solid and albedo GPU views", "[.render-native]")
+{
+    const QString root = qEnvironmentVariable("LUDUS_VIEWPORT_TEST_PROJECT");
+    if (root.isEmpty() == true)
+    {
+        SUCCEED("Set LUDUS_VIEWPORT_TEST_PROJECT and LUDUS_VIEWPORT_TEST_WORLD for imported-World acceptance.");
+        return;
+    }
+    WorldWorkspace workspace;
+    workspace.resize(1200, 850);
+    workspace.show();
+    workspace.SetProject(root, 1);
+    REQUIRE(workspace.Open(QDir(root).filePath(qEnvironmentVariable("LUDUS_VIEWPORT_TEST_WORLD"))));
+    PreviewViewport* viewport =
+        static_cast<PreviewViewport*>(workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport")));
+    REQUIRE(viewport != nullptr);
+    QComboBox* shading = viewport->findChild<QComboBox*>(QStringLiteral("viewportShading"));
+    REQUIRE(shading != nullptr);
+    const QJsonObject draft = workspace.Document().Draft();
+    const QString imagePrefix = qEnvironmentVariable("LUDUS_VIEWPORT_TEST_IMAGE");
+    QImage previous;
+    for (int32 mode = 0; mode < 3; ++mode)
+    {
+        const uint64 target = viewport->PresentedFrames() + 2;
+        shading->setCurrentIndex(mode);
+        QElapsedTimer timer;
+        timer.start();
+        while (viewport->PresentedFrames() < target && timer.elapsed() < 15000)
+        {
+            QTest::qWait(20);
+        }
+        REQUIRE(viewport->PresentedFrames() >= target);
+        const QImage image = ReadViewport();
+        REQUIRE_FALSE(image.isNull());
+        if (mode == 0)
+        {
+            bool hasContrast = false;
+            const QColor first = image.pixelColor(0, 0);
+            for (int32 y = 0; y < image.height(); y += 16)
+            {
+                for (int32 x = 0; x < image.width(); x += 16)
+                {
+                    hasContrast = hasContrast || image.pixelColor(x, y) != first;
+                }
+            }
+            CHECK(hasContrast);
+        }
+        if (mode > 0)
+        {
+            CHECK(image != previous);
+        }
+        if (imagePrefix.isEmpty() == false)
+        {
+            REQUIRE(image.save(imagePrefix + QString::number(mode) + QStringLiteral(".png")));
+        }
+        previous = image;
+    }
+    CHECK(workspace.Document().Draft() == draft);
+    CHECK_FALSE(workspace.Dirty());
+    workspace.StopPreview();
+}
 TEST_CASE("Native World preview renders authored assets, cameras, culling, updates and resize", "[.render-native]")
 {
     REQUIRE(QApplication::platformName() == QStringLiteral("cocoa"));
