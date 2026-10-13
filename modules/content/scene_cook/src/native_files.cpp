@@ -421,6 +421,53 @@ Status ReadFileBounded(std::string_view path, usize maximum, foundation::Array<u
     return status;
 }
 
+void SequentialFile::Close() noexcept
+{
+    if (mDescriptor >= 0)
+    {
+        (void)close(mDescriptor);
+        mDescriptor = -1;
+    }
+}
+
+Status SequentialFile::Open(std::string_view path) noexcept
+{
+    NativePath native;
+    if (mDescriptor >= 0 || TryMakeNativePath(path, native) == false)
+    {
+        return Status::Invalid;
+    }
+    mDescriptor = open(native.GetData(), O_RDONLY | O_CLOEXEC);
+    if (mDescriptor < 0)
+    {
+        return errno == ENOENT ? Status::NotFound : Status::IoError;
+    }
+    return Status::Ok;
+}
+
+Status SequentialFile::Read(std::span<uint8> outBuffer, usize& outCount) noexcept
+{
+    outCount = 0;
+    if (mDescriptor < 0)
+    {
+        return Status::IoError;
+    }
+    while (true)
+    {
+        const ssize_t count = read(mDescriptor, outBuffer.data(), outBuffer.size());
+        if (count < 0 && errno == EINTR)
+        {
+            continue;
+        }
+        if (count < 0)
+        {
+            return Status::IoError;
+        }
+        outCount = static_cast<usize>(count);
+        return Status::Ok;
+    }
+}
+
 PublishResult PublishFile(std::string_view path,
                           std::span<const uint8> data,
                           PublishMode mode,
@@ -661,6 +708,16 @@ Status MakeTemporaryDirectory(std::string_view, std::string_view, foundation::St
 }
 Status RemoveTree(std::string_view) noexcept
 {
+    return Status::Unsupported;
+}
+void SequentialFile::Close() noexcept {}
+Status SequentialFile::Open(std::string_view) noexcept
+{
+    return Status::Unsupported;
+}
+Status SequentialFile::Read(std::span<uint8>, usize& outCount) noexcept
+{
+    outCount = 0;
     return Status::Unsupported;
 }
 Status FileLock::Acquire(std::string_view, LockMode) noexcept

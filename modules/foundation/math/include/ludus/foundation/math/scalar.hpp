@@ -130,6 +130,8 @@ template <typename ScalarType>
 
 // Trusted libm wrappers. Callers validate their domain/range at ingress.
 [[nodiscard]] float64 Exp(float64 value) noexcept;
+/// Natural logarithm with the platform libm log (NaN for negative input, -infinity at zero).
+[[nodiscard]] float64 Log(float64 value) noexcept;
 [[nodiscard]] float64 Floor(float64 value) noexcept;
 [[nodiscard]] float64 Ceil(float64 value) noexcept;
 /// Raise base to exponent with the platform libm pow (IEEE special cases apply).
