@@ -129,6 +129,11 @@ including SDK identity, compiler/toolchain, profile and the first useful error.
 
 ## Contribute a new target
 
+Use the [platform porting checklist](../../development/platform-porting.md) to
+track subsystem owners, blockers and acceptance evidence. The
+[mobile support plan](../../development/mobile-support-plan.md) sequences the
+shared contracts and parallel Apple/Android implementation tracks.
+
 Change detection and its positive/negative compiler matrix together. Then add
 backend source selection, real target SDK/consumer builds and runtime acceptance
 as separately verified work. A synthetic fixture or successful header compile
