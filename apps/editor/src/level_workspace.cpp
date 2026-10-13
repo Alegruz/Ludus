@@ -360,7 +360,7 @@ bool LevelWorkspace::Start(const QString& operation, const QString& path, const 
     Operation_ = operation;
     CandidatePath_ = path;
     const QJsonValue expected = Disk_.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(Disk_);
-    if (!Run(operation, path, source, expected))
+    if (Run({operation, path, source, expected}) == false)
     {
         Status_->setText(QStringLiteral("Could not start the scene operation; current scene retained."));
         return false;
@@ -412,18 +412,16 @@ QString DescribeStage(std::string_view stage)
 }
 } // namespace
 #endif
-bool LevelWorkspace::Run(const QString& operation,
-                         const QString& path,
-                         const QString& source,
-                         const QJsonValue& expected)
+bool LevelWorkspace::Run(const SceneOperationRequest& request)
 {
 #if defined(Q_OS_WASM)
-    (void)operation;
-    (void)path;
-    (void)source;
-    (void)expected;
+    (void)request;
     return false;
 #else
+    const QString& operation = request.Operation;
+    const QString& path = request.Path;
+    const QString& source = request.Source;
+    const QJsonValue& expected = request.Expected;
     using namespace ludus::content::scene_cook;
     EditorSceneOperation kind = EditorSceneOperation::Assemble;
     if (operation == QStringLiteral("open"))
@@ -628,7 +626,7 @@ void LevelWorkspace::CommitImport()
 {
 #if !defined(Q_OS_WASM)
     PublishingCatalog_ = true;
-    if (!Run(QStringLiteral("commit-import"), {}, Source_, CatalogExpected_))
+    if (Run({QStringLiteral("commit-import"), {}, Source_, CatalogExpected_}) == false)
     {
         PublishingCatalog_ = false;
         Rollback(QStringLiteral("Could not publish the prepared catalog."));

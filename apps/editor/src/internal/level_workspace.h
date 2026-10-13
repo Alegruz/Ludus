@@ -101,7 +101,15 @@ Q_SIGNALS:
 private:
     bool Start(const QString& operation, const QString& path = {}, const QString& source = {});
     void Completed();
-    bool Run(const QString& operation, const QString& path, const QString& source, const QJsonValue& expected);
+    /// Inputs for one scene operation, grouped so call sites name each field.
+    struct SceneOperationRequest
+    {
+        QString Operation;
+        QString Path;
+        QString Source;
+        QJsonValue Expected;
+    };
+    bool Run(const SceneOperationRequest& request);
     void WaitForOperation();
     void Publish();
     void CommitCandidate();
