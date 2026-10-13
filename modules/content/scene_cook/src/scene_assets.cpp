@@ -2870,10 +2870,16 @@ private:
 /// publish(root, level, destination).
 [[nodiscard]] bool PublishRelease(std::string_view root,
                                   const Document& level,
-                                  std::string_view destination,
+                                  std::string_view requestedDestination,
                                   Document& outDump,
                                   Failure& inoutFailure) noexcept
 {
+    // Strip trailing separators so the staging parent is never the destination itself.
+    std::string_view destination = requestedDestination;
+    while (destination.size() > 1 && (destination.back() == '/' || destination.back() == '\\'))
+    {
+        destination.remove_suffix(1);
+    }
     LockScope reader;
     if (reader.Enter(root, LockMode::Shared, inoutFailure) == false)
     {
