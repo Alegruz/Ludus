@@ -678,9 +678,8 @@ TEST_CASE("A confirmed import must match the approved preview", "[scene_assets]"
     EditorSceneResult preview;
     INFO(Describe(error));
     REQUIRE(OperateEditorScene(request, options, preview, error));
-    const std::string token = GetResponseMember(preview.Response, "source_digest");
-    REQUIRE(token.size() == 64); // hexadecimal SHA-256
-    const std::string digest = token;
+    const std::string digest = GetResponseMember(preview.Response, "source_digest");
+    REQUIRE(digest.size() == 64); // hexadecimal SHA-256
 
     request.Operation = EditorSceneOperation::Import;
     options.ExpectedSourceDigest = digest;
