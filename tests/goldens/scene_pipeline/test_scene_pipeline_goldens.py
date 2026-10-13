@@ -41,7 +41,7 @@ class SceneGoldenTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(record, self.goldens["outputs"][name])
                 if record["inline"]:
-                    self.assertEqual((capture.EXPECTED / "files" / name).read_bytes(), self.files[name])
+                    self.assertEqual(capture.stored(name).read_bytes(), self.files[name])
 
     def test_capture_is_deterministic(self):
         again, _ = capture.capture()

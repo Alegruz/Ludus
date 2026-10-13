@@ -10,7 +10,7 @@ here before `scene_cook.py` / `scene_assets.py` / `scene_editor.py` are removed.
 | `source/` | The committed output of `fixture.py`, so a non-Python port can consume it directly. |
 | `capture.py` | Runs `scene_cook.cook`, then `scene_assets` `new_level` → `import_scene` (twice) → `save_level` → `open_level` → `assemble` → `dump` → `publish`, plus `cmake/shaders/cook_texture.py` on the two in-repo texture sources and four synthetic cases. |
 | `expected/goldens.json` | SHA-256 and size of every output file, the fixture tree, and the digests of the Python sources. |
-| `expected/files/` | Full bytes of every output ≤ 64 KiB (manifests, catalog, levels, material/mesh/licence artifacts, texture headers). Larger outputs (the 1.1 MB `scene.luscn` and the wallpaper atlas texture) are checked by digest only. |
+| `expected/files/` | Full bytes of every output ≤ 64 KiB (manifests, catalog, levels, material/mesh/licence artifacts, texture headers). Generated C/C++ headers are stored with an extra `.golden` suffix so formatters and analysis tools leave their bytes alone. Larger outputs (the 1.1 MB `scene.luscn` and the wallpaper atlas texture) are checked by digest only. |
 | `licensed/staircase2.json` | Digest-only goldens for the licensed staircase2 scene. Not captured in CI. |
 
 ## Normalization a port must apply

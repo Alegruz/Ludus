@@ -61,6 +61,16 @@ TEXTURE_SYNTHETIC = {
 }
 
 
+# Golden copies of generated C/C++ headers are stored with a ".golden" suffix so repository
+# formatters, header self-sufficiency checks and static analysis never touch their bytes.
+CXX_SUFFIXES = {".m", ".mm", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
+
+
+def stored(name):
+    path = EXPECTED / "files" / name
+    return path.with_name(path.name + ".golden") if path.suffix in CXX_SUFFIXES else path
+
+
 def float_sum_semantics():
     """Python 3.12 made float sum() compensated (Neumaier); cook_texture.py output depends on it."""
     return "compensated" if sum([1e16, 1.0, -1e16]) == 1.0 else "naive"
@@ -187,7 +197,7 @@ def write(goldens, files):
     EXPECTED.mkdir()
     for name, data in files.items():
         if len(data) <= INLINE_LIMIT:
-            path = EXPECTED / "files" / name
+            path = stored(name)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
     (EXPECTED / "goldens.json").write_text(json.dumps(goldens, indent=1, sort_keys=True) + "\n")
@@ -206,7 +216,7 @@ def differences(goldens, files):
     for name in sorted(set(old) | set(new)):
         if old.get(name) != new.get(name):
             problems.append(f"output {name}: expected {old.get(name)}, got {new.get(name)}")
-        elif new[name]["inline"] and (EXPECTED / "files" / name).read_bytes() != files[name]:
+        elif new[name]["inline"] and stored(name).read_bytes() != files[name]:
             problems.append(f"inline file {name} differs")
     if tree(SOURCE) != goldens["source"]:
         problems.append("committed source/ does not match fixture.py")
