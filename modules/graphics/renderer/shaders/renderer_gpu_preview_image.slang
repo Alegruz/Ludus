@@ -2,7 +2,7 @@
 // No fragment-stage storage binding or host image transfer is required.
 [[vk::binding(0, 0)]] cbuffer ImageParameters
 {
-    float4 imageSize;
+    float4 previewExtent;
 };
 struct VertexInput
 {
@@ -17,10 +17,10 @@ struct VertexOutput
 VertexOutput vertexMain(VertexInput input)
 {
     VertexOutput output;
-    uint width = uint(imageSize.x);
+    uint width = uint(previewExtent.x);
     float2 pixel = float2(uint(input.display.w) % width, uint(input.display.w) / width) + .5;
-    float2 center = pixel * float2(2 / imageSize.x, -2 / imageSize.y) + float2(-1, 1);
-    output.position = float4(center + input.corner / imageSize.xy, 0, 1);
+    float2 center = pixel * float2(2 / previewExtent.x, -2 / previewExtent.y) + float2(-1, 1);
+    output.position = float4(center + input.corner / previewExtent.xy, 0, 1);
     output.color = float4(input.display.xyz, 1);
     return output;
 }
