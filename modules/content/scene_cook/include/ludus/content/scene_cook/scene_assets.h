@@ -1,0 +1,289 @@
+#pragma once
+
+#include <ludus/content/content.h>
+#include <ludus/content/scene_cook/scene_cook.h>
+#include <ludus/foundation/containers/array.hpp>
+
+#include <span>
+#include <string_view>
+
+/// @file
+/// Durable, content-addressed scene assets shared by ludus-cook and the Editor.
+///
+/// Byte-identical port of the retired Python `scene_assets.py`. Loose files are
+/// the storage profile: immutable artifacts live in `assets/objects/<key>.bin`
+/// and `assets/catalog.json` is the commit point, so readers never observe half
+/// an import. Level documents (`.lulevel`) bind logical UUIDs; the catalog
+/// resolves exact artifact revisions. Levels and catalogs cross this API as
+/// canonical JSON bytes (sorted keys, compact separators, ASCII escapes,
+/// trailing newline), exactly as they are stored on disk.
+///
+/// Writers take an exclusive `flock` on `assets/.scene-writer.lock`; readers
+/// take a shared lock only when that file exists. Locks are re-entrant per
+/// thread for the same project root; upgrading a reader to a writer fails with
+/// AssetErrorCode::Busy. Every function performs synchronous file I/O and is
+/// intended for tool processes and Editor worker threads.
+namespace ludus::content::scene_cook
+{
+/// Profile identifier stored in every level document.
+inline constexpr std::string_view LEVEL_PROFILE = "resident-reference-v1";
+/// Largest artifact, bundle or resident closure in bytes.
+inline constexpr usize MAX_ASSET_BYTES = usize{64} * 1024 * 1024;
+/// Largest level, catalog or metadata document in bytes.
+inline constexpr usize MAX_METADATA_BYTES = usize{1024} * 1024;
+
+/// Stable failure vocabulary shared with the Editor result protocol.
+enum class AssetErrorCode : uint8
+{
+    /// The level, catalog or bundle violates the profile.
+    InvalidScene,
+    /// Stored bytes are unreadable, malformed or fail their digest.
+    AssetCorrupt,
+    /// The caller's cancellation hook fired.
+    InstallCancelled,
+    /// Files changed underneath the operation (compare-and-publish failed).
+    Conflict,
+    /// Another process holds the project lock, or a reader tried to write.
+    Busy,
+    /// The host lacks the native facilities (only Linux and macOS are supported).
+    MissingTools,
+    /// The source scene could not be converted.
+    UnsupportedScene,
+    /// A filesystem operation failed.
+    StorageFailure,
+    /// A failed import rollback left recovery files behind.
+    RecoveryRequired,
+    /// The release destination already exists.
+    DestinationExists,
+    /// An allocation failed.
+    OutOfMemory,
+};
+
+/// Stable code name, e.g. "AssetCorrupt".
+[[nodiscard]] std::string_view GetAssetErrorCodeName(AssetErrorCode code) noexcept;
+
+/// @brief Failure description with the reference message text.
+struct AssetError final
+{
+    /// Stable failure class.
+    AssetErrorCode Code = AssetErrorCode::InvalidScene;
+    /// Human-readable message, matching the reference wording where it exists.
+    MessageText Message;
+};
+
+/// @brief Source of version-4 UUIDs; tests inject a deterministic sequence.
+struct UuidSource final
+{
+    /// Writes 16 big-endian UUID bytes, used verbatim (no version bits are forced).
+    void (*Generate)(void* context, uint8 (&outBytes)[16]) noexcept = nullptr;
+    /// Opaque pointer passed back to Generate.
+    void* Context = nullptr;
+};
+
+/// @brief Per-call options.
+struct AssetOptions final
+{
+    /// Optional cooperative cancellation; nullptr disables cancellation.
+    const Cancellation* CancelOrNull = nullptr;
+    /// Optional UUID source; nullptr draws random UUIDs from the operating system.
+    const UuidSource* UuidsOrNull = nullptr;
+    /// Provenance recorded as `source_origin` and used to reuse logical
+    /// identities on reimport; empty selects realpath(source).
+    std::string_view SourceOrigin;
+};
+
+/// @brief Result of PrepareImport: a complete candidate that is not yet published.
+struct ImportCandidate final
+{
+    /// Canonical level with the imported objects, camera and provenance.
+    foundation::Array<uint8> Level;
+    /// Canonical candidate catalog; publish it with CommitImport.
+    foundation::Array<uint8> Catalog;
+    /// True when a catalog was published when the candidate was prepared.
+    bool HasPublishedCatalog = false;
+    /// SHA-256 of that published catalog, for compare-and-publish.
+    Digest PublishedCatalog;
+};
+
+/// Byte layout of DumpLevel and PublishLevel outputs.
+enum class DumpLayout : uint8
+{
+    /// canonical(): what scene-release.json stores.
+    Canonical,
+    /// json.dumps(indent=2, sort_keys=True), for people reading a terminal.
+    Indented,
+    /// json.dumps(sort_keys=True) on one line, for machine-readable CLI output.
+    Line,
+};
+
+/// new_level(name): an empty level with a fresh UUID and the default camera.
+/// @param name Display name, stored verbatim.
+/// @param options UuidsOrNull selects the UUID source.
+/// @param outLevel Canonical level bytes.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool CreateLevel(std::string_view name,
+                               const AssetOptions& options,
+                               foundation::Array<uint8>& outLevel,
+                               AssetError& outError) noexcept;
+
+/// validate_level: parse a level document and check every profile rule.
+/// @param level Level JSON bytes.
+/// @param outError Set on failure.
+/// @return true when the level is valid.
+[[nodiscard]] bool ValidateLevel(std::span<const uint8> level, AssetError& outError) noexcept;
+
+/// catalog(root): the published catalog, or the empty catalog when none exists.
+/// @param root Project directory.
+/// @param outCatalog Canonical catalog bytes.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool
+ReadCatalog(std::string_view root, foundation::Array<uint8>& outCatalog, AssetError& outError) noexcept;
+
+/// prepare_import: cook source, store its immutable artifacts and build a
+/// candidate level and catalog without publishing the catalog.
+/// @param root Project directory.
+/// @param source Directory holding the pbrt-reference-v1 scene.
+/// @param level Level the import is merged into; never saved here.
+/// @param options Cancellation, UUID source and provenance override.
+/// @param outCandidate Replaced on success.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool PrepareImport(std::string_view root,
+                                 std::string_view source,
+                                 std::span<const uint8> level,
+                                 const AssetOptions& options,
+                                 ImportCandidate& outCandidate,
+                                 AssetError& outError) noexcept;
+
+/// commit_import: revalidate a candidate and publish its catalog when the
+/// published catalog still matches the one it was prepared against.
+/// @param root Project directory.
+/// @param level Candidate level bytes.
+/// @param catalog Candidate catalog bytes.
+/// @param publishedOrNull Digest of the catalog the candidate was prepared
+/// against; nullptr when no catalog was published.
+/// @param source Source directory, rechecked for changes.
+/// @param options Cancellation and provenance override.
+/// @param outError Set on failure.
+/// @return true when the catalog was published.
+[[nodiscard]] bool CommitImport(std::string_view root,
+                                std::span<const uint8> level,
+                                std::span<const uint8> catalog,
+                                const Digest* publishedOrNull,
+                                std::string_view source,
+                                const AssetOptions& options,
+                                AssetError& outError) noexcept;
+
+/// import_scene: PrepareImport then CommitImport; never saves the level.
+/// @param root Project directory.
+/// @param source Source scene directory.
+/// @param level Level to merge into.
+/// @param options Cancellation, UUID source and provenance override.
+/// @param outLevel Canonical candidate level.
+/// @param outError Set on failure.
+/// @return true when the catalog was published.
+[[nodiscard]] bool ImportScene(std::string_view root,
+                               std::string_view source,
+                               std::span<const uint8> level,
+                               const AssetOptions& options,
+                               foundation::Array<uint8>& outLevel,
+                               AssetError& outError) noexcept;
+
+/// import_saved_level: import into a saved level and publish the catalog and
+/// level together, rolling both back when either replacement fails.
+/// @param root Project directory.
+/// @param relative Project-relative `.lulevel` path.
+/// @param source Source scene directory.
+/// @param options Cancellation, UUID source and provenance override.
+/// @param outLevel Canonical saved level.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool ImportSavedLevel(std::string_view root,
+                                    std::string_view relative,
+                                    std::string_view source,
+                                    const AssetOptions& options,
+                                    foundation::Array<uint8>& outLevel,
+                                    AssetError& outError) noexcept;
+
+/// save_level: validate the closure, compare the bytes on disk and replace the level.
+/// @param root Project directory.
+/// @param relative Project-relative `.lulevel` path.
+/// @param level Level bytes.
+/// @param expectedOrNull Bytes the file must still hold; nullptr requires that it does not exist.
+/// @param outSaved Canonical bytes written.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool SaveLevel(std::string_view root,
+                             std::string_view relative,
+                             std::span<const uint8> level,
+                             const foundation::Array<uint8>* expectedOrNull,
+                             foundation::Array<uint8>& outSaved,
+                             AssetError& outError) noexcept;
+
+/// open_level: read, validate, and check the closure and assembly of a saved level.
+/// @param root Project directory.
+/// @param relative Project-relative `.lulevel` path.
+/// @param outLevel Canonical level bytes.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool OpenLevel(std::string_view root,
+                             std::string_view relative,
+                             foundation::Array<uint8>& outLevel,
+                             AssetError& outError) noexcept;
+
+/// assemble: decode a level's closure into one LUSCN v2 bundle (empty when the
+/// level has no objects); the source importer is never called.
+/// @param root Project directory.
+/// @param level Level bytes.
+/// @param catalog Candidate catalog bytes, or empty to use the published catalog.
+/// @param outBundle Bundle bytes.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool AssembleLevel(std::string_view root,
+                                 std::span<const uint8> level,
+                                 std::span<const uint8> catalog,
+                                 foundation::Array<uint8>& outBundle,
+                                 AssetError& outError) noexcept;
+
+/// dump: the level with its exact resident closure and byte total.
+/// @param root Project directory.
+/// @param level Level bytes.
+/// @param catalog Candidate catalog bytes, or empty to use the published catalog.
+/// @param layout Output layout.
+/// @param outDump JSON bytes.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool DumpLevel(std::string_view root,
+                             std::span<const uint8> level,
+                             std::span<const uint8> catalog,
+                             DumpLayout layout,
+                             foundation::Array<uint8>& outDump,
+                             AssetError& outError) noexcept;
+
+/// publish: write a deterministic loose-file release (closure, catalog, level,
+/// assembled bundle and scene-release.json) to a new directory.
+/// @param root Project directory.
+/// @param level Level bytes.
+/// @param destination Release directory; must not exist.
+/// @param layout Layout of outDump.
+/// @param outDump Dump of the published release.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool PublishLevel(std::string_view root,
+                                std::span<const uint8> level,
+                                std::string_view destination,
+                                DumpLayout layout,
+                                foundation::Array<uint8>& outDump,
+                                AssetError& outError) noexcept;
+
+/// Write bytes with the catalog's atomic replacement protocol (used for
+/// `ludus-cook scene assemble` outputs).
+/// @param path Native file path; parent directories are created.
+/// @param data Bytes to write.
+/// @param outError Set on failure.
+/// @return true on success.
+[[nodiscard]] bool
+WriteFileAtomically(std::string_view path, std::span<const uint8> data, AssetError& outError) noexcept;
+} // namespace ludus::content::scene_cook
