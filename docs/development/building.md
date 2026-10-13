@@ -580,7 +580,10 @@ PYTHONPATH=scripts/python python3 -m unittest test_source_policy -v
 ```
 
 CI uses the PR's actual base commit and includes standalone examples, tests and
-shader includes. The gate rejects newly introduced inferred variable types
+shader includes. It reads the exact PR head tree rather than attributing newer
+main changes in GitHub's synthetic merge to the PR (`--head <commit>`). Local
+checks without that option include uncommitted and untracked source changes.
+The gate rejects newly introduced inferred variable types
 except unspellable lambdas or explained iterator/dependent types, checks Slang
 function/member/out names and coordinate member labels, and keeps target
 annotations at the RHI shader interface boundary. Existing violations are

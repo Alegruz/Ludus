@@ -127,6 +127,43 @@ class SourcePolicyTests(unittest.TestCase):
             )
             self.assertEqual(len(check(root, base)), 2)
 
+    def test_pr_head_excludes_unrelated_synthetic_merge_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments],
+                    cwd=root,
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                ).stdout.strip()
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Policy test")
+            git("config", "user.email", "policy@example.invalid")
+            (root / "modules").mkdir()
+            source = root / "modules/a.cpp"
+            source.write_text("auto legacy = Poll();\n")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            git("checkout", "-qb", "feature")
+            source.write_text("auto legacy = Poll();\nStatus current = Poll();\n")
+            git("add", ".")
+            git("commit", "-qm", "feature")
+            head = git("rev-parse", "HEAD")
+            git("checkout", "-q", "main")
+            (root / "modules/other.cpp").write_text("auto unrelated = Poll();\n")
+            git("add", ".")
+            git("commit", "-qm", "unrelated main change")
+            git("merge", "-q", "--no-edit", "feature")
+            self.assertTrue(check(root, base))
+            self.assertFalse(check(root, base, head=head))
+            # Head-specific checking still rejects actual PR violations.
+            self.assertTrue(check(root, head, head=git("rev-parse", "HEAD")))
+
 
 if __name__ == "__main__":
     unittest.main()

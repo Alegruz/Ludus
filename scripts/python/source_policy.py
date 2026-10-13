@@ -141,22 +141,34 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
     return found
 
 
-def check(root: Path, base: str, clang_format: str | None = None) -> list[str]:
-    """Compare tracked worktree contents against an explicit base, including edits."""
+def check(
+    root: Path, base: str, clang_format: str | None = None, head: str | None = None
+) -> list[str]:
+    """Inspect a PR head tree, or local edits; never attribute synthetic-merge main changes to a PR."""
+    if head:
+        base = subprocess.run(
+            ["git", "merge-base", base, head],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+    comparison = [base, head] if head else [base]
     names = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMR", base],
+        ["git", "diff", "--name-only", "--diff-filter=ACMR", *comparison],
         cwd=root,
         text=True,
         capture_output=True,
         check=True,
     ).stdout.splitlines()
-    names += subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.splitlines()
+    if not head:
+        names += subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
     failures = []
     for name in sorted(set(names)):
         path = Path(name)
@@ -166,7 +178,17 @@ def check(root: Path, base: str, clang_format: str | None = None) -> list[str]:
             or path.suffix not in CPP | {".slang"}
         ):
             continue
-        source = (root / path).read_text(encoding="utf-8")
+        source = (
+            subprocess.run(
+                ["git", "show", f"{head}:{name}"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+            if head
+            else (root / path).read_text(encoding="utf-8")
+        )
         if (
             clang_format
             and format_source(source, (root / path).resolve(), clang_format) != source
@@ -192,9 +214,13 @@ def main() -> int:
         "--clang-format",
         help="also verify formatting of every changed C++/Slang source",
     )
+    parser.add_argument(
+        "--head",
+        help="inspect this exact PR head instead of the checked-out synthetic merge",
+    )
     arguments = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    failures = check(root, arguments.base, arguments.clang_format)
+    failures = check(root, arguments.base, arguments.clang_format, arguments.head)
     for failure in failures:
         print(failure)
     return bool(failures)
