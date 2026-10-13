@@ -219,12 +219,20 @@ def main():
     # browser backend artifact. When absent, SPIR-V/WGSL builds are unchanged.
     parser.add_argument('--spirv-cross')
     parser.add_argument('--spirv-cross-lock')
+    parser.add_argument("--graph-stage", choices=("vertex", "fragment"))
+    parser.add_argument("--graph-target", choices=("spirv", "wgsl", "metal", "glsl"))
     args = parser.parse_args()
     lock = json.loads(Path(args.lock).read_text())
     if run([args.compiler, '-version']).strip() != lock['slang']['version']:
         raise RuntimeError('Slang version differs from SDK pin')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', args.name):
         raise RuntimeError('Invalid shader name')
+    if args.graph_stage or args.graph_target:
+        if not args.graph_stage or not args.graph_target or args.compute or args.vertex or args.fragment or args.raster or args.metal or args.include or args.define:
+            raise RuntimeError("Graph stages require a closed generated source and exactly one target/stage")
+        from compile_graph_stage import compile_graph_stage
+        compile_graph_stage(args, lock)
+        return
     if args.compute and (args.vertex or args.fragment or args.raster):
         raise RuntimeError("Compute is mutually exclusive with raster/fullscreen stages")
     if not args.compute and (not args.vertex or not args.fragment):

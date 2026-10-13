@@ -389,7 +389,18 @@ def cmd_scene(args) -> int:
 def cmd_render_graph(args) -> int:
     from . import render_graph
 
-    if args.graph_action == "new":
+    if args.graph_action in ("new-build", "build", "verify-package"):
+        from . import render_graph_build
+        if args.graph_action == "new-build":
+            created = render_graph_build.new_build_sources(Path(args.graph), profiles=args.profiles)
+            payload = {"created": str(created), "stage": "RG1"}
+        elif args.graph_action == "verify-package":
+            payload = {"package": render_graph_build.verify_package(Path(args.package))}
+        else:
+            payload = {"build": render_graph_build.build_package(Path(args.manifest), Path(args.output), helper=args.helper,
+                        compiler=args.compiler, validator=args.validator, spirv_cross=args.spirv_cross, root=args.root)}
+        human = _json.dumps(payload, indent=2)
+    elif args.graph_action == "new":
         path = render_graph.new_workspace(Path(args.destination), output=args.output)
         payload = {"created": str(path), "stage": "RG0"}
         human = f"Saved graph sources at {path}; RG0 validates contracts, not GPU execution."
@@ -416,7 +427,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="emit a versioned JSON result")
     p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or the native user data directory)")
     sub = p.add_subparsers(dest="group", required=True)
-    graphs = sub.add_parser("render-graph", help="RG0 graph contracts and serial plans (no GPU execution)").add_subparsers(dest="graph_action", required=True)
+    graphs = sub.add_parser("render-graph", help="graph contracts and offline shader packages (no GPU execution)").add_subparsers(dest="graph_action", required=True)
     new_graph = graphs.add_parser("new", help="save RasterizeGraph and a root graph in a new directory")
     new_graph.add_argument("destination")
     new_graph.add_argument("--output", choices=("presentation", "offscreen", "depth"), default="presentation")
@@ -429,6 +440,22 @@ def build_parser() -> argparse.ArgumentParser:
         if action == "validate":
             graph.add_argument("--library", action="store_true", help="inspect all library interfaces; bindings require a containing graph")
         graph.set_defaults(func=cmd_render_graph)
+    new_build = graphs.add_parser("new-build", help="save explicit RG1 build sources next to a root graph")
+    new_build.add_argument("graph")
+    new_build.add_argument("--profiles", nargs="+", choices=("spirv", "wgsl", "metal", "glsl"), required=True)
+    new_build.set_defaults(func=cmd_render_graph)
+    build_graph = graphs.add_parser("build", help="compile declared schemas/stages/recipes and publish an offline package")
+    build_graph.add_argument("manifest", help=".lushader.json manifest; sibling .lurender.json root")
+    build_graph.add_argument("output", help="owned build tree, cache and immutable generations")
+    build_graph.add_argument("--root", help="source package root (default: manifest directory)")
+    build_graph.add_argument("--helper", required=True, help="installed SDK lib/cmake/Ludus/shaders directory")
+    build_graph.add_argument("--compiler", required=True, help="pinned Slang executable")
+    build_graph.add_argument("--validator", help="pinned spirv-val; required for spirv/glsl")
+    build_graph.add_argument("--spirv-cross", help="verified SPIRV-Cross; required for glsl")
+    build_graph.set_defaults(func=cmd_render_graph)
+    verify_graph = graphs.add_parser("verify-package", help="verify complete generation inventory without shader tools")
+    verify_graph.add_argument("package")
+    verify_graph.set_defaults(func=cmd_render_graph)
     scenes = sub.add_parser("scene", help="project-owned 3D levels and immutable cooked assets").add_subparsers(dest="scene_action", required=True)
     for action in ("new", "open", "import", "dump", "assemble", "publish"):
         command = scenes.add_parser(action)
