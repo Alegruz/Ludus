@@ -407,6 +407,7 @@ DeviceProfile QueryDeviceProfile() noexcept
                         backend::RasterColorAttachmentLimit(),
                         1};
     result.Compute = backend::ComputeLimits();
+    result.Binding = backend::BindingLimits();
     for (usize i = 0; i < 7; ++i)
     {
         result.Formats[i] = backend::FormatLimits(static_cast<RasterFormat>(i));
@@ -458,6 +459,8 @@ namespace ludus::graphics::rhi::internal
 {
 namespace
 {
+bool gIsBindlessRequested = false;
+bool gIsBindlessRequired = false;
 StorageLimits gStorageLimits;
 StorageUsage gStorageUsage;
 RasterStatus gStorageFailure = RasterStatus::CapacityExceeded;
@@ -465,6 +468,19 @@ RasterStatus gStorageFailure = RasterStatus::CapacityExceeded;
 bool gFailStorageAllocation = false;
 #endif
 } // namespace
+bool IsBindlessRequested() noexcept
+{
+    return gIsBindlessRequested;
+}
+bool IsBindlessRequired() noexcept
+{
+    return gIsBindlessRequired;
+}
+void SetBindlessRequest(bool isRequested, bool isRequired) noexcept
+{
+    gIsBindlessRequested = isRequested;
+    gIsBindlessRequired = isRequired;
+}
 const StorageLimits& CurrentStorageLimits() noexcept
 {
     return gStorageLimits;
@@ -473,6 +489,8 @@ bool ValidStorageLimits(const StorageLimits& limits) noexcept
 {
     constexpr foundation::uint32 invalid = ~foundation::uint32{0};
     const foundation::uint32 counts[]{limits.ResourcesPerKind,
+                                      limits.BindingDescriptors,
+                                      limits.DescriptorsPerSet,
                                       limits.RayResourcesPerKind,
                                       limits.RayInstances,
                                       limits.DrawsPerFrame,

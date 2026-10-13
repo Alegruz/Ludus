@@ -173,6 +173,27 @@ uint32 RasterVertexStrideLimit() noexcept
 {
     return 256;
 }
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
+{
+    return false;
+}
+BindingCapabilities BindingLimits() noexcept
+{
+    WGPULimits limits = WGPU_LIMITS_INIT;
+    if (gDevice == nullptr || wgpuDeviceGetLimits(gDevice, &limits) != WGPUStatus_Success)
+    {
+        return {};
+    }
+    return
+    {
+        .MaxDynamicUniformBuffers =
+            limits.maxDynamicUniformBuffersPerPipelineLayout < 8 ? limits.maxDynamicUniformBuffersPerPipelineLayout : 8,
+        .MaxDynamicStorageBuffers =
+            limits.maxDynamicStorageBuffersPerPipelineLayout < 4 ? limits.maxDynamicStorageBuffersPerPipelineLayout : 4,
+        .MaxTextureArrayElements = 1,
+        .MaxDescriptorsPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+    };
+}
 RasterCapabilities RasterLimits() noexcept
 {
     WGPULimits limits = WGPU_LIMITS_INIT;
@@ -285,7 +306,11 @@ RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
         return RasterStatus::OutOfMemory;
     }
     wgpuComputePassEncoderSetPipeline(pass, gComputePipelines[packet.Pipeline].Object);
-    wgpuComputePassEncoderSetBindGroup(pass, 0, gRasterSets[packet.Set], 0, nullptr);
+    wgpuComputePassEncoderSetBindGroup(pass,
+                                       0,
+                                       gRasterSets[packet.Set],
+                                       packet.DynamicOffsetCount,
+                                       packet.DynamicOffsets);
     wgpuComputePassEncoderDispatchWorkgroups(pass, packet.Groups[0], packet.Groups[1], packet.Groups[2]);
     wgpuComputePassEncoderEnd(pass);
     wgpuComputePassEncoderRelease(pass);
@@ -480,6 +505,7 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
                                 : source.Kind == RasterBindingKind::StorageRead ? WGPUBufferBindingType_ReadOnlyStorage
                                                                                 : WGPUBufferBindingType_Storage;
             entry.buffer.minBindingSize = source.MinSize;
+            entry.buffer.hasDynamicOffset = source.HasDynamicOffset;
         }
         else if (internal::TextureBinding(source.Kind))
         {
@@ -776,7 +802,11 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     const auto& pipeline = gRasterPipelines[packet.Pipeline];
     wgpuRenderPassEncoderSetPipeline(gPass, pipeline.Object);
     wgpuRenderPassEncoderSetStencilReference(gPass, pipeline.Info.StencilReference);
-    wgpuRenderPassEncoderSetBindGroup(gPass, 0, gRasterSets[packet.Set], 0, nullptr);
+    wgpuRenderPassEncoderSetBindGroup(gPass,
+                                      0,
+                                      gRasterSets[packet.Set],
+                                      packet.DynamicOffsetCount,
+                                      packet.DynamicOffsets);
     for (usize i = 0; i < pipeline.Info.StreamCount; ++i)
     {
         wgpuRenderPassEncoderSetVertexBuffer(gPass,

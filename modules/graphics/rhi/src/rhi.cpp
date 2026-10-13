@@ -421,6 +421,7 @@ void Shutdown() noexcept
     gDeviceOwner = 0;
     internal::SetGpuTimingRequest(false);
     gRayProfileRequest = false;
+    internal::SetBindlessRequest(false);
     gFallback = nullptr;
     gToken = 0;
     if (internal::DeferNativeInteropShutdown())

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ludus/foundation/containers/static_array.hpp>
+
 #include "profile.h"
 // Private implementation included only by rhi_vulkan.cpp. Thanks to AMD GPUOpen,
 // "Vulkan Memory Allocator 3.3.0", Quick start and Memory mapping (flush alignment),
@@ -48,9 +50,18 @@ struct RasterVulkanShader final
     VkShaderModule Object = VK_NULL_HANDLE;
     char Entry[64]{};
 };
-struct RasterVulkanSet final
+inline constexpr usize DESCRIPTOR_KINDS = 6;
+inline constexpr uint32 DESCRIPTOR_SETS_PER_ARENA = 16;
+struct RasterDescriptorArena final
 {
     VkDescriptorPool Pool = VK_NULL_HANDLE;
+    foundation::StaticArray<uint32, DESCRIPTOR_KINDS> Counts{};
+    uint32 Capacity = 0;
+    uint32 LiveSets = 0;
+};
+struct RasterVulkanSet final
+{
+    usize Arena = internal::RASTER_INVALID;
     VkDescriptorSet Object = VK_NULL_HANDLE;
 };
 struct RasterVulkanPipeline final
@@ -74,6 +85,7 @@ internal::StorageTable<VkSampler> gRasterSamplers;
 internal::StorageTable<RasterVulkanShader> gRasterShaders;
 internal::StorageTable<VkDescriptorSetLayout> gRasterLayouts;
 internal::StorageTable<RasterVulkanSet> gRasterSets;
+internal::StorageTable<RasterDescriptorArena> gRasterDescriptorArenas;
 internal::StorageTable<RasterVulkanPipeline> gRasterPipelines;
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
@@ -469,11 +481,14 @@ VkResult RasterUploadBuffer(VkBufferUsageFlags usage, std::span<const uint8> byt
     std::memcpy(mapped.pMappedData, bytes.data(), bytes.size());
     return vmaFlushAllocation(gRasterAllocator, buffer.Allocation, 0, bytes.size());
 }
-VkDescriptorType RasterDescriptor(RasterBindingKind kind) noexcept
+VkDescriptorType RasterDescriptor(RasterBindingKind kind, bool hasDynamicOffset = false) noexcept
 {
-    return kind == RasterBindingKind::UniformBuffer ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+    return kind == RasterBindingKind::UniformBuffer
+               ? (hasDynamicOffset == true ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+                                           : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
            : kind == RasterBindingKind::StorageRead || kind == RasterBindingKind::StorageReadWrite
-               ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+               ? (hasDynamicOffset == true ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC
+                                           : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
            : internal::TextureBinding(kind) ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
                                             : VK_DESCRIPTOR_TYPE_SAMPLER;
 }
@@ -756,6 +771,58 @@ uint32 RasterVertexStrideLimit() noexcept
     return 256;
 }
 bool gRasterHdrProbed = false, gRasterHdr = false;
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage& outUsage) noexcept
+{
+    outUsage = {};
+    for (const RasterDescriptorArena& arena : gRasterDescriptorArenas)
+    {
+        if (arena.Pool == VK_NULL_HANDLE)
+        {
+            continue;
+        }
+        ++outUsage.Pools;
+        uint32 descriptorCount = 0;
+        for (uint32 count : arena.Counts)
+        {
+            descriptorCount += count;
+        }
+        // Empty layouts reserve one otherwise-unused uniform slot per native set.
+        outUsage.ReservedDescriptors += uint64{descriptorCount == 0 ? 1U : descriptorCount} * arena.Capacity;
+    }
+    return true;
+}
+BindingCapabilities BindingLimits() noexcept
+{
+    if (gPhysical == VK_NULL_HANDLE || gDevice == VK_NULL_HANDLE)
+    {
+        return {};
+    }
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(gPhysical, &properties);
+    const VkPhysicalDeviceLimits& limits = properties.limits;
+    uint32 textures = internal::CurrentStorageLimits().DescriptorsPerSet;
+    if (limits.maxPerStageDescriptorSampledImages < textures)
+    {
+        textures = limits.maxPerStageDescriptorSampledImages;
+    }
+    if (limits.maxDescriptorSetSampledImages < textures)
+    {
+        textures = limits.maxDescriptorSetSampledImages;
+    }
+    return
+    {
+        .MaxDynamicUniformBuffers =
+            limits.maxDescriptorSetUniformBuffersDynamic < 8 ? limits.maxDescriptorSetUniformBuffersDynamic : 8,
+        .MaxDynamicStorageBuffers =
+            limits.maxDescriptorSetStorageBuffersDynamic < 4 ? limits.maxDescriptorSetStorageBuffersDynamic : 4,
+        .MaxTextureArrayElements = textures,
+        .MaxDescriptorsPerSet = limits.maxPerStageResources < internal::CurrentStorageLimits().DescriptorsPerSet
+                                    ? limits.maxPerStageResources
+                                    : internal::CurrentStorageLimits().DescriptorsPerSet,
+        .HasUniformTextureIndexing = gHasUniformTextureIndexing,
+        .HasBindlessTextureIndexing = gHasBindlessTextureIndexing,
+    };
+}
 RasterCapabilities RasterLimits() noexcept
 {
     VkPhysicalDeviceProperties properties{};
@@ -841,8 +908,8 @@ RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
                             0,
                             1,
                             &gRasterSets[packet.Set].Object,
-                            0,
-                            nullptr);
+                            packet.DynamicOffsetCount,
+                            packet.DynamicOffsets);
     vkCmdDispatch(command, packet.Groups[0], packet.Groups[1], packet.Groups[2]);
     return RasterStatus::Ready;
 }
@@ -1265,119 +1332,207 @@ RasterStatus RasterCreateShader(usize slot,
 }
 RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, uint32) noexcept
 {
-    VkDescriptorSetLayoutBinding entries[8]{};
-    for (usize i = 0; i < info.Count; ++i)
+    foundation::StaticArray<VkDescriptorSetLayoutBinding, internal::RASTER_BINDINGS> entries{};
+    for (usize index = 0; index < info.Count; ++index)
     {
-        const auto& entry = info.Entries[i];
-        entries[i].binding = entry.Binding;
-        entries[i].descriptorCount = 1;
-        entries[i].descriptorType = RasterDescriptor(entry.Kind);
+        const RasterBinding& entry = info.Entries[index];
+        VkShaderStageFlags visibility = 0;
         if ((static_cast<uint8>(entry.Visibility) & 1) != 0)
         {
-            entries[i].stageFlags |= VK_SHADER_STAGE_VERTEX_BIT;
+            visibility |= VK_SHADER_STAGE_VERTEX_BIT;
         }
         if ((static_cast<uint8>(entry.Visibility) & 4) != 0)
         {
-            entries[i].stageFlags |= VK_SHADER_STAGE_COMPUTE_BIT;
+            visibility |= VK_SHADER_STAGE_COMPUTE_BIT;
         }
         if ((static_cast<uint8>(entry.Visibility) & 2) != 0)
         {
-            entries[i].stageFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+            visibility |= VK_SHADER_STAGE_FRAGMENT_BIT;
         }
+        entries[index] =
+        {
+            .binding = entry.Binding,
+            .descriptorType = RasterDescriptor(entry.Kind, entry.HasDynamicOffset),
+            .descriptorCount = entry.Count,
+            .stageFlags = visibility,
+        };
     }
-    VkDescriptorSetLayoutCreateInfo create{};
-    create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    create.bindingCount = static_cast<uint32>(info.Count);
-    create.pBindings = entries;
+    const VkDescriptorSetLayoutCreateInfo create
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32>(info.Count),
+        .pBindings = entries.GetData(),
+    };
     return RasterError(vkCreateDescriptorSetLayout(gDevice, &create, nullptr, &gRasterLayouts[slot]));
 }
 RasterStatus
 RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal::RasterSet& info, uint32) noexcept
 {
-    auto& set = gRasterSets[slot];
-    VkDescriptorPoolSize sizes[4]{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0},
-                                  {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 0},
-                                  {VK_DESCRIPTOR_TYPE_SAMPLER, 0},
-                                  {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0}};
-    for (usize i = 0; i < layout.Count; ++i)
-    {
-        const auto type = RasterDescriptor(layout.Entries[i].Kind);
-        for (auto& size : sizes)
+    // Thanks to Khronos Group, Vulkan Samples, "Descriptor and buffer management",
+    // https://docs.vulkan.org/samples/latest/samples/performance/descriptor_management/README.html, for pool
+    // amortization. Immutable snapshots retire through the common completion
+    // registry; individual sets are freed only after their final GPU use.
+    RasterVulkanSet& set = gRasterSets[slot];
+    constexpr foundation::StaticArray<VkDescriptorType, DESCRIPTOR_KINDS> types = {
         {
-            if (size.type == type)
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            VK_DESCRIPTOR_TYPE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+        },
+    };
+    foundation::StaticArray<uint32, DESCRIPTOR_KINDS> counts{};
+    for (usize entry = 0; entry < layout.Count; ++entry)
+    {
+        const RasterBinding& binding = layout.Entries[entry];
+        for (usize kind = 0; kind < DESCRIPTOR_KINDS; ++kind)
+        {
+            if (types[kind] == RasterDescriptor(binding.Kind, binding.HasDynamicOffset))
             {
-                ++size.descriptorCount;
-                break;
+                counts[kind] += binding.Count;
             }
         }
     }
-    VkDescriptorPoolSize used[4]{};
-    uint32 count = 0;
-    for (const auto& size : sizes)
+    usize arenaSlot = internal::RASTER_INVALID;
+    usize emptySlot = internal::RASTER_INVALID;
+    for (usize index = 0; index < gRasterDescriptorArenas.GetSize(); ++index)
     {
-        if (size.descriptorCount != 0)
+        const RasterDescriptorArena& arena = gRasterDescriptorArenas[index];
+        if (arena.Pool == VK_NULL_HANDLE)
         {
-            used[count++] = size;
+            emptySlot = index;
+            continue;
+        }
+        bool hasMatchingCounts = arena.LiveSets < arena.Capacity;
+        for (usize kind = 0; kind < DESCRIPTOR_KINDS; ++kind)
+        {
+            hasMatchingCounts = hasMatchingCounts == true && arena.Counts[kind] == counts[kind];
+        }
+        if (hasMatchingCounts == true)
+        {
+            arenaSlot = index;
+            break;
         }
     }
-    // Empty layouts still need a legal pool for their one empty descriptor set.
-    if (count == 0)
+    if (arenaSlot == internal::RASTER_INVALID)
     {
-        used[count++] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1};
-    }
-    VkDescriptorPoolCreateInfo pool{};
-    pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool.maxSets = 1;
-    pool.poolSizeCount = count;
-    pool.pPoolSizes = used;
-    auto result = vkCreateDescriptorPool(gDevice, &pool, nullptr, &set.Pool);
-    if (result != VK_SUCCESS)
-    {
-        return RasterError(result);
-    }
-    VkDescriptorSetAllocateInfo allocate{};
-    allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocate.descriptorPool = set.Pool;
-    allocate.descriptorSetCount = 1;
-    allocate.pSetLayouts = &gRasterLayouts[info.Layout];
-    result = vkAllocateDescriptorSets(gDevice, &allocate, &set.Object);
-    if (result != VK_SUCCESS)
-    {
-        return RasterError(result);
-    }
-    VkWriteDescriptorSet writes[8]{};
-    VkDescriptorBufferInfo buffers[8]{};
-    VkDescriptorImageInfo images[8]{};
-    for (usize i = 0; i < layout.Count; ++i)
-    {
-        const auto& entry = layout.Entries[i];
-        auto& write = writes[i];
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = set.Object;
-        write.dstBinding = entry.Binding;
-        write.descriptorCount = 1;
-        write.descriptorType = RasterDescriptor(entry.Kind);
-        if (entry.Kind == RasterBindingKind::UniformBuffer || entry.Kind == RasterBindingKind::StorageRead ||
-            entry.Kind == RasterBindingKind::StorageReadWrite)
+        if (emptySlot == internal::RASTER_INVALID)
         {
-            buffers[i] = {gRasterBuffers[info.Slots[i]].Object, info.Offsets[i], info.Sizes[i]};
-            write.pBufferInfo = &buffers[i];
+            emptySlot = gRasterDescriptorArenas.GetSize();
+            if (gRasterDescriptorArenas.EnsureSlots(emptySlot + 1) == false)
+            {
+                return internal::StorageFailure();
+            }
+        }
+        RasterDescriptorArena& arena = gRasterDescriptorArenas[emptySlot];
+        const uint32 recordLimit = internal::CurrentStorageLimits().ResourcesPerKind;
+        arena.Capacity = recordLimit < DESCRIPTOR_SETS_PER_ARENA ? recordLimit : DESCRIPTOR_SETS_PER_ARENA;
+        for (uint32 count : counts)
+        {
+            if (count != 0 && arena.Capacity > ~uint32{0} / count)
+            {
+                arena.Capacity = ~uint32{0} / count;
+            }
+        }
+        foundation::StaticArray<VkDescriptorPoolSize, DESCRIPTOR_KINDS> sizes{};
+        uint32 sizeCount = 0;
+        for (usize kind = 0; kind < DESCRIPTOR_KINDS; ++kind)
+        {
+            arena.Counts[kind] = counts[kind];
+            if (counts[kind] != 0)
+            {
+                sizes[sizeCount++] = { .type = types[kind], .descriptorCount = counts[kind] * arena.Capacity };
+            }
+        }
+        if (sizeCount == 0)
+        {
+            sizes[sizeCount++] = { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = arena.Capacity };
+        }
+        const VkDescriptorPoolCreateInfo create
+        {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            .maxSets = arena.Capacity,
+            .poolSizeCount = sizeCount,
+            .pPoolSizes = sizes.GetData(),
+        };
+        const VkResult result = vkCreateDescriptorPool(gDevice, &create, nullptr, &arena.Pool);
+        if (result != VK_SUCCESS)
+        {
+            arena = {};
+            return RasterError(result);
+        }
+        arenaSlot = emptySlot;
+    }
+    RasterDescriptorArena& arena = gRasterDescriptorArenas[arenaSlot];
+    const VkDescriptorSetAllocateInfo allocate
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = arena.Pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &gRasterLayouts[info.Layout],
+    };
+    const VkResult result = vkAllocateDescriptorSets(gDevice, &allocate, &set.Object);
+    if (result != VK_SUCCESS)
+    {
+        if (arena.LiveSets == 0)
+        {
+            vkDestroyDescriptorPool(gDevice, arena.Pool, nullptr);
+            arena = {};
+        }
+        set.Object = VK_NULL_HANDLE;
+        return RasterError(result);
+    }
+    ++arena.LiveSets;
+    set.Arena = arenaSlot;
+    internal::StorageArray<VkWriteDescriptorSet> writes;
+    internal::StorageArray<VkDescriptorBufferInfo> buffers;
+    internal::StorageArray<VkDescriptorImageInfo> images;
+    if (writes.TryResize(layout.DescriptorCount) == false || buffers.TryResize(layout.DescriptorCount) == false ||
+        images.TryResize(layout.DescriptorCount) == false)
+    {
+        return internal::StorageFailure();
+    }
+    for (usize index = 0; index < layout.DescriptorCount; ++index)
+    {
+        const RasterBinding& entry = layout.GetDescriptorBinding(index);
+        const bool isBuffer = entry.Kind == RasterBindingKind::UniformBuffer ||
+                              entry.Kind == RasterBindingKind::StorageRead ||
+                              entry.Kind == RasterBindingKind::StorageReadWrite;
+        if (isBuffer == true)
+        {
+            buffers[index] =
+            {
+                .buffer = gRasterBuffers[info.Slots[index]].Object,
+                .offset = info.Offsets[index],
+                .range = info.Sizes[index],
+            };
         }
         else
         {
-            if (internal::TextureBinding(entry.Kind))
+            const bool isTexture = internal::TextureBinding(entry.Kind);
+            images[index] =
             {
-                images[i].imageView = gRasterViews[info.Slots[i]];
-                images[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            }
-            else
-            {
-                images[i].sampler = gRasterSamplers[info.Slots[i]];
-            }
-            write.pImageInfo = &images[i];
+                .sampler = isTexture == false ? gRasterSamplers[info.Slots[index]] : VK_NULL_HANDLE,
+                .imageView = isTexture == true ? gRasterViews[info.Slots[index]] : VK_NULL_HANDLE,
+                .imageLayout = isTexture == true ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+            };
         }
+        writes[index] =
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = set.Object,
+            .dstBinding = entry.Binding,
+            .dstArrayElement = layout.GetArrayElement(index),
+            .descriptorCount = 1,
+            .descriptorType = RasterDescriptor(entry.Kind, entry.HasDynamicOffset),
+            .pImageInfo = isBuffer == false ? &images[index] : nullptr,
+            .pBufferInfo = isBuffer == true ? &buffers[index] : nullptr,
+        };
     }
-    vkUpdateDescriptorSets(gDevice, static_cast<uint32>(layout.Count), writes, 0, nullptr);
+    vkUpdateDescriptorSets(gDevice, static_cast<uint32>(layout.DescriptorCount), writes.GetData(), 0, nullptr);
     return RasterStatus::Ready;
 }
 RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo& info, uint32) noexcept
@@ -1610,7 +1765,17 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             gRasterLayouts[slot] = VK_NULL_HANDLE;
             break;
         case internal::RasterKind::Set:
-            vkDestroyDescriptorPool(gDevice, gRasterSets[slot].Pool, nullptr);
+            if (gRasterSets[slot].Arena != internal::RASTER_INVALID)
+            {
+                RasterDescriptorArena& arena = gRasterDescriptorArenas[gRasterSets[slot].Arena];
+                (void)vkFreeDescriptorSets(gDevice, arena.Pool, 1, &gRasterSets[slot].Object);
+                --arena.LiveSets;
+                if (arena.LiveSets == 0)
+                {
+                    vkDestroyDescriptorPool(gDevice, arena.Pool, nullptr);
+                    arena = {};
+                }
+            }
             gRasterSets[slot] = {};
             break;
         case internal::RasterKind::Pipeline:
@@ -1668,8 +1833,8 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                             0,
                             1,
                             &gRasterSets[packet.Set].Object,
-                            0,
-                            nullptr);
+                            packet.DynamicOffsetCount,
+                            packet.DynamicOffsets);
     for (usize i = 0; i < pipeline.Info.StreamCount; ++i)
     {
         const VkDeviceSize offset = packet.Offsets[i];

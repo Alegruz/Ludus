@@ -122,8 +122,9 @@ RasterStatus ComputeCreatePipeline(usize, const internal::ComputePipelineInfo&, 
 {
     return Created(internal::RasterKind::ComputePipeline, request);
 }
-RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
+RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
 {
+    reference::DispatchPacket = packet;
     ++reference::Dispatches;
     return reference::ComputeResult;
 }
@@ -159,6 +160,27 @@ uint32 RasterColorAttachmentLimit() noexcept
 uint32 RasterVertexStrideLimit() noexcept
 {
     return Kind() == Backend::WebGL2 ? 252U : 256U;
+}
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
+{
+    return false;
+}
+BindingCapabilities BindingLimits() noexcept
+{
+    if (reference::ProfileAvailable == false)
+    {
+        return {};
+    }
+    const bool hasNativeArrays = Kind() == Backend::Vulkan || Kind() == Backend::Metal;
+    return
+    {
+        .MaxDynamicUniformBuffers = 8,
+        .MaxDynamicStorageBuffers = Kind() == Backend::WebGL2 ? 0U : 4U,
+        .MaxTextureArrayElements = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 1U,
+        .MaxDescriptorsPerSet = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 8U,
+        .HasUniformTextureIndexing = hasNativeArrays,
+        .HasBindlessTextureIndexing = hasNativeArrays == true && internal::IsBindlessRequested() == true,
+    };
 }
 RasterCapabilities RasterLimits() noexcept
 {

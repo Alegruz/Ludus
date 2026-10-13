@@ -48,6 +48,30 @@ class SourcePolicyTests(unittest.TestCase):
             )
         )
 
+    def test_explicit_boolean_comparisons(self):
+        for text in (
+            "if (!IsReady()) {}",
+            "bool hasFailed = !ready;",
+            "if (not IsReady()) {}",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(self.diagnose(text))
+        self.assertFalse(self.diagnose("if (IsReady() == false || status != Ready) {}"))
+        self.assertFalse(self.diagnose("bool operator!=(const Value& other) const;"))
+
+    def test_negation_ignores_literals_comments_and_preprocessor(self):
+        self.assertFalse(
+            self.diagnose(
+                '// !ready and not ready\nconst char* message = R"(!ready, not ready)";\n#if !defined(TEST)\n#endif\n'
+            )
+        )
+
+    def test_negation_ratchet_reports_only_touched_code(self):
+        before = "if (!legacy) {}\n"
+        after = before + "if (!current) {}\n"
+        failures = violations("modules/a.cpp", after, added_lines(before, after))
+        self.assertEqual([line for line, _ in failures], [2])
+
     def test_shader_members_functions_and_spaces(self):
         good = "struct Hit { float3 PositionWorld; float DistanceWorld; };\nfloat3 NormalizeOrZero(float3 value) { return value; }\n"
         self.assertFalse(self.diagnose(good, ".slang"))

@@ -43,6 +43,7 @@ inline foundation::usize Barriers = 0;
 inline RasterStatus PassStart = RasterStatus::Ready;
 inline RasterStatus PassPrepare = RasterStatus::Ready;
 inline internal::RasterPacket Packet;
+inline internal::ComputePacket DispatchPacket;
 inline internal::RasterPassInfo Pass;
 inline internal::StorageTable<internal::RasterPipelineInfo> Pipelines;
 inline internal::StorageTable<foundation::Array<foundation::uint8>> BufferBytes;

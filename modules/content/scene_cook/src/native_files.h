@@ -3,6 +3,8 @@
 // Private POSIX helpers for the scene pipeline: path resolution, directory
 // creation and atomic whole-file replacement of arbitrary size.
 
+#include <ludus/foundation/base/config.h>
+
 #include <ludus/content/content.h>
 #include <ludus/content/scene_cook/scene_cook.h>
 #include <ludus/foundation/containers/array.hpp>
@@ -83,7 +85,11 @@ class FileLock final
 {
 public:
     FileLock() noexcept = default;
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     ~FileLock() noexcept;
+#else
+    ~FileLock() noexcept = default;
+#endif
     FileLock(const FileLock&) = delete;
     FileLock& operator=(const FileLock&) = delete;
     /// Open path (created in append mode when exclusive) and lock it.
@@ -91,6 +97,8 @@ public:
     [[nodiscard]] Status Acquire(std::string_view path, LockMode mode) noexcept;
 
 private:
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     int mDescriptor = -1;
+#endif
 };
 } // namespace ludus::content::scene_cook::detail
