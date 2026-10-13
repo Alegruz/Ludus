@@ -25,6 +25,10 @@ public:
     [[nodiscard]] bool Start();
     void Stop() noexcept;
     void Tick();
+    [[nodiscard]] bool Running() const noexcept
+    {
+        return static_cast<bool>(Window_);
+    }
     void Select(const world_demo::Name& id) noexcept;
     [[nodiscard]] world_demo::Name Selected() const noexcept
     {

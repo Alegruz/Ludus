@@ -15,7 +15,7 @@ This is a scene-specific offline vertical slice. The private sample bundle
 does not itself implement the project workflow. Stage 5 now reuses its converter
 inside the installed backend and integrates project-owned assets, saved levels and
 the native Editor viewport; see the
-[project scene import and saved-level workflow](../architecture/resource-management.md#project-scene-import-and-saved-level-workflow).
+[World scene import and saved-document workflow](../architecture/resource-management.md#project-scene-import-and-saved-level-workflow).
 The standalone commands below are prototype evidence; they do not provide the
 project → scene → import → viewport → save/reopen product workflow.
 
@@ -258,3 +258,9 @@ Thanks to Matt Pharr, Wenzel Jakob and Greg Humphreys for the
 [pbrt-v4 input format documentation](https://pbrt.org/fileformat-v4), especially
 camera transforms, graphics-state scopes, materials and shapes. The converter
 is original code, with no PBRT implementation copied.
+
+For interactive placement and gameplay fields use the single
+[World authoring workflow](../development/editor-workspace.md#project-owned-3d-levels-and-reference-import).
+The command-line level conversion/capture remains a runtime asset pipeline,
+not a separate editor workspace. Existing `.lulevel` files open in World through
+the documented conversion path.

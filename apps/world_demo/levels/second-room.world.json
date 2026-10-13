@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "schema": "ludus.world-demo.v1",
+  "entities": [
+    {
+      "id": "player-start",
+      "name": "player-start",
+      "components": {
+        "transform": {
+          "x": -6,
+          "y": 0,
+          "rotation": 0,
+          "scale_x": 1,
+          "scale_y": 1
+        },
+        "player": {
+          "speed": 4,
+          "health": 3,
+          "sprite": "player"
+        }
+      }
+    },
+    {
+      "id": "guard-a",
+      "name": "guard-a",
+      "components": {
+        "transform": {
+          "x": 0,
+          "y": 2,
+          "rotation": 0,
+          "scale_x": 1,
+          "scale_y": 1
+        },
+        "enemy": {
+          "speed": 2,
+          "health": 3,
+          "sprite": "guard",
+          "target": "player-start"
+        }
+      }
+    },
+    {
+      "id": "exit-a",
+      "name": "exit-a",
+      "components": {
+        "transform": {
+          "x": 8,
+          "y": 0,
+          "rotation": 0,
+          "scale_x": 1,
+          "scale_y": 1
+        },
+        "exit": {
+          "half_x": 0.5,
+          "half_y": 1,
+          "next_level": "first-room"
+        }
+      }
+    },
+    {
+      "id": "floor",
+      "name": "floor",
+      "components": {
+        "collision": {
+          "x": 0,
+          "y": -4,
+          "half_x": 10,
+          "half_y": 0.5
+        }
+      }
+    },
+    {
+      "id": "level-settings",
+      "name": "Level settings",
+      "components": {
+        "settings": {
+          "id": "second-room",
+          "seed": "43",
+          "min_x": -12,
+          "min_y": -7,
+          "max_x": 12,
+          "max_y": 7,
+          "camera_x": 0,
+          "camera_y": 0,
+          "vertical_extent": 14
+        }
+      }
+    }
+  ]
+}

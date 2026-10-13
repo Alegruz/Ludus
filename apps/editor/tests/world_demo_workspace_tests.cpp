@@ -1,0 +1,220 @@
+#include "internal/world_demo_adapter.h"
+#include "internal/world_workspace.h"
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QPushButton>
+#include <QSignalSpy>
+#include <QTemporaryDir>
+#include <QTest>
+
+#include <catch2/catch_test_macros.hpp>
+
+using namespace ludus::editor;
+namespace
+{
+void Write(const QString& path, const QByteArray& bytes)
+{
+    QFile file(path);
+    REQUIRE(file.open(QIODevice::WriteOnly));
+    REQUIRE(file.write(bytes) == bytes.size());
+}
+QByteArray Read(const QString& path)
+{
+    QFile file(path);
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    return file.readAll();
+}
+QString WorldFile(QTemporaryDir& directory)
+{
+    REQUIRE(directory.isValid());
+    const auto path = QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("room.world.json"));
+    const auto sample = ludus::world_demo::ExampleLevel();
+    Write(path, QByteArray(sample.data(), static_cast<ludus::foundation::int64>(sample.size())));
+    return path;
+}
+void Select(WorldWorkspace& view, const QString& id)
+{
+    auto* list = view.findChild<QListWidget*>(QStringLiteral("worldEntities"));
+    REQUIRE(list != nullptr);
+    for (ludus::foundation::int32 row = 0; row < list->count(); ++row)
+    {
+        if (list->item(row)->data(Qt::UserRole).toString() == id)
+        {
+            list->setCurrentRow(row);
+            return;
+        }
+    }
+    FAIL("Missing World entity");
+}
+QLineEdit* Field(WorldWorkspace& view, const QString& key)
+{
+    auto* field = view.findChild<QLineEdit*>(QStringLiteral("worldField:") + key);
+    REQUIRE(field != nullptr);
+    return field;
+}
+void Type(QLineEdit* field, const QString& value)
+{
+    field->setFocus();
+    field->selectAll();
+    QTest::keyClicks(field, value);
+}
+} // namespace
+TEST_CASE("World demo uses World fields history save recovery and runtime data", "[editor][world][unified][world-demo]")
+{
+    QTemporaryDir directory;
+    const auto path = WorldFile(directory);
+    WorldWorkspace view;
+    view.SetProject(directory.path(), 1);
+    REQUIRE(view.Open(path));
+    REQUIRE(IsWorldDemo(view.Document()));
+    auto* boundViewport = view.findChild<QWidget*>(QStringLiteral("worldViewport"));
+    REQUIRE(boundViewport != nullptr);
+    CHECK(boundViewport->isHidden());
+    CHECK(view.findChild<QListWidget*>(QStringLiteral("worldEntities"))->count() == 5);
+    Select(view, QStringLiteral("player-start"));
+    const auto original = view.Document().Draft();
+    Type(Field(view, QStringLiteral("transform/x")), QStringLiteral("-"));
+    CHECK_FALSE(view.Save());
+    CHECK(Field(view, QStringLiteral("transform/x"))->text() == QStringLiteral("-"));
+    CHECK(view.Document().Draft() == original);
+    Type(Field(view, QStringLiteral("transform/x")), QStringLiteral("0.5"));
+    REQUIRE(view.Save());
+    CHECK_FALSE(view.Dirty());
+    CHECK(view.Document()
+              .Entity(QStringLiteral("player-start"))
+              .value(QStringLiteral("components"))
+              .toObject()
+              .value(QStringLiteral("transform"))
+              .toObject()
+              .value(QStringLiteral("x")) == QJsonValue(.5));
+    ludus::world_demo::Level runtime;
+    const auto saved = Read(path);
+    REQUIRE(
+        ludus::world_demo::ReadLevel({saved.constData(), static_cast<ludus::foundation::usize>(saved.size())}, runtime)
+            .Error == ludus::world_demo::LevelError::None);
+    CHECK(runtime.Entities[0].Position.X == .5F);
+    WorldWorkspace reopened;
+    reopened.SetProject(directory.path(), 1);
+    REQUIRE(reopened.Open(path));
+    CHECK(reopened.Document().Draft() == view.Document().Draft());
+    view.Undo();
+    CHECK(view.Document().Draft() == original);
+    CHECK(view.Dirty());
+    view.Redo();
+    CHECK_FALSE(view.Dirty());
+    Select(view, QStringLiteral("guard-a"));
+    Type(Field(view, QStringLiteral("enemy/health")), QStringLiteral("7"));
+    REQUIRE(view.Apply());
+    CHECK(QFileInfo::exists(path + QStringLiteral(".ludus-recovery")));
+    WorldWorkspace recovered;
+    recovered.SetProject(directory.path(), 1);
+    REQUIRE(recovered.Open(path));
+    REQUIRE(recovered.Recover());
+    CHECK(recovered.Document().Draft() == view.Document().Draft());
+    recovered.Undo();
+    CHECK_FALSE(recovered.Dirty());
+    Write(path, QByteArrayLiteral("{}"));
+    CHECK_FALSE(view.Save());
+    CHECK(view.Dirty());
+    CHECK(Read(path) == QByteArrayLiteral("{}"));
+}
+TEST_CASE("World demo migration preserves legacy source and refuses overwrite and malformed candidates",
+          "[editor][world][unified][world-demo]")
+{
+    QTemporaryDir directory;
+    const auto worldPath = WorldFile(directory);
+    ludus::world_demo::Level level;
+    const auto source = ludus::world_demo::ExampleLevel();
+    REQUIRE(ludus::world_demo::ReadLevel(source, level).Error == ludus::world_demo::LevelError::None);
+    ludus::foundation::core::Array<char> legacy;
+    REQUIRE(ludus::world_demo::WriteLevel(level, legacy));
+    const QByteArray bytes(legacy.GetData(), static_cast<ludus::foundation::int64>(legacy.GetSize()));
+    const auto path = QFileInfo(worldPath).absolutePath() + QStringLiteral("/legacy.json");
+    Write(path, bytes);
+    WorldWorkspace view;
+    view.SetProject(directory.path(), 1);
+    REQUIRE(view.Open(path));
+    CHECK(view.Path().endsWith(QStringLiteral("legacy.world.json")));
+    CHECK(view.Dirty());
+    REQUIRE(view.Save());
+    CHECK(Read(path) == bytes);
+    CHECK(QFileInfo::exists(view.Path()));
+    const auto original = view.Document().Draft();
+    CHECK_FALSE(view.Open(path));
+    CHECK(view.Document().Draft() == original);
+    const auto bad = QFileInfo(worldPath).absolutePath() + QStringLiteral("/bad.json");
+    Write(bad, bytes + bytes);
+    CHECK_FALSE(view.Open(bad));
+    CHECK(view.Document().Draft() == original);
+}
+TEST_CASE("World demo actors colliders settings and duplication share one inspector and validation",
+          "[editor][world][unified][world-demo]")
+{
+    QTemporaryDir directory;
+    const auto path = WorldFile(directory);
+    WorldWorkspace view;
+    view.SetProject(directory.path(), 1);
+    REQUIRE(view.Open(path));
+    Select(view, QStringLiteral("floor"));
+    Type(Field(view, QStringLiteral("collision/half_x")), QStringLiteral("8"));
+    REQUIRE(view.Apply());
+    Select(view, QStringLiteral("level-settings"));
+    Type(Field(view, QStringLiteral("settings/seed")), QStringLiteral("18446744073709551615"));
+    REQUIRE(view.Save());
+    ludus::world_demo::Level runtime;
+    QString error;
+    REQUIRE(ProjectWorldDemo(view.Document(), runtime, error));
+    CHECK(runtime.Seed == ~ludus::foundation::uint64{0});
+    CHECK(runtime.Collision[0].HalfExtent.X == 8);
+    Select(view, QStringLiteral("guard-a"));
+    view.findChild<QPushButton*>(QStringLiteral("worldDuplicate"))->click();
+    CHECK(view.Document().Draft().value(QStringLiteral("entities")).toArray().size() == 6);
+    REQUIRE(view.Save());
+    REQUIRE(ProjectWorldDemo(view.Document(), runtime, error));
+    CHECK(runtime.EntityCount == 4);
+    view.Undo();
+    REQUIRE(ProjectWorldDemo(view.Document(), runtime, error));
+    CHECK(runtime.EntityCount == 3);
+    Select(view, QStringLiteral("level-settings"));
+    Type(Field(view, QStringLiteral("settings/seed")), QStringLiteral("broken"));
+    REQUIRE(view.Apply());
+    const auto disk = Read(path);
+    CHECK_FALSE(view.Save());
+    CHECK(Read(path) == disk);
+    CHECK(view.Dirty());
+}
+TEST_CASE("World demo preview gestures commit once to World and cancel without authoring edits",
+          "[editor][world][unified][world-demo]")
+{
+    QTemporaryDir directory;
+    const auto path = WorldFile(directory);
+    WorldWorkspace view;
+    view.SetProject(directory.path(), 1);
+    REQUIRE(view.Open(path));
+    Select(view, QStringLiteral("player-start"));
+    CHECK(view.WorldDemoPreview().Selected().View() == "player-start");
+    const auto original = view.Document().Draft();
+    auto projection = view.WorldDemoProjection().Draft();
+    for (auto& recipe : projection.Level.Entities)
+    {
+        if (recipe.Id.View() == "player-start")
+        {
+            recipe.Position.X += .25F;
+        }
+    }
+    WorldDocument candidate = view.Document();
+    QString error;
+    REQUIRE(CommitWorldDemoGesture(candidate, projection, error));
+    REQUIRE(candidate.Undo());
+    CHECK(candidate.Draft() == original);
+    CHECK_FALSE(candidate.CanUndo());
+    Type(Field(view, QStringLiteral("transform/x")), QStringLiteral("-"));
+    CHECK_FALSE(view.StartPreview());
+    CHECK(view.Document().Draft() == original);
+}

@@ -688,6 +688,7 @@ TEST_CASE("Editor exposes a single World tab for scene and component authoring",
         const auto text = tabs->tabText(i).remove(QLatin1Char('&'));
         worlds += text == QStringLiteral("World") ? 1 : 0;
         CHECK(text != QStringLiteral("3D Levels"));
+        CHECK(text != QStringLiteral("Scene"));
     }
     CHECK(worlds == 1);
 }

@@ -1,0 +1,336 @@
+{
+  "version": 1,
+  "id": "ludus.world-demo.v1",
+  "label": "World demo",
+  "components": [
+    {
+      "id": "transform",
+      "label": "Transform",
+      "help": "",
+      "required": false,
+      "properties": [
+        {
+          "id": "x",
+          "label": "Position X",
+          "type": "number",
+          "default": 0,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        },
+        {
+          "id": "y",
+          "label": "Position Y",
+          "type": "number",
+          "default": 0,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        },
+        {
+          "id": "rotation",
+          "label": "Rotation",
+          "type": "number",
+          "default": 0,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": "radians"
+        },
+        {
+          "id": "scale_x",
+          "label": "Scale X",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "scale_y",
+          "label": "Scale Y",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "id": "player",
+      "label": "Player",
+      "help": "",
+      "required": false,
+      "properties": [
+        {
+          "id": "speed",
+          "label": "Speed",
+          "type": "number",
+          "default": 4,
+          "min": 0,
+          "max": 32,
+          "help": "",
+          "unit": "metres/second"
+        },
+        {
+          "id": "health",
+          "label": "Health",
+          "type": "integer",
+          "default": 3,
+          "min": 1,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "sprite",
+          "label": "Sprite",
+          "type": "enum",
+          "default": "player",
+          "help": "",
+          "unit": "",
+          "choices": [
+            "player",
+            "guard"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "enemy",
+      "label": "Enemy",
+      "help": "",
+      "required": false,
+      "properties": [
+        {
+          "id": "speed",
+          "label": "Speed",
+          "type": "number",
+          "default": 2,
+          "min": 0,
+          "max": 32,
+          "help": "",
+          "unit": "metres/second"
+        },
+        {
+          "id": "health",
+          "label": "Health",
+          "type": "integer",
+          "default": 2,
+          "min": 1,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "sprite",
+          "label": "Sprite",
+          "type": "enum",
+          "default": "guard",
+          "help": "",
+          "unit": "",
+          "choices": [
+            "player",
+            "guard"
+          ]
+        },
+        {
+          "id": "target",
+          "label": "Target",
+          "type": "entity",
+          "default": "",
+          "help": "",
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "id": "exit",
+      "label": "Exit",
+      "help": "",
+      "required": false,
+      "properties": [
+        {
+          "id": "half_x",
+          "label": "Half width",
+          "type": "number",
+          "default": 0.5,
+          "min": 0,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        },
+        {
+          "id": "half_y",
+          "label": "Half height",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        },
+        {
+          "id": "next_level",
+          "label": "Next level",
+          "type": "enum",
+          "default": "second-room",
+          "help": "",
+          "unit": "",
+          "choices": [
+            "first-room",
+            "second-room"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "collision",
+      "label": "Collision box",
+      "help": "",
+      "required": false,
+      "properties": [
+        {
+          "id": "x",
+          "label": "Center X",
+          "type": "number",
+          "default": 0,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        },
+        {
+          "id": "y",
+          "label": "Center Y",
+          "type": "number",
+          "default": -4,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        },
+        {
+          "id": "half_x",
+          "label": "Half width",
+          "type": "number",
+          "default": 10,
+          "min": 0,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        },
+        {
+          "id": "half_y",
+          "label": "Half height",
+          "type": "number",
+          "default": 0.5,
+          "min": 0,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "label": "Level settings",
+      "help": "",
+      "required": false,
+      "properties": [
+        {
+          "id": "id",
+          "label": "Level ID",
+          "type": "string",
+          "default": "first-room",
+          "help": "Lowercase ASCII letters, digits and hyphens; 1\u201331 bytes.",
+          "unit": ""
+        },
+        {
+          "id": "seed",
+          "label": "Seed",
+          "type": "string",
+          "default": "42",
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "min_x",
+          "label": "Bounds minimum X",
+          "type": "number",
+          "default": -12,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "min_y",
+          "label": "Bounds minimum Y",
+          "type": "number",
+          "default": -7,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "max_x",
+          "label": "Bounds maximum X",
+          "type": "number",
+          "default": 12,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "max_y",
+          "label": "Bounds maximum Y",
+          "type": "number",
+          "default": 7,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "camera_x",
+          "label": "Camera X",
+          "type": "number",
+          "default": 0,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "camera_y",
+          "label": "Camera Y",
+          "type": "number",
+          "default": 0,
+          "min": -100000,
+          "max": 100000,
+          "help": "",
+          "unit": ""
+        },
+        {
+          "id": "vertical_extent",
+          "label": "Camera vertical extent",
+          "type": "number",
+          "default": 14,
+          "min": 0,
+          "max": 100000,
+          "help": "",
+          "unit": "metres"
+        }
+      ]
+    }
+  ],
+  "assets": []
+}

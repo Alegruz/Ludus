@@ -48,7 +48,15 @@ without adopting their class hierarchies or singleton managers.
 
 ## Initial content schema
 
-The following is a complete illustrative version 1 document for a small 2D game.
+The shipped sample now uses the version-1 World entity/component envelope and
+`ludus.world-demo.v1` game schema, with actors, collision boxes and settings in one
+authoring hierarchy. See [the editor workflow](../development/editor-workspace.md#s4-scene-authoring)
+and [the canonical sample World](../../apps/world_demo/levels/first-room.world.json).
+Runtime loading projects those components into the same owned Level definition.
+Static boxes and settings stay outside the gameplay entity registry.
+
+The following is the legacy version-1 interchange form, retained for import and
+compatibility, rather than a second authoring workflow.
 Its kinds and properties belong to that game. Ludus does not define `player`,
 `enemy`, or `exit` as built-in entity types.
 
@@ -153,7 +161,7 @@ Parsing and validation return a status and a bounded diagnostic record, includin
 source file, property path, and line/column where the chosen parser provides them.
 The bounded reference codec currently returns an error code and byte offset;
 file/path context and richer editor diagnostics are future tooling work.
-For example, a future editor can show: `first-room.json entities[1].properties.target: unknown entity
+For example, a future editor can show: `first-room.world.json entities[1].components.enemy.target: unknown entity
 'player-strat'`. Ordinary malformed content is not an assertion failure.
 
 Reject duplicate JSON object keys, duplicate IDs, unknown versions/kinds/fields,

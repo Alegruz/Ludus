@@ -427,6 +427,10 @@ LevelResult ReadLevel(std::string_view source, Level& output) noexcept
     {
         return {LevelError::Capacity, 0};
     }
+    if (source.find("\"schema\"") != std::string_view::npos)
+    {
+        return ReadWorldLevel(source, output);
+    }
     Reader reader(source);
     Level candidate;
     const bool parsed = reader.Object(

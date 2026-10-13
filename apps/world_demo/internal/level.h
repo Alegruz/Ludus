@@ -84,6 +84,8 @@ struct LevelResult final
     LevelError Error = LevelError::None;
     usize Offset = 0;
 };
+// Read the bounded World adapter; failure preserves output. No project code is executed.
+[[nodiscard]] LevelResult ReadWorldLevel(std::string_view source, Level& output) noexcept;
 [[nodiscard]] LevelResult ReadLevel(std::string_view source, Level& output) noexcept;
 [[nodiscard]] LevelError ValidateLevel(const Level& level) noexcept;
 [[nodiscard]] bool WriteLevel(const Level& level, foundation::core::Array<char>& output) noexcept;
