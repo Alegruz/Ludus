@@ -806,7 +806,8 @@ one-device/surface scope, resource table bounds and restricted operations are
 assigned below. R6 implements configurable, budgeted storage, and R7 provides
 measurement and qualification tooling with explicitly open host acceptance.
 R8 adds mutable transfers and incremental initialized mip primitives; partial
-sampling remains R9a. R9–R17 remain **planned and not implemented**. They extend the
+sampling is supplied by implemented R9a; R9 also supplies its documented texture
+types and formats. R10–R17 retain the planned subprofiles below. They extend the
 shipped R0–R5 profiles rather than reopening their original acceptance.
 
 #### Follow-up milestones R6–R17
@@ -863,7 +864,11 @@ R7a is Implemented and R7b physical host gates remain open. R8a and R8b's
 initialized-mip/staging primitives are Implemented with their
 [transfer contract and SDK journey](../development/fullscreen-rendering.md#mutable-transfers-and-mip-initialization-r8);
 R9a/R9b/R9c are Implemented with explicit backend profiles; sampled depth/stencil
-aspects remain R10. R10–R17 subprofiles remain Planned.
+aspects remain R10. R10–R17 subprofiles remain Planned, except for the existing
+[RT0 static native-query profile](renderer-systems.md#l6-implemented-scope-rt0-and-rt1)
+overlapping R16a/R17a. That immutable native build/query path is implemented;
+it does not complete their broader GDI build/read declarations or R16b/R17b's
+refit/compaction and dedicated ray-pipeline scope.
 Implemented means
 the declared operations and failure paths pass SDK/correctness gates; Qualified
 adds the named hardware/workload measurements. Unavailable evidence stays open.
