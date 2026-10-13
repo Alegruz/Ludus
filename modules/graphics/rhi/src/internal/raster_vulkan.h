@@ -1426,7 +1426,7 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     VkPipelineRasterizationStateCreateInfo raster{};
     raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.frontFace = VK_FRONT_FACE_CLOCKWISE; // Negative-height viewport preserves canonical clip-space CCW.
+    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // Canonical clip-space CCW with the negative-height viewport.
     raster.lineWidth = 1;
     VkPipelineMultisampleStateCreateInfo samples{};
     samples.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
