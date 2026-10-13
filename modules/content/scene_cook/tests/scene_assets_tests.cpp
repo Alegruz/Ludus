@@ -436,3 +436,133 @@ TEST_CASE("Invalid levels report the reference messages", "[scene_assets]")
     CHECK_FALSE(ValidateLevel(ToSpan(degenerate), error));
     CHECK(error.Message.View() == "Degenerate authored camera");
 }
+
+namespace
+{
+/// The `level` member of an Editor response, as canonical bytes.
+std::string GetResponseMember(const Array<uint8>& response, std::string_view member)
+{
+    detail::JsonTree tree;
+    detail::JsonIndex root = detail::NO_JSON_NODE;
+    content::MessageText message;
+    REQUIRE(detail::ParsePythonJson(ToSpan(response), tree, root, message));
+    const detail::JsonIndex value = tree.GetMember(root, member);
+    REQUIRE(value != detail::NO_JSON_NODE);
+    if (tree.GetKind(value) == detail::JsonKind::String)
+    {
+        return std::string(tree.GetText(value));
+    }
+    Array<uint8> bytes;
+    REQUIRE(detail::WriteCanonicalJson(tree, value, bytes));
+    return ToText(bytes);
+}
+
+/// Compare one Editor response and its scene with the scene_editor.py capture.
+void CheckEditorStep(const EditorSceneResult& result, const std::string& step)
+{
+    INFO(step);
+    const std::filesystem::path editor = std::filesystem::path(GOLDENS) / "expected/files/editor";
+    CHECK(ToText(result.Response) == ReadWhole(editor / (step + ".json")) + "\n");
+    const std::string scenes = ReadWhole(editor / "scenes.json");
+    const usize at = scenes.find("\"" + step + "\"");
+    if (at == std::string::npos)
+    {
+        CHECK(result.Scene.GetSize() == 0);
+        return;
+    }
+    CHECK(scenes.find(HexOf(ToText(result.Scene)), at) == scenes.find("\"sha256\": \"", at) + 11);
+}
+} // namespace
+
+TEST_CASE("In-process Editor operations match scene_editor.py responses", "[scene_assets][goldens]")
+{
+    const std::filesystem::path work = MakeWorkDirectory();
+    const std::filesystem::path project = work / "project";
+    std::filesystem::create_directories(project);
+    const std::string root = project.string();
+    const std::string source = std::string(GOLDENS) + "/source";
+    SequentialUuids counter;
+    UuidSource uuids{&SequentialUuids::Generate, &counter};
+    AssetOptions options;
+    options.UuidsOrNull = &uuids;
+    options.SourceOrigin = VIRTUAL_ORIGIN;
+    AssetError error;
+    Array<uint8> level;
+    REQUIRE(CreateLevel("Golden", options, level, error));
+
+    usize stages = 0;
+    EditorSceneProgress progress{[](void* context, std::string_view) noexcept { ++*static_cast<usize*>(context); },
+                                 &stages};
+    EditorSceneRequest request;
+    request.Root = root;
+    request.Source = source;
+    request.ProgressOrNull = &progress;
+
+    request.Operation = EditorSceneOperation::Import;
+    request.Level = ToSpan(level);
+    EditorSceneResult imported;
+    INFO(Describe(error));
+    REQUIRE(OperateEditorScene(request, options, imported, error));
+    CheckEditorStep(imported, "1-import");
+    CHECK(ToText(imported.Catalog) ==
+          ReadWhole(std::filesystem::path(GOLDENS) / "expected/files/editor/1-import.catalog.json"));
+    CHECK(stages > 0);
+    CHECK(std::filesystem::exists(project / "assets/catalog.json") == false);
+
+    const std::string candidate = GetResponseMember(imported.Response, "level");
+    request.Operation = EditorSceneOperation::CommitImport;
+    request.Level = ToSpan(candidate);
+    request.Catalog = ToSpan(imported.Catalog);
+    request.HasExpected = false;
+    EditorSceneResult committed;
+    REQUIRE(OperateEditorScene(request, options, committed, error));
+    CheckEditorStep(committed, "2-commit");
+
+    request.Operation = EditorSceneOperation::Save;
+    request.Path = "scenes/main.lulevel";
+    request.Catalog = {};
+    EditorSceneResult saved;
+    REQUIRE(OperateEditorScene(request, options, saved, error));
+    CheckEditorStep(saved, "3-save");
+
+    request.Operation = EditorSceneOperation::Open;
+    request.Level = {};
+    EditorSceneResult opened;
+    REQUIRE(OperateEditorScene(request, options, opened, error));
+    CheckEditorStep(opened, "4-open");
+
+    std::string renamed = GetResponseMember(opened.Response, "level");
+    const usize name = renamed.find("\"name\":", renamed.find("\"objects\":"));
+    REQUIRE(name != std::string::npos);
+    renamed.replace(name + 8, renamed.find('"', name + 8) - (name + 8), "Renamed");
+    request.Operation = EditorSceneOperation::Assemble;
+    request.Level = ToSpan(renamed);
+    EditorSceneResult assembled;
+    REQUIRE(OperateEditorScene(request, options, assembled, error));
+    CheckEditorStep(assembled, "5-assemble");
+
+    const std::string disk = GetResponseMember(opened.Response, "disk");
+    request.Operation = EditorSceneOperation::Save;
+    request.HasExpected = true;
+    request.Expected = disk;
+    EditorSceneResult resaved;
+    REQUIRE(OperateEditorScene(request, options, resaved, error));
+    CheckEditorStep(resaved, "6-save");
+
+    // The bytes on disk changed: the stale digest now conflicts.
+    REQUIRE_FALSE(OperateEditorScene(request, options, resaved, error));
+    CHECK(error.Code == AssetErrorCode::Conflict);
+
+    bool isCancelled = true;
+    Cancellation cancel{[](void* context) noexcept { return *static_cast<bool*>(context); }, &isCancelled};
+    AssetOptions cancelling = options;
+    cancelling.CancelOrNull = &cancel;
+    request.Operation = EditorSceneOperation::Import;
+    request.Level = ToSpan(renamed);
+    request.HasExpected = false;
+    REQUIRE_FALSE(OperateEditorScene(request, cancelling, imported, error));
+    CHECK(error.Code == AssetErrorCode::InstallCancelled);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(work, ignored);
+}

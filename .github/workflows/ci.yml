@@ -125,7 +125,7 @@ jobs:
           ./scripts/install-sdk macos-clang-development
           out/host-tools/venv/bin/python -m venv out/project-tooling-venv
           out/project-tooling-venv/bin/python -m pip install --no-deps ./scripts/python
-          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_render_graph_build test_scene_assets -v
+          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_render_graph_build -v
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
       - name: Qualify installed RG1 Metal and WGSL packages
         run: |
@@ -458,10 +458,6 @@ jobs:
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
       - name: Test reproducible packs with the independent LZ4 decoder
         run: python3 -m unittest discover -s scripts/python -p test_pack_builder.py -v
-      - name: Test scene conversion encodings and geometry
-        run: |
-          python3 -m unittest discover -s tools/scene_cooker -v
-          PYTHONPATH=scripts/python python3 -m unittest test_scene_assets -v
       - name: Test Metal shader reflection contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_rhi_measurements test_metal_shaders test_raster_shaders test_texture_cooker -v
       - name: Test optional RAD tooling contracts

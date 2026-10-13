@@ -1,0 +1,22 @@
+{
+  "1-import": {
+    "bytes": 1130180,
+    "sha256": "d69e23948266db7b94ccbc8a92136abc443de6a9a3645d313cc532f92e113a6a"
+  },
+  "3-save": {
+    "bytes": 1130180,
+    "sha256": "d69e23948266db7b94ccbc8a92136abc443de6a9a3645d313cc532f92e113a6a"
+  },
+  "4-open": {
+    "bytes": 1130180,
+    "sha256": "d69e23948266db7b94ccbc8a92136abc443de6a9a3645d313cc532f92e113a6a"
+  },
+  "5-assemble": {
+    "bytes": 1130180,
+    "sha256": "d69e23948266db7b94ccbc8a92136abc443de6a9a3645d313cc532f92e113a6a"
+  },
+  "6-save": {
+    "bytes": 1130180,
+    "sha256": "d69e23948266db7b94ccbc8a92136abc443de6a9a3645d313cc532f92e113a6a"
+  }
+}
