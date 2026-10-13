@@ -1524,7 +1524,9 @@ small tail mips, array layers, a cube face and unaligned native base edges, then
 pixels. It retains views after texture-owner destruction. Its patterned image
 uses 8240 texels when admitted, otherwise the actual lower enabled width, and
 2049 rows: its complete upload exceeds 64 MiB. It samples array layer 256 when enabled (otherwise the highest admitted
-layer of a reported 256-layer array) and a 512-deep volume mip chain. These prepared textures exercise the old ceilings
+layer of a reported 256-layer array) and a 512-deep volume mip chain when
+enabled, otherwise a reported lower volume depth. A WebGL browser regression
+reports a 256-texel volume limit and verifies the admitted mip chain and pixels. These prepared textures exercise the old ceilings
 without loading a reference scene. Unit tests cover copied
 required/preferred requests, unsupported BC5, enabled 8192/16384 limits,
 malformed mip/slice/pitch lengths, native rollback and resource-byte budgets.

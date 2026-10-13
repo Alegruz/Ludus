@@ -30,6 +30,7 @@ constexpr usize VIEW_COUNT = 13;
 constexpr uint32 CASE_COUNT = 20;
 constexpr uint32 ARRAY_LAYERS = 257;
 uint32 gArrayLayers = ARRAY_LAYERS;
+uint32 gVolumeDepth = 0;
 StaticArray<rhi::TextureHandle, TEXTURE_COUNT> gTextures{};
 rhi::TextureHandle gTarget;
 StaticArray<rhi::TextureViewHandle, VIEW_COUNT> gViews{};
@@ -221,9 +222,10 @@ bool CreateExtendedTextures() noexcept
         return false;
     }
     LUDUS_LOG_INFO(LOG_R9,
-                   "R18c complete upload {} bytes; array layers {}; volume depth 512",
+                   "R18c complete upload {} bytes; array layers {}; volume depth {}",
                    large.GetSize(),
-                   gArrayLayers);
+                   gArrayLayers,
+                   gVolumeDepth);
     constexpr usize FACE_COUNT = 6;
     constexpr usize CUBE_ENCODED_BYTES = FACE_COUNT * BC5_BLOCK_BYTES;
     constexpr usize CUBE_RGBA_BYTES = FACE_COUNT * 4 * 4 * 4;
@@ -330,6 +332,15 @@ bool CreateResources() noexcept
         return false;
     }
     gArrayLayers = rgba.MaxArrayLayers < ARRAY_LAYERS ? rgba.MaxArrayLayers : ARRAY_LAYERS;
+    if (rgba.MaxDimension3D < 4)
+    {
+        return false;
+    }
+    gVolumeDepth = 4;
+    while (gVolumeDepth < 512 && gVolumeDepth * 2 <= rgba.MaxDimension3D)
+    {
+        gVolumeDepth *= 2;
+    }
     constexpr usize ARRAY_BYTES = usize{ARRAY_LAYERS} * 64;
     StaticArray<uint8, ARRAY_BYTES> arrayBytes{};
     for (usize layer = 0; layer < gArrayLayers; ++layer)
@@ -375,32 +386,31 @@ bool CreateResources() noexcept
     {
         return false;
     }
-    constexpr uint32 VOLUME_DEPTH = 512;
-    constexpr usize VOLUME_BASE_BYTES = usize{VOLUME_DEPTH} * 64;
-    constexpr usize VOLUME_SECOND_BYTES = usize{VOLUME_DEPTH / 2} * 16;
-    constexpr usize VOLUME_BYTES = VOLUME_BASE_BYTES + VOLUME_SECOND_BYTES + usize{VOLUME_DEPTH / 4} * 4;
+    const usize volumeBaseBytes = usize{gVolumeDepth} * 64;
+    const usize volumeSecondBytes = usize{gVolumeDepth / 2} * 16;
+    const usize volumeBytesCount = volumeBaseBytes + volumeSecondBytes + usize{gVolumeDepth / 4} * 4;
     Array<uint8> volumeBytes;
-    if (volumeBytes.TryResize(VOLUME_BYTES) == false)
+    if (volumeBytes.TryResize(volumeBytesCount) == false)
     {
         return false;
     }
-    for (usize slice = 0; slice < VOLUME_DEPTH; ++slice)
+    for (usize slice = 0; slice < gVolumeDepth; ++slice)
     {
-        Fill(volumeBytes.GetData() + slice * 64, 16, COLORS[slice / (VOLUME_DEPTH / 4)]);
+        Fill(volumeBytes.GetData() + slice * 64, 16, COLORS[slice / (gVolumeDepth / 4)]);
     }
-    for (usize slice = 0; slice < VOLUME_DEPTH / 2; ++slice)
+    for (usize slice = 0; slice < gVolumeDepth / 2; ++slice)
     {
-        Fill(volumeBytes.GetData() + VOLUME_BASE_BYTES + slice * 16, 4, COLORS[slice < VOLUME_DEPTH / 4 ? 4 : 5]);
+        Fill(volumeBytes.GetData() + volumeBaseBytes + slice * 16, 4, COLORS[slice < gVolumeDepth / 4 ? 4 : 5]);
     }
-    Fill(volumeBytes.GetData() + VOLUME_BASE_BYTES + VOLUME_SECOND_BYTES, VOLUME_DEPTH / 4, COLORS[0]);
-    const rhi::TextureMipUpload mips[3]{{0, 16}, {VOLUME_BASE_BYTES, 8}, {VOLUME_BASE_BYTES + VOLUME_SECOND_BYTES, 4}};
+    Fill(volumeBytes.GetData() + volumeBaseBytes + volumeSecondBytes, gVolumeDepth / 4, COLORS[0]);
+    const rhi::TextureMipUpload mips[3]{{0, 16}, {volumeBaseBytes, 8}, {volumeBaseBytes + volumeSecondBytes, 4}};
     if (Accepted(rhi::CreateTexture(gDevice,
                                     {
                                         .Width = 4,
                                         .Height = 4,
                                         .MipLevels = 3,
                                         .Dimension = rhi::TextureDimension::D3,
-                                        .DepthOrLayers = VOLUME_DEPTH,
+                                        .DepthOrLayers = gVolumeDepth,
                                     },
                                     {volumeBytes, 0, mips},
                                     gTextures[3])) == false)

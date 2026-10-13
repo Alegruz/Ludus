@@ -333,9 +333,15 @@ try {
     report.cases.push({scenario:'r18c-webgpu',bufferBytes:67109120,storageRangeBytes:16777472,storageBindings:5,totalBindings:9,gpuValue:20});
     await context.close();
   }
-  for (const backend of ['webgpu','webgl2','auto','fallback']) {
+  for (const backend of ['webgpu','webgl2','auto','fallback','webgl2-volume-256']) {
     const context = await browser.newContext();
     if (backend === 'fallback') await context.addInitScript(() => Object.defineProperty(navigator,'gpu',{get:() => undefined}));
+    if (backend === 'webgl2-volume-256') await context.addInitScript(() => {
+      const getParameter = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+        return parameter === this.MAX_3D_TEXTURE_SIZE ? 256 : getParameter.call(this, parameter);
+      };
+    });
     const page = await context.newPage(); lastPage = page;
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -358,7 +364,7 @@ try {
         };
       }
     });
-    await page.goto(`http://127.0.0.1:${server.address().port}/r9.html?backend=${backend === 'fallback' ? 'auto' : backend}`);
+    await page.goto(`http://127.0.0.1:${server.address().port}/r9.html?backend=${backend === 'fallback' ? 'auto' : backend.startsWith('webgl2') ? 'webgl2' : backend}`);
     await page.waitForFunction(() => ['passed','failed'].includes(document.querySelector('#status')?.dataset.state),null,{timeout:45000});
     const status = await page.locator('#status').evaluate(node => ({...node.dataset}));
     assert.equal(status.state,'passed',JSON.stringify(status));
@@ -377,6 +383,9 @@ try {
       assert.ok(request.limits.maxStorageBuffersPerShaderStage >= 5);
     } else {
       assert.deepEqual(textureLimitRequests, []);
+    }
+    if (backend === 'webgl2-volume-256') {
+      assert.ok(report.console.some(message => message.scenario === `r9-${backend}` && message.text.includes('volume depth 256')));
     }
     report.cases.push({scenario:`r9-${backend}`,frames:20,pixelReadbacks:20,textureLimitRequests});
     await context.close();
