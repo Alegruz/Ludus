@@ -423,6 +423,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install pinned formatter and GUI test dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 clang-tidy-18 python3-venv python3-tk xvfb xauth liblz4-1
       - name: Install pinned CMake and Ninja for live project setup tests
@@ -478,6 +480,13 @@ jobs:
           python3 tests/build_time/policy_tests.py
       - name: Verify source formatting before builds
         run: ./scripts/check --format
+      - name: Enforce review-derived source rules
+        env:
+          SOURCE_POLICY_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/main' }}
+          SOURCE_POLICY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/python/source_policy.py --base "$SOURCE_POLICY_BASE" --head "$SOURCE_POLICY_HEAD" --clang-format clang-format-18
+          PYTHONPATH=scripts/python python3 -m unittest test_source_policy -v
       - name: Test S0 Luau source and bytecode integrity contracts
         run: python3 -m unittest discover -s tools/luau-probe -p 'test_*.py' -v
       - name: Test S1 manifest and cook admission contracts

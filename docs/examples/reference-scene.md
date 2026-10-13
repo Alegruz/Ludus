@@ -264,3 +264,55 @@ For interactive placement and gameplay fields use the single
 The command-line level conversion/capture remains a runtime asset pipeline,
 not a separate editor workspace. Existing `.lulevel` files open in World through
 the documented conversion path.
+
+## Interactive raster viewport acceptance
+
+The installed consumer accepts `reference_scene INPUT OUTPUT SIZE 2 viewport`.
+It loads the supplied cooked scene and its camera, renders two ordinary raster
+frames through `RasterViewport`, and exports `viewport.rgba` for offline evidence.
+It never enables reference capture or requires compute/ray queries. That file
+contains top-left RGBA8Unorm **sRGB-encoded tone-mapped RGB**; the consumer must
+preserve display values without encoding again. The independent emitter fixture checks authored .5 emission
+maps to 156/255 after Reinhard/sRGB. This mode supplies no indirect transport, invented
+lights or CPU image presentation fallback.
+
+The native renderer viewport regression changes the extracted World snapshot's
+material and camera while keeping an earlier image leased, checking changed
+pixels, culling, retained-image immutability, backpressure and stale rejection.
+A real editor must feed the selected project's current World extraction into
+`Update`, respond to scene/camera/resize changes, and import the completed image
+through the RHI/Qt native-sharing bridge. The offline consumer proves the
+installed renderer API; it does not prove editor integration. See the
+[interactive viewport contract](../architecture/renderer-systems.md#interactive-world-viewport).
+
+## GPU preview acceptance
+
+This is the explicit optional progressive path-tracing reference mode, distinct
+from the primary interactive raster viewport above.
+
+The installed sample also accepts `gpu` as its optional mode. This selects the
+renderer GPU-compute BVH path, requires compute capability and preserves authored
+emissive lighting with a black environment. It performs GPU tracing, shading,
+accumulation and display conversion and returns a leased RHI texture. CPU setup
+builds, packs and uploads the static scene; it does not trace or shade pixels.
+
+```bash
+examples/reference-scene/out/build/linux-clang-development/reference_scene \
+  out/staircase2 out/staircase2 64 32 gpu
+```
+
+Offline acceptance writes `gpu-preview.rgba` (top-left opaque RGBA8, exposure one,
+Reinhard then sRGB) and `gpu-preview.bin`: little-endian width, height, completed
+samples and reserved zero as four uint32 values, then two uint64 scene fingerprint
+words. This sample deliberately reads back its final leased texture to export
+acceptance evidence. A live viewport must share that texture through RHI/Qt with
+producer and consumer completion, without running this export. GPU preview failure
+is exit step 16. Failed execution never selects the CPU reference renderer.
+
+The source profile and approximation limits above still apply. Numerical failure
+is a magenta error pixel; the completed-dispatch count does not assert radiance
+validity. `scene_gpu_preview` tests the installed shaders/API using an independently
+encoded emitter fixture with no added lights and verifies the expected display
+pixels. Dense-scene accuracy and additional GPU backends require separate
+qualification. See the [GPU preview contract](../architecture/renderer-systems.md#gpu-resident-progressive-preview)
+for budgets, capability rejection, ownership and external-consumer requirements.

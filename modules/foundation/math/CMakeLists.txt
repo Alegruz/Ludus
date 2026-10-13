@@ -145,3 +145,5 @@ if(LUDUS_BUILD_TESTS)
         set_tests_properties(ludus_math_alloc_tests PROPERTIES LABELS "unit;foundation;math;alloc")
     endif()
 endif()
+
+install(FILES shaders/math.slang DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")

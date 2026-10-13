@@ -204,7 +204,7 @@ struct LightingOutput final
     ludus::foundation::float32 Exposure = 1;
     /// Apply guarded per-channel Reinhard after exposure; false preserves linear RGB.
     bool ToneMap = true;
-    /// Encode to sRGB only for a nonlinear unorm surface; hardware sRGB encodes instead.
+    /// Encode to sRGB for unorm display textures/surfaces; hardware sRGB surfaces encode instead.
     /// False selects a linear display intermediate, suitable for subsequent linear UI blending.
     bool Encode = true;
 };

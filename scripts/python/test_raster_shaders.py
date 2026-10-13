@@ -125,6 +125,35 @@ class RasterReflectionTests(unittest.TestCase):
             invalid=copy.deepcopy(data);invalid['entryPoints'][0]['threadGroupSize']=group
             with self.assertRaisesRegex(RuntimeError,'workgroup'):raster_interface(invalid,'compute')
 
+    def test_compute_integer_uniforms_verify_wgsl_packing_without_widening_raster(self):
+        from compile_raster import wgsl_contract, wgsl_uniform_type
+        code = """struct Parameters_0 {
+            @align(16) dimensions_0: vec4<u32>,
+            @align(16) signed_0: vec4<i32>,
+            sequence_0: u32,
+            @align(16) exposure_0: vec4<f32>,
+        }
+        @binding(0) @group(0) var<uniform> parameters_0: Parameters_0;
+        """
+        reflected = {'inputs': [], 'entries': [{'binding': 0, 'kind': 'UniformBuffer',
+            'size': 64, 'offsets': {'dimensions': 0, 'signed': 16, 'sequence': 32, 'exposure': 48}}]}
+        self.assertEqual(wgsl_contract(code, reflected, 'compute'), code)
+        with self.assertRaisesRegex(RuntimeError, 'require float'):
+            wgsl_contract(code, reflected, 'fragment')
+        for kind, layout in (('u32', (4,4)), ('vec2<i32>', (8,8)),
+                             ('vec3<u32>', (12,16)), ('vec4<i32>', (16,16)),
+                             ('array<vec4<u32>,4>', (64,16))):
+            self.assertEqual(wgsl_uniform_type('', kind, compute=True), layout)
+            with self.assertRaises(RuntimeError):
+                wgsl_uniform_type('', kind)
+        for kind in ('bool', 'f64', 'vec4<bool>', 'array<vec4<u32>,0>', 'array<vec4<u32>,1025>'):
+            with self.assertRaises(RuntimeError):
+                wgsl_uniform_type('', kind, compute=True)
+        invalid = copy.deepcopy(reflected)
+        invalid['entries'][0]['offsets']['sequence'] = 36
+        with self.assertRaisesRegex(RuntimeError, 'packing differs'):
+            wgsl_contract(code, invalid, 'compute')
+
     def test_compute_rejects_unportable_elements_and_extra_storage(self):
         data=self.compute_fixture()
         for change in ({'elementCount':3},{'elementType':{'kind':'scalar','scalarType':'float64'}},
