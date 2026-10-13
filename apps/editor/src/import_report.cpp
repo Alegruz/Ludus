@@ -71,7 +71,7 @@ constexpr foundation::int64 MAX_BUNDLE_BYTES = foundation::int64{64} * 1024 * 10
                      : QStringLiteral("%1 of %2").arg(FormatMebibytes(bytes), FormatMebibytes(MAX_BUNDLE_BYTES)),
                  FormatCount(cooked, QStringLiteral("dropped_placements"))));
     QStringList fallbacks;
-    for (const QJsonValue& value : report.value(QStringLiteral("diagnostics")).toArray())
+    for (const QJsonValue value : report.value(QStringLiteral("diagnostics")).toArray())
     {
         const QJsonObject diagnostic = value.toObject();
         const QString severity = diagnostic.value(QStringLiteral("severity")).toString();
@@ -105,7 +105,7 @@ constexpr foundation::int64 MAX_BUNDLE_BYTES = foundation::int64{64} * 1024 * 10
                           FormatCount(manifest, QStringLiteral("cooked_triangles")),
                           FormatMebibytes(manifest.value(QStringLiteral("bytes")).toInteger())));
     QStringList approximations;
-    for (const QJsonValue& value : manifest.value(QStringLiteral("approximations")).toArray())
+    for (const QJsonValue value : manifest.value(QStringLiteral("approximations")).toArray())
     {
         approximations.append(QStringLiteral("  ") + value.toString());
     }
