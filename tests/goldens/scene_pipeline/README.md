@@ -1,24 +1,28 @@
 # Scene pipeline goldens (Phase 0)
 
-Byte-exact goldens of the current Python asset pipeline, captured before it is ported to
-C++ (the planned `modules/content/scene_cook`). The port must reproduce every byte recorded
-here before `scene_cook.py` / `scene_assets.py` / `scene_editor.py` are removed.
+Byte-exact goldens captured from the retired Python asset pipeline (`scene_cook.py`,
+`scene_assets.py`, `scene_editor.py`) before it was ported to C++
+(`modules/content/scene_cook`). The Python sources, `fixture.py` and `capture.py`
+have been removed; the files here are frozen and are verified only by native tests.
 
 | Path | Contents |
 |---|---|
-| `fixture.py` | Deterministic synthetic **staircase2-profile** PBRT/PLY/TGA source (CC0, no third-party data). It covers every accepted branch of `scene_cook._cook`: the wallpaper atlas clip, wood and tile coated diffuse, a conductor, solid colours, degenerate faces, quad and `s t` PLY, and the PLY-rectangle, trianglemesh-quad and disk emitters. |
-| `source/` | The committed output of `fixture.py`, so a non-Python port can consume it directly. |
-| `capture.py` | Runs `scene_cook.cook`, then `scene_assets` `new_level` → `import_scene` (twice) → `save_level` → `open_level` → `assemble` → `dump` → `publish`, plus `cmake/shaders/cook_texture.py` on the two in-repo texture sources and four synthetic cases. |
-| `expected/goldens.json` | SHA-256 and size of every output file, the fixture tree, and the digests of the Python sources. |
+| `source/` | Deterministic synthetic **staircase2-profile** PBRT/PLY/TGA source (CC0, no third-party data), generated once by the retired `fixture.py`. It covers every accepted branch of the cooker: the wallpaper atlas clip, wood and tile coated diffuse, a conductor, solid colours, degenerate faces, quad and `s t` PLY, and the PLY-rectangle, trianglemesh-quad and disk emitters. |
+| `expected/goldens.json` | SHA-256 and size of every output file, the fixture tree, and the digests of the Python sources at capture time. |
 | `expected/files/` | Full bytes of every output ≤ 64 KiB (manifests, catalog, levels, material/mesh/licence artifacts, texture headers). Generated C/C++ headers are stored with an extra `.golden` suffix so formatters and analysis tools leave their bytes alone. Larger outputs (the 1.1 MB `scene.luscn` and the wallpaper atlas texture) are checked by digest only. |
-| `licensed/staircase2.json` | Digest-only goldens for the licensed staircase2 scene. Not captured in CI. |
+| `expected/files/editor/` | `scene_editor.operate` responses for import → commit-import → save → open → assemble (renamed object) → save, the candidate catalog, and `scenes.json` with the digest of each assembled scene. |
+| `licensed/staircase2.json` | Digest-only goldens for the licensed staircase2 scene. Not checked in CI. |
 
 ## Native consumers
 
-- `ludus_scene_cook_tests` (`modules/content/scene_cook`) cooks `source/` with the C++
-  `Ludus::SceneCook` port and checks `cook/scene.luscn` (digest and size),
-  `cook/manifest.json` and `cook/LICENSE.txt` byte for byte. The same check is available
-  from the command line: `ludus-cook cook tests/goldens/scene_pipeline/source OUT`.
+- `ludus_scene_cook_tests` cooks `source/` and checks `cook/scene.luscn` (digest and
+  size), `cook/manifest.json` and `cook/LICENSE.txt` byte for byte. The same check is
+  available from the command line: `ludus-cook cook tests/goldens/scene_pipeline/source OUT`.
+- `ludus_scene_assets_tests` runs new → import (twice) → save → open → assemble → dump →
+  publish and checks every `project/`, `release/`, `saved/`, `assemble/` and `dump/`
+  output, then replays the Editor sequence against `expected/files/editor/`.
+- The `cook_texture.py` texture goldens (`expected/files/texture/`) currently have no
+  native verifier; they remain as reference data until the texture cooker is ported.
 
 ## Normalization a port must apply
 
@@ -44,18 +48,8 @@ here before `scene_cook.py` / `scene_assets.py` / `scene_editor.py` are removed.
 ## Commands
 
 ```bash
-python3 -m unittest discover -s tests/goldens/scene_pipeline -v   # check
-python3 tests/goldens/scene_pipeline/capture.py --check            # same, CLI
-python3 tests/goldens/scene_pipeline/capture.py --write            # deliberate recapture; review the diff
+ctest --preset linux-clang-development -L goldens --output-on-failure
 ```
 
-Licensed staircase2: on a machine that has the scene, run this to record its digests:
-
-```bash
-python3 tests/goldens/scene_pipeline/capture.py \
-  --licensed references/resources/scenes/staircase2 --write-licensed
-LUDUS_STAIRCASE2_DIR=references/resources/scenes/staircase2 \
-  python3 -m unittest discover -s tests/goldens/scene_pipeline -v
-```
-
-Only digests and the input hashes are recorded; no licensed bytes are committed.
+The goldens are frozen. A deliberate format change must update the expected files and
+explain the difference in review; there is no capture script any more.
