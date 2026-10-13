@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QSize>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -26,6 +27,26 @@ using namespace ludus::editor;
 using namespace ludus::foundation;
 bool Frames(RenderPreview& preview, uint64 target)
 {
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport") && window->isExposed() == false)
+        {
+            // Qt suspends consumer presentation for occluded native children.
+            // Frame-progress assertions require an exposed test window.
+            QWindow* topLevel = window;
+            while (topLevel->parent() != nullptr)
+            {
+                topLevel = topLevel->parent();
+            }
+            topLevel->raise();
+            topLevel->requestActivate();
+            if (QTest::qWaitForWindowExposed(window, 5000) == false)
+            {
+                WARN("Native viewport could not become exposed for the frame-progress check");
+                return false;
+            }
+        }
+    }
     QElapsedTimer timer;
     timer.start();
     while (preview.Frames() < target && timer.elapsed() < 10000 && preview.Running())
@@ -57,6 +78,20 @@ QImage ReadViewport()
         {
             // Independent test-only Qt framebuffer readback; product presentation never reads pixels.
             return static_cast<QQuickWindow*>(window)->grabWindow();
+        }
+    }
+    return {};
+}
+QSize GetViewportPixelSize()
+{
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+        {
+            const float64 ratio = window->devicePixelRatio();
+            const int32 width = qRound(static_cast<float64>(window->width()) * ratio);
+            const int32 height = qRound(static_cast<float64>(window->height()) * ratio);
+            return {width, height};
         }
     }
     return {};
@@ -158,6 +193,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     RenderPreview preview;
     PreviewViewport viewport(&preview);
     viewport.resize(640, 480);
+    // Exercise a child surface smaller than the widget on both 1x and Retina displays.
+    viewport.setContentsMargins(7, 11, 13, 17);
     viewport.show();
     REQUIRE(preview.SetScene(scene));
     preview.Navigate(0, 0, 0, 3, false);
@@ -168,7 +205,9 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     QImage embedded = ReadViewport();
     REQUIRE(viewport.PresentedFrames() >= 1);
     REQUIRE_FALSE(embedded.isNull());
-    CHECK(embedded.width() >= 640);
+    const QSize initialPixelSize = GetViewportPixelSize();
+    CHECK(embedded.size() == initialPixelSize);
+    CHECK(initialPixelSize.width() < qRound(static_cast<float64>(viewport.width()) * viewport.devicePixelRatioF()));
     CHECK(embedded.pixelColor(embedded.width() / 2, embedded.height() / 2) != embedded.pixelColor(0, 0));
     if (qEnvironmentVariableIsSet("LUDUS_GPU_VIEWPORT_IMAGE") == true)
     {
@@ -225,7 +264,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
     embedded = ReadViewport();
-    CHECK(embedded.width() >= 720);
+    CHECK(embedded.size() == GetViewportPixelSize());
+    CHECK(embedded.width() > initialPixelSize.width());
     auto entity = world.Entity(QStringLiteral("starter.cube"));
     auto components = entity.value(QStringLiteral("components")).toObject();
     auto transform = components.value(QStringLiteral("transform")).toObject();
