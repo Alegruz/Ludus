@@ -39,27 +39,35 @@ inline constexpr uint32 VERSION_2 = 2;
 
 /// Largest admitted bundle.
 inline constexpr usize MAX_BUNDLE_BYTES = usize{64} * 1024 * 1024;
-/// Mesh, material, texture and object count limits.
+/// Most meshes in a bundle.
 inline constexpr uint32 MAX_MESHES = 6;
+/// Most materials in a bundle.
 inline constexpr uint32 MAX_MATERIALS = 8;
+/// Most textures in a bundle.
 inline constexpr uint32 MAX_TEXTURES = 8;
+/// Most placed objects in a bundle.
 inline constexpr uint32 MAX_OBJECTS = 128;
-/// Texture limits: per-axis texels, bytes per texture and combined bytes.
+/// Largest texture width or height in texels.
 inline constexpr uint32 MAX_TEXTURE_DIMENSION = 4096;
+/// Largest single texture in bytes.
 inline constexpr usize MAX_TEXTURE_BYTES = usize{16} * 1024 * 1024;
+/// Largest combined texture bytes in a bundle.
 inline constexpr usize MAX_TOTAL_TEXTURE_BYTES = usize{32} * 1024 * 1024;
 /// RGBA8 bytes per texel.
 inline constexpr uint32 TEXEL_BYTES = 4;
-/// Vertex limits per mesh and combined across meshes; index limit per mesh.
+/// Most vertices per mesh and combined across all meshes.
 inline constexpr uint32 MAX_VERTICES = 500000;
+/// Most indices per mesh.
 inline constexpr uint32 MAX_INDICES = 1500000;
 /// MaterialRecord::Texture value for an untextured surface.
 inline constexpr uint32 NO_TEXTURE = ~uint32{0};
-/// MaterialRecordV2::AddressMode values.
+/// MaterialRecordV2::AddressMode: clamp texture coordinates at the borders.
 inline constexpr uint32 ADDRESS_CLAMP = 0;
+/// MaterialRecordV2::AddressMode: repeat texture coordinates.
 inline constexpr uint32 ADDRESS_REPEAT = 1;
-/// Admitted material ranges.
+/// Smallest admitted material roughness.
 inline constexpr float32 MIN_ROUGHNESS = .045F;
+/// Largest admitted emission per channel.
 inline constexpr float32 MAX_EMISSION = 10000.0F;
 
 /// Bundle header.
