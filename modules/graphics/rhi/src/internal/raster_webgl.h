@@ -1188,6 +1188,13 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
 }
 RasterStatus RasterPrepareStorage() noexcept
 {
+    // Frame storage admission precedes Begin(), so preserve synchronous loss
+    // before querying GL errors or allocating the R10 framebuffer objects.
+    if (gContext <= 0 || emscripten_is_webgl_context_lost(gContext))
+    {
+        internal::Fail(gSession, StartupError::DeviceLost);
+        return RasterStatus::DeviceLost;
+    }
     if (!gRasterCompletions.EnsureSlots(internal::CurrentStorageLimits().Submissions))
     {
         return internal::StorageFailure();

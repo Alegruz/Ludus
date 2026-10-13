@@ -390,12 +390,25 @@ try {
     await page.goto(base + '/index.html');
     await playing(page);
     assert.equal(await backend(page), 'webgl2');
+    // Exercise the first owner tick before the asynchronous contextlost event.
+    // A GL error during frame admission must already classify the device as lost.
+    await page.evaluate(() => { window.__qaSuspend = true; });
+    await until(() => page.evaluate(() => typeof window.__qaPending === 'function'),
+      ready => ready, 'paused WebGL owner tick');
     const extension = await page.evaluate(() => {
       const gl = document.querySelector('canvas').getContext('webgl2');
       // getContext returns the engine's existing context; WEBGL_lose_context lets
       // the test inject a real loss. Record the dependency.
       const ext = gl && gl.getExtension('WEBGL_lose_context');
-      if (ext) { ext.loseContext(); return true; }
+      const tick = window.__qaPending;
+      window.__qaPending = null;
+      window.__qaSuspend = false;
+      if (ext) {
+        ext.loseContext();
+        tick(performance.now());
+        return true;
+      }
+      tick(performance.now());
       return false;
     });
     entry.loseContextExtension = extension;
