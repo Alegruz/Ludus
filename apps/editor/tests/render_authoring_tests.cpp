@@ -1,3 +1,5 @@
+#include "internal/controller.h"
+#include "internal/main_window.h"
 #include "internal/render_panel.h"
 #include "internal/render_scene.h"
 #include "internal/workspace_style.h"
@@ -10,17 +12,20 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDir>
+#include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalSpy>
 #include <QSlider>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
@@ -320,6 +325,7 @@ TEST_CASE("Late preview loads are discarded and repeated edits coalesce to the l
     CHECK(loaded.isEmpty());
     CHECK(panel.Preview().Scene().Identity.isEmpty());
     panel.SetWorld(f.Root, &f.World);
+    panel.Stop();
     REQUIRE(panel.Refresh(false));
     REQUIRE(f.Edit(QStringLiteral("starter.cube"), {QStringLiteral("transform"), QStringLiteral("x")}, 3));
     panel.WorldChanged();
@@ -395,6 +401,8 @@ TEST_CASE("Renderer controls and inspector remain reachable in a small styled Wo
     }
     if (!qEnvironmentVariable("LUDUS_RENDER_SCREENSHOT").isEmpty())
     {
+        QSignalSpy frame(&world.findChild<RenderPanel*>()->Preview(), &RenderPreview::FrameReady);
+        REQUIRE(frame.wait(5000));
         REQUIRE(world.grab().save(qEnvironmentVariable("LUDUS_RENDER_SCREENSHOT")));
     }
 }
@@ -589,5 +597,148 @@ TEST_CASE("World composes schema meshes into cooked renderer data with bounded f
         combined = {};
         REQUIRE(preview.SetScene({}));
         CHECK(lastDefinition.isNull());
+    }
+}
+
+TEST_CASE("Embedded World preview follows valid inspector drafts without committing them", "[editor][render-authoring]")
+{
+    Fixture f;
+    WorldWorkspace world;
+    world.SetProject(f.Root, 1);
+    REQUIRE(world.Open(f.Path(QStringLiteral("rendering.world.json"))));
+    world.findChild<QListWidget*>(QStringLiteral("worldEntities"))->setCurrentRow(0);
+    auto* panel = world.findChild<RenderPanel*>();
+    QSignalSpy loaded(panel, &RenderPanel::Loaded);
+    REQUIRE(loaded.wait(5000));
+    auto* viewport = world.findChild<QLabel*>(QStringLiteral("worldViewport"));
+    REQUIRE(viewport != nullptr);
+    CHECK(viewport->parentWidget()->objectName() == QStringLiteral("worldSplitter"));
+    CHECK_FALSE(viewport->isWindow());
+    const auto applied = world.Document().Draft();
+    auto* field = world.findChild<QLineEdit*>(QStringLiteral("worldField:transform/x"));
+    REQUIRE(field != nullptr);
+    field->selectAll();
+    QTest::keyClicks(field, QStringLiteral("0.75"));
+    REQUIRE(loaded.wait(5000));
+    CHECK(panel->Preview().Scene().Objects[0].Transform.Translation.X == Catch::Approx(.75F));
+    CHECK(world.Document().Draft() == applied);
+    CHECK(world.Dirty());
+    CHECK_FALSE(world.CanUndo());
+    const auto identity = panel->Preview().Scene().Identity;
+    field->selectAll();
+    QTest::keyClicks(field, QStringLiteral("-"));
+    QTest::qWait(300);
+    CHECK(field->text() == QStringLiteral("-"));
+    CHECK(panel->Preview().Scene().Identity == identity);
+    CHECK(world.Document().Draft() == applied);
+    world.findChild<QPushButton*>(QStringLiteral("worldReset"))->click();
+    REQUIRE(loaded.wait(5000));
+    CHECK(panel->Preview().Scene().Identity == f.Scene.Identity);
+    CHECK_FALSE(world.Dirty());
+}
+
+TEST_CASE("World session restores orbit position and rejects stale or external document paths", "[editor][layout]")
+{
+    Fixture f;
+    WorldWorkspace first;
+    first.SetProject(f.Root, 1);
+    REQUIRE(first.Open(f.Path(QStringLiteral("rendering.world.json"))));
+    QSignalSpy loaded(first.findChild<RenderPanel*>(), &RenderPanel::Loaded);
+    REQUIRE(loaded.wait(5000));
+    auto& preview = first.findChild<RenderPanel*>()->Preview();
+    preview.Orbit(80, -15);
+    preview.Pan(30, 10);
+    preview.Zoom(2);
+    const auto session = first.Session();
+    first.StopPreview();
+    WorldWorkspace reopened;
+    reopened.SetProject(f.Root, 2);
+    reopened.RestoreSession(session);
+    QSignalSpy restored(reopened.findChild<RenderPanel*>(), &RenderPanel::Loaded);
+    REQUIRE(restored.wait(5000));
+    CHECK(reopened.findChild<RenderPanel*>()->Preview().Navigation() ==
+          session.value(QStringLiteral("boundCamera")).toObject());
+    CHECK(reopened.Document().Draft() == first.Document().Draft());
+    CHECK_FALSE(reopened.Dirty());
+    reopened.SetProject(f.Root, 3);
+    auto stale = session;
+    stale.insert(QStringLiteral("world"), QStringLiteral("authoring/deleted.world.json"));
+    reopened.RestoreSession(stale);
+    CHECK_FALSE(reopened.Document().Loaded());
+    stale.insert(QStringLiteral("world"), f.Path(QStringLiteral("rendering.world.json")));
+    reopened.RestoreSession(stale);
+    CHECK_FALSE(reopened.Document().Loaded());
+    stale.insert(QStringLiteral("world"), QStringLiteral("../../outside.world.json"));
+    reopened.RestoreSession(stale);
+    CHECK_FALSE(reopened.Document().Loaded());
+}
+
+TEST_CASE("Reopening projects restores their own embedded viewport and dock layouts", "[editor][layout]")
+{
+    Fixture a;
+    Fixture b;
+    QTemporaryDir settings;
+    const auto preferences = settings.filePath(QStringLiteral("workspace.json"));
+    const auto descriptor = [](Fixture& fixture) {
+        const auto path = fixture.Path(QStringLiteral("ludus.project.json"));
+        Write(
+            path,
+            QByteArrayLiteral(
+                R"json({"version":1,"name":"viewport","provider":"cmake","source_dir":"..","preset":"linux-clang-debug","target":"app","run":{"cwd":".","args":[]}})json"));
+        return path;
+    };
+    const auto projectA = descriptor(a), projectB = descriptor(b);
+    const auto close = [](MainWindow& window) {
+        (void)window.close();
+        for (int32 attempt = 0; window.isVisible() && attempt < 100; ++attempt)
+        {
+            QTest::qWait(20);
+        }
+        REQUIRE_FALSE(window.isVisible());
+    };
+    QJsonObject navigation;
+    {
+        EditorController controller(ToolingPaths{}, nullptr, settings.filePath(QStringLiteral("recent.json")));
+        MainWindow window(&controller, nullptr, preferences);
+        window.show();
+        controller.OpenProject(projectA);
+        REQUIRE(controller.State().Document == DocumentState::ProjectLoaded);
+        auto* world = window.findChild<WorldWorkspace*>();
+        REQUIRE(world->Open(a.Path(QStringLiteral("rendering.world.json"))));
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("workspaceTabs"));
+        tabs->setCurrentWidget(world);
+        world->findChild<RenderPanel*>()->Preview().Orbit(65, 12);
+        world->findChild<RenderPanel*>()->Preview().Pan(17, 8);
+        navigation = world->Session().value(QStringLiteral("boundCamera")).toObject();
+        window.addDockWidget(Qt::LeftDockWidgetArea, window.findChild<QDockWidget*>(QStringLiteral("outputDock")));
+        window.findChild<QDockWidget*>(QStringLiteral("liveInspectorDock"))->hide();
+        close(window);
+    }
+    {
+        EditorController controller(ToolingPaths{}, nullptr, settings.filePath(QStringLiteral("recent.json")));
+        MainWindow window(&controller, nullptr, preferences);
+        window.show();
+        controller.OpenProject(projectB);
+        auto* world = window.findChild<WorldWorkspace*>();
+        CHECK_FALSE(world->Document().Loaded());
+        REQUIRE(world->Open(b.Path(QStringLiteral("rendering.world.json"))));
+        window.addDockWidget(Qt::RightDockWidgetArea, window.findChild<QDockWidget*>(QStringLiteral("outputDock")));
+        window.findChild<QDockWidget*>(QStringLiteral("liveInspectorDock"))->show();
+        close(window);
+    }
+    {
+        EditorController controller(ToolingPaths{}, nullptr, settings.filePath(QStringLiteral("recent.json")));
+        MainWindow window(&controller, nullptr, preferences);
+        window.show();
+        controller.OpenProject(projectA);
+        auto* world = window.findChild<WorldWorkspace*>();
+        CHECK(world->Document().Loaded());
+        CHECK_FALSE(world->Dirty());
+        CHECK(world->Session().value(QStringLiteral("boundCamera")).toObject() == navigation);
+        CHECK(window.findChild<QTabWidget*>(QStringLiteral("workspaceTabs"))->currentWidget() == world);
+        CHECK(window.dockWidgetArea(window.findChild<QDockWidget*>(QStringLiteral("outputDock"))) ==
+              Qt::LeftDockWidgetArea);
+        CHECK(window.findChild<QDockWidget*>(QStringLiteral("liveInspectorDock"))->isHidden());
+        close(window);
     }
 }

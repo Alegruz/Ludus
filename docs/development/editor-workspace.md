@@ -525,11 +525,16 @@ opaque flat/textured unlit surfaces only. See the owning
 Build the native editor using [Enable the rendered authoring surface](#enable-the-rendered-authoring-surface); the same option cooks the trusted renderer stages.
 
 1. Open a writable **live-edit-game** sample and select **World**.
-2. Open `authoring/rendering.world.json`, then choose **Preview 3D**.
-   The native renderer opens its own window. Asset validation runs in an owned
-   worker; the World editor remains responsive during bounded file reads/decoding.
+2. Open `authoring/rendering.world.json`. Its persistent 3D viewport starts inside
+   the World workspace. Asset validation runs in an owned worker; the editor
+   remains responsive during bounded file reads/decoding. Drag in the viewport
+   to orbit, middle-drag or Shift-drag to pan, scroll to zoom, and double-click
+   to frame all visible objects.
 3. Select **Starter Cube** in World. Edit Position/rotation/scale or Renderable
-   tint, visibility, mesh and color texture; **Apply Changes** updates the preview.
+   tint, visibility, mesh and color texture. Valid inspector buffers update the
+   viewport after a short debounce, before **Apply Changes** commits the edit.
+   Incomplete or invalid text retains the last valid image without changing the
+   document or moving keyboard focus. **Reset Fields** restores the applied view.
    **Tint…** opens a display-sRGB picker and fills pending linear RGB values;
    Apply/Reset still own the transaction, while numeric fields remain available.
    **Save World** persists the applied data. Invalid fields stay in the inspector.
@@ -546,13 +551,23 @@ Build the native editor using [Enable the rendered authoring surface](#enable-th
 6. Use **Reload preview assets** after editing mesh/PNG/binding files outside the
    editor. An accepted preview is a frozen snapshot, not a file-watching promise.
    Invalid replacement files retain the prior preview with persistent stale-data
-   feedback. **Close preview** cancels pending publication and closes its device.
+   feedback. **Pause viewport** cancels pending publication and releases its device;
+   the viewport stays embedded. **Resume viewport** restarts rendering.
 
 The native Scene sample preview and World 3D preview share one device admission
 boundary. Opening either closes the other authoring surface; launching a game
-also closes World rendering. Project/document replacement prevents late worker
+also pauses World rendering and resumes it when the operation returns to Idle. Project/document replacement prevents late worker
 results from reopening or publishing into another document. Failed GPU setup
-stops the surface with feedback and preserves World edits; reopening retries.
+stops the surface with feedback and preserves World edits; resuming retries.
+
+Reopening a project restores its last World, selection, orbit center, distance,
+yaw/pitch, authored camera selection, splitter sizes, active tab and dock layout.
+These preferences live beside the editor's local `workspace.json`, in `projects/`
+files keyed by the canonical project root. They do not alter World camera entities
+or project documents. Missing Worlds and incompatible or invalid preferences
+fall back to the normal workspace; reopening never cooks or downloads assets
+just to restore preferences. Viewport asset validation uses the existing local
+project assets. Unsaved inspector buffers are not part of this preference file.
 Browser builds and native builds without `LUDUS_EDITOR_RENDER_PREVIEW` explain
 why rendering is unavailable. The existing Scene workflow is still its separate
 world-demo adapter.
@@ -636,13 +651,16 @@ World; they do not expose another object hierarchy or authoring document.
 4. Select an imported entity. Its **Scene instance** inspector edits local
    position in metres, rotation in degrees, and positive scale; gameplay fields
    and **Add Component** are in that same inspector. **Apply Changes** validates
-   placement, name and component values together. The embedded viewport follows
-   applied placement. Camera and material data retain the imported scene profile.
+   placement, name and component values together. Valid draft fields update the
+   embedded viewport before Apply; invalid buffers retain its last valid image.
+   Camera and material data retain the imported scene profile.
 5. Duplicate/Delete and World Undo/Redo act on the complete entity, including its
    scene binding and gameplay components. Parent removal is refused while its
    children remain. Invalid fields preserve the previous applied document.
 6. **Save World** verifies the cooked-scene assets before the atomic document
-   write, independently of viewport availability. While a scene operation runs, editing and Save wait for it to finish;
+   write, independently of viewport availability. During imports and asset/save
+   operations, editing and Save wait for completion; draft preview assembly keeps
+   text fields available and coalesces continued typing.
    **Cancel scene operation** retains the previous document. Reopen reads the
    project's cooked assets without needing the original source directory.
 
@@ -699,7 +717,11 @@ Modern Hall/staircase2's bounded PBRT/PLY/TGA
 subset, with grouped static room surfaces and emissive geometry. It is not a
 universal PBRT/glTF/OBJ importer. Unsupported features preserve the active scene.
 The native viewport selects CPU reference traversal explicitly and shows live
-256 × 256, 64-sample progressive output with no denoising. Browser scene import
+aspect-preserving progressive output, at most 256 pixels on its longest edge
+and 64 samples, with no denoising. Orbit, pan and zoom restart the capture using
+the editor camera. World binding previews render into an owned GPU attachment
+and present asynchronously through the embedded widget; their longest edge is
+bounded to 1024 pixels. Neither path creates a separate native preview window. Browser scene import
 and a game's automatic Play/load integration are outside this initial profile.
 
 Keep `assets/` and `.world.json` documents with the project. Retain legacy

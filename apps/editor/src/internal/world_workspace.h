@@ -5,6 +5,7 @@
 #include "internal/world_document.h"
 
 #include <QMap>
+#include <QTimer>
 #include <QWidget>
 
 QT_BEGIN_NAMESPACE
@@ -14,6 +15,7 @@ class QLineEdit;
 class QListWidget;
 class QPushButton;
 class QVBoxLayout;
+class QSplitter;
 QT_END_NAMESPACE
 namespace ludus::editor
 {
@@ -50,6 +52,10 @@ public:
         return !Pending_ && !SceneBusy() && Document_.CanRedo();
     }
     void StopPreview() noexcept;
+    void ResumePreview();
+    [[nodiscard]] bool PreviewRunning() const noexcept;
+    [[nodiscard]] QJsonObject Session() const;
+    void RestoreSession(const QJsonObject& state);
     void Undo();
     void Redo();
     [[nodiscard]] bool Apply();
@@ -73,6 +79,8 @@ private:
     void RenderInspector();
     void Changed(const QString& message = {});
     void Pending();
+    void PreviewDraft();
+    [[nodiscard]] bool ReadDraft(WorldDocument& document, QString& error, QWidget*& invalid);
     void PickTint(const QString& id, const QJsonObject& binding);
     void Snapshot();
     [[nodiscard]] QByteArray RecoveryHeader() const;
@@ -80,6 +88,10 @@ private:
     RenderPanel* Render_ = nullptr;
     LevelWorkspace* Scene_ = nullptr;
     QWidget* Viewport_ = nullptr;
+    QWidget* BoundViewport_ = nullptr;
+    QSplitter* Split_ = nullptr;
+    QTimer DraftTimer_;
+    bool DraftPreview_ = false;
     QPushButton* Import_ = nullptr;
     QPushButton* CancelScene_ = nullptr;
     bool Importing_ = false;

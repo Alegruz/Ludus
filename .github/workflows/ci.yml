@@ -125,8 +125,14 @@ jobs:
           ./scripts/install-sdk macos-clang-development
           out/host-tools/venv/bin/python -m venv out/project-tooling-venv
           out/project-tooling-venv/bin/python -m pip install --no-deps ./scripts/python
-          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_scene_assets -v
+          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_render_graph test_render_graph_build test_scene_assets -v
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
+      - name: Qualify installed RG1 Metal and WGSL packages
+        run: |
+          out/host-tools/venv/bin/python tests/sdk_consumer/verify_render_graph_build.py \
+            --cli "$PWD/out/project-tooling-venv/bin/ludus" --sdk "$PWD/out/install/macos-clang-development" \
+            --slang "$PWD/out/shader-tools/slang/bin/slangc" --cxx "$PWD/out/host-tools/bin/clang++" \
+            --profiles metal wgsl --sanitize --output out/rg1-macos
       - name: Verify signed macOS game release packages
         env:
           QT_QPA_PLATFORM: cocoa
@@ -637,6 +643,23 @@ jobs:
             --validator "$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             --spirv-cross "$PWD/out/shader-tools/spirv-cross/bin/spirv-cross" \
             --conan "$PWD/out/conan/linux-clang-development"
+      - name: Qualify installed RG1 SPIR-V, WGSL and GLSL packages
+        run: |
+          out/host-tools/venv/bin/python -m venv out/rg1-cli
+          out/rg1-cli/bin/python -m pip install --no-deps ./scripts/python
+          out/host-tools/venv/bin/python tests/sdk_consumer/verify_render_graph_build.py \
+            --cli "$PWD/out/rg1-cli/bin/ludus" --sdk "$PWD/out/install/linux-clang-development" \
+            --slang "$PWD/out/shader-tools/slang/bin/slangc" --cxx "$PWD/out/host-tools/bin/clang++" \
+            --validator "$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
+            --spirv-cross "$PWD/out/shader-tools/spirv-cross/bin/spirv-cross" \
+            --profiles spirv wgsl glsl --sanitize --output out/rg1-linux
+      - name: Validate RG1 emitted browser shaders
+        run: |
+          cd tools/web-browser-tests
+          npm ci
+          npx playwright install --with-deps chromium
+          cd ../..
+          node tests/sdk_consumer/render-graph-browser-test.mjs out/rg1-linux
       - name: Validate portable Vulkan raster pixels with validation layers
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development \

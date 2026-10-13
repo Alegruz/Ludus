@@ -16,6 +16,7 @@ QT_END_NAMESPACE
 namespace ludus::editor
 {
 class RenderLoadJob;
+class PreviewViewport;
 class RenderPanel final : public QWidget
 {
     Q_OBJECT
@@ -26,6 +27,8 @@ public:
     [[nodiscard]] bool Refresh(bool launch);
     void Stop() noexcept;
     void WorldChanged();
+    void PreviewDraft(const WorldDocument& draft);
+    [[nodiscard]] QWidget* TakeViewport(QWidget* parent);
     void SetSelection(const QString& id, bool pending);
     [[nodiscard]] RenderPreview& Preview() noexcept
     {
@@ -38,7 +41,7 @@ Q_SIGNALS:
 
 private:
     void Publish(const RenderScene& scene, bool launch);
-    void Navigate();
+    void Navigate(bool controls = true);
     void ShowStatus();
     void UpdateTintAction();
     const WorldDocument* World_ = nullptr;
@@ -51,6 +54,8 @@ private:
     bool Again_ = false;
     bool QueuedLaunch_ = false;
     RenderPreview Preview_;
+    PreviewViewport* Viewport_;
+    WorldDocument PreviewWorld_;
     QLabel* Status_;
     QLabel* Trace_;
     QPushButton* Open_;

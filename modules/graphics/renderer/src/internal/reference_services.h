@@ -621,6 +621,22 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
                                   math::Max(triangle.Error.Y, error.Y),
                                   math::Max(triangle.Error.Z, error.Z)};
             }
+            // Thanks to Dirk Gerrit van Antwerpen, "Solving Self-Intersection
+            // Artifacts in DirectX Raytracing", NVIDIA Technical Blog (2023),
+            // Error bounds: traversal mixes error across coordinate axes.
+            // https://developer.nvidia.com/blog/solving-self-intersection-artifacts-in-directx-raytracing/
+            // Adapt the extent term to world-space triangles with this profile's
+            // 1e-6 FP32 allowance; this is not the article's RTX-specific bound.
+            // A flat triangle at coordinate zero still needs a normal offset.
+            float32 extent = 0;
+            for (usize corner = 1; corner < 3; ++corner)
+            {
+                const auto edge = triangle.Positions[corner] - triangle.Positions[0];
+                extent =
+                    math::Max(extent, math::Max(math::Abs(edge.X), math::Max(math::Abs(edge.Y), math::Abs(edge.Z))));
+            }
+            const auto traversalError = extent * 2e-6F;
+            triangle.Error = triangle.Error + math::Vector3{traversalError, traversalError, traversalError};
             const auto areaVector = math::Cross(triangle.Positions[1] - triangle.Positions[0],
                                                 triangle.Positions[2] - triangle.Positions[0]);
             triangle.Area = math::Length(areaVector) * 0.5F;

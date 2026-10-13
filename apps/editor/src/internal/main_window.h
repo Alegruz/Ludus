@@ -116,6 +116,12 @@ private:
 
     // Local presentation preferences; never part of project/controller state.
     QString WorkspaceSettingsFile_;
+    QString ProjectLayoutRoot_;
+    uint64 ProjectLayoutEpoch_ = ~uint64{0};
+    uint64 ResumeViewportEpoch_ = 0;
+    bool ResumeViewport_ = false;
+    void SetProjectWorkspace(const QString& root, bool restore);
+    void SaveProjectWorkspace() const;
     QByteArray DefaultLayout_;
     QTabWidget* WorkTabs_ = nullptr;
     QDockWidget* InspectorDock_ = nullptr;

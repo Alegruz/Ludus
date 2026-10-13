@@ -133,6 +133,8 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     connect(Render_, &RenderPanel::Starting, this, &WorldWorkspace::PreviewStarting);
     connect(Render_, &RenderPanel::TintRequested, this, &WorldWorkspace::PickTint);
     auto* split = new QSplitter(this);
+    Split_ = split;
+    split->setObjectName(QStringLiteral("worldSplitter"));
     layout->addWidget(split, 1);
     auto* left = new QWidget(split);
     auto* hierarchy = new QVBoxLayout(left);
@@ -140,7 +142,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     Entities_->setObjectName(QStringLiteral("worldEntities"));
     Entities_->setAccessibleName(QStringLiteral("World entities"));
     hierarchy->addWidget(Entities_, 1);
-    auto* commands = new QHBoxLayout;
+    auto* commands = new QVBoxLayout;
     Add_ = new QPushButton(QStringLiteral("Add Entity"), left);
     Add_->setObjectName(QStringLiteral("worldAdd"));
     Duplicate_ = new QPushButton(QStringLiteral("Duplicate"), left);
@@ -151,6 +153,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     commands->addWidget(Duplicate_);
     commands->addWidget(Remove_);
     hierarchy->addLayout(commands);
+    BoundViewport_ = Render_->TakeViewport(split);
     Scene_ = new LevelWorkspace(tooling, this);
     Scene_->hide();
     Viewport_ = Scene_->TakeViewport(split);
@@ -170,7 +173,10 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     Inspector_->setSizeConstraint(QLayout::SetMinimumSize);
     scroll->setWidget(inspector);
     split->setStretchFactor(0, 1);
-    split->setStretchFactor(1, 2);
+    split->setStretchFactor(1, 3);
+    split->setStretchFactor(2, 3);
+    split->setStretchFactor(3, 1);
+    split->setSizes({240, 520, 520, 300});
     auto* edits = new QHBoxLayout;
     Components_ = new QComboBox(this);
     Components_->setObjectName(QStringLiteral("worldComponentChoice"));
@@ -296,7 +302,9 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     });
     connect(Apply_, &QPushButton::clicked, this, [this]() { (void)Apply(); });
     connect(Reset_, &QPushButton::clicked, this, [this]() {
+        DraftTimer_.stop();
         Pending_ = false;
+        PreviewDraft();
         Render();
         Changed(QStringLiteral("Fields reset to the last applied edit."));
     });
@@ -312,6 +320,9 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     help->setText(QStringLiteral("World authoring currently requires the native editor. Browser file import/export and "
                                  "runtime binding are not available for this document type."));
 #endif
+    DraftTimer_.setSingleShot(true);
+    DraftTimer_.setInterval(180);
+    connect(&DraftTimer_, &QTimer::timeout, this, &WorldWorkspace::PreviewDraft);
     Render();
     Changed(QStringLiteral("Open a project to begin authoring its world."));
 }
@@ -322,7 +333,11 @@ void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
     {
         return;
     }
+    DraftTimer_.stop();
+    DraftPreview_ = false;
     StopPreview();
+    Render_->Preview().RestoreNavigation({});
+    Scene_->RestoreNavigation({});
     Scene_->SetProject(canonical, epoch);
     ValidatedScene_ = {};
     ValidatedWorld_.clear();
@@ -573,6 +588,21 @@ void WorldWorkspace::RefreshScene()
 }
 void WorldWorkspace::SceneCompleted(bool accepted)
 {
+    if (DraftPreview_)
+    {
+        DraftPreview_ = false;
+        // This packet represents only inspector buffers; Apply/Reset still own the document.
+        if (!accepted)
+        {
+            Changed(Scene_->StatusText());
+        }
+        else
+        {
+            Changed();
+        }
+        return;
+    }
+
     if (SceneGeneration_ != DocumentGeneration_)
     {
         return;
@@ -685,6 +715,7 @@ void WorldWorkspace::Render()
     RenderInspector();
     const bool scene = Document_.Draft().contains(QStringLiteral("scene"));
     Viewport_->setVisible(scene);
+    BoundViewport_->setVisible(!scene);
     Render_->setVisible(!scene);
 }
 void WorldWorkspace::RenderInspector()
@@ -968,6 +999,7 @@ void WorldWorkspace::PickTint(const QString& id, const QJsonObject& binding)
 void WorldWorkspace::Pending()
 {
     Pending_ = true;
+    DraftTimer_.start();
     Changed(QStringLiteral(
         "Unapplied fields. Apply Changes validates them together; Reset Fields keeps the last applied edit."));
 }
@@ -984,11 +1016,11 @@ void WorldWorkspace::Changed(const QString& message)
     const bool busy = SceneBusy();
     if (Name_ != nullptr)
     {
-        Name_->setEnabled(!busy);
+        Name_->setEnabled(!busy || DraftPreview_);
     }
     for (auto* field : Fields_)
     {
-        field->setEnabled(!busy);
+        field->setEnabled(!busy || DraftPreview_);
     }
     Entities_->setEnabled(!Pending_ && !busy);
     Import_->setEnabled(Document_.Loaded() && !Pending_ && !busy);
@@ -1009,18 +1041,9 @@ void WorldWorkspace::Changed(const QString& message)
     Render_->SetSelection(Selected_, Pending_);
     Q_EMIT DocumentChanged();
 }
-bool WorldWorkspace::Apply()
+bool WorldWorkspace::ReadDraft(WorldDocument& document, QString& error, QWidget*& invalid)
 {
-    if (SceneBusy())
-    {
-        return false;
-    }
-    if (!Pending_)
-    {
-        return Document_.Loaded();
-    }
     auto components = Document_.Entity(Selected_).value(QStringLiteral("components")).toObject();
-    QString error;
     for (auto c = components.begin(); c != components.end(); ++c)
     {
         auto values = c.value().toObject();
@@ -1048,14 +1071,13 @@ bool WorldWorkspace::Apply()
                 }
                 else if (!WorldDocument::ParseValue(p, text->text(), candidate, error))
                 {
-                    text->setFocus();
-                    Changed(error);
+                    invalid = text;
                     return false;
                 }
             }
             else
             {
-                Changed(QStringLiteral("Inspector no longer matches the selected entity."));
+                error = QStringLiteral("Inspector no longer matches the selected entity.");
                 return false;
             }
             values.insert(pid, candidate);
@@ -1074,7 +1096,7 @@ bool WorldWorkspace::Apply()
                     qobject_cast<QLineEdit*>(Fields_.value(QStringLiteral("scene/") + key + QString::number(axis)));
                 if (field == nullptr)
                 {
-                    Changed(QStringLiteral("Scene inspector is stale."));
+                    error = QStringLiteral("Scene inspector is stale.");
                     return false;
                 }
                 if (field->text() == Display(values[axis]))
@@ -1091,8 +1113,7 @@ bool WorldWorkspace::Apply()
                 QJsonValue value;
                 if (!WorldDocument::ParseValue(property, field->text(), value, error))
                 {
-                    field->setFocus();
-                    Changed(error);
+                    invalid = field;
                     return false;
                 }
                 values[axis] = value;
@@ -1100,11 +1121,103 @@ bool WorldWorkspace::Apply()
             scene.insert(key, values);
         }
     }
-    if (!Document_.Edit(Selected_, components, Name_->text(), error, scene.isEmpty() ? nullptr : &scene))
+    if (!document.Edit(Selected_, components, Name_->text(), error, scene.isEmpty() ? nullptr : &scene))
     {
+        return false;
+    }
+    return true;
+}
+void WorldWorkspace::PreviewDraft()
+{
+    if (!Document_.Loaded())
+    {
+        return;
+    }
+    if (SceneBusy())
+    {
+        DraftTimer_.start();
+        return;
+    }
+    auto draft = Document_;
+    QString error;
+    QWidget* invalid = nullptr;
+    if (Pending_ && !ReadDraft(draft, error, invalid))
+    {
+        return;
+    }
+    if (draft.SceneLevel().isEmpty())
+    {
+        Render_->PreviewDraft(draft);
+    }
+    else
+    {
+        DraftPreview_ = true;
+        SceneGeneration_ = DocumentGeneration_;
+        Scene_->SetWorldSnapshot(draft);
+        if (!Scene_->Assemble(draft.SceneLevel()))
+        {
+            DraftPreview_ = false;
+        }
+    }
+}
+QJsonObject WorldWorkspace::Session() const
+{
+    return {{QStringLiteral("world"), Path_.isEmpty() ? QString() : QDir(Root_).relativeFilePath(Path_)},
+            {QStringLiteral("selection"), Selected_},
+            {QStringLiteral("splitter"), QString::fromLatin1(Split_->saveState().toBase64())},
+            {QStringLiteral("boundCamera"), Render_->Preview().Navigation()},
+            {QStringLiteral("sceneCamera"), Scene_->Navigation()}};
+}
+void WorldWorkspace::RestoreSession(const QJsonObject& state)
+{
+    const auto path = state.value(QStringLiteral("world")).toString();
+    if (!path.isEmpty() && QDir::isRelativePath(path))
+    {
+        const auto absolute = QDir(Root_).filePath(path);
+        if (Inside(absolute, true))
+        {
+            (void)Open(absolute);
+        }
+    }
+    Render_->Preview().RestoreNavigation(state.value(QStringLiteral("boundCamera")).toObject());
+    Scene_->RestoreNavigation(state.value(QStringLiteral("sceneCamera")).toObject());
+    const auto encoded = state.value(QStringLiteral("splitter")).toString().toLatin1();
+    const auto bytes = QByteArray::fromBase64(encoded);
+    if (bytes.size() <= 4096 && bytes.toBase64() == encoded)
+    {
+        (void)Split_->restoreState(bytes);
+    }
+    const auto selected = state.value(QStringLiteral("selection")).toString();
+    if (!Document_.Entity(selected).isEmpty())
+    {
+        Selected_ = selected;
+        Render();
+    }
+}
+bool WorldWorkspace::Apply()
+{
+    if (SceneBusy())
+    {
+        return false;
+    }
+    if (!Pending_)
+    {
+        return Document_.Loaded();
+    }
+    WorldDocument candidate = Document_;
+    QString error;
+    QWidget* invalid = nullptr;
+    if (!ReadDraft(candidate, error, invalid))
+    {
+        if (invalid != nullptr)
+        {
+            invalid->setFocus();
+        }
         Changed(error);
         return false;
     }
+    DraftTimer_.stop();
+    Document_ = candidate;
     Pending_ = false;
     // Update labels in place so Save preserves the focused field's text buffer.
     for (foundation::int32 i = 0; i < Entities_->count(); ++i)
@@ -1317,6 +1430,25 @@ bool WorldWorkspace::ConfirmDiscard()
     Render();
     Changed(QStringLiteral("Changes discarded."));
     return true;
+}
+bool WorldWorkspace::PreviewRunning() const noexcept
+{
+    return Render_->Preview().Running() || Scene_->PreviewRunning();
+}
+void WorldWorkspace::ResumePreview()
+{
+    if (!Document_.Loaded() || SceneBusy())
+    {
+        return;
+    }
+    if (Document_.SceneLevel().isEmpty())
+    {
+        (void)Render_->Refresh(true);
+    }
+    else
+    {
+        Scene_->ResumePreview();
+    }
 }
 void WorldWorkspace::StopPreview() noexcept
 {

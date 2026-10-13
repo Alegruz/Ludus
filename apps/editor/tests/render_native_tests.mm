@@ -28,6 +28,10 @@ bool Frames(RenderPreview& preview, uint64 target)
     {
         QTest::qWait(20);
     }
+    if (preview.Frames() >= target)
+    {
+        QTest::qWait(100);
+    }
     return preview.Frames() >= target;
 }
 } // namespace
@@ -66,10 +70,17 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     RenderPreview preview;
     REQUIRE(preview.SetScene(scene));
     preview.Navigate(0, 0, 0, 3, false);
+    QImage embedded;
+    QObject::connect(&preview, &RenderPreview::FrameReady, &preview, [&embedded](const QImage& frame) {
+        embedded = frame;
+    });
     REQUIRE(preview.Start());
     const bool presented = Frames(preview, 3);
     INFO(preview.Status().toStdString());
     REQUIRE(presented);
+    REQUIRE_FALSE(embedded.isNull());
+    CHECK(embedded.size() == QSize(640, 480));
+    CHECK(embedded.pixelColor(320, 240) != embedded.pixelColor(0, 0));
     CHECK(preview.Report().Submitted == 1);
     CHECK(preview.Report().Visible == 1);
     CHECK(preview.Report().Draws == 1);
@@ -97,11 +108,12 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     preview.Navigate(0, 0, 0, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK_FALSE(world.Dirty());
-    auto* window = static_cast<NSWindow*>(preview.WindowInfo().CocoaWindow);
-    REQUIRE(window != nil);
-    [window setContentSize:NSMakeSize(720, 480)];
+    CHECK(preview.WindowInfo().System == ludus::platform::WindowSystem::Headless);
+    CHECK(preview.WindowInfo().CocoaWindow == nullptr);
+    preview.Resize(720, 480);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
+    CHECK(embedded.size() == QSize(720, 480));
     auto entity = world.Entity(QStringLiteral("starter.cube"));
     auto components = entity.value(QStringLiteral("components")).toObject();
     auto transform = components.value(QStringLiteral("transform")).toObject();
@@ -115,6 +127,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Culled == 1);
     CHECK(preview.Report().Visible == 0);
+    CHECK(embedded.pixelColor(360, 240) == embedded.pixelColor(0, 0));
     preview.Navigate(0, 0, 0, 3, true);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
@@ -157,7 +170,24 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(preview.Start());
     REQUIRE(Frames(preview, 3));
     preview.Stop();
-    // A headless Metal pixel oracle complements the real-window lifecycle:
+    // Readback delivery keeps its pixels alive even when an earlier receiver stops rendering.
+    RenderPreview closing;
+    QImage closingFrame;
+    REQUIRE(closing.SetScene(scene));
+    QObject::connect(&closing, &RenderPreview::FrameReady, &closing, [&closing](const QImage&) { closing.Stop(); });
+    QObject::connect(&closing, &RenderPreview::FrameReady, &closing, [&closingFrame](const QImage& frame) {
+        closingFrame = frame;
+    });
+    REQUIRE(closing.Start());
+    QElapsedTimer closingTimer;
+    closingTimer.start();
+    while (closing.Running() && closingTimer.elapsed() < 10000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE_FALSE(closing.Running());
+    REQUIRE_FALSE(closingFrame.isNull());
+    // A headless Metal pixel oracle complements the embedded viewport lifecycle:
     // render an extracted red cube and independently check foreground/background.
     entity = world.Entity(QStringLiteral("starter.cube"));
     components = entity.value(QStringLiteral("components")).toObject();

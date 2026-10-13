@@ -5,11 +5,14 @@
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
-#include <ludus/platform/base/window.h>
+#include <ludus/platform/native_window.h>
 
 #include "internal/render_scene.h"
 
+#include <QImage>
+#include <QJsonObject>
 #include <QObject>
 #include <QTimer>
 
@@ -32,6 +35,12 @@ public:
                   foundation::float32 zoom,
                   bool reference);
     void FrameAll() noexcept;
+    void Resize(foundation::int32 width, foundation::int32 height);
+    void Orbit(foundation::int32 dx, foundation::int32 dy);
+    void Pan(foundation::int32 dx, foundation::int32 dy);
+    void Zoom(foundation::int32 steps);
+    [[nodiscard]] QJsonObject Navigation() const;
+    void RestoreNavigation(const QJsonObject& state);
     void Tick();
     [[nodiscard]] bool Running() const noexcept
     {
@@ -64,6 +73,7 @@ public:
     [[nodiscard]] platform::NativeWindowInfo WindowInfo() const noexcept;
 Q_SIGNALS:
     void Changed();
+    void NavigationChanged();
     void FrameReady(const QImage& frame);
     void Stopped();
     void Failed(const QString& error);
@@ -79,7 +89,17 @@ private:
     [[nodiscard]] bool Prepare();
     void RestartResources() noexcept;
     RenderScene Scene_;
-    foundation::UniquePtr<platform::Window> Window_;
+    graphics::rhi::TextureHandle Color_{};
+    graphics::rhi::ReadbackTicket Readback_{};
+    QImage ReadbackImage_;
+    foundation::uint32 ReadbackRow_ = 0, ReadbackRows_ = 0;
+    foundation::uint32 RequestedWidth_ = 640, RequestedHeight_ = 480;
+    bool Reading_ = false;
+    bool RestoredOrbit_ = false;
+    QString CameraId_;
+    void CancelReadback() noexcept;
+    void Fail(const QString& message);
+    [[nodiscard]] bool ReadFrame();
     graphics::rhi::DeviceHandle Device_{};
     graphics::rhi::SurfaceHandle Surface_{};
     graphics::renderer::Renderer Renderer_;

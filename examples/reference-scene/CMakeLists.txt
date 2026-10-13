@@ -34,4 +34,15 @@ endif()
 if(BUILD_TESTING)
     add_test(NAME scene_capture COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_capture.py" "$<TARGET_FILE:reference_scene>")
     set_tests_properties(scene_capture PROPERTIES TIMEOUT 60)
+    add_test(NAME scene_acceptance_driver COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+        -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -p test_acceptance.py -v)
+    add_test(NAME scene_renderer_acceptance COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_acceptance.py" "$<TARGET_FILE:reference_scene>")
+    set_tests_properties(scene_renderer_acceptance PROPERTIES TIMEOUT 60)
+    option(LUDUS_SCENE_NATIVE_ACCEPTANCE "Require native ray queries in the complete-scene acceptance fixture" OFF)
+    if(LUDUS_SCENE_NATIVE_ACCEPTANCE)
+        add_test(NAME scene_native_acceptance COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_acceptance.py" "$<TARGET_FILE:reference_scene>" --native)
+        set_tests_properties(scene_native_acceptance PROPERTIES TIMEOUT 90)
+    endif()
 endif()
