@@ -1,0 +1,46 @@
+{
+  "source_sha256": "426d39085dec9b8061f627a90acfd65027251ebce7c10b08d612ee441b964c97",
+  "upload_sha256": "8667e718294e9e0df1d30600ba3eeb201f764aad2dad72748643e4a285e1d1f7",
+  "semantic": "data",
+  "format": "Rgba8Unorm",
+  "levels": [
+    {
+      "width": 4,
+      "height": 4,
+      "offset": 0,
+      "row_pitch": 16
+    }
+  ],
+  "bake": {
+    "source_id": 2,
+    "scene_revision": 1,
+    "dependency_revision": 11,
+    "direct_light_id": 1,
+    "transform": [
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0.45,
+      0
+    ],
+    "scale": [
+      1,
+      1,
+      1
+    ],
+    "gutter": 1,
+    "uv_transform": [
+      0.25,
+      0.25,
+      0.375,
+      0.375
+    ]
+  }
+}

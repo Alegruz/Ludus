@@ -1,0 +1,6 @@
+{
+ "outputs": null,
+ "scene": "staircase2",
+ "schema": 1,
+ "note": "Digest-only goldens for the licensed Modern Hall / staircase2 scene (CC BY 3.0, not in the repository). Fill with: python3 tests/goldens/scene_pipeline/capture.py --licensed references/resources/scenes/staircase2 --write-licensed"
+}
