@@ -85,7 +85,11 @@ class FileLock final
 {
 public:
     FileLock() noexcept = default;
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     ~FileLock() noexcept;
+#else
+    ~FileLock() noexcept = default;
+#endif
     FileLock(const FileLock&) = delete;
     FileLock& operator=(const FileLock&) = delete;
     /// Open path (created in append mode when exclusive) and lock it.
