@@ -95,7 +95,7 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
                 "use the RHI shader interface macros, not target annotation vocabulary",
             )
     for declaration in re.finditer(r"\b(?:struct|cbuffer)\s+(\w+)", code):
-        if not declaration[1][0].isupper():
+        if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", declaration[1]):
             report(
                 declaration.start(1),
                 "shader types and constant-buffer blocks use PascalCase",
@@ -108,7 +108,7 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
         ):
             offset = match.start(1) + field.start(1)
             name = field[1]
-            if not name[0].isupper():
+            if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", name):
                 report(offset, "shader members use PascalCase")
             if re.search(
                 r"Position|Normal|Direction|Eye|Bounds", name
@@ -122,18 +122,18 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
     ):
         if match[1] in {"if", "for", "while", "switch", "return"}:
             continue
-        if not match[2][0].isupper():
+        if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", match[2]):
             report(match.start(2), "shader functions and entry points use PascalCase")
         for parameter in re.finditer(
             r"\b(?:in\s+|inout\s+|out\s+)?\w+\s+(\w+)\s*(?:[:,=]|$)", match[3]
         ):
-            if not parameter[1][0].islower():
+            if not re.fullmatch(r"[a-z][A-Za-z0-9]*", parameter[1]):
                 report(
                     match.start(3) + parameter.start(1),
                     "shader parameters use lowerCamelCase",
                 )
         for parameter in re.finditer(r"\bout\s+\w+\s+(\w+)", match[3]):
-            if not re.fullmatch(r"out[A-Z]\w*", parameter[1]):
+            if not re.fullmatch(r"out[A-Z][A-Za-z0-9]*", parameter[1]):
                 report(
                     match.start(3) + parameter.start(1),
                     "out parameters use outPascalCase",

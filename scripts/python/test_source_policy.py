@@ -66,6 +66,17 @@ class SourcePolicyTests(unittest.TestCase):
             self.diagnose("float Evaluate(float value) { return value; }", ".slang")
         )
 
+    def test_camel_case_rejects_underscores_after_correct_initial_case(self):
+        for text in [
+            "struct Sample_type { float Value; };",
+            "struct Sample { float Value_count; };",
+            "float Evaluate_brdf(float value) { return value; }",
+            "float Evaluate(float incident_value) { return incident_value; }",
+            "void Evaluate(out float outValue_count) { outValue_count = 0; }",
+        ]:
+            with self.subTest(text=text):
+                self.assertTrue(self.diagnose(text, ".slang"))
+
     def test_shader_outputs_and_entry_points(self):
         self.assertFalse(
             self.diagnose(
