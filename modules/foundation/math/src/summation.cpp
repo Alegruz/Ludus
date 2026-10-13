@@ -22,7 +22,7 @@ void CompensatedSum::Add(float64 value) noexcept
 
 float64 CompensatedSum::GetResult() const noexcept
 {
-    return mCompensation != 0.0 && IsFinite(mCompensation) ? mTotal + mCompensation : mTotal;
+    return mCompensation != 0.0 && IsFinite(mCompensation) == true ? mTotal + mCompensation : mTotal;
 }
 
 float64 CompensatedDot(Vector3d a, Vector3d b) noexcept

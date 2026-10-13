@@ -148,12 +148,43 @@ engine code. Discuss such cases in the PR before adding them.
   null.
 - **Non-const reference parameters carry their intent as a prefix**: `out` when
   the function only writes the argument (`CookResult& outResult`), `inout` when it
-  reads and updates it (`Failure& inoutErrors`, `Scene& inoutScene`). Const
+  reads and updates it (`Failure& inoutErrors`, `Scene& inoutScene`). The rule
+  applies to function (and lambda) parameters only: local reference variables,
+  range-`for` bindings and reference members are named normally. Const
   references and values take no prefix.
 - **No magic sizes in template arguments.** Spell a bounded capacity through a
   named constant or a shared alias (`MessageText`, `ResourcePath`,
   `MAX_MESSAGE_BYTES`) rather than a literal such as `Text<255>`; reuse the shared
   alias so each capacity is instantiated once.
+- **Compare booleans explicitly.** Write `condition == false` instead of
+  `!condition` (the `!` is thin and easy to miss), and prefer
+  `condition == true` over a bare boolean operand in `if`/`while`/`?:`/`&&`/`||`
+  (`if (writer.IsOk() == true && hasCamera == true)`). Comparisons that already
+  yield a boolean (`count == 0`, `a < b`) stay as they are. Non-boolean values
+  (pointers, integers) are compared against `nullptr`/`0` explicitly as usual.
+
+#### Naming enforcement
+
+Rules are enforced by tooling only in modules that have adopted them, so
+existing code does not fail CI before it is migrated. A module adopts the rules
+by adding a `.clang-tidy` with `InheritParentConfig: true` and
+`readability-identifier-naming` (copy `modules/content/scene_cook/.clang-tidy`)
+and listing its directory in `config/naming_scopes.txt`. New modules adopt them
+when created. Adopted today: `modules/content/scene_cook`,
+`modules/content/scene_format`, and FoundationMath's `summation` files.
+
+| Rule | Enforcement |
+| --- | --- |
+| Private/protected methods camelCase; public methods, free functions, types PascalCase; private members `m` + PascalCase; parameters and locals camelCase; constants UPPER_CASE | clang-tidy `readability-identifier-naming` (per-directory `.clang-tidy`) |
+| `condition == false` instead of `!condition` | `tools/check_naming.py` rule N1 (`./scripts/check --format`) |
+| `out`/`inout` prefix on non-const reference parameters | `check_naming.py` N2 (presence of a prefix; `out` vs `inout` choice is review-only) |
+| Boolean names read as questions | `check_naming.py` N3 (declarations spelled `bool`) |
+| `OrNull` on nullable pointer parameters | `check_naming.py` N4 (parameters defaulted to `nullptr`); other nullable pointers are review-only |
+| `condition == true` instead of a bare boolean operand | Review-only (needs type information) |
+| Spelled-out names, verb-first functions, no literal template sizes, reuse engine types | Review-only |
+
+`readability-simplify-boolean-expr` is disabled repository-wide because it
+rejects the explicit `== true`/`== false` style.
 
 ### Public SDK documentation
 
@@ -391,6 +422,15 @@ headers. Separate the groups with a blank line.
   instead of local vector, matrix, identity, or fixed `char[]` buffer types. If
   the engine lacks a general-purpose facility, add it to the owning Foundation
   module (with tests) and use it from there.
+- **Data formats shared by tools and runtime are owned by neither.** A cooked
+  or interchange format (for example LUSCN in `Ludus::SceneFormat`,
+  `modules/content/scene_format`) lives in its own header-only INTERFACE target
+  that depends only on FoundationBase and holds the versioned POD record
+  layouts, limits and constants with `static_assert`ed sizes. Producers (the
+  cooker, Editor composers) and consumers (Resources decoders, the renderer)
+  include it; a cooker never links the renderer and the runtime never links a
+  cooker. Serialise records field by field in little-endian order; the structs
+  document the layout and are not `memcpy`ed to or from files.
 - Engine modules live under `modules/<layer>/<module>/` with public headers in
   `include/` and private implementation headers in `src/internal/` (and
   `src/sinks/`, etc.). Only public headers are installed/exported.

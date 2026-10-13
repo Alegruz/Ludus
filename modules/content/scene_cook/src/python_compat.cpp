@@ -18,11 +18,11 @@ namespace
 {
     // Tokens are ASCII-trimmed; Unicode whitespace inside a decoded string literal
     // is outside the reference profile and is reported as a syntax failure.
-    while (!text.empty() && IsPythonSpace(static_cast<uint8>(text.front())))
+    while (text.empty() == false && IsPythonSpace(static_cast<uint8>(text.front())) == true)
     {
         text.remove_prefix(1);
     }
-    while (!text.empty() && IsPythonSpace(static_cast<uint8>(text.back())))
+    while (text.empty() == false && IsPythonSpace(static_cast<uint8>(text.back())) == true)
     {
         text.remove_suffix(1);
     }
@@ -33,19 +33,19 @@ namespace
 [[nodiscard]] bool TakeDigits(std::string_view& inoutText, ByteWriter& inoutDigits, usize& inoutCount) noexcept
 {
     inoutCount = 0;
-    if (inoutText.empty() || !IsAsciiDigit(inoutText.front()))
+    if (inoutText.empty() == true || IsAsciiDigit(inoutText.front()) == false)
     {
         return true;
     }
-    while (!inoutText.empty())
+    while (inoutText.empty() == false)
     {
-        if (IsAsciiDigit(inoutText.front()))
+        if (IsAsciiDigit(inoutText.front()) == true)
         {
             inoutDigits.Append(inoutText.front());
             ++inoutCount;
             inoutText.remove_prefix(1);
         }
-        else if (inoutText.front() == '_' && inoutText.size() > 1 && IsAsciiDigit(inoutText[1]))
+        else if (inoutText.front() == '_' && inoutText.size() > 1 && IsAsciiDigit(inoutText[1]) == true)
         {
             inoutText.remove_prefix(1);
         }
@@ -90,12 +90,13 @@ enum class FloatSyntax : uint8
 {
     text = StripPythonSpace(text);
     bool isNegative = false;
-    if (!text.empty() && (text.front() == '+' || text.front() == '-'))
+    if (text.empty() == false && (text.front() == '+' || text.front() == '-'))
     {
         isNegative = text.front() == '-';
         text.remove_prefix(1);
     }
-    if (IsEqualIgnoringCase(text, "inf") || IsEqualIgnoringCase(text, "infinity") || IsEqualIgnoringCase(text, "nan"))
+    if (IsEqualIgnoringCase(text, "inf") == true || IsEqualIgnoringCase(text, "infinity") == true ||
+        IsEqualIgnoringCase(text, "nan") == true)
     {
         return FloatSyntax::Nonfinite;
     }
@@ -108,7 +109,7 @@ enum class FloatSyntax : uint8
     usize integerCount = 0;
     usize fractionCount = 0;
     (void)TakeDigits(text, integer, integerCount);
-    if (!text.empty() && text.front() == '.')
+    if (text.empty() == false && text.front() == '.')
     {
         text.remove_prefix(1);
         (void)TakeDigits(text, fraction, fractionCount);
@@ -119,10 +120,10 @@ enum class FloatSyntax : uint8
     }
     bool isExponentNegative = false;
     usize exponentCount = 0;
-    if (!text.empty() && (text.front() == 'e' || text.front() == 'E'))
+    if (text.empty() == false && (text.front() == 'e' || text.front() == 'E'))
     {
         text.remove_prefix(1);
-        if (!text.empty() && (text.front() == '+' || text.front() == '-'))
+        if (text.empty() == false && (text.front() == '+' || text.front() == '-'))
         {
             isExponentNegative = text.front() == '-';
             text.remove_prefix(1);
@@ -133,11 +134,11 @@ enum class FloatSyntax : uint8
             return FloatSyntax::Invalid;
         }
     }
-    if (!text.empty())
+    if (text.empty() == false)
     {
         return FloatSyntax::Invalid;
     }
-    if (isNegative)
+    if (isNegative == true)
     {
         inoutJson.Append('-');
     }
@@ -147,18 +148,19 @@ enum class FloatSyntax : uint8
     {
         digits.remove_prefix(1);
     }
-    inoutJson.Append(digits.empty() ? std::string_view("0") : digits);
+    inoutJson.Append(digits.empty() == true ? std::string_view("0") : digits);
     inoutJson.Append('.');
     inoutJson.Append(fractionCount == 0 ? std::string_view("0")
                                         : std::string_view(reinterpret_cast<const char*>(fractionBytes.GetData()),
                                                            fractionBytes.GetSize()));
     if (exponentCount != 0)
     {
-        inoutJson.Append(isExponentNegative ? std::string_view("e-") : std::string_view("e+"));
+        inoutJson.Append(isExponentNegative == true ? std::string_view("e-") : std::string_view("e+"));
         inoutJson.Append(
             std::string_view(reinterpret_cast<const char*>(exponentBytes.GetData()), exponentBytes.GetSize()));
     }
-    return integer.IsOk() && fraction.IsOk() && exponent.IsOk() ? FloatSyntax::Number : FloatSyntax::Invalid;
+    return integer.IsOk() == true && fraction.IsOk() == true && exponent.IsOk() == true ? FloatSyntax::Number
+                                                                                        : FloatSyntax::Invalid;
 }
 
 void AppendCodeUnitEscape(ByteWriter& inoutWriter, uint32 unit) noexcept
@@ -176,7 +178,7 @@ void ByteWriter::Append(std::string_view text) noexcept
 
 void ByteWriter::AppendBytes(std::span<const uint8> data) noexcept
 {
-    if (mIsOk && !data.empty() && !mBuffer.TryAddRange(data))
+    if (mIsOk == true && data.empty() == false && mBuffer.TryAddRange(data) == false)
     {
         mIsOk = false;
     }
@@ -227,7 +229,7 @@ void AppendFloatRepr(ByteWriter& inoutWriter, float64 value) noexcept
     const bool isNegative = (std::bit_cast<uint64>(value) >> 63) != 0;
     if (value == 0.0)
     {
-        inoutWriter.Append(isNegative ? std::string_view("-0.0") : std::string_view("0.0"));
+        inoutWriter.Append(isNegative == true ? std::string_view("-0.0") : std::string_view("0.0"));
         return;
     }
     // yyjson emits the shortest round-trip digits; reformat them as CPython repr.
@@ -241,11 +243,11 @@ void AppendFloatRepr(ByteWriter& inoutWriter, float64 value) noexcept
         return;
     }
     std::string_view text(reinterpret_cast<const char*>(written.data()), written.size());
-    while (!text.empty() && text.back() == '\n')
+    while (text.empty() == false && text.back() == '\n')
     {
         text.remove_suffix(1);
     }
-    if (!text.empty() && text.front() == '-')
+    if (text.empty() == false && text.front() == '-')
     {
         text.remove_prefix(1);
     }
@@ -282,7 +284,7 @@ void AppendFloatRepr(ByteWriter& inoutWriter, float64 value) noexcept
         {
             exponent = exponent * 10 + (text[index] - '0');
         }
-        if (isExponentNegative)
+        if (isExponentNegative == true)
         {
             exponent = -exponent;
         }
@@ -301,7 +303,7 @@ void AppendFloatRepr(ByteWriter& inoutWriter, float64 value) noexcept
     const std::string_view significant(digits + first, count - first);
     const int64 decimalExponent = pointAt + exponent; // value = 0.d1d2... * 10^decpt
     const auto digitCount = static_cast<int64>(significant.size());
-    if (isNegative)
+    if (isNegative == true)
     {
         inoutWriter.Append('-');
     }
@@ -441,7 +443,7 @@ void PythonJsonWriter::writeNewline() noexcept
 
 void PythonJsonWriter::beginValue() noexcept
 {
-    if (mIsAfterKey)
+    if (mIsAfterKey == true)
     {
         mIsAfterKey = false;
         return;
@@ -450,7 +452,7 @@ void PythonJsonWriter::beginValue() noexcept
     {
         return;
     }
-    if (!mIsFirst)
+    if (mIsFirst == false)
     {
         mWriter.Append(',');
     }
@@ -468,7 +470,7 @@ void PythonJsonWriter::BeginObject() noexcept
 void PythonJsonWriter::EndObject() noexcept
 {
     --mDepth;
-    if (!mIsFirst)
+    if (mIsFirst == false)
     {
         writeNewline();
     }
@@ -487,7 +489,7 @@ void PythonJsonWriter::BeginArray() noexcept
 void PythonJsonWriter::EndArray() noexcept
 {
     --mDepth;
-    if (!mIsFirst)
+    if (mIsFirst == false)
     {
         writeNewline();
     }
@@ -497,7 +499,7 @@ void PythonJsonWriter::EndArray() noexcept
 
 void PythonJsonWriter::WriteKey(std::string_view key) noexcept
 {
-    if (!mIsFirst)
+    if (mIsFirst == false)
     {
         mWriter.Append(',');
     }
@@ -531,7 +533,7 @@ void PythonJsonWriter::WriteFloat(float64 value) noexcept
 void PythonJsonWriter::WriteBoolean(bool isTrue) noexcept
 {
     beginValue();
-    mWriter.Append(isTrue ? std::string_view("true") : std::string_view("false"));
+    mWriter.Append(isTrue == true ? std::string_view("true") : std::string_view("false"));
     mIsFirst = false;
 }
 
@@ -545,7 +547,7 @@ void PythonJsonWriter::WriteNull() noexcept
 NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64>& outValues) noexcept
 {
     outValues.Clear();
-    if (tokens.empty())
+    if (tokens.empty() == true)
     {
         return NumberResult::Ok;
     }
@@ -571,11 +573,11 @@ NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64
         }
     }
     json.Append(']');
-    if (!json.IsOk())
+    if (json.IsOk() == false)
     {
         return NumberResult::OutOfMemory;
     }
-    if (hasNonfinite)
+    if (hasNonfinite == true)
     {
         return NumberResult::Nonfinite;
     }
@@ -600,14 +602,14 @@ NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64
         return NumberResult::Nonfinite;
     }
     const parsing::JsonValue root = document.Root();
-    if (!outValues.TryResize(tokens.size()))
+    if (outValues.TryResize(tokens.size()) == false)
     {
         return NumberResult::OutOfMemory;
     }
     for (usize i = 0; i < tokens.size(); ++i)
     {
         float64 value = 0.0;
-        if (!root.At(i).Number(value))
+        if (root.At(i).Number(value) == false)
         {
             return NumberResult::Syntax;
         }
@@ -624,19 +626,19 @@ bool ParseInt(std::string_view text, int64& outValue) noexcept
 {
     text = StripPythonSpace(text);
     bool isNegative = false;
-    if (!text.empty() && (text.front() == '+' || text.front() == '-'))
+    if (text.empty() == false && (text.front() == '+' || text.front() == '-'))
     {
         isNegative = text.front() == '-';
         text.remove_prefix(1);
     }
-    if (text.empty() || !IsAsciiDigit(text.front()))
+    if (text.empty() == true || IsAsciiDigit(text.front()) == false)
     {
         return false;
     }
     uint64 value = 0;
-    while (!text.empty())
+    while (text.empty() == false)
     {
-        if (IsAsciiDigit(text.front()))
+        if (IsAsciiDigit(text.front()) == true)
         {
             const auto digit = static_cast<uint64>(text.front() - '0');
             if (value > (uint64{1} << 62) / 5) // Beyond int64 magnitude after * 10.
@@ -646,7 +648,7 @@ bool ParseInt(std::string_view text, int64& outValue) noexcept
             value = value * 10 + digit;
             text.remove_prefix(1);
         }
-        else if (text.front() == '_' && text.size() > 1 && IsAsciiDigit(text[1]))
+        else if (text.front() == '_' && text.size() > 1 && IsAsciiDigit(text[1]) == true)
         {
             text.remove_prefix(1);
         }
@@ -659,7 +661,7 @@ bool ParseInt(std::string_view text, int64& outValue) noexcept
     {
         return false;
     }
-    outValue = isNegative ? -static_cast<int64>(value) : static_cast<int64>(value);
+    outValue = isNegative == true ? -static_cast<int64>(value) : static_cast<int64>(value);
     return true;
 }
 
@@ -674,7 +676,7 @@ bool DecodeJsonString(std::string_view token, foundation::String& outText) noexc
         return false;
     }
     std::string_view value;
-    if (!document.Root().String(value))
+    if (document.Root().String(value) == false)
     {
         return false;
     }

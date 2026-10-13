@@ -34,7 +34,7 @@ std::atomic<uint32> gTemporaryCounter{0};
 /// Copy path into a NativePath; rejects empty paths and embedded NUL bytes.
 [[nodiscard]] bool TryMakeNativePath(std::string_view path, NativePath& outPath) noexcept
 {
-    if (path.empty() || path.find('\0') != std::string_view::npos)
+    if (path.empty() == true || path.find('\0') != std::string_view::npos)
     {
         return false;
     }
@@ -67,7 +67,7 @@ std::atomic<uint32> gTemporaryCounter{0};
 Status ResolveDirectory(std::string_view path, foundation::String& outPath) noexcept
 {
     NativePath input;
-    if (!TryMakeNativePath(path, input))
+    if (TryMakeNativePath(path, input) == false)
     {
         return Status::Invalid;
     }
@@ -78,7 +78,7 @@ Status ResolveDirectory(std::string_view path, foundation::String& outPath) noex
     {
         return errno == ENOENT || errno == ENOTDIR ? Status::NotFound : Status::IoError;
     }
-    if (!IsDirectory(resolved))
+    if (IsDirectory(resolved) == false)
     {
         return Status::NotFound;
     }
@@ -88,7 +88,7 @@ Status ResolveDirectory(std::string_view path, foundation::String& outPath) noex
 Status MakeDirectories(std::string_view path) noexcept
 {
     NativePath full;
-    if (!TryMakeNativePath(path, full))
+    if (TryMakeNativePath(path, full) == false)
     {
         return Status::Invalid;
     }
@@ -108,7 +108,7 @@ Status MakeDirectories(std::string_view path) noexcept
             return Status::IoError;
         }
     }
-    return IsDirectory(full.GetData()) ? Status::Ok : Status::IoError;
+    return IsDirectory(full.GetData()) == true ? Status::Ok : Status::IoError;
 }
 
 Status WriteFileAtomic(std::string_view directory, std::string_view name, std::span<const uint8> data) noexcept
@@ -127,12 +127,13 @@ Status WriteFileAtomic(std::string_view directory, std::string_view name, std::s
     for (uint32 attempt = 0; attempt < MAX_TEMPORARY_ATTEMPTS && file < 0; ++attempt)
     {
         temporary.Clear();
-        const bool isNamed = temporary.TryAssign(target.GetView()) == foundation::StringStatus::Ok &&
-                             temporary.TryAppend(".ludus-cook-") == foundation::StringStatus::Ok &&
-                             TryAppendDecimal(temporary, static_cast<uint64>(getpid())) &&
-                             temporary.TryAppend("-") == foundation::StringStatus::Ok &&
-                             TryAppendDecimal(temporary, gTemporaryCounter.fetch_add(1, std::memory_order_relaxed));
-        if (!isNamed)
+        const bool isNamed =
+            temporary.TryAssign(target.GetView()) == foundation::StringStatus::Ok &&
+            temporary.TryAppend(".ludus-cook-") == foundation::StringStatus::Ok &&
+            TryAppendDecimal(temporary, static_cast<uint64>(getpid())) == true &&
+            temporary.TryAppend("-") == foundation::StringStatus::Ok &&
+            TryAppendDecimal(temporary, gTemporaryCounter.fetch_add(1, std::memory_order_relaxed)) == true;
+        if (isNamed == false)
         {
             return Status::Limit;
         }
@@ -148,7 +149,7 @@ Status WriteFileAtomic(std::string_view directory, std::string_view name, std::s
     }
     usize written = 0;
     bool isOk = true;
-    while (isOk && written < data.size())
+    while (isOk == true && written < data.size())
     {
         const ssize_t count = write(file, data.data() + written, data.size() - written);
         if (count < 0 && errno == EINTR)
@@ -156,11 +157,11 @@ Status WriteFileAtomic(std::string_view directory, std::string_view name, std::s
             continue;
         }
         isOk = count > 0;
-        written += isOk ? static_cast<usize>(count) : 0;
+        written += isOk == true ? static_cast<usize>(count) : 0;
     }
-    isOk = isOk && fsync(file) == 0;
-    isOk = close(file) == 0 && isOk;
-    if (!isOk || rename(temporary.GetData(), target.GetData()) != 0)
+    isOk = isOk == true && fsync(file) == 0;
+    isOk = close(file) == 0 && isOk == true;
+    if (isOk == false || rename(temporary.GetData(), target.GetData()) != 0)
     {
         (void)unlink(temporary.GetData());
         return Status::IoError;

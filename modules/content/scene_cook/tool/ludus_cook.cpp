@@ -17,7 +17,7 @@ using ludus::foundation::core::usize;
 
 void WriteAll(int descriptor, std::string_view text) noexcept
 {
-    while (!text.empty())
+    while (text.empty() == false)
     {
         const ssize_t written = write(descriptor, text.data(), text.size());
         if (written <= 0)
@@ -44,7 +44,7 @@ int main(int argc, char** argv)
     }
     CookResult result;
     CookError error;
-    if (!Cook(argv[2], result, error) || !WriteCook(argv[3], result, error))
+    if (Cook(argv[2], result, error) == false || WriteCook(argv[3], result, error) == false)
     {
         WriteAll(2, "conversion failed: ");
         WriteAll(2, error.Message.View());

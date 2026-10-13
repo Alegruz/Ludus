@@ -6,6 +6,15 @@
 # hicpp-exception-baseclass check below is an additional guard. Do not add
 # exception-based error handling; use status codes / std::optional / return
 # values instead.
+#
+# readability-simplify-boolean-expr is deliberately off: the house style
+# (AGENTS.md "Naming") writes `condition == false` and `condition == true`,
+# which that check reports as redundant literals.
+#
+# Identifier naming is enforced per directory: modules that have adopted the
+# AGENTS.md naming rules carry their own .clang-tidy with
+# InheritParentConfig: true and readability-identifier-naming. See
+# config/naming_scopes.txt and tools/check_naming.py for the text-level rules.
 ---
 Checks: >
   -*,
@@ -26,8 +35,7 @@ Checks: >
   readability-inconsistent-declaration-parameter-name,
   readability-misleading-indentation,
   readability-redundant-control-flow,
-  readability-redundant-member-init,
-  readability-simplify-boolean-expr
+  readability-redundant-member-init
 WarningsAsErrors: ''
 HeaderFilterRegex: '(.*/)?(modules|apps|tools|tests|examples)/.*'
 FormatStyle: file

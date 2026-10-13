@@ -77,8 +77,19 @@ and run the required documentation checks before a PR.
   `param`, `ctx`); functions start with a verb; booleans read as questions
   (`isOk`, `mIsOk`, `HasFailed`); private member functions are camelCase;
   nullable pointer parameters end in `OrNull`; non-const reference parameters
-  start with `out` or `inout`; no literal sizes in template arguments — use a
-  named constant or shared alias such as `MessageText`.
+  (parameters only, not locals) start with `out` or `inout`; no literal sizes in
+  template arguments — use a named constant or shared alias such as
+  `MessageText`.
+- Compare booleans explicitly: `condition == false`, never `!condition`; prefer
+  `condition == true` over a bare boolean operand. Older code is updated when
+  touched.
+- Enforcement is per adopted module (per-directory `.clang-tidy` with
+  `readability-identifier-naming`, plus `config/naming_scopes.txt` for
+  `tools/check_naming.py`); see the table in `AGENTS.md` §Naming for which
+  rules are tool-enforced and which are review-only.
+- Formats shared by tools and runtime (e.g. LUSCN, `Ludus::SceneFormat`) live in
+  their own header-only target owned by neither side; cookers never link the
+  renderer.
 - Reuse FoundationMath, FoundationStrings, and shared Content types instead of
   local vector/matrix/buffer types; add missing general facilities to the
   owning Foundation module.
