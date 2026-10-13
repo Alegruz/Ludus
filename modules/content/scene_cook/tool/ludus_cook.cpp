@@ -2,6 +2,8 @@
 // `ludus scene` CLI commands.
 //
 //   ludus-cook cook SOURCE OUTPUT
+//   ludus-cook pbrt ENTRY.pbrt OUTPUT     (best-effort pbrt-v4 import)
+//   ludus-cook pbrt ENTRY.pbrt --dry-run
 //   ludus-cook scene new      PROJECT LEVEL [--name NAME] [--json]
 //   ludus-cook scene open     PROJECT LEVEL [--json]
 //   ludus-cook scene import   PROJECT LEVEL SOURCE [--json]
@@ -10,12 +12,15 @@
 //   ludus-cook scene publish  PROJECT LEVEL OUTPUT [--json]
 //
 // `cook` writes OUTPUT/scene.luscn, OUTPUT/manifest.json and OUTPUT/LICENSE.txt
-// and prints the manifest. Every `scene` command prints the level's dump (the
+// and prints the manifest. `pbrt` writes OUTPUT/scene.luscn,
+// OUTPUT/import-report.json and OUTPUT/LICENSE.txt and prints the report;
+// --dry-run only parses and plans and prints the report. Every `scene` command prints the level's dump (the
 // level, its exact resident closure and byte total); --json prints it on one
 // line with "schema": 1, or the error as {"schema": 1, "error": {...}}.
 // Exit status: 0 success, 1 failure, 2 usage, 3 missing host facilities,
 // 130 cancelled.
 
+#include <ludus/content/scene_cook/best_effort_import.h>
 #include <ludus/content/scene_cook/scene_assets.h>
 #include <ludus/content/scene_cook/scene_cook.h>
 
@@ -62,6 +67,7 @@ int PrintUsage() noexcept
 {
     WriteAll(2,
              "usage: ludus-cook cook SOURCE OUTPUT\n"
+             "       ludus-cook pbrt ENTRY.pbrt {OUTPUT|--dry-run}\n"
              "       ludus-cook scene new PROJECT LEVEL [--name NAME] [--json]\n"
              "       ludus-cook scene {open|dump} PROJECT LEVEL [--json]\n"
              "       ludus-cook scene import PROJECT LEVEL SOURCE [--json]\n"
@@ -136,6 +142,28 @@ int RunCook(int argc, char** argv) noexcept
         return EXIT_FAILED;
     }
     WriteAll(1, GetView(result.Manifest));
+    return EXIT_OK;
+}
+
+int RunPbrt(int argc, char** argv) noexcept
+{
+    if (argc != 4)
+    {
+        return PrintUsage();
+    }
+    BestEffortOptions options;
+    options.IsDryRun = std::string_view(argv[3]) == "--dry-run";
+    BestEffortResult result;
+    CookError error;
+    const bool isImported = ImportPbrtBestEffort(argv[2], options, result, error);
+    WriteAll(1, GetView(result.Report));
+    if (isImported == false || (options.IsDryRun == false && WriteBestEffortImport(argv[3], result, error) == false))
+    {
+        WriteAll(2, "import failed: ");
+        WriteAll(2, error.Message.View());
+        WriteAll(2, "\n");
+        return error.Result == ludus::content::Status::Cancelled ? EXIT_CANCELLED : EXIT_FAILED;
+    }
     return EXIT_OK;
 }
 
@@ -250,6 +278,10 @@ int main(int argc, char** argv)
     if (argc >= 2 && std::string_view(argv[1]) == "cook")
     {
         return RunCook(argc, argv);
+    }
+    if (argc >= 2 && std::string_view(argv[1]) == "pbrt")
+    {
+        return RunPbrt(argc, argv);
     }
     if (argc >= 2 && std::string_view(argv[1]) == "scene")
     {
