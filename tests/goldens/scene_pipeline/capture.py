@@ -18,7 +18,7 @@ Normalization (a port must reproduce these to compare):
 Usage:
   capture.py --write                 # regenerate expected/ (review the diff!)
   capture.py --check                 # exit 1 on any difference
-  capture.py --licensed DIR [--write-licensed]   # staircase2 digests; see licensed/README.md
+  capture.py --licensed DIR [--write-licensed]   # staircase2 digests; see README.md ("Licensed staircase2")
 """
 import argparse
 from contextlib import ExitStack
