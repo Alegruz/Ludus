@@ -189,7 +189,7 @@ def glsl_interface(code, reflected, cross_reflection):
     return names, textures
 
 
-def wgsl_uniform_type(code, kind, depth=0):
+def wgsl_uniform_type(code, kind, depth=0, *, compute=False):
     """Only scalar/vector/mat4 and bounded fixed vec4/mat4 storage shapes.
 
     Pinned Slang lowers std140 matrices to a single aligned vec4[4] field,
@@ -198,6 +198,14 @@ def wgsl_uniform_type(code, kind, depth=0):
     """
     kinds = {'f32': (4,4), 'vec2<f32>': (8,8), 'vec3<f32>': (12,16),
              'vec4<f32>': (16,16), 'mat4x4<f32>': (64,16)}
+    # Compute uploads the uniform buffer's raw bytes on WebGPU; unlike WebGL
+    # raster uploads it does not reinterpret fields through float uniform calls.
+    # Keep integer admission local to compute and verify its emitted alignment.
+    if compute:
+        kinds.update({'i32': (4,4), 'u32': (4,4)})
+        for scalar in ('i32', 'u32'):
+            for width, size, alignment in ((2,8,8), (3,12,16), (4,16,16)):
+                kinds[f'vec{width}<{scalar}>'] = (size, alignment)
     if kind in kinds:
         return kinds[kind]
     if depth > 3:
@@ -208,9 +216,10 @@ def wgsl_uniform_type(code, kind, depth=0):
         count = int(cast_count or bare_count)
         if not 1 <= count <= 1024:
             raise RuntimeError('Browser raster uniform array count exceeds bounded profile')
-        if element not in ('vec4<f32>', 'mat4x4<f32>') and not re.fullmatch(r'_MatrixStorage_float4x4_(?:ColMajor|RowMajor)std140_\d+', element):
+        allowed_arrays = ('vec4<f32>', 'mat4x4<f32>', 'vec4<i32>', 'vec4<u32>') if compute else ('vec4<f32>', 'mat4x4<f32>')
+        if element not in allowed_arrays and not re.fullmatch(r'_MatrixStorage_float4x4_(?:ColMajor|RowMajor)std140_\d+', element):
             raise RuntimeError('Browser raster uniforms require bounded vec4/mat4 arrays')
-        stride, alignment = wgsl_uniform_type(code, element, depth+1)
+        stride, alignment = wgsl_uniform_type(code, element, depth+1, compute=compute)
         if stride * count > 16384:
             raise RuntimeError('Browser raster uniform array exceeds 16384-byte profile')
         return stride * count, alignment
@@ -224,7 +233,7 @@ def wgsl_uniform_type(code, kind, depth=0):
                 inner = field[1]
                 if matrix and re.fullmatch(r'array<vec4<f32>,\s*(?:[iu]32\(4\)|4)>', inner) is None:
                     raise RuntimeError('Browser raster matrix storage requires exactly four vec4 columns/rows')
-                return wgsl_uniform_type(code, inner, depth+1)
+                return wgsl_uniform_type(code, inner, depth+1, compute=compute)
     raise RuntimeError('Browser raster uniforms require float/vector/mat4 or bounded vec4/mat4 arrays')
 
 
@@ -294,7 +303,7 @@ def wgsl_contract(code, reflected, stage):
             if field is None:
                 raise RuntimeError('Browser raster uniform member is malformed')
             explicit, name, kind = field.groups()
-            size, natural = wgsl_uniform_type(code, kind)
+            size, natural = wgsl_uniform_type(code, kind, compute=stage == 'compute')
             align = max(int(explicit or 1), natural)
             if align & (align-1):
                 raise RuntimeError('WGSL uniform alignment is invalid')

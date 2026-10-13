@@ -1675,6 +1675,147 @@ orders architecture/lifetime and shader-debugging reviews before advanced scalin
 Record the consulted source sections and a concrete contract change or experiment
 before promoting a program description into an implementation decision.
 
+## Interactive World viewport
+
+The primary editor viewport renders the selected project's current World/level
+extraction and current camera through the ordinary renderer. World ownership,
+entity-to-mesh/material extraction, selection and camera controls belong above
+GraphicsRenderer; the renderer consumes `Snapshot` and `ViewDescription`, just
+as a game runtime does. It must not substitute a fixed acceptance scene or an
+offline capture for the selected World.
+
+`RasterViewport` packages that existing raster path into GPU output textures.
+Initialize views/lighting on the renderer, then initialize the viewport with
+physical dimensions and exposure. On a World edit, publish a complete replacement
+snapshot; on a camera change, supply its current `WorldToClip` and camera values.
+`Update` atomically prepares the latest snapshot/view and preserves the prior
+view on rejection. `Render` draws that view and tone-maps it on GPU; it requires
+no reference input retention, BVH, compute or ray-query capability and has no
+sample target or convergence state. Poll Pending resource/view setup before
+rendering. No driver shader compilation occurs in the per-frame draw path.
+
+Acquire a completed `ViewportImage` with a `ViewportFrame` lease. Two leased
+images apply backpressure and neither may be overwritten. The image is top-left,
+physical-pixel RGBA8Unorm carrying **sRGB-encoded tone-mapped RGB**, matching the optional PT image convention.
+The consumer must not apply a second tone map or encoding. A Qt adapter must negotiate the exact logical
+GPU device and retain an RHI interop lease through foreign sampling completion,
+then return the renderer frame lease. There is no CPU image presentation fallback.
+For resize prepare a candidate viewport, swap when Ready, and retire the old
+viewport after its consumers finish. Reset the viewport before its borrowed
+Renderer/device; RHI interop leases independently retain external backing.
+
+Raster mode uses authored materials, direct lights, environment and admitted
+bakes/shadows. An emissive material is visible but does not automatically illuminate
+other objects: real-time emissive GI is still a separate lighting capability.
+No editor lights or fake environment are added to hide that limitation. Choose
+optional GPU path tracing explicitly when emissive/indirect transport is wanted;
+do not make it the prerequisite for ordinary scene navigation.
+
+Native acceptance changes a snapshot's material color and its camera while
+retaining a prior GPU image, verifies visible content changes and culling,
+checks two-image backpressure and stale identities, and uses no tracing setup.
+This establishes the renderer output contract. Selected-project loading,
+interactive UI controls and Qt GPU presentation require the editor integration
+and RHI native-sharing bridge; renderer fixture acceptance alone does not claim
+those end-to-end checks are complete.
+
+## GPU-resident progressive preview
+
+`Renderer::EnableGpuPreview` explicitly enables an optional GPU-compute BVH path before mesh
+and material creation. It requires negotiated compute, storage buffers and
+StorageVertex support. Cook `renderer_gpu_preview.slang` as compute and
+`renderer_gpu_preview_image.slang` as raster with the installed shader helper;
+pass their independently reflected descriptors. WebGL2 rejects this path with
+`Unsupported`. The first acceptance covers native Metal; other backends require
+their own pixel qualification. There is no CPU transport/readback fallback and
+this path does not request native ray queries.
+
+CPU setup freezes the existing snapshot, retained normals/UVs/materials and one
+retained RGBA8 texture mip, builds the static median BVH, and packs GPU buffers.
+Shared texture content is packed once, in a separate read-only buffer so the
+geometry/BVH and texel payload each respect the R4 storage-range limit. `BeginGpuPreview` then owns that immutable
+scene independently of caller snapshot/mesh/material owners. No per-pixel CPU
+path, ray, intersection or accumulation arrays are created for GPU setup.
+The retained-input setup machinery is shared with RT1; selecting its CPU-oracle
+input retention internally does not execute its CPU tracing loop.
+
+A compute dispatch performs closest/visibility BVH queries, opacity filtering,
+RGB GGX/Lambert sampling, emissive-triangle/constant-environment sampling, MIS,
+roulette and compensated accumulation. It uses RT1's addressed Philox dimensions
+and world-space origin error allowance. A second ordered GDI pass draws pixel
+quads using compute-written per-instance RGB/pixel-index records into an RHI
+attachment texture. Binary32-exact indices are bounded to 2^24 pixels, avoiding
+nonportable builtin-instance signature lowering without extra buffer bytes.
+The graph declares storage history, compute-to-vertex visibility and the sampled
+texture export. No ray, radiance, counter or pixel readback occurs in these
+renderer APIs. GPU numerical failure makes an error pixel magenta; CPU progress
+reports completed dispatches, not observed valid sample counts or convergence.
+
+The explicit quality profile admits at most four live jobs, 4096 requested
+samples, depth eight, the reference secondary-distance/camera bounds and a fixed
+texture mip. It has no denoising, motion history, transmission, spectral transport,
+coating model or native acceleration structure. Analytic lights and baked/shadow
+atlas inputs reject with `Unsupported`; lighting comes from the admitted
+emissive surfaces and caller-supplied constant environment. This is a finite-depth
+preview of the prepared RGB profile, not general PBRT fidelity. FP32 BVH triangle
+intersection remains subject to thin/near-edge precision qualification. The
+existing native-query Staircase2 parity gap remains independent of this path.
+
+Enable-time CPU budget covers retained renderer geometry, preview state, BVH and
+packing/zero-initialization scratch. RHI-retained source texels/registries and
+driver staging are separate. GPU budget covers shared quad/index bytes, immutable
+scene/uniform buffers, 32 accumulation bytes and 16 display-color bytes per pixel,
+and two RGBA8/private-depth output allocations (16 bytes per pixel together).
+It excludes RHI registries, staging, shaders/pipeline objects and driver padding.
+Negotiated storage-range, dispatch and attachment limits can reject a scene
+before resource creation. Jobs share the budget; cancelled jobs with acquired
+frames or pending producers still count. PollGpuPreview/Begin reclaim cancelled
+completed jobs; cancellation cannot bypass the in-flight GPU byte budget. Setup allocates and uploads; frame execution rebuilds a small
+GDI plan and uploads no scene or pixel data.
+
+Use `PollGpuPreview` for asynchronous enablement. After `BeginGpuPreview`, poll
+`GetGpuPreviewInfo`, dispatch with `AdvanceGpuPreview`, and acquire an image with
+`AcquireGpuPreviewFrame` when producer completion is known. `Pending` progress
+may still expose the preceding complete image. The output is top-left physical
+pixels, opaque RGBA8Unorm, exposure multiplied into linear radiance, Reinhard
+compression then sRGB encoding. The consumer must not apply that conversion a
+second time. Exposure/camera/content changes create a new job and restart
+accumulation; resize uses the same replacement workflow.
+
+Each job has two images. `GpuPreviewFrame` is an opaque ownership lease on one
+complete texture incarnation. The renderer never overwrites an acquired image;
+if both images are leased, dispatch returns `NotReady`. Acquire cannot issue a
+second lease for the same image. Cancel the job with `Release(GpuPreview&)`;
+acquired frames keep its GPU resources alive until they are returned. Stale
+copies reject, and generations do not wrap. Reset/destruction invalidates all
+renderer identities; RHI's accepted GPU uses retire through producer completion.
+
+For Qt sharing, import this exact RHI texture on the same native logical device/backend.
+Matching a physical adapter alone does not permit direct texture sharing.
+Order Qt sampling after the returned producer token, and independently retain its
+native backing with the RHI interoperability service. Return the renderer frame
+only after every external GPU consumer has completed and released its RHI lease.
+Renderer frame ownership is not a cross-device import, foreign-queue semaphore,
+Qt completion token or permission to destroy/mutate the borrowed texture.
+The RHI/Qt bridge remains a separate prerequisite; this renderer change alone
+cannot claim an editor viewport is connected or teardown is cross-queue safe.
+
+The native acceptance compares the small emissive/indirect fixture against the
+CPU oracle at matched seed/depth/128 samples, checks opaque output and error
+pixels, preserves a leased image across later accumulation, exercises two-image
+backpressure and cancelled/stale ownership. The installed-SDK sample's `gpu` mode
+exports a texture through public RHI readback **only for offline acceptance**;
+interactive rendering/presentation must retain the GPU image instead. On native
+Metal the full prepared Staircase2 scene (28,831 instanced triangles), 64×64,
+32 samples, depth four, seed 871 produced 4,072 nonblack pixels and no magenta
+error pixels. Its display comparison to the matched CPU capture had maximum
+channel error 14/255, RMS of per-pixel maximum channel error 0.2923/255, with
+3/4096 pixels above two display levels. This qualifies GPU execution and lighting
+of the full scene; it does **not** qualify dense-scene pixel parity. The scene
+fingerprint matches the CPU capture. The RGB output SHA-256 (including alpha) was
+`e702b19b7f3f7235cbc6860e66c98c2279c1d81d743016d592679e2e974935dc`.
+See the [scene workflow](../examples/reference-scene.md#gpu-preview-acceptance).
+
 ## Implementation phases and acceptance
 
 Complete prepared-scene acceptance uses the existing installed-SDK reference

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <new>
 
+#include "internal/gpu_preview_data.h"
 #include "internal/reference_data.h"
 
 namespace ludus::graphics::renderer
@@ -106,6 +107,23 @@ bool ValidCapacities(const Limits& limits) noexcept
 bool Accepted(Status status) noexcept
 {
     return status == Status::Ready || status == Status::Pending;
+}
+Status RendererAdmission(rhi::DeviceHandle device, bool mutation = true) noexcept
+{
+    rhi::DeviceInfo info;
+    switch (rhi::GetDeviceInfo(device, info))
+    {
+        case rhi::DeviceStatus::Ready:
+            return mutation && info.FrameOpen ? Status::InvalidState : Status::Ready;
+        case rhi::DeviceStatus::InvalidHandle:
+            return Status::InvalidHandle;
+        case rhi::DeviceStatus::DeviceLost:
+            return Status::DeviceLost;
+        case rhi::DeviceStatus::Pending:
+            return Status::NotReady;
+        default:
+            return Status::Failed;
+    }
 }
 bool ValidColor(math::Vector4 color) noexcept
 {
@@ -394,19 +412,26 @@ struct Renderer::State final
     Status ReserveStorage(const Limits&) noexcept;
     core::UniquePtr<LightClusters> ClusterScratch;
     core::UniquePtr<internal::ReferenceState> Reference;
+    core::UniquePtr<internal::GpuPreviewState> GpuPreview;
+    void DropGpuPreview(usize) noexcept;
+    void RetireGpuPreviews() noexcept;
+    void ClearGpuPreview() noexcept;
     Status PrepareReferenceMesh(const MeshDescription&,
                                 const struct Vertex*,
                                 core::UniquePtr<internal::ReferenceMeshData>&) noexcept;
     Status PrepareReferenceSurface(const MaterialDescription&,
                                    const LitMaterialDescription*,
                                    core::UniquePtr<internal::ReferenceSurfaceData>&) noexcept;
-    Status
-    BuildReferenceJob(usize, const ReferenceCaptureDescription&, core::UniquePtr<internal::ReferenceJob>&) noexcept;
+    Status BuildReferenceJob(usize,
+                             const ReferenceCaptureDescription&,
+                             core::UniquePtr<internal::ReferenceJob>&,
+                             bool gpuSetup = false) noexcept;
     usize RemainingReferenceRayBytes(Status&) noexcept;
     void DropReferenceCapture(usize) noexcept;
     void ClearReference() noexcept;
     ~State()
     {
+        ClearGpuPreview();
         ClearReference();
         for (usize i = 0; i < ViewRecords.GetSize(); ++i)
         {
@@ -1457,10 +1482,6 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
     uint32 width = frame.Width, height = frame.Height;
     if (!surface)
     {
-        if (p->Encode)
-        {
-            return Status::InvalidDescription;
-        }
         rhi::TextureDescription target;
         const auto status = rhi::GetTextureDescription(s.Device, description.Color, target);
         if (status != Status::Ready)
@@ -1487,7 +1508,7 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
     {
         return status;
     }
-    const usize mode = surface && p->Encode && frame.Encoding == rhi::SurfaceEncoding::Unorm ? 1U : 0U;
+    const usize mode = p->Encode && (!surface || frame.Encoding == rhi::SurfaceEncoding::Unorm) ? 1U : 0U;
     const rhi::RasterVertexSlice vertices[]{{p->Vertices, 0, 4 * sizeof(math::Vector4)}};
     return rhi::DrawIndexed(
         s.Device,
@@ -3588,4 +3609,5 @@ Status Renderer::Release(ShadowAtlas& handle) noexcept
 }
 } // namespace ludus::graphics::renderer
 
+#include "internal/gpu_preview_services.h"
 #include "internal/reference_services.h"

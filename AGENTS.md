@@ -186,6 +186,51 @@ when created. Adopted today: `modules/content/scene_cook`,
 `readability-simplify-boolean-expr` is disabled repository-wide because it
 rejects the explicit `== true`/`== false` style.
 
+### Explicit types and shader source
+
+- Spell C++ variable types by default, including range-for element types. Use
+  `auto` for unspellable lambda closure types or trivial but excessively long
+  iterator/dependent types. The latter exception needs a same-line
+  `// ludus-style: inferred-type: iterator <reason>` (or `dependent`) explaining
+  why spelling the type obscures the code. Convenience alone is insufficient.
+- Slang is engine source: functions, entry points, types and struct/cbuffer
+  members use PascalCase. Parameters and locals use lowerCamelCase; `out`
+  parameters use `outName`. Slang's native scalar/vector spellings remain valid.
+- Name coordinate-bearing values with their space: `PositionWorld`,
+  `positionMesh`, `normalTangent`, `WorldToClip`, `positionPixel`, etc. Matrices
+  name source and destination. For shader interfaces and local arithmetic use
+  space suffixes; introduce distinct host types when crossing a public math
+  boundary can otherwise mix spaces. A suffix checker cannot prove correctness;
+  review the actual transformations and units.
+- Share GPU math/random primitives in FoundationMath's shader sources and GPU
+  interface annotations in the RHI shader boundary. Slang's `vk` slot/location
+  annotation is translated for all targets; it is not a Vulkan-only algorithm.
+  Do not scatter that target vocabulary or runtime backend branches through
+  common material/transport shaders. Preserve reflection and installation tests.
+  C++ math headers are not automatically Slang-compatible: keep language-specific
+  declarations in their owner's shader include, with matched numerical tests.
+- Run `python3 scripts/python/source_policy.py --base <base-commit-or-ref>`.
+  CI checks added/modified lines against the PR base, including standalone
+  samples and tests, without a debt baseline. Existing violations do not permit
+  new ones. This lexical gate checks explicit declarations, shader case/out
+  names, coordinate member labels and interface annotation placement; compiler,
+  reflection tests, formatting, tidy and semantic review remain required.
+
+### Review feedback and viewport acceptance
+
+- Read current human PR reviews and inline threads before claiming readiness,
+  and again after the final implementation. Passing CI does not address a review.
+  Reconcile each comment with code/evidence; preserve unresolved scope questions.
+  Generalizable feedback belongs in these rules and the owning checks, with
+  regressions for what is enforced and an explicit account of semantic limits.
+- An interactive editor viewport renders the selected project's current World
+  extraction and camera, responds to edits/navigation/resize, and presents GPU
+  output with tracked producer/consumer ownership. A fixed scene, offline export
+  or progressive reference capture does not establish that acceptance. Optional
+  path tracing must not become the prerequisite for ordinary raster navigation.
+  Do not invent scene lights to hide missing lighting; state the selected
+  renderer profile's limits and validate the authored inputs.
+
 ### Public SDK documentation
 
 - Treat documentation as part of every new feature. Include appropriate Doxygen

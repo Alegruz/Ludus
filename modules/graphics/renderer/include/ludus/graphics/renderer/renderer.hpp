@@ -6,6 +6,7 @@
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
+#include <ludus/graphics/renderer/gpu_preview.hpp>
 #include <ludus/graphics/renderer/lighting.hpp>
 #include <ludus/graphics/renderer/materials.hpp>
 #include <ludus/graphics/renderer/reference.hpp>
@@ -270,6 +271,8 @@ public:
     /// CPU mesh/material copies. Raster versions remain usable. Re-enabling requires
     /// reauthoring meshes/materials after all existing incarnations are released.
     /// Owner-thread/between-frames only; no GPU wait or device capability switch.
+    /// InvalidState while GPU preview owns retained input setup; Reset releases
+    /// both services. Never disables preview input retention implicitly.
     [[nodiscard]] rhi::RasterStatus DisableReferenceRendering() noexcept;
     /// Freeze all opaque/masked snapshot objects and exact surface/texture versions,
     /// including offscreen objects and full-detail geometry. Overlays are excluded.
@@ -301,6 +304,56 @@ public:
     /// Copy bounded progress and profile evidence. Failure preserves output; valid
     /// failed captures still report their diagnostic counters. Owner-thread only.
     [[nodiscard]] rhi::RasterStatus GetReferenceCaptureInfo(ReferenceCapture, ReferenceCaptureInfo&) const noexcept;
+    /// Enable GPU-compute preview before creating meshes/materials. Shader artifacts
+    /// must be the installed preview kernels. Requires Compute/StorageVertex and
+    /// Ready renderer; unsupported devices reject, with no CPU rendering fallback.
+    /// Copies options; positive budgets and finite exposure are required. Owner-thread,
+    /// between frames. Failure preserves the previous disabled state. Pending owns
+    /// setup and requires PollGpuPreview; Reset releases it. CPU input retention
+    /// must be disabled before enable; it is enabled internally without CPU tracing.
+    [[nodiscard]] rhi::RasterStatus EnableGpuPreview(const rhi::RasterShaderDescription& compute,
+                                                     const rhi::RasterShaderDescription& vertex,
+                                                     const rhi::RasterShaderDescription& fragment,
+                                                     const GpuPreviewOptions&) noexcept;
+    /// Poll asynchronous GPU preview setup and retire cancelled completed jobs on
+    /// the owner thread between frames.
+    /// No waiting; failure remains observable until Reset.
+    [[nodiscard]] rhi::RasterStatus PollGpuPreview() noexcept;
+    /// Copy an admitted static snapshot/camera/material integral into owned GPU
+    /// buffers. Four live jobs; old/new GPU bytes share the enable-time budget.
+    /// RT1 supported RGB reflection/opacity/emission only, fixed retained mip;
+    /// overlay items are excluded. No
+    /// baked/atlas lighting, transmission or deformation. Target <=4096, depth <=8,
+    /// pixel count <=2^24; negotiated storage limits can be tighter.
+    /// Emissive triangles and constant environment only; analytic lights reject.
+    /// Ready/Pending publish ownership into a null output; rejection preserves it. All caller
+    /// owners may detach after success. Changing camera/content/exposure creates a
+    /// new job and restarts accumulation. Setup can allocate/upload; never shades.
+    [[nodiscard]] rhi::RasterStatus BeginGpuPreview(Snapshot, const ReferenceCaptureDescription&, GpuPreview&) noexcept;
+    /// Dispatch one full-image GPU sample, shade/accumulate/tone-map on GPU, and
+    /// rasterize GPU-produced colors into an available output texture. Ordered GDI
+    /// dependencies include compute-to-vertex and output export. Never reads rays,
+    /// radiance or pixels to host. Owner-thread, closed frame; completion starts null.
+    /// NotReady means an earlier producer is pending or both output images are leased.
+    /// Success publishes producing completion; acquired images are never overwritten.
+    [[nodiscard]] rhi::RasterStatus AdvanceGpuPreview(GpuPreview, rhi::SurfaceHandle, rhi::SubmissionToken&) noexcept;
+    /// Poll GPU completion and copy progress; no waiting or GPU-buffer readback.
+    /// Ready/Pending copy progress; rejection preserves output. Owner-thread,
+    /// between frames. Pending means creation or producer work is outstanding.
+    [[nodiscard]] rhi::RasterStatus GetGpuPreviewInfo(GpuPreview, GpuPreviewInfo&) noexcept;
+    /// Acquire latest GPU-complete output. Ready fills a null frame lease and
+    /// copied image; Pending/NotReady/rejection preserves both outputs. The same
+    /// output cannot be acquired twice. Retain through external sampling completion.
+    [[nodiscard]] rhi::RasterStatus AcquireGpuPreviewFrame(GpuPreview, GpuPreviewFrame&, GpuPreviewImage&) noexcept;
+    /// Return an acquired output lease and clear identity. @pre Every external GPU
+    /// use completed and its RHI interoperability lease was released. Never releases
+    /// on behalf of Qt; stale/foreign frames preserve input. Owner-thread, between frames.
+    [[nodiscard]] rhi::RasterStatus Release(GpuPreviewFrame&) noexcept;
+    /// Cancel future preview work and clear owner. Acquired frames keep GPU scene
+    /// storage alive until returned. Pending producers keep their GPU budget until
+    /// PollGpuPreview or the next Begin retires them after completion.
+    /// Stale/foreign jobs preserve input. Owner-thread, between frames.
+    [[nodiscard]] rhi::RasterStatus Release(GpuPreview&) noexcept;
     /// Copy exactly Width*Height raw unexposed means/AOVs and committed counts.
     /// Incomplete images expose zero/unequal counts; native pending work never
     /// enters the copied data. Failure preserves output. No allocation or GPU wait.
@@ -390,15 +443,17 @@ public:
     /// Detach atlas ownership; materials retain the exact rendered texture and caster version.
     [[nodiscard]] rhi::RasterStatus Release(ShadowAtlas& handle) noexcept;
     /// Prepare retained linear scene/display source and immutable exposure/output parameters.
-    /// Accepts RGBA8 or supported RGBA16F attachments. Encode=false is required for drawing
-    /// into a linear display target; UI can blend there before a second encode-only presentation.
+    /// Accepts RGBA8 or supported RGBA16F attachments. Encode=false selects a linear display
+    /// target for UI blending; Encode=true permits a final sRGB-encoded RGBA8Unorm
+    /// texture for external presentation. Consumers must not encode that again.
     [[nodiscard]] rhi::RasterStatus PrepareLightingPresentation(rhi::TextureHandle source,
                                                                 const ViewMapping& mapping,
                                                                 const LightingOutput& lighting,
                                                                 Presentation& output) noexcept;
     /// Compose a Ready lighting presentation in an acquired frame; select surface or linear RGBA8.
     /// Actual surface encoding selects shader or hardware conversion, exactly once. No blending.
-    /// Draw into a display intermediate with Encode=false, then UI, then an encode-only surface pass.
+    /// Use Encode=false for a linear UI intermediate. Encode=true encodes once for
+    /// RGBA8Unorm offscreen output, or selects shader/hardware surface encoding.
     [[nodiscard]] rhi::RasterStatus DrawLightingPresentation(Presentation handle,
                                                              const rhi::RasterPassDescription& description =
                                                              {
