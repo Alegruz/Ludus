@@ -118,7 +118,8 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
+    result.HasUnalignedBlockExtents = internal::CompressedTexture(format);
     if (result.Uses.Sampled)
     {
         result.MaxArrayLayers = 256;
@@ -173,7 +174,7 @@ RasterCapabilities RasterLimits() noexcept
     return
     {
         .MaxBufferSize = gDevice.maxBufferLength < max ? gDevice.maxBufferLength : max,
-        .MaxTextureDimension2D = 4096,
+        .MaxTextureDimension2D = MAX_DIMENSION,
         .UniformOffsetAlignment = 256,
         .MaxUniformRange = 16384,
         .ResourcesPerKind = internal::CurrentStorageLimits().ResourcesPerKind,
@@ -264,6 +265,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
             texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Bc1RgbaUnorm   ? MTLPixelFormatBC1_RGBA
                                                : info.Format == RasterFormat::Bc3RgbaUnorm ? MTLPixelFormatBC3_RGBA
+                                               : info.Format == RasterFormat::Bc5RgUnorm   ? MTLPixelFormatBC5_RGUnorm
                                                : info.Format == RasterFormat::Rgba16Float  ? MTLPixelFormatRGBA16Float
                                                : info.Format == RasterFormat::Rg8Unorm     ? MTLPixelFormatRG8Unorm
                                                : info.Format == RasterFormat::R8Unorm      ? MTLPixelFormatR8Unorm

@@ -84,8 +84,8 @@ if (typeof window === 'undefined' && typeof process === 'object') {
     };
     ++stats.devices; currentDevice = result; return result;
   }
-  const adapter = {features: new Set(), limits: {maxTextureDimension2D: 4096, maxUniformBufferBindingSize: 65536, maxBufferSize: 268435456}, requestDevice(desc) {
-    assert(!desc.requiredFeatures?.length && !Object.keys(desc.requiredLimits || {}).length, 'elevated requirements');
+  const adapter = {features: new Set(), limits: new Proxy({maxTextureDimension2D: 4096, maxUniformBufferBindingSize: 65536, maxBufferSize: 268435456}, {get: (o, k) => o[k] ?? 0}), requestDevice(desc) {
+    assert(!desc.requiredFeatures?.length && Object.keys(desc.requiredLimits || {}).length === 1 && desc.requiredLimits.maxTextureDimension2D === adapter.limits.maxTextureDimension2D, 'texture limit negotiation');
     return Promise.resolve(device());
   }};
   Object.defineProperty(globalThis, 'navigator', {value: {gpu: {getPreferredCanvasFormat: () => 'bgra8unorm', requestAdapter: () => Promise.resolve(adapter)}}});

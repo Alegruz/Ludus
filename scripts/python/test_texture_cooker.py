@@ -83,3 +83,17 @@ class TextureCookerTests(unittest.TestCase):
             source['bake'][field][index]=2 ** -149
             self.assertEqual(len(cook(source)[1]),1)
             source['bake'][field][index]=0
+
+    def test_large_thin_image_is_cooked_without_device_clamping(self):
+        source = {'width':8240,'height':1,'format':'R8Unorm','semantic':'data',
+                  'mip_levels':1,'pixels':[127]*8240}
+        blob, levels = cook(source)
+        self.assertEqual(len(blob), 8240)
+        self.assertEqual(levels[0]['width'], 8240)
+        for dimension in (0, 32769, 2**32-1):
+            source['width'] = dimension
+            with self.assertRaisesRegex(ValueError, 'dimensions'):
+                cook(source)
+        source.update(width=8240, height=8200, format='Rgba8Unorm')
+        with self.assertRaisesRegex(ValueError, '64 MiB'):
+            cook(source)

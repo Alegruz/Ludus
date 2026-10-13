@@ -742,7 +742,7 @@ RasterStatus CreateBuffer(DeviceHandle device,
 }
 RasterStatus GetFormatCapabilities(DeviceHandle device, RasterFormat format, FormatCapabilities& output) noexcept
 {
-    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -763,22 +763,23 @@ RasterStatus CreateTexture(DeviceHandle device,
                            const TextureUpload& upload,
                            TextureHandle& output) noexcept
 {
-    const auto admission = Admission(device);
+    const RasterStatus admission = Admission(device);
     if (admission != RasterStatus::Ready)
     {
         return admission;
     }
-    const auto textureLimits = backend::RasterLimits();
+    const RasterCapabilities textureLimits = backend::RasterLimits();
     if (description.Width == 0 || description.Height == 0 || description.DepthOrLayers == 0 ||
         static_cast<uint8>(description.Dimension) > static_cast<uint8>(TextureDimension::D3) ||
-        static_cast<uint8>(description.Format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm) ||
+        static_cast<uint8>(description.Format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm) ||
         (description.Dimension == TextureDimension::D2 && description.DepthOrLayers != 1) ||
         (description.Dimension == TextureDimension::Cube &&
          (description.DepthOrLayers != 6 || description.Width != description.Height)) ||
-        (description.Stencil && !description.Attachment) ||
+        (description.Stencil && description.Attachment == false) ||
         (description.SampleCount != 1 && description.SampleCount != 4) ||
         (description.SampleCount != 1 &&
-         (!description.Attachment || description.Dimension != TextureDimension::D2 || description.MipLevels != 1)) ||
+         (description.Attachment == false || description.Dimension != TextureDimension::D2 ||
+          description.MipLevels != 1)) ||
         (description.Attachment &&
          (description.Dimension == TextureDimension::D3 || description.Format == RasterFormat::R8Unorm ||
           description.Format == RasterFormat::Rg8Unorm || CompressedTexture(description.Format))) ||
@@ -788,28 +789,29 @@ RasterStatus CreateTexture(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
-    const auto format = internal::CurrentDeviceProfile().Formats[static_cast<usize>(description.Format)];
-    const auto dimension = description.Attachment && description.Dimension == TextureDimension::Cube
-                               ? format.MaxAttachmentCubeDimension
-                           : description.Attachment                          ? format.MaxAttachmentDimension2D
-                           : description.Dimension == TextureDimension::Cube ? format.MaxCubeDimension
-                           : description.Dimension == TextureDimension::D3   ? format.MaxDimension3D
-                                                                             : format.MaxSampledDimension2D;
-    if (!format.Uses.Sampled || !format.Uses.Filterable || (description.Attachment && !format.Uses.ColorAttachment) ||
-        description.Width > dimension || description.Height > dimension ||
-        description.MipLevels > format.MaxMipLevels ||
+    const FormatCapabilities format = internal::CurrentDeviceProfile().Formats[static_cast<usize>(description.Format)];
+    const uint32 dimension = description.Attachment && description.Dimension == TextureDimension::Cube
+                                 ? format.MaxAttachmentCubeDimension
+                             : description.Attachment                          ? format.MaxAttachmentDimension2D
+                             : description.Dimension == TextureDimension::Cube ? format.MaxCubeDimension
+                             : description.Dimension == TextureDimension::D3   ? format.MaxDimension3D
+                                                                               : format.MaxSampledDimension2D;
+    if (format.Uses.Sampled == false || format.Uses.Filterable == false ||
+        (description.Attachment && format.Uses.ColorAttachment == false) || description.Width > dimension ||
+        description.Height > dimension || description.MipLevels > format.MaxMipLevels ||
         (description.Attachment && (description.MipLevels > format.MaxAttachmentMipLevels ||
                                     description.DepthOrLayers > format.MaxAttachmentLayers ||
                                     (format.SampleCounts & description.SampleCount) == 0 ||
-                                    (description.Stencil && !format.StencilAttachment))) ||
+                                    (description.Stencil && format.StencilAttachment == false))) ||
         (description.Dimension == TextureDimension::D2Array && description.DepthOrLayers > format.MaxArrayLayers) ||
         (description.Dimension == TextureDimension::D3 && description.DepthOrLayers > dimension))
     {
         return RasterStatus::Unsupported;
     }
-    if (CompressedTexture(description.Format) && (description.Width % 4 != 0 || description.Height % 4 != 0))
+    if (CompressedTexture(description.Format) == true && format.HasUnalignedBlockExtents == false &&
+        (description.Width % 4 != 0 || description.Height % 4 != 0))
     {
-        return RasterStatus::InvalidDescription;
+        return RasterStatus::Unsupported;
     }
     uint32 levels = 1;
     const uint32 largest2D = description.Width > description.Height ? description.Width : description.Height;
@@ -825,31 +827,34 @@ RasterStatus CreateTexture(DeviceHandle device,
         return RasterStatus::InvalidDescription;
     }
     uint64 storageBytes = 0;
-    uint32 storageWidth = description.Width, storageHeight = description.Height;
+    uint32 storageWidth = description.Width;
+    uint32 storageHeight = description.Height;
     const uint64 storageChannels = TextureBlockBytes(description.Format);
     for (uint32 mip = 0; mip < description.MipLevels; ++mip)
     {
-        uint64 pixels = 0, bytes = 0;
-        if (!foundation::TryMultiply(uint64{TextureBlockRows(description.Format, storageWidth)},
-                                     uint64{TextureBlockRows(description.Format, storageHeight)},
-                                     pixels) ||
-            !foundation::TryMultiply(pixels, uint64{TextureSlices(description, mip)}, pixels) ||
-            !foundation::TryMultiply(pixels, storageChannels * description.SampleCount, bytes) ||
-            !foundation::TryAdd(storageBytes, bytes, storageBytes))
+        uint64 pixels = 0;
+        uint64 bytes = 0;
+        if (foundation::TryMultiply(uint64{TextureBlockRows(description.Format, storageWidth)},
+                                    uint64{TextureBlockRows(description.Format, storageHeight)},
+                                    pixels) == false ||
+            foundation::TryMultiply(pixels, uint64{TextureSlices(description, mip)}, pixels) == false ||
+            foundation::TryMultiply(pixels, storageChannels * description.SampleCount, bytes) == false ||
+            foundation::TryAdd(storageBytes, bytes, storageBytes) == false)
         {
             return RasterStatus::InvalidDescription;
         }
         if (description.Attachment)
         {
-            if (backend::Kind() == Backend::WebGL2 && (!foundation::TryMultiply(pixels, storageChannels, bytes) ||
-                                                       !foundation::TryAdd(storageBytes, bytes, storageBytes)))
+            if (backend::Kind() == Backend::WebGL2 &&
+                (foundation::TryMultiply(pixels, storageChannels, bytes) == false ||
+                 foundation::TryAdd(storageBytes, bytes, storageBytes) == false))
             {
                 return RasterStatus::InvalidDescription;
             }
-            if (!foundation::TryMultiply(pixels,
-                                         uint64{description.Stencil ? 8U : 4U} * description.SampleCount,
-                                         bytes) ||
-                !foundation::TryAdd(storageBytes, bytes, storageBytes))
+            if (foundation::TryMultiply(pixels,
+                                        uint64{description.Stencil ? 8U : 4U} * description.SampleCount,
+                                        bytes) == false ||
+                foundation::TryAdd(storageBytes, bytes, storageBytes) == false)
             {
                 return RasterStatus::InvalidDescription;
             }
@@ -865,7 +870,7 @@ RasterStatus CreateTexture(DeviceHandle device,
     }
     if (description.Attachment || description.DeferredInitialization)
     {
-        if (!upload.Bytes.empty() || upload.RowPitch != 0 || !upload.Mips.empty())
+        if (upload.Bytes.empty() == false || upload.RowPitch != 0 || upload.Mips.empty() == false)
         {
             return RasterStatus::InvalidDescription;
         }
@@ -875,9 +880,9 @@ RasterStatus CreateTexture(DeviceHandle device,
             [&](usize slot, Record& record) noexcept {
                 record.Texture = description;
                 if (description.Attachment &&
-                    (!record.AttachmentState.TryResize(static_cast<usize>(description.MipLevels) *
-                                                       description.DepthOrLayers) ||
-                     !record.FrameAttachmentState.TryResize(record.AttachmentState.GetSize())))
+                    (record.AttachmentState.TryResize(static_cast<usize>(description.MipLevels) *
+                                                      description.DepthOrLayers) == false ||
+                     record.FrameAttachmentState.TryResize(record.AttachmentState.GetSize()) == false))
                 {
                     return StorageFailure();
                 }
@@ -886,17 +891,18 @@ RasterStatus CreateTexture(DeviceHandle device,
             storageBytes);
     }
     if ((upload.Mips.empty() && description.MipLevels != 1) ||
-        (!upload.Mips.empty() && (upload.Mips.size() != description.MipLevels || upload.RowPitch != 0)))
+        (upload.Mips.empty() == false && (upload.Mips.size() != description.MipLevels || upload.RowPitch != 0)))
     {
         return RasterStatus::InvalidDescription;
     }
     usize occupied = 0;
-    uint32 width = description.Width, height = description.Height;
+    uint32 width = description.Width;
+    uint32 height = description.Height;
     const usize channels = TextureBlockBytes(description.Format);
     for (usize level = 0; level < description.MipLevels; ++level)
     {
-        const auto pitch = upload.Mips.empty() ? upload.RowPitch : upload.Mips[level].RowPitch;
-        const auto offset = upload.Mips.empty() ? usize{0} : upload.Mips[level].Offset;
+        const usize pitch = upload.Mips.empty() ? upload.RowPitch : upload.Mips[level].RowPitch;
+        const usize offset = upload.Mips.empty() ? usize{0} : upload.Mips[level].Offset;
         const usize rows = TextureBlockRows(description.Format, height);
         const usize slices = TextureSlices(description, static_cast<uint32>(level));
         if (pitch < static_cast<usize>(TextureBlockRows(description.Format, width)) * channels ||
@@ -920,18 +926,18 @@ RasterStatus CreateTexture(DeviceHandle device,
             record.Texture = description;
             if (description.RetainCpuContent)
             {
-                if (!ReserveHostStorage(sizeof(CpuTextureRecord)))
+                if (ReserveHostStorage(sizeof(CpuTextureRecord)) == false)
                 {
                     return StorageFailure();
                 }
                 record.AuxiliaryHostBytes = sizeof(CpuTextureRecord);
-                auto* copy = new (std::nothrow) CpuTextureRecord;
+                CpuTextureRecord* copy = new (std::nothrow) CpuTextureRecord;
                 if (copy == nullptr)
                 {
                     return RasterStatus::OutOfMemory;
                 }
                 record.CpuTexture.Reset(copy);
-                if (!copy->Bytes.TryResize(upload.Bytes.size()))
+                if (copy->Bytes.TryResize(upload.Bytes.size()) == false)
                 {
                     return StorageFailure();
                 }
@@ -1612,7 +1618,7 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     for (usize i = 0; i < info.ColorCount; ++i)
     {
         const auto format = description.ColorFormats[i];
-        if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
+        if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm))
         {
             return RasterStatus::InvalidDescription;
         }

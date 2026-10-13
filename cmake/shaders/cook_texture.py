@@ -67,8 +67,10 @@ def cook(document):
     formats = {'R8Unorm': 1, 'Rg8Unorm': 2, 'Rgba8Unorm': 4, 'Rgba8Srgb': 4}
     width, height, fmt = document.get('width'), document.get('height'), document.get('format')
     semantic, pixels = document.get('semantic'), document.get('pixels')
-    if type(width) is not int or type(height) is not int or not 1 <= width <= 4096 or not 1 <= height <= 4096:
-        raise ValueError('Texture dimensions must be integer 1..4096')
+    # Offline bound matches the sixteen-mip spatial envelope, not a device guarantee.
+    # Runtime format/device admission and the existing upload-byte budget remain mandatory.
+    if type(width) is not int or type(height) is not int or not 1 <= width <= 32768 or not 1 <= height <= 32768:
+        raise ValueError('Texture dimensions must be integer 1..32768')
     if fmt not in formats or semantic not in ('color', 'data', 'normal', 'mask'):
         raise ValueError('Unknown portable format/semantic')
     channels = formats[fmt]

@@ -287,6 +287,8 @@ RasterCapabilities RasterLimits() noexcept
     {
         return {};
     }
+    GLint textureDimension = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &textureDimension);
     GLint alignment = 0;
     GLint uniform = 0;
     GLint attributes = 0;
@@ -301,8 +303,8 @@ RasterCapabilities RasterLimits() noexcept
     glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &vertexTextures);
     glGetIntegerv(GL_MAX_VERTEX_UNIFORM_BLOCKS, &vertexBlocks);
     glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_BLOCKS, &fragmentBlocks);
-    if (alignment <= 0 || uniform < 16384 || attributes < 8 || textures < 8 || vertexTextures < 8 || vertexBlocks < 8 ||
-        fragmentBlocks < 8)
+    if (textureDimension <= 0 || alignment <= 0 || uniform < 16384 || attributes < 8 || textures < 8 ||
+        vertexTextures < 8 || vertexBlocks < 8 || fragmentBlocks < 8)
     {
         return {};
     }
@@ -312,7 +314,7 @@ RasterCapabilities RasterLimits() noexcept
         gRasterHdrProbed = true;
     }
     return {64U * 1024U * 1024U,
-            gMaxDimension < 4096 ? gMaxDimension : 4096,
+            static_cast<uint32>(textureDimension),
             static_cast<usize>(alignment > 256 ? alignment : 256),
             16384,
             internal::CurrentStorageLimits().ResourcesPerKind,
@@ -330,9 +332,31 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
     if (result.Uses.ColorAttachment)
     {
+        GLint renderbufferDimension = 0;
+        glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &renderbufferDimension);
+        // The private depth/stencil renderbuffer and raster viewport can be smaller than sampled textures.
+        if (renderbufferDimension <= 0)
+        {
+            result.MaxAttachmentDimension2D = 0;
+            result.Uses.ColorAttachment = false;
+            result.Uses.Blendable = false;
+            result.SampleCounts = 0;
+        }
+        else
+        {
+            const uint32 depthDimension = static_cast<uint32>(renderbufferDimension);
+            if (depthDimension < result.MaxAttachmentDimension2D)
+            {
+                result.MaxAttachmentDimension2D = depthDimension;
+            }
+            if (gMaxDimension < result.MaxAttachmentDimension2D)
+            {
+                result.MaxAttachmentDimension2D = gMaxDimension;
+            }
+        }
         result.MaxAttachmentMipLevels = 1;
         result.MaxAttachmentLayers = 1;
         result.AttachmentViews = true;
