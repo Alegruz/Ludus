@@ -323,7 +323,8 @@ public:
     /// buffers. Four live jobs; old/new GPU bytes share the enable-time budget.
     /// RT1 supported RGB reflection/opacity/emission only, fixed retained mip;
     /// overlay items are excluded. No
-    /// baked/atlas lighting, transmission or deformation. Target <=4096, depth <=8.
+    /// baked/atlas lighting, transmission or deformation. Target <=4096, depth <=8,
+    /// pixel count <=2^24; negotiated storage limits can be tighter.
     /// Emissive triangles and constant environment only; analytic lights reject.
     /// Ready/Pending publish ownership into a null output; rejection preserves it. All caller
     /// owners may detach after success. Changing camera/content/exposure creates a

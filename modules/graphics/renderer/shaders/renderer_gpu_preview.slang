@@ -34,7 +34,7 @@ float4 sceneValue(uint index)
     return asfloat(sceneWords[index]);
 }
 [[vk::binding(2, 0)]] RWStructuredBuffer<float4> accumulation; // sum/count, compensation/error
-[[vk::binding(3, 0)]] RWStructuredBuffer<float4> colors;
+[[vk::binding(3, 0)]] RWStructuredBuffer<float4> colors;       // Encoded RGB and binary32-exact pixel index.
 [[vk::binding(4, 0)]] StructuredBuffer<uint4> textureWords;
 static const float PI = 3.14159265358979323846;
 float3 unit(float3 v)
@@ -510,5 +510,5 @@ float3 integrate(uint pixel, uint sample)
         linear[channel] = isfinite(linear[channel]) ? linear[channel] / (1 + linear[channel]) : 1;
     }
     float3 encoded = select(linear > .0031308, 1.055 * pow(linear, 1.0 / 2.4) - .055, linear * 12.92);
-    colors[pixel] = float4(compensation.w != 0 ? float3(1, 0, 1) : saturate(encoded), 1);
+    colors[pixel] = float4(compensation.w != 0 ? float3(1, 0, 1) : saturate(encoded), float(pixel));
 }

@@ -1699,7 +1699,9 @@ A compute dispatch performs closest/visibility BVH queries, opacity filtering,
 RGB GGX/Lambert sampling, emissive-triangle/constant-environment sampling, MIS,
 roulette and compensated accumulation. It uses RT1's addressed Philox dimensions
 and world-space origin error allowance. A second ordered GDI pass draws pixel
-quads using compute-written per-instance colors into an RHI attachment texture.
+quads using compute-written per-instance RGB/pixel-index records into an RHI
+attachment texture. Binary32-exact indices are bounded to 2^24 pixels, avoiding
+nonportable builtin-instance signature lowering without extra buffer bytes.
 The graph declares storage history, compute-to-vertex visibility and the sampled
 texture export. No ray, radiance, counter or pixel readback occurs in these
 renderer APIs. GPU numerical failure makes an error pixel magenta; CPU progress
