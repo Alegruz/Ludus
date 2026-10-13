@@ -1,5 +1,6 @@
 #include "internal/controller.h"
 #include "internal/main_window.h"
+#include "internal/preview_viewport.h"
 #include "internal/render_panel.h"
 #include "internal/render_scene.h"
 #include "internal/workspace_style.h"
@@ -533,6 +534,36 @@ TEST_CASE("Duplicate textured objects share surfaces while distinct material cap
     CHECK_FALSE(RenderScene::Load(f.Root, f.World, f.Scene, f.Error));
     CHECK(f.Error.contains(QStringLiteral("eight distinct")));
     CHECK(f.Scene.Identity == identity);
+}
+TEST_CASE("Viewport shading is visible by default and restores independently of authored World data",
+          "[editor][render-authoring]")
+{
+    Fixture fixture;
+    RenderPreview preview;
+    PreviewViewport viewport(&preview);
+    REQUIRE(preview.SetScene(fixture.Scene));
+    QComboBox* shading = viewport.findChild<QComboBox*>(QStringLiteral("viewportShading"));
+    REQUIRE(shading != nullptr);
+    CHECK(preview.GetShading() == PreviewShading::Solid);
+    CHECK(shading->currentIndex() == 0);
+    const QJsonObject draft = fixture.World.Draft();
+    preview.Orbit(35, 10);
+    QJsonObject navigation = preview.Navigation();
+    shading->setCurrentIndex(1);
+    CHECK(preview.GetShading() == PreviewShading::Albedo);
+    CHECK(preview.Navigation().value(QStringLiteral("yaw")) == navigation.value(QStringLiteral("yaw")));
+    navigation = preview.Navigation();
+    shading->setCurrentIndex(2);
+    CHECK(preview.GetShading() == PreviewShading::Lit);
+    preview.RestoreNavigation(navigation);
+    CHECK(preview.GetShading() == PreviewShading::Albedo);
+    CHECK(shading->currentIndex() == 1);
+    CHECK(preview.Scene().Identity == fixture.Scene.Identity);
+    CHECK(fixture.World.Draft() == draft);
+    navigation.remove(QStringLiteral("shading"));
+    preview.RestoreNavigation(navigation);
+    CHECK(preview.GetShading() == PreviewShading::Solid);
+    CHECK(shading->currentIndex() == 0);
 }
 TEST_CASE("Renderer snapshot admission protects fixed handle arrays even for an invalid private caller",
           "[editor][render-authoring]")

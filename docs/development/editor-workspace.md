@@ -722,10 +722,26 @@ edge. Valid field drafts, orbit, pan, zoom and resize update the GPU view. Both
 project binding previews and imported lit scenes share their original GPU display
 textures with Qt; presentation performs no CPU pixel readback or image upload.
 The renderer tone-maps and encodes its RGBA8 display image once. Unlit textured
-bindings use a linear RGBA8 intermediate; imported lit scenes prefer HDR when
-available.
+bindings use a linear RGBA8 intermediate; imported scenes in Lit mode prefer HDR
+when available.
 
-The raster profile uses authored material emission and the renderer's admitted
+The shading selector above each viewport defaults to **Solid — neutral preview
+shading**. It gives surfaces a neutral material and imported geometry an editor-only
+directional fill and ambient contribution, so imported rooms remain visible for
+inspection and editing. **Albedo — unlit surface colors** displays base-color textures and material tints; emitting meshes
+with black authored albedo remain black in this view.
+**Lit — scene lighting** displays the existing material-lighting path, including
+emission. During resource preparation, the viewport retains its last drawable GPU
+image until Qt presents the replacement. A failed replacement reports its error
+without clearing that image; a later scene or shading change can retry preparation.
+Switching modes keeps the World, camera and layout; the shading choice
+is restored with the project's viewport preferences. Older preferences without a
+shading choice open in Solid mode. These visualization overrides do not change
+authored materials or add lights to the World. Solid lighting is a navigation
+aid, not the imported scene lighting. Wireframe and normal visualizations are
+not yet available.
+
+The Lit raster profile uses authored material emission and the renderer's admitted
 lighting. It does **not** infer indirect illumination from emissive geometry or
 invent editor lights: imported scenes lit solely by emitting meshes can have dark
 non-emissive surfaces. This viewport is an interactive raster view, not the old

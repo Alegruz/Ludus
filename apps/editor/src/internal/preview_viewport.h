@@ -25,9 +25,6 @@ protected:
     void resizeEvent(QResizeEvent* event) override
     {
         QWidget::resizeEvent(event);
-        const foundation::float64 ratio = devicePixelRatioF();
-        Preview_->Resize(qRound(static_cast<foundation::float64>(width()) * ratio),
-                         qRound(static_cast<foundation::float64>(height()) * ratio));
         resizeSurface();
     }
     void mousePressEvent(QMouseEvent* event) override

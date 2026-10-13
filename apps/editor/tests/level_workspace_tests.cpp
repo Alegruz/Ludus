@@ -2,6 +2,7 @@
 #include "internal/preview_viewport.h"
 #include "scene_fixture.h"
 
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -133,6 +134,32 @@ TEST_CASE("saved cooked level renders after moving the project and removing sour
         }
     }
     CHECK(hasEmission);
+    const QJsonObject document = workspace.Document();
+    QComboBox* shading = viewport->findChild<QComboBox*>(QStringLiteral("viewportShading"));
+    REQUIRE(shading != nullptr);
+    CHECK(shading->currentIndex() == 0);
+    const PreviewViewport* gpuViewport = static_cast<PreviewViewport*>(viewport);
+    const ludus::foundation::uint64 targetFrames = gpuViewport->PresentedFrames() + 2;
+    shading->setCurrentIndex(2);
+    QElapsedTimer timer;
+    timer.start();
+    while (gpuViewport->PresentedFrames() < targetFrames && timer.elapsed() < 10000)
+    {
+        QTest::qWait(20);
+    }
+    REQUIRE(gpuViewport->PresentedFrames() >= targetFrames);
+    QImage litImage;
+    for (QWindow* window : QGuiApplication::allWindows())
+    {
+        if (window->objectName() == QStringLiteral("LudusGpuViewport"))
+        {
+            litImage = static_cast<QQuickWindow*>(window)->grabWindow();
+        }
+    }
+    REQUIRE_FALSE(litImage.isNull());
+    CHECK(litImage != image);
+    CHECK(workspace.Document() == document);
+    CHECK(workspace.Navigation().value(QStringLiteral("shading")).toString() == QStringLiteral("lit"));
     workspace.StopPreview();
 }
 #endif
