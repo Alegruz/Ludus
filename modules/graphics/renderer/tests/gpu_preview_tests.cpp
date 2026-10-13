@@ -1,4 +1,6 @@
 #include "l6_scene.h"
+#include "renderer_clustered_surface.h"
+#include "renderer_clustered_surface_shadow.h"
 #include "renderer_composite.h"
 #include "renderer_flat.h"
 #include "renderer_gpu_preview.h"
@@ -7,6 +9,8 @@
 #include "renderer_lit_shadow.h"
 #include "renderer_output.h"
 #include "renderer_shadow.h"
+#include "renderer_surface.h"
+#include "renderer_surface_shadow.h"
 
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/time/time.hpp>
@@ -122,6 +126,12 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     capture.Seed = 871;
     // Authored constant environment is permitted; the renderer invents no lights.
     capture.Environment = {.3F, .4F, .5F};
+    rr::DirectLight authoredLight;
+    authoredLight.SourceId = 41;
+    authoredLight.Direction = {0, 0, 1};
+    authoredLight.Intensity = .2F;
+    capture.Lights = &authoredLight;
+    capture.LightCount = 1;
     rr::ReferenceCapture oracle;
     REQUIRE(renderer.BeginReferenceCapture(snapshot, capture, oracle) == S::Ready);
     status = S::Pending;
@@ -145,7 +155,7 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     rr::DirectLight light;
     rejected.Lights = &light;
     rejected.LightCount = 1;
-    CHECK(renderer.BeginGpuPreview(snapshot, rejected, preview) == S::Unsupported);
+    CHECK(renderer.BeginGpuPreview(snapshot, rejected, preview) == S::InvalidDescription);
     rejected = capture;
     rejected.Width = rejected.Height = 4096;
     CHECK(renderer.BeginGpuPreview(snapshot, rejected, preview) == S::CapacityExceeded);
@@ -291,4 +301,223 @@ TEST_CASE("Interactive raster viewport updates World snapshots and camera withou
     REQUIRE(renderer.Release(world) == S::Ready);
     REQUIRE(renderer.Release(mesh) == S::Ready);
     viewport.Reset();
+}
+
+TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU reference",
+          "[renderer][gpu][fidelity]")
+{
+    rhi::Shutdown();
+    struct Guard final
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::DeviceDescription deviceDescription;
+    deviceDescription.Required.PortableRaster = true;
+    deviceDescription.Required.Compute = true;
+    const rhi::DeviceStatus started =
+        rhi::CreateDevice({}, { .Width = 8, .Height = 8 }, deviceDescription, device, surface);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && rhi::GetStartup().Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rr::Renderer renderer;
+    REQUIRE(renderer.Initialize(device, shaders::renderer_flat::Vertex(), shaders::renderer_flat::Fragment()) ==
+            S::Ready);
+    REQUIRE(renderer.EnableGpuPreview(shaders::renderer_gpu_preview::Compute(),
+                                      shaders::renderer_gpu_preview_image::Vertex(),
+                                      shaders::renderer_gpu_preview_image::Fragment(),
+                                      {usize{32} * 1024 * 1024, usize{32} * 1024 * 1024, 1}) == S::Ready);
+    REQUIRE(renderer.InitializeViews(shaders::renderer_composite::Vertex(), shaders::renderer_composite::Fragment()) ==
+            S::Ready);
+    REQUIRE(renderer.InitializeLighting(shaders::renderer_output::Vertex(),
+                                        shaders::renderer_output::Fragment(),
+                                        shaders::renderer_shadow::Fragment()) == S::Ready);
+    rr::MaterialProgram program, clusteredProgram;
+    const auto waitProgram = [&renderer](const rr::MaterialProgram& value, S status) {
+        const uint64 start = time::NowTicks();
+        while (status == S::Pending && time::NowTicks() - start < 10 * time::NANOSECONDS_PER_SECOND)
+        {
+            status = renderer.GetStatus(value);
+        }
+        REQUIRE(status == S::Ready);
+    };
+    waitProgram(program,
+                renderer.PrewarmLitProgram(shaders::renderer_surface::Vertex(),
+                                           shaders::renderer_surface::Fragment(),
+                                           shaders::renderer_surface_shadow::Fragment(),
+                                           program));
+    waitProgram(clusteredProgram,
+                renderer.PrewarmLitProgram(shaders::renderer_clustered_surface::Vertex(),
+                                           shaders::renderer_clustered_surface::Fragment(),
+                                           shaders::renderer_clustered_surface_shadow::Fragment(),
+                                           clusteredProgram));
+    const math::Vector3 positions[]{{-2, -2, .7F}, {2, -2, .7F}, {2, 2, .7F}, {-2, 2, .7F}};
+    const math::Vector3 normals[]{{0, 0, -1}, {0, 0, -1}, {0, 0, -1}, {0, 0, -1}};
+    const math::Vector2 uvs[]{{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint32 indices[]{0, 2, 1, 0, 3, 2};
+    rr::MeshDescription meshDescription{positions, 4, indices, 6};
+    meshDescription.Normals = normals;
+    meshDescription.Texcoords = uvs;
+    rr::Mesh mesh;
+    REQUIRE(renderer.CreateMesh(meshDescription, mesh) == S::Ready);
+    // Linear packed map tilts toward +U, modulates roughness and removes metallic.
+    // The UV-derived bitangent follows +V even on this clockwise camera-facing quad.
+    const uint8 mapBytes[]{204, 128, 128, 0};
+    rhi::TextureHandle map;
+    rhi::TextureDescription mapDescription{1, 1, rhi::RasterFormat::Rgba8Unorm};
+    mapDescription.RetainCpuContent = true;
+    REQUIRE(rhi::CreateTexture(device, mapDescription, {{mapBytes, 4}, 4}, map) == S::Ready);
+    rr::DirectLight light;
+    light.SourceId = 73;
+    light.Intensity = 1;
+    light.Direction = {-.6F, 0, .8F};
+    light.Position = {.6F, 0, -.1F};
+    light.Range = 10;
+    light.InnerCos = .95F;
+    light.OuterCos = .5F;
+    rr::LitMaterialDescription material;
+    material.SurfaceMap = map;
+    material.Metallic = 1;
+    material.Roughness = .8F;
+    material.Surface.Tint = {.6F, .3F, .1F, 1};
+    rr::LightSelection selection;
+    rr::MaterialVersion retained;
+    REQUIRE(renderer.CreateLitMaterial(program, material, retained, selection) == S::Ready);
+    rr::MaterialVersion rasterMaterials[6];
+    rr::LightClusterDescription cluster;
+    for (uint32 kind = 0; kind < 3; ++kind)
+    {
+        light.Kind = static_cast<rr::LightKind>(kind);
+        light.Direction = kind == 2 ? math::Vector3{0, 0, 1} : math::Vector3{-.6F, 0, .8F};
+        material.Lights = &light;
+        material.LightCount = 1;
+        material.Clusters = nullptr;
+        REQUIRE(renderer.CreateLitMaterial(program, material, rasterMaterials[usize(kind) * 2], selection) == S::Ready);
+        material.Clusters = &cluster;
+        REQUIRE(
+            renderer.CreateLitMaterial(clusteredProgram, material, rasterMaterials[usize(kind) * 2 + 1], selection) ==
+            S::Ready);
+        CHECK(selection.Dropped == 0);
+    }
+    REQUIRE(rhi::Destroy(device, map) == S::Ready);
+    // The material retains map backing after the public texture owner is destroyed.
+    for (uint32 kind = 0; kind < 3; ++kind)
+    {
+        light.Kind = static_cast<rr::LightKind>(kind);
+        light.Direction = kind == 2 ? math::Vector3{0, 0, 1} : math::Vector3{-.6F, 0, .8F};
+        rr::SceneItem item;
+        item.Geometry = mesh;
+        item.Surface = retained;
+        item.SourceId = 9;
+        rr::Snapshot snapshot;
+        REQUIRE(renderer.CreateSnapshot(&item, 1, snapshot) == S::Ready);
+        rr::ReferenceCaptureDescription capture;
+        capture.OrthographicCamera = true;
+        capture.Width = capture.Height = 1;
+        capture.CenterRays = true;
+        capture.TargetSamples = 1;
+        capture.MaxDepth = 1;
+        capture.Lights = &light;
+        capture.LightCount = 1;
+        rr::ReferenceCapture oracle;
+        REQUIRE(renderer.BeginReferenceCapture(snapshot, capture, oracle) == S::Ready);
+        S status = S::Pending;
+        while (status == S::Pending)
+        {
+            status = renderer.AdvanceReferenceCapture(oracle);
+        }
+        REQUIRE(status == S::Ready);
+        rr::ReferencePixel reference;
+        REQUIRE(renderer.CopyReferencePixels(oracle, &reference, 1) == S::Ready);
+        REQUIRE(reference.Samples == 1);
+        REQUIRE(reference.Direct.X > .01F);
+        // Independent center-pixel expectation: linear data, reconstructed tangent
+        // direction, clockwise mesh normal, texture-removed metallic and fixed BRDF.
+        const float32 normalY = 1.0F / 255;
+        const math::Vector3 expectedNormalWorld{.6F, normalY, -math::Sqrt(1 - .36F - normalY * normalY)};
+        math::Vector3 expected;
+        REQUIRE(rr::EvaluateLitBrdf({.6F, .3F, .1F},
+                                    0,
+                                    .8F * (128.0F / 255),
+                                    expectedNormalWorld,
+                                    {0, 0, -1},
+                                    {.6F, 0, -.8F},
+                                    expected) == S::Ready);
+        if (kind != 0)
+        {
+            const float32 window = 1 - .0001F;
+            const float32 cone = (.8F - .5F) / (.95F - .5F);
+            expected = expected * (window * window * (kind == 2 ? cone * cone : 1));
+        }
+        CHECK(math::Length(reference.Direct - expected) < .00001F);
+        for (uint32 mode = 0; mode < 2; ++mode)
+        {
+            rr::SceneItem rasterItem = item;
+            rasterItem.Surface = rasterMaterials[usize(kind) * 2 + mode];
+            rr::Snapshot rasterSnapshot;
+            REQUIRE(renderer.CreateSnapshot(&rasterItem, 1, rasterSnapshot) == S::Ready);
+            rr::RasterViewport viewport;
+            REQUIRE(viewport.Initialize(renderer, device, 1, 1) == S::Ready);
+            rr::ViewDescription camera;
+            camera.OrthographicCamera = true;
+            camera.CameraForward = {0, 0, 1};
+            rr::ViewReport report;
+            REQUIRE(viewport.Update(rasterSnapshot, camera, report) == S::Ready);
+            rhi::SubmissionToken producer;
+            REQUIRE(viewport.Render(surface, producer) == S::Ready);
+            rr::ViewportFrame rasterFrame;
+            rr::ViewportImage rasterImage;
+            S imageStatus = S::Pending;
+            const uint64 start = time::NowTicks();
+            do
+            {
+                imageStatus = viewport.Acquire(rasterFrame, rasterImage);
+            } while (imageStatus == S::Pending && time::NowTicks() - start < 10 * time::NANOSECONDS_PER_SECOND);
+            REQUIRE(imageStatus == S::Ready);
+            uint8 rasterPixel[4]{};
+            ReadImage(device, {rasterImage.Texture, rasterImage.Producer, 1, 1, 0}, rasterPixel, sizeof(rasterPixel));
+            CHECK(std::abs(int(rasterPixel[0]) - int(Display(expected.X))) <= 1);
+            CHECK(std::abs(int(rasterPixel[1]) - int(Display(expected.Y))) <= 1);
+            CHECK(std::abs(int(rasterPixel[2]) - int(Display(expected.Z))) <= 1);
+            REQUIRE(viewport.Release(rasterFrame) == S::Ready);
+            viewport.Reset();
+            REQUIRE(renderer.Release(rasterSnapshot) == S::Ready);
+        }
+
+        rr::GpuPreview preview;
+        REQUIRE(renderer.BeginGpuPreview(snapshot, capture, preview) == S::Ready);
+        rhi::SubmissionToken token;
+        REQUIRE(renderer.AdvanceGpuPreview(preview, surface, token) == S::Ready);
+        WaitPreview(renderer, preview, 1);
+        rr::GpuPreviewFrame frame;
+        rr::GpuPreviewImage image;
+        REQUIRE(renderer.AcquireGpuPreviewFrame(preview, frame, image) == S::Ready);
+        uint8 pixel[4]{};
+        ReadImage(device, image, pixel, sizeof(pixel));
+        CHECK(std::abs(int(pixel[0]) - int(Display(reference.Direct.X))) <= 1);
+        CHECK(std::abs(int(pixel[1]) - int(Display(reference.Direct.Y))) <= 1);
+        CHECK(std::abs(int(pixel[2]) - int(Display(reference.Direct.Z))) <= 1);
+        CHECK(pixel[3] == 255);
+        REQUIRE(renderer.Release(frame) == S::Ready);
+        REQUIRE(renderer.Release(preview) == S::Ready);
+        REQUIRE(renderer.Release(oracle) == S::Ready);
+        REQUIRE(renderer.Release(snapshot) == S::Ready);
+    }
+    for (rr::MaterialVersion& value : rasterMaterials)
+    {
+        REQUIRE(renderer.Release(value) == S::Ready);
+    }
+    REQUIRE(renderer.Release(retained) == S::Ready);
+    REQUIRE(renderer.Release(mesh) == S::Ready);
+    REQUIRE(renderer.Release(clusteredProgram) == S::Ready);
+    REQUIRE(renderer.Release(program) == S::Ready);
+    renderer.Reset();
 }

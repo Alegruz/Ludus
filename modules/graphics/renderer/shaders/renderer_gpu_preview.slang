@@ -1,5 +1,6 @@
 #include "math.slang"
 #include "raster_bindings.slang"
+#include "renderer_surface_functions.slang"
 
 // GPU preview ports Ludus's frozen RGB transport, not the CPU transport loop.
 // Thanks to Sven Woop, Carsten Benthin and Ingo Wald, "Watertight Ray/Triangle
@@ -68,7 +69,7 @@ float2 TexcoordUv(uint t, float2 uv)
 float4 Surface(uint t, uint field)
 {
     uint i = asuint(SceneValue(t * 10).w);
-    return SceneValue(Offsets.w + i * 6 + field);
+    return SceneValue(Offsets.w + i * 8 + field);
 }
 int Address(int i, int extent, bool repeat)
 {
@@ -77,10 +78,10 @@ int Address(int i, int extent, bool repeat)
     int v = i % extent;
     return v < 0 ? v + extent : v;
 }
-float4 Texel(uint t, int x, int y)
+float4 Texel(uint t, int x, int y, bool isSurfaceMap)
 {
-    uint4 layout = asuint(Surface(t, 5));
-    uint2 size = asuint(Surface(t, 1).zw);
+    uint4 layout = asuint(Surface(t, isSurfaceMap ? 7 : 5));
+    uint2 size = isSurfaceMap ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
     uint flags = layout.y;
     x = Address(x, int(size.x), (flags & 2) != 0);
     y = Address(y, int(size.y), (flags & 4) != 0);
@@ -91,24 +92,24 @@ float4 Texel(uint t, int x, int y)
         c.xyz = select(c.xyz > .04045, pow((c.xyz + .055) / 1.055, 2.4), c.xyz / 12.92);
     return c;
 }
-float4 Texture(uint t, float2 uv)
+float4 Texture(uint t, float2 uv, bool isSurfaceMap = false)
 {
-    if (asuint(Surface(t, 4).w) == 0)
+    if (asuint(Surface(t, isSurfaceMap ? 6 : 4).w) == 0)
         return float4(1);
     float4 transform = Surface(t, 3);
     uv = uv * transform.xy + transform.zw;
-    uint flags = asuint(Surface(t, 5).y);
-    uint2 size = asuint(Surface(t, 1).zw);
+    uint flags = asuint(Surface(t, isSurfaceMap ? 7 : 5).y);
+    uint2 size = isSurfaceMap ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
     uv.x = (flags & 2) != 0 ? frac(uv.x) : saturate(uv.x);
     uv.y = (flags & 4) != 0 ? frac(uv.y) : saturate(uv.y);
     float2 p = uv * float2(size);
     if ((flags & 1) == 0)
-        return Texel(t, int(floor(p.x)), int(floor(p.y)));
+        return Texel(t, int(floor(p.x)), int(floor(p.y)), isSurfaceMap);
     p -= .5;
     int2 cell = int2(floor(p));
     float2 f = frac(p);
-    return lerp(lerp(Texel(t, cell.x, cell.y), Texel(t, cell.x + 1, cell.y), f.x),
-                lerp(Texel(t, cell.x, cell.y + 1), Texel(t, cell.x + 1, cell.y + 1), f.x),
+    return lerp(lerp(Texel(t, cell.x, cell.y, isSurfaceMap), Texel(t, cell.x + 1, cell.y, isSurfaceMap), f.x),
+                lerp(Texel(t, cell.x, cell.y + 1, isSurfaceMap), Texel(t, cell.x + 1, cell.y + 1, isSurfaceMap), f.x),
                 f.y);
 }
 struct Hit
@@ -218,7 +219,7 @@ Hit Trace(float3 originWorld,
             float distance;
             float2 uv;
             if (Intersect(t, originWorld, directionWorld, nearDistanceWorld, hit.DistanceWorld, distance, uv) &&
-                (distance < hit.DistanceWorld || t < hit.Triangle))
+                (distance < hit.DistanceWorld || (distance == hit.DistanceWorld && t < hit.Triangle)))
             {
                 hit.Triangle = t;
                 hit.DistanceWorld = distance;
@@ -356,7 +357,7 @@ float3 Integrate(uint pixel, uint sample)
     }
     float3 radiance = 0, throughput = 1, previousPositionWorld = 0;
     float previousPdf = 0;
-    uint lights = Counts.z + (HasPositiveComponent(Environment.xyz) ? 1u : 0u);
+    uint lights = Counts.w + Counts.z + (HasPositiveComponent(Environment.xyz) ? 1u : 0u);
     for (uint depth = 0; depth <= Dimensions.z; ++depth)
     {
         Hit hit = Trace(originWorld, directionWorld, minimum, maximum);
@@ -381,6 +382,22 @@ float3 Integrate(uint pixel, uint sample)
                                              SceneValue(t * 10 + 5).xyz * hit.Barycentric.y);
         float3 color = saturate(Surface(t, 0).xyz * Texture(t, TexcoordUv(t, hit.Barycentric)).xyz);
         float metallic = Surface(t, 0).w, roughness = Surface(t, 1).x;
+        if (asuint(Surface(t, 6).w) != 0)
+        {
+            SurfaceParameters parameters = DecodeSurfaceParameters(Texture(t, TexcoordUv(t, hit.Barycentric), true),
+                                                                   metallic,
+                                                                   roughness,
+                                                                   Surface(t, 6).x);
+            metallic = parameters.Metallic;
+            roughness = parameters.Roughness;
+            float2 uvScale = Surface(t, 3).xy;
+            normalWorld = ApplyNormalWorld(normalWorld,
+                                           parameters.NormalTangent,
+                                           SceneValue(t * 10 + 1).xyz - SceneValue(t * 10).xyz,
+                                           SceneValue(t * 10 + 2).xyz - SceneValue(t * 10).xyz,
+                                           (SceneValue(t * 10 + 6).zw - SceneValue(t * 10 + 6).xy) * uvScale,
+                                           (SceneValue(t * 10 + 7).xy - SceneValue(t * 10 + 6).xy) * uvScale);
+        }
         uint dimension = 2 + depth * 8;
         if (lights > 0)
         {
@@ -390,9 +407,42 @@ float3 Integrate(uint pixel, uint sample)
             float3 lightDirectionWorld, lightColor = 0, lightPositionWorld = 0;
             float pdf = 0, range = Options.x;
             uint emitter = 0xffffffff;
-            if (selected < Counts.z)
+            bool isDelta = false, hasFiniteEndpoint = false;
+            if (selected < Counts.w)
             {
-                emitter = asuint(SceneValue(Offsets.z + selected).x);
+                uint light = asuint(Environment.w) + selected * 4;
+                float4 colorAndKind = SceneValue(light), positionAndRangeWorld = SceneValue(light + 1),
+                       directionAndConeWorld = SceneValue(light + 2);
+                lightColor = colorAndKind.xyz;
+                lightDirectionWorld = -directionAndConeWorld.xyz;
+                pdf = 1 / float(lights);
+                isDelta = true;
+                if (colorAndKind.w != 0)
+                {
+                    lightPositionWorld = positionAndRangeWorld.xyz;
+                    float3 offsetWorld = lightPositionWorld - positionWorld;
+                    float distanceSquared = dot(offsetWorld, offsetWorld);
+                    if (distanceSquared <= 0)
+                        return float3(-1);
+                    range = sqrt(distanceSquared);
+                    lightDirectionWorld = offsetWorld / range;
+                    hasFiniteEndpoint = true;
+                    float ratio = range / positionAndRangeWorld.w;
+                    float window = max(1 - ratio * ratio * ratio * ratio, 0);
+                    float angular = 1;
+                    if (colorAndKind.w == 2)
+                    {
+                        float cone =
+                            saturate((dot(-lightDirectionWorld, directionAndConeWorld.xyz) - directionAndConeWorld.w) /
+                                     (SceneValue(light + 3).x - directionAndConeWorld.w));
+                        angular = cone * cone;
+                    }
+                    lightColor *= range <= Options.x ? window * window * angular / max(distanceSquared, 1e-4) : 0;
+                }
+            }
+            else if (selected - Counts.w < Counts.z)
+            {
+                emitter = asuint(SceneValue(Offsets.z + selected - Counts.w).x);
                 float root = sqrt(Random01(pixel, sample, dimension + 1));
                 float2 uv = float2(root * (1 - Random01(pixel, sample, dimension + 2)), 0);
                 uv.y = root - uv.x;
@@ -431,12 +481,20 @@ float3 Integrate(uint pixel, uint sample)
                     shadowDirectionWorld = NormalizeOrZero(offsetWorld);
                     distance = asfloat(asuint(distance) - 1);
                 }
+                else if (hasFiniteEndpoint)
+                {
+                    float3 offsetWorld = lightPositionWorld - shadowOriginWorld;
+                    distance = length(offsetWorld);
+                    shadowDirectionWorld = NormalizeOrZero(offsetWorld);
+                    distance = asfloat(asuint(distance) - 1);
+                }
                 Hit shadow = Trace(shadowOriginWorld, shadowDirectionWorld, 0, distance, true);
                 if (shadow.Triangle == 0xfffffffe)
                     return float3(-1);
                 if (shadow.Triangle == 0xffffffff)
-                    radiance += throughput * value * lightColor *
-                                (dot(normalWorld, lightDirectionWorld) * PowerWeight(pdf, bsdfPdf) / pdf);
+                    radiance +=
+                        throughput * value * lightColor *
+                        (dot(normalWorld, lightDirectionWorld) * (isDelta ? 1 : PowerWeight(pdf, bsdfPdf)) / pdf);
             }
         }
         float3 outgoingDirectionWorld = SampleBsdf(normalWorld,

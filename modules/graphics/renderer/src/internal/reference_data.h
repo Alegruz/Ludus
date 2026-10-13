@@ -36,7 +36,8 @@ struct ReferenceSurfaceData final
     rhi::SamplerDescription Sampler;
     MaterialAlpha Alpha = MaterialAlpha::Opaque;
     float32 AlphaCutoff = 0.5F;
-    bool HasTexture = false;
+    bool HasTexture = false, HasSurfaceMap = false;
+    float32 NormalScale = 1;
 };
 struct ReferenceTriangle final
 {
@@ -49,7 +50,7 @@ struct ReferenceTriangle final
 struct ReferenceInstance final
 {
     const ReferenceSurfaceData* Surface = nullptr;
-    rhi::TextureCpuContent Texture;
+    rhi::TextureCpuContent Texture, SurfaceMap;
     usize FirstTriangle = 0, TriangleCount = 0;
     uint64 SourceId = 0;
 };
@@ -200,6 +201,9 @@ ReferenceRay(math::Vector3 origin, math::Vector3 direction, float32 distance) no
 [[nodiscard]] rhi::RasterStatus
 TraceReferenceOracle(const ReferenceSceneData&, const rhi::RayInput&, rhi::RayResult&) noexcept;
 [[nodiscard]] math::Vector4 SampleReferenceTexture(const ReferenceInstance&, math::Vector2) noexcept;
+[[nodiscard]] math::Vector4 SampleReferenceSurfaceMap(const ReferenceInstance&, math::Vector2) noexcept;
+[[nodiscard]] math::Vector3
+ApplyReferenceNormal(const ReferenceTriangle&, const ReferenceSurfaceData&, math::Vector3, math::Vector3) noexcept;
 [[nodiscard]] bool ReferenceOpacity(const ReferenceInstance&, math::Vector2) noexcept;
 [[nodiscard]] rhi::RasterStatus PrepareReferenceCamera(ReferenceJob&) noexcept;
 [[nodiscard]] rhi::RasterStatus GenerateReferencePrimary(const ReferenceJob&, ReferencePath&, rhi::RayInput&) noexcept;

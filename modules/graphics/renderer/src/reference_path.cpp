@@ -139,9 +139,9 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
             {
                 const auto cosine = math::Dot(light.Direction, -result.Direction);
                 const auto t = math::Clamp((cosine - light.OuterCos) / (light.InnerCos - light.OuterCos), 0.0F, 1.0F);
-                angular = t * t * (3 - 2 * t);
+                angular = t * t;
             }
-            result.Radiance = result.Radiance * (window * window * angular / square);
+            result.Radiance = result.Radiance * (window * window * angular / math::Max(square, 1e-4F));
         }
         return result;
     }
@@ -227,11 +227,26 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
                    ? rhi::RasterStatus::Ready
                    : Invalid(job, path);
     }
-    const auto normal = ReferenceNormalize(triangle.Normals[0] * (1 - hit.U - hit.V) + triangle.Normals[1] * hit.U +
-                                           triangle.Normals[2] * hit.V);
+    math::Vector3 normal = ReferenceNormalize(triangle.Normals[0] * (1 - hit.U - hit.V) + triangle.Normals[1] * hit.U +
+                                              triangle.Normals[2] * hit.V);
     const auto texel = SampleReferenceTexture(instance, Uv(triangle, hit.U, hit.V));
-    auto bsdf = surface.Bsdf;
+    ReferenceBsdf bsdf = surface.Bsdf;
     bsdf.BaseColor = math::Hadamard({texel.X, texel.Y, texel.Z}, bsdf.BaseColor);
+    if (surface.HasSurfaceMap)
+    {
+        SurfaceParameters parameters;
+        if (DecodeSurfaceParameters(SampleReferenceSurfaceMap(instance, Uv(triangle, hit.U, hit.V)),
+                                    bsdf.Metallic,
+                                    bsdf.Roughness,
+                                    surface.NormalScale,
+                                    parameters) != rhi::RasterStatus::Ready)
+        {
+            return Invalid(job, path);
+        }
+        bsdf.Metallic = parameters.Metallic;
+        bsdf.Roughness = parameters.Roughness;
+        normal = ApplyReferenceNormal(triangle, surface, normal, parameters.NormalTangent);
+    }
     const auto proposal = SampleLight(job, path, point);
     if (!math::IsFinite(proposal.Pdf) || proposal.Pdf < 0 || !ValidContribution(proposal.Radiance))
     {

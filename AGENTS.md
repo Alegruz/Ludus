@@ -230,6 +230,10 @@ rejects the explicit `== true`/`== false` style.
   path tracing must not become the prerequisite for ordinary raster navigation.
   Do not invent scene lights to hide missing lighting; state the selected
   renderer profile's limits and validate the authored inputs.
+- Pending preparation must retain the last drawable viewport view until the
+  replacement reaches Ready. A failed replacement must not erase that view.
+  Distinguish an accepted candidate's diagnostic report from the last presented
+  image; verify pending, failure and successful publication with regression tests.
 
 ### Public SDK documentation
 

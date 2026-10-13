@@ -74,6 +74,13 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
     // Hashes are diagnostics; exact retained identities/parameters control resets.
     const usize triangleBytes = job.Scene.Triangles.GetSize() * 132;
     usize bytes = triangleBytes + job.Scene.InstanceCount * 116 + job.Description.LightCount * 64 + 12;
+    for (usize i = 0; i < job.Scene.InstanceCount; ++i)
+    {
+        if (job.Scene.Instances[i].Surface->HasSurfaceMap)
+        {
+            bytes += 48;
+        }
+    }
     if (bytes > budget)
     {
         return false;
@@ -149,6 +156,23 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         offset += 8;
         Put64(stream.GetData() + offset, textureFingerprint.High);
         offset += 8;
+        if (surface.HasSurfaceMap)
+        {
+            word(0x53555246); // SURF domain marker, explicitly versioned extension.
+            scalar(surface.NormalScale);
+            word(static_cast<uint32>(instance.SurfaceMap.Format));
+            word(instance.SurfaceMap.Width);
+            word(instance.SurfaceMap.Height);
+            Put64(stream.GetData() + offset, instance.SurfaceMap.RowPitch);
+            offset += 8;
+            const foundation::Fingerprint128 fingerprint =
+                foundation::StableFingerprint128({instance.SurfaceMap.Bytes, instance.SurfaceMap.Size});
+            Put64(stream.GetData() + offset, fingerprint.Low);
+            offset += 8;
+            Put64(stream.GetData() + offset, fingerprint.High);
+            offset += 8;
+            word(0);
+        }
     }
     for (usize i = 0; i < job.Description.LightCount; ++i)
     {
@@ -295,6 +319,8 @@ Status Renderer::State::PrepareReferenceSurface(const MaterialDescription& surfa
     data->AlphaCutoff = surface.AlphaCutoff;
     data->Emission = lighting->Emission;
     data->HasTexture = !rhi::IsNull(surface.Texture);
+    data->HasSurfaceMap = rhi::IsNull(lighting->SurfaceMap) == false;
+    data->NormalScale = lighting->NormalScale;
     output.Reset(data);
     return Status::Ready;
 }
@@ -435,7 +461,7 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         return status;
     }
     const auto& snapshot = SnapshotRecords[snapshotSlot];
-    usize triangles = 0, instances = 0, emitters = 0;
+    usize triangles = 0, instances = 0, emitters = 0, surfaceMaps = 0;
     uint64 alphaScalars = 0;
     for (usize i = 0; i < snapshot.Count; ++i)
     {
@@ -495,6 +521,20 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
                 alphaScalars += uint64(texture.Width) * texture.Height;
             }
         }
+        if (material.Reference->HasSurfaceMap)
+        {
+            ++surfaceMaps;
+            rhi::TextureCpuContent texture;
+            status = rhi::GetTextureCpuContent(Device, material.SurfaceTexture, description.TextureMip, texture);
+            if (status != Status::Ready)
+            {
+                return status;
+            }
+            if (texture.Format != rhi::RasterFormat::Rgba8Unorm)
+            {
+                return Status::Unsupported;
+            }
+        }
         ++instances;
     }
     const usize pixels = gpuSetup ? 0 : usize(description.Width) * description.Height;
@@ -506,7 +546,8 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         uint64(pixels) * sizeof(internal::ReferenceAccumulator) + uint64(tile) * sizeof(internal::ReferencePath) +
         uint64(tile) * 2 * (sizeof(rhi::RayInput) + sizeof(rhi::RayResult)) +
         uint64(triangles) * sizeof(ReferenceTriangle) + bvhBytes + uint64(emitters) * sizeof(uint32);
-    const uint64 signatureBytes = uint64(triangles) * 132 + uint64(instances) * 116 + uint64(lights.Count) * 64 + 12;
+    const uint64 signatureBytes =
+        uint64(triangles) * 132 + uint64(instances) * 116 + uint64(surfaceMaps) * 48 + uint64(lights.Count) * 64 + 12;
     const uint64 nativeSetup =
         oracle ? 0
                : uint64(instances) * (sizeof(rhi::RayInstanceDescription) + sizeof(Array<float32>)) +
@@ -570,6 +611,15 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         if (instance.Surface->HasTexture)
         {
             status = rhi::GetTextureCpuContent(Device, material.Texture, description.TextureMip, instance.Texture);
+            if (status != Status::Ready)
+            {
+                return status;
+            }
+        }
+        if (instance.Surface->HasSurfaceMap)
+        {
+            status =
+                rhi::GetTextureCpuContent(Device, material.SurfaceTexture, description.TextureMip, instance.SurfaceMap);
             if (status != Status::Ready)
             {
                 return status;

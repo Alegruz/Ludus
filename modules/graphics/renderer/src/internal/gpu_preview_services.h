@@ -47,7 +47,8 @@ Status PackGpuScene(const ReferenceJob& job,
     const uint64 orderWide = nodesWide + uint64(scene.Nodes.GetSize()) * 3;
     const uint64 emittersWide = orderWide + scene.Order.GetSize();
     const uint64 surfacesWide = emittersWide + scene.Emitters.GetSize();
-    const uint64 sizeWide = surfacesWide + uint64(scene.InstanceCount) * 6;
+    const uint64 lightsWide = surfacesWide + uint64(scene.InstanceCount) * 8;
+    const uint64 sizeWide = lightsWide + uint64(job.Description.LightCount) * 4;
     if (sizeWide > ~uint32{0})
     {
         return Status::CapacityExceeded;
@@ -57,33 +58,37 @@ Status PackGpuScene(const ReferenceJob& job,
     const usize dataSize = math::Max(static_cast<usize>(sizeWide), usize{1});
     usize size = 0;
     Array<usize> textures;
-    if (scene.InstanceCount * sizeof(usize) > budget || !textures.TryResize(scene.InstanceCount))
+    const usize textureCount = scene.InstanceCount * 2;
+    const auto getImage = [&scene](usize index) noexcept -> const rhi::TextureCpuContent& {
+        return index % 2 == 0 ? scene.Instances[index / 2].Texture : scene.Instances[index / 2].SurfaceMap;
+    };
+    if (textureCount * sizeof(usize) > budget || textures.TryResize(textureCount) == false)
     {
         return Status::CapacityExceeded;
     }
-    for (usize i = 0; i < scene.InstanceCount; ++i)
+    for (usize i = 0; i < textureCount; ++i)
     {
-        const internal::ReferenceInstance& instance = scene.Instances[i];
+        const rhi::TextureCpuContent& image = getImage(i);
         textures[i] = size;
-        if (!instance.Surface->HasTexture)
+        if (image.Bytes == nullptr)
         {
             continue;
         }
-        bool shared = false;
+        bool isShared = false;
         for (usize j = 0; j < i; ++j)
         {
-            if (scene.Instances[j].Surface->HasTexture && SameGpuTexture(instance.Texture, scene.Instances[j].Texture))
+            if (getImage(j).Bytes != nullptr && SameGpuTexture(image, getImage(j)))
             {
                 textures[i] = textures[j];
-                shared = true;
+                isShared = true;
                 break;
             }
         }
-        if (!shared)
+        if (isShared == false)
         {
-            const uint64 words = (uint64(instance.Texture.Width) * instance.Texture.Height + 3) / 4;
+            const uint64 words = (uint64(image.Width) * image.Height + 3) / 4;
             usize added = 0;
-            if (!foundation::TryIntegerCast(words, added) || !foundation::TryAdd(size, added, size))
+            if (foundation::TryIntegerCast(words, added) == false || foundation::TryAdd(size, added, size) == false)
             {
                 return Status::CapacityExceeded;
             }
@@ -139,7 +144,7 @@ Status PackGpuScene(const ReferenceJob& job,
     {
         const internal::ReferenceInstance& instance = scene.Instances[i];
         const internal::ReferenceSurfaceData& s = *instance.Surface;
-        math::Vector4* out = data.GetData() + surfaces + i * 6;
+        math::Vector4* out = data.GetData() + surfaces + i * 8;
         out[0] = GpuVector(s.Bsdf.BaseColor, s.Bsdf.Metallic);
         out[1] = {s.Bsdf.Roughness, s.AlphaCutoff, GpuBits(instance.Texture.Width), GpuBits(instance.Texture.Height)};
         out[2] = s.Tint;
@@ -149,24 +154,32 @@ Status PackGpuScene(const ReferenceJob& job,
                              (s.Sampler.U == rhi::RasterAddress::Repeat ? 2U : 0U) |
                              (s.Sampler.V == rhi::RasterAddress::Repeat ? 4U : 0U) |
                              (instance.Texture.Format == rhi::RasterFormat::Rgba8Srgb ? 8U : 0U);
-        out[5] = {GpuBits(static_cast<uint32>(textures[i])),
+        out[5] = {GpuBits(static_cast<uint32>(textures[i * 2])),
                   GpuBits(flags),
                   GpuBits(s.Alpha == MaterialAlpha::Masked ? 1U : 0U),
                   0};
-        if (!s.HasTexture)
+        out[6] = {s.NormalScale,
+                  GpuBits(instance.SurfaceMap.Width),
+                  GpuBits(instance.SurfaceMap.Height),
+                  GpuBits(s.HasSurfaceMap ? 1U : 0U)};
+        out[7] = {GpuBits(static_cast<uint32>(textures[i * 2 + 1])), GpuBits(flags & 7U), 0, 0};
+    }
+    for (usize i = 0; i < textureCount; ++i)
+    {
+        const rhi::TextureCpuContent& image = getImage(i);
+        if (image.Bytes == nullptr)
         {
             continue;
         }
-        bool shared = false;
+        bool isShared = false;
         for (usize j = 0; j < i; ++j)
         {
-            shared = shared || (textures[j] == textures[i] && scene.Instances[j].Surface->HasTexture);
+            isShared = isShared || (textures[j] == textures[i] && getImage(j).Bytes != nullptr);
         }
-        if (shared)
+        if (isShared)
         {
             continue;
         }
-        const rhi::TextureCpuContent& image = instance.Texture;
         for (usize y = 0; y < image.Height; ++y)
         {
             for (usize x = 0; x < image.Width; ++x)
@@ -197,6 +210,15 @@ Status PackGpuScene(const ReferenceJob& job,
             }
         }
     }
+    for (usize i = 0; i < job.Description.LightCount; ++i)
+    {
+        const DirectLight& light = job.Lights[i];
+        math::Vector4* outLight = data.GetData() + static_cast<usize>(lightsWide) + i * 4;
+        outLight[0] = GpuVector(light.Color * light.Intensity, static_cast<float32>(light.Kind));
+        outLight[1] = GpuVector(light.Position, light.Range);
+        outLight[2] = GpuVector(light.Direction, light.OuterCos);
+        outLight[3] = {light.InnerCos, 0, 0, 0};
+    }
     uniform.ClipToWorld = job.ClipToWorld;
     uniform.CameraPositionWorld =
         GpuVector(job.Description.CameraPosition, job.Description.OrthographicCamera ? 1.0F : 0.0F);
@@ -211,12 +233,13 @@ Status PackGpuScene(const ReferenceJob& job,
     uniform.Counts[0] = static_cast<uint32>(scene.Triangles.GetSize());
     uniform.Counts[1] = static_cast<uint32>(scene.Nodes.GetSize());
     uniform.Counts[2] = static_cast<uint32>(scene.Emitters.GetSize());
+    uniform.Counts[3] = static_cast<uint32>(job.Description.LightCount);
     uniform.Sampling[0] = static_cast<uint32>(job.Key.Value);
     uniform.Sampling[1] = static_cast<uint32>(job.Key.Value >> 32);
     uniform.Sampling[2] = (job.Description.ReverseZ ? 1U : 0U) | (job.Description.InfiniteFar ? 2U : 0U) |
                           (job.Description.CenterRays ? 4U : 0U);
     uniform.Sampling[3] = job.Description.TargetSamples;
-    uniform.Environment = GpuVector(job.Description.Environment);
+    uniform.Environment = GpuVector(job.Description.Environment, GpuBits(static_cast<uint32>(lightsWide)));
     uniform.Options.X = job.Description.SecondaryDistance;
     uniform.BoundsMinimumWorld = GpuVector(scene.Bounds.Min);
     uniform.BoundsMaximumWorld = GpuVector(scene.Bounds.Max);
@@ -627,7 +650,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
     {
         return Status::InvalidHandle;
     }
-    if (description.LightCount != 0 || description.MaxDepth > 8 || description.TargetSamples > 4096 ||
+    if (description.MaxDepth > 8 || description.TargetSamples > 4096 ||
         uint64(description.Width) * description.Height > (uint64{1} << 24))
     {
         return Status::Unsupported;

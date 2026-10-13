@@ -26,6 +26,18 @@ def uniform_shape(value):
     return 'Opaque'
 
 
+def external_text_source(namespace, label, data):
+    """Store exact UTF-8 shader bytes in one compiled file, without giant literals."""
+    encoded = data.encode("utf-8") + b"\0"
+    values = [str(value) if value < 128 else f"static_cast<char>({value})" for value in encoded]
+    rows = [", ".join(values[index:index + 32]) for index in range(0, len(values), 32)]
+    declaration = f"extern const char {label}[{len(encoded)}];\n"
+    definition = (f"namespace ludus::shaders::{namespace} {{\n"
+                  f"extern const char {label}[{len(encoded)}] = {{\n" +
+                  ",\n".join(rows) + "\n};\n}\n")
+    return declaration, definition
+
+
 def raster_interface(document, stage, metal=False):
     points = [x for x in document['entryPoints'] if x['stage'] == stage]
     if len(points) != 1:
@@ -447,6 +459,7 @@ def compile_raster(args, lock):
             interfaces[('wgsl', stage)] = interface
     if args.spirv_cross and not compute:
         verify_varyings(interfaces[('glsl', 'vertex')]['varyings'], interfaces[('glsl', 'fragment')]['varyings'])
+    companion = ''
     header = '#pragma once\n#include <ludus/foundation/base/config.h>\n#include <ludus/graphics/rhi/raster.h>\n'
     header += f'namespace ludus::shaders::{args.name} {{\n'
     for (backend, stage), (data, name) in artifacts.items():
@@ -459,7 +472,12 @@ def compile_raster(args, lock):
             delimiter = 'R_' + label
             if f'){delimiter}"' in data:
                 raise RuntimeError('Raster source conflicts with raw string delimiter')
-            header += f'inline constexpr char {label}[] = R"{delimiter}(' + data + f'){delimiter}";\n'
+            if compute and len(data.encode("utf-8")) >= 60000:
+                declaration, definition = external_text_source(args.name, label, data)
+                header += declaration
+                companion += definition
+            else:
+                header += f'inline constexpr char {label}[] = R"{delimiter}(' + data + f'){delimiter}";\n'
         if interface['entries']:
             header += f'inline constexpr graphics::rhi::RasterBinding {label}_BINDINGS[] = {{\n'
             for binding in interface['entries']:
@@ -521,3 +539,5 @@ def compile_raster(args, lock):
     escaped = str(dest).replace(' ', '\\ ').replace('#', '\\#')
     (output / 'shader.d').write_text(escaped + ': ' + ' '.join(dependencies) + '\n')
     dest.write_text(header)
+    if compute:
+        (output / f"{args.name}.cpp").write_text(companion or "// No external text artifacts in this profile.\n")

@@ -9,13 +9,20 @@ add_executable(reference_scene src/main.cpp)
 target_link_libraries(reference_scene PRIVATE Ludus::GraphicsRenderer Ludus::Resources Ludus::Content Ludus::FoundationFilesystem Ludus::FoundationTime Ludus::FoundationLogging)
 ludus_apply_app_policy(reference_scene)
 foreach(shader renderer_flat renderer_composite renderer_lit renderer_shadow renderer_output)
+    if(shader MATCHES "renderer_(lit|clustered)$")
+        set(renderer_vertex_entry VertexMain)
+        set(renderer_fragment_entry FragmentMain)
+    else()
+        set(renderer_vertex_entry vertexMain)
+        set(renderer_fragment_entry fragmentMain)
+    endif()
     ludus_compile_shader(TARGET reference_scene NAME ${shader} RASTER
-        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry})
 endforeach()
 ludus_compile_shader(TARGET reference_scene NAME renderer_gpu_preview_image RASTER
     SOURCE "${Ludus_DIR}/shaders/renderer_gpu_preview_image.slang" VERTEX VertexMain FRAGMENT FragmentMain)
 ludus_compile_shader(TARGET reference_scene NAME renderer_lit_shadow RASTER
-    SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
+    SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX VertexMain FRAGMENT ShadowMain)
 ludus_compile_ray_queries(TARGET reference_scene NAME ray_query)
 ludus_compile_shader(TARGET reference_scene NAME renderer_gpu_preview
     SOURCE "${Ludus_DIR}/shaders/renderer_gpu_preview.slang" COMPUTE ComputeMain)

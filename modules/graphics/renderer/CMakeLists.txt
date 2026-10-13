@@ -17,7 +17,7 @@ ludus_apply_project_defaults(ludus_graphics_renderer)
 install(TARGETS ludus_graphics_renderer EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 # Source is cooked by the existing installed shader helper; no runtime compiler dependency.
-install(FILES shaders/renderer_flat.slang shaders/renderer_composite.slang shaders/renderer_overlay.slang shaders/renderer_material.slang shaders/renderer_lit.slang shaders/renderer_clustered.slang shaders/renderer_shadow.slang shaders/renderer_output.slang shaders/renderer_gpu_preview.slang shaders/renderer_gpu_preview_image.slang DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+install(FILES shaders/renderer_flat.slang shaders/renderer_composite.slang shaders/renderer_overlay.slang shaders/renderer_material.slang shaders/renderer_lit.slang shaders/renderer_clustered.slang shaders/renderer_shadow.slang shaders/renderer_output.slang shaders/renderer_gpu_preview.slang shaders/renderer_gpu_preview_image.slang shaders/renderer_surface.slang shaders/renderer_clustered_surface.slang shaders/renderer_surface_functions.slang DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     # Exercise the production renderer/RHI registry with the existing deterministic backend.
@@ -55,19 +55,31 @@ if(TARGET ludus_rhi_render_tests)
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_material RASTER
         SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_material.slang" VERTEX vertexMain FRAGMENT fragmentMain)
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_clustered RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_clustered.slang" VERTEX vertexMain FRAGMENT fragmentMain
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang")
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_clustered.slang" VERTEX VertexMain FRAGMENT FragmentMain
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang"
+        INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders" "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_clustered_shadow RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_clustered.slang" VERTEX vertexMain FRAGMENT shadowMain
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang")
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_clustered.slang" VERTEX VertexMain FRAGMENT ShadowMain
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang"
+        INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders" "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_lit RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang" VERTEX VertexMain FRAGMENT FragmentMain
+        INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders" "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_lit_shadow RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang" VERTEX VertexMain FRAGMENT ShadowMain
+        INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders" "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_shadow RASTER
         SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_shadow.slang" VERTEX vertexMain FRAGMENT fragmentMain)
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_output RASTER
         SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_output.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    foreach(surface_shader renderer_surface renderer_clustered_surface)
+        ludus_compile_shader(TARGET ludus_renderer_render_tests NAME ${surface_shader} RASTER
+            SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${surface_shader}.slang" VERTEX VertexMain FRAGMENT FragmentMain
+            INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders" "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
+        ludus_compile_shader(TARGET ludus_renderer_render_tests NAME ${surface_shader}_shadow RASTER
+            SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${surface_shader}.slang" VERTEX VertexMain FRAGMENT ShadowMain
+            INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders" "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
+    endforeach()
     ludus_cook_texture(TARGET ludus_renderer_render_tests NAME l4_bake SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/l4-bake.texture.json")
     ludus_cook_texture(TARGET ludus_renderer_render_tests NAME l3_color
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/l3-color.texture.json")

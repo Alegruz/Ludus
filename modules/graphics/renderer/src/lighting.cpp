@@ -7,6 +7,37 @@ namespace ludus::graphics::renderer
 {
 using namespace foundation;
 namespace math = foundation::math;
+rhi::RasterStatus DecodeSurfaceParameters(math::Vector4 texel,
+                                          float32 metallic,
+                                          float32 roughness,
+                                          float32 normalScale,
+                                          SurfaceParameters& outParameters) noexcept
+{
+    if (math::IsFinite(texel) == false || texel.X < 0 || texel.X > 1 || texel.Y < 0 || texel.Y > 1 || texel.Z < 0 ||
+        texel.Z > 1 || texel.W < 0 || texel.W > 1 || math::IsFinite(metallic) == false || metallic < 0 ||
+        metallic > 1 || math::IsFinite(roughness) == false || roughness < 0.045F || roughness > 1 ||
+        math::IsFinite(normalScale) == false || normalScale < 0 || normalScale > 8)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    math::Vector2 xy{texel.X * 2 - 1, texel.Y * 2 - 1};
+    const float32 square = math::Dot(xy, xy);
+    if (square > 1)
+    {
+        xy = xy / math::Sqrt(square);
+    }
+    math::Vector3 normalTangent{xy.X * normalScale, xy.Y * normalScale, math::Sqrt(math::Max(0.0F, 1 - square))};
+    if (normalScale == 0)
+    {
+        normalTangent = {0, 0, 1};
+    }
+    SurfaceParameters parameters;
+    static_cast<void>(math::TryNormalize(normalTangent, parameters.NormalTangent));
+    parameters.Metallic = metallic * texel.W;
+    parameters.Roughness = math::Max(0.045F, roughness * texel.Z);
+    outParameters = parameters;
+    return rhi::RasterStatus::Ready;
+}
 namespace
 {
 bool Bounded(math::Vector3 value, float32 minimum, float32 maximum) noexcept
@@ -271,7 +302,7 @@ rhi::RasterStatus EvaluateLitBrdf(math::Vector3 baseColor,
         const auto nh = math::Clamp(math::Dot(normal, half), 0.0F, 1.0F);
         const auto lh = math::Clamp(math::Dot(light, half), 0.0F, 1.0F);
         const auto alpha = roughness * roughness, a2 = alpha * alpha;
-        const auto denominator = nh * nh * (a2 - 1) + 1;
+        const float32 denominator = (1 - nh * nh) + nh * nh * a2;
         const auto distribution = a2 / (math::kPiF * denominator * denominator);
         const auto visibility =
             0.5F /

@@ -33,7 +33,7 @@ target_link_libraries(ludus_sdk_renderer_overlays_consumer PRIVATE Ludus::Graphi
 target_compile_options(ludus_sdk_renderer_overlays_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
 foreach(shader renderer_flat renderer_composite renderer_overlay)
     ludus_compile_shader(TARGET ludus_sdk_renderer_overlays_consumer NAME ${shader} RASTER
-        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry})
 endforeach()
 if(EMSCRIPTEN)
     target_link_options(ludus_sdk_renderer_overlays_consumer PRIVATE -fno-exceptions -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
@@ -46,7 +46,7 @@ target_link_libraries(ludus_sdk_renderer_materials_consumer PRIVATE Ludus::Graph
 target_compile_options(ludus_sdk_renderer_materials_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
 foreach(shader renderer_flat renderer_composite renderer_material)
     ludus_compile_shader(TARGET ludus_sdk_renderer_materials_consumer NAME ${shader} RASTER
-        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry})
 endforeach()
 ludus_compile_shader(TARGET ludus_sdk_renderer_materials_consumer NAME l3_layout RASTER
     SOURCE ../l3_layout.slang VERTEX vertexMain FRAGMENT fragmentMain)
@@ -61,11 +61,18 @@ add_executable(ludus_sdk_renderer_lighting_consumer ../renderer_lighting.cpp)
 target_link_libraries(ludus_sdk_renderer_lighting_consumer PRIVATE Ludus::GraphicsRenderer Ludus::FoundationTime)
 target_compile_options(ludus_sdk_renderer_lighting_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
 foreach(shader renderer_flat renderer_composite renderer_lit renderer_shadow renderer_output)
+    if(shader MATCHES "renderer_(lit|clustered)$")
+        set(renderer_vertex_entry VertexMain)
+        set(renderer_fragment_entry FragmentMain)
+    else()
+        set(renderer_vertex_entry vertexMain)
+        set(renderer_fragment_entry fragmentMain)
+    endif()
     ludus_compile_shader(TARGET ludus_sdk_renderer_lighting_consumer NAME ${shader} RASTER
-        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry})
 endforeach()
 ludus_compile_shader(TARGET ludus_sdk_renderer_lighting_consumer NAME renderer_lit_shadow RASTER
-    SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
+    SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX VertexMain FRAGMENT ShadowMain)
 ludus_cook_texture(TARGET ludus_sdk_renderer_lighting_consumer NAME l4_bake SOURCE ../l4-bake.texture.json)
 if(EMSCRIPTEN)
     target_link_options(ludus_sdk_renderer_lighting_consumer PRIVATE -fno-exceptions -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
@@ -77,12 +84,19 @@ add_executable(ludus_sdk_renderer_scaling_consumer ../renderer_scaling.cpp)
 target_link_libraries(ludus_sdk_renderer_scaling_consumer PRIVATE Ludus::GraphicsRenderer Ludus::FoundationTime)
 target_compile_options(ludus_sdk_renderer_scaling_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
 foreach(shader renderer_flat renderer_composite renderer_clustered renderer_shadow renderer_output)
+    if(shader MATCHES "renderer_(lit|clustered)$")
+        set(renderer_vertex_entry VertexMain)
+        set(renderer_fragment_entry FragmentMain)
+    else()
+        set(renderer_vertex_entry vertexMain)
+        set(renderer_fragment_entry fragmentMain)
+    endif()
     ludus_compile_shader(TARGET ludus_sdk_renderer_scaling_consumer NAME ${shader} RASTER
-        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry}
         DEPENDS "${Ludus_DIR}/shaders/renderer_lit.slang")
 endforeach()
 ludus_compile_shader(TARGET ludus_sdk_renderer_scaling_consumer NAME renderer_clustered_shadow RASTER
-    SOURCE "${Ludus_DIR}/shaders/renderer_clustered.slang" VERTEX vertexMain FRAGMENT shadowMain
+    SOURCE "${Ludus_DIR}/shaders/renderer_clustered.slang" VERTEX VertexMain FRAGMENT ShadowMain
     DEPENDS "${Ludus_DIR}/shaders/renderer_lit.slang")
 if(EMSCRIPTEN)
     target_link_options(ludus_sdk_renderer_scaling_consumer PRIVATE -fno-exceptions -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
@@ -96,11 +110,18 @@ if(NOT EMSCRIPTEN AND LUDUS_SPIRV_CROSS)
     target_link_libraries(ludus_sdk_reference_capture PRIVATE Ludus::GraphicsRenderer Ludus::FoundationFilesystem Ludus::FoundationTime)
     target_compile_options(ludus_sdk_reference_capture PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
     foreach(shader renderer_flat renderer_composite renderer_lit renderer_shadow renderer_output)
+    if(shader MATCHES "renderer_(lit|clustered)$")
+        set(renderer_vertex_entry VertexMain)
+        set(renderer_fragment_entry FragmentMain)
+    else()
+        set(renderer_vertex_entry vertexMain)
+        set(renderer_fragment_entry fragmentMain)
+    endif()
         ludus_compile_shader(TARGET ludus_sdk_reference_capture NAME ${shader} RASTER
-            SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+            SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX ${renderer_vertex_entry} FRAGMENT ${renderer_fragment_entry})
     endforeach()
     ludus_compile_shader(TARGET ludus_sdk_reference_capture NAME renderer_lit_shadow RASTER
-        SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
+        SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX VertexMain FRAGMENT ShadowMain)
     ludus_compile_ray_queries(TARGET ludus_sdk_reference_capture NAME ray_query)
 endif()
 

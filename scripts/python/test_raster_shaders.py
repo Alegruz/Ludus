@@ -6,9 +6,20 @@ import sys
 import unittest
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'cmake/shaders'))
-from compile_raster import raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type
+from compile_raster import raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type, external_text_source
 
 class RasterReflectionTests(unittest.TestCase):
+    def test_external_large_shader_preserves_exact_utf8_and_terminator(self):
+        import re
+        text = "// café\n" + "void Compute() {}\n" * 5000
+        declaration, definition = external_text_source("large_shader", "METAL_COMPUTE", text)
+        body = definition.split("= {\n", 1)[1].split("\n};", 1)[0]
+        values = [int(value) for value in re.findall(r"\d+", body)]
+        self.assertEqual(bytes(values), text.encode("utf-8") + b"\0")
+        self.assertIn(f"[{len(values)}]", declaration)
+        self.assertNotIn('R"', definition)
+
+
     def test_cluster_light_arrays_obey_uniform_byte_budget(self):
         vector = {'kind':'vector','elementCount':4,'elementType':{'kind':'scalar','scalarType':'float32'}}
         for count in (32,512,1024):

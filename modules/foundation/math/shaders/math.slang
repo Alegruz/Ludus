@@ -40,3 +40,40 @@ uint RandomBits(uint pixel, uint sample, uint dimension, uint2 key, uint attempt
     }
     return c[dimension & 3];
 }
+
+// UV-derived frame used by renderer raster and ray profiles; see
+// docs/architecture/renderer-systems.md#material-and-lighting-fidelity.
+// Orthonormalizes against the supplied unit normal, preserving mirrored UV sign.
+// Numerically degenerate frames return the original normal without perturbation.
+float3 ApplyNormalWorld(float3 normalWorld,
+                        float3 normalTangent,
+                        float3 edgeUWorld,
+                        float3 edgeVWorld,
+                        float2 edgeUUv,
+                        float2 edgeVUv)
+{
+    // Normalize edge magnitudes before solving; this makes admission independent
+    // of pixel footprint, triangle size and uniform UV tiling scale.
+    float uvMagnitude = max(max(abs(edgeUUv.x), abs(edgeUUv.y)), max(abs(edgeVUv.x), abs(edgeVUv.y)));
+    float worldMagnitude = max(max(max(abs(edgeUWorld.x), abs(edgeUWorld.y)), abs(edgeUWorld.z)),
+                               max(max(abs(edgeVWorld.x), abs(edgeVWorld.y)), abs(edgeVWorld.z)));
+    if (uvMagnitude <= 1e-30 || worldMagnitude <= 1e-30)
+        return normalWorld;
+    edgeUUv /= uvMagnitude;
+    edgeVUv /= uvMagnitude;
+    edgeUWorld /= worldMagnitude;
+    edgeVWorld /= worldMagnitude;
+    float determinant = edgeUUv.x * edgeVUv.y - edgeUUv.y * edgeVUv.x;
+    if (abs(determinant) <= 1e-6 * max(abs(edgeUUv.x * edgeVUv.y), abs(edgeUUv.y * edgeVUv.x)))
+        return normalWorld;
+    float3 tangentWorld = (edgeUWorld * edgeVUv.y - edgeVWorld * edgeUUv.y) / determinant;
+    float3 bitangentWorld = (edgeVWorld * edgeUUv.x - edgeUWorld * edgeVUv.x) / determinant;
+    tangentWorld -= normalWorld * dot(normalWorld, tangentWorld);
+    if (dot(tangentWorld, tangentWorld) <= 1e-20)
+        return normalWorld;
+    tangentWorld = NormalizeOrZero(tangentWorld);
+    float handedness = dot(cross(normalWorld, tangentWorld), bitangentWorld) < 0 ? -1 : 1;
+    bitangentWorld = cross(normalWorld, tangentWorld) * handedness;
+    return NormalizeOrZero(tangentWorld * normalTangent.x + bitangentWorld * normalTangent.y +
+                           normalWorld * normalTangent.z);
+}

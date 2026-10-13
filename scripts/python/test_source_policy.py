@@ -14,6 +14,9 @@ class SourcePolicyTests(unittest.TestCase):
             "modules/example/source" + suffix, text, set(range(1, text.count("\n") + 2))
         )
 
+    def test_shader_else_if_is_control_flow(self):
+        self.assertFalse(self.diagnose("void Shade() { if (x) {} else if (y) {} }", ".slang"))
+
     def test_explicit_values_and_unspellable_lambdas(self):
         self.assertFalse(
             self.diagnose(

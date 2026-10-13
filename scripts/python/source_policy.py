@@ -120,7 +120,7 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
     for match in re.finditer(
         r"\b(\w+)\s+(\w+)\s*\(([^{};]*)\)\s*(?::\s*\w+)?\s*\{", code
     ):
-        if match[1] in {"if", "for", "while", "switch", "return"}:
+        if match[1] in {"if", "else", "for", "while", "switch", "return"}:
             continue
         if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", match[2]):
             report(match.start(2), "shader functions and entry points use PascalCase")
