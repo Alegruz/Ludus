@@ -13,6 +13,13 @@ here before `scene_cook.py` / `scene_assets.py` / `scene_editor.py` are removed.
 | `expected/files/` | Full bytes of every output ≤ 64 KiB (manifests, catalog, levels, material/mesh/licence artifacts, texture headers). Generated C/C++ headers are stored with an extra `.golden` suffix so formatters and analysis tools leave their bytes alone. Larger outputs (the 1.1 MB `scene.luscn` and the wallpaper atlas texture) are checked by digest only. |
 | `licensed/staircase2.json` | Digest-only goldens for the licensed staircase2 scene. Not captured in CI. |
 
+## Native consumers
+
+- `ludus_scene_cook_tests` (`modules/content/scene_cook`) cooks `source/` with the C++
+  `Ludus::SceneCook` port and checks `cook/scene.luscn` (digest and size),
+  `cook/manifest.json` and `cook/LICENSE.txt` byte for byte. The same check is available
+  from the command line: `ludus-cook cook tests/goldens/scene_pipeline/source OUT`.
+
 ## Normalization a port must apply
 
 - `uuid4()` returns `UUID(int=1)`, `UUID(int=2)`, … in call order (`scene_assets.new_level`,
