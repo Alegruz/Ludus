@@ -500,7 +500,8 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     }
     VkPhysicalDeviceFeatures enabled{};
     vkGetPhysicalDeviceFeatures(gPhysical, &enabled);
-    if (internal::CompressedTexture(format) && enabled.textureCompressionBC != VK_TRUE)
+    if (internal::CompressedTexture(format) &&
+        (internal::NativeDeviceRequest() != nullptr || enabled.textureCompressionBC != VK_TRUE))
     {
         return {};
     }

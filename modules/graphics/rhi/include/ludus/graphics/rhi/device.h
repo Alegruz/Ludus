@@ -182,7 +182,8 @@ struct DeviceInfo final
 /// Cancel pending startup or destroy a ready/failed/lost session; invalidates callback tokens
 /// before backend teardown. Clears device on success; borrowed surface copies become stale.
 /// InvalidHandle preserves device and cannot destroy another owner's session. Never waits for
-/// browser callbacks; native teardown retains the facade's existing completion behavior.
+/// browser callbacks. Native interop leases defer physical teardown until foreign
+/// consumers complete; new device creation rejects InvalidState until all pins retire.
 [[nodiscard]] DeviceStatus DestroyDevice(DeviceHandle& device) noexcept;
 
 /// Set a borrowed target between frames; dimensions are pixels and zero skips acquisition.

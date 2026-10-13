@@ -1551,3 +1551,140 @@ selected backend, with explicit fallback cases for unavailable profiles. Native
 tests add malformed range/sample/resolve, typed-binding, undefined-sibling,
 declaration and completion-retention checks. Existing resize/loss suites continue
 to exercise the shared device/frame/resource lifecycle.
+
+
+## Native texture sharing
+
+`native_interop.h` provides a Qt-independent, same-device, same-queue color-read
+bridge on Metal and Vulkan. It admits an existing native context for headless
+RHI rendering and publishes a leased GPU texture for an external sampler.
+The bridge performs no CPU pixel readback, image upload, staging copy or silent
+backend fallback. GPU readback in the SDK fixture is solely its final pixel oracle.
+
+The initial profile is one initialized `Rgba8Unorm`, D2, single-mip/layer,
+single-sample color attachment. Export its resolved single-sample destination
+when producing with MSAA. Depth/stencil, HDR, arrays, cubes, volumes, foreign
+writes, different queues and cross-device external memory/semaphore imports are
+outside this profile and return `Unsupported`. Formats and numeric RGBA values
+are unchanged; the consumer must choose compatible alpha and display-encoding
+rules. The editor's first tone-mapped preview is opaque.
+
+### Admit the actual compositor context
+
+Use `CreateNativeDevice` with `NativeDeviceDescription`, rather than creating a
+second device on the same physical GPU. Both the logical device and command queue
+must match the consumer. Vulkan also carries the instance, physical device and
+created queue family/index; Metal requires the command queue's device to be the
+provided device. Vulkan admission requires an instance and physical device at
+least Vulkan 1.1 and does not infer enabled features from adapter support: BC
+compression and Vulkan native ray queries are disabled for an admitted context.
+The existing single-session limit remains; this bridge does not complete R14's
+independent multi-device/surface milestone.
+
+The source owner supplies `Retain`/`Release` callbacks. A successful retain
+promises the native objects remain valid until release, including loss and
+shutdown cleanup. RHI owns its allocations, command pools and fences, and never
+destroys the foreign Vulkan instance/device. Metal references are strongly held.
+Callbacks run on the owner thread, must not reenter RHI, and release exactly once
+after successful retain. A rejected request preserves output handles; unsupported
+profiles reject before retaining the source. Native handles must be valid objects
+with accurate provenance; arbitrary pointer values cannot be safely probed.
+
+All RHI work and foreign queue access must be serialized on the RHI owner thread.
+`GetNativeInteropCapabilities` reports the enabled profile and R6
+`ResourcesPerKind` bound for each native lease kind. Native lease tables and
+backend bookkeeping use the existing host allocation budget. The bridge pins
+existing texture allocations rather than allocating copied presentation images.
+
+### Produce, borrow, submit and retire
+
+1. Pin the context with `AcquireNativeDevice`, and compare the consumer's actual
+   native context with `GetNativeDeviceInfo`. Registry ID/UUID describe the
+   adapter; agreement on the adapter alone does not establish image compatibility.
+2. Render the image through ordinary direct/GDI commands and retain its accepted
+   `SubmissionToken`. `AcquireNativeTextureRead` requires that token to match the
+   texture's most recent accepted RHI use. The producer may still be in flight.
+3. Acquire the read before the foreign command buffer is enqueued or submitted.
+   Vulkan records a producer-to-shader memory/layout barrier on the shared queue;
+   Metal uses tracked texture hazards and an ordered command-buffer publication.
+   The descriptor carries the exact native image, extent, original format, RHI
+   incarnation/state revision and Vulkan shader-read-only layout. Copying a
+   descriptor or handle adds no ownership.
+4. Wrap and sample the image on that same context. Do not write the image, change
+   its ownership/layout, or enqueue new foreign reads after requesting release.
+   RHI attachment/resolve writers and mutable transfers reject while any native
+   read is live. A replacement texture can render while an old incarnation is held.
+5. After every consumer has actually submitted its reads, request
+   `ReleaseNativeTextureRead`. Recording completion is insufficient. A GPU marker
+   follows foreign queue work. `Pending` retains the handle/backing; query
+   `GetStatus`, destroy foreign wrappers, and repeat release after completion.
+   The descriptor getter rejects once release starts. Multiple readers each hold
+   their own lease and completion obligation. `DrainNativeTextureRead` is an
+   explicit blocking maintenance/teardown operation, never a presentation path.
+6. Destroy every foreign borrower of an exported context, then
+   `ReleaseNativeDevice`. The original owner of an admitted context remains
+   independent of this exported lease. Release rejects while its image reads live.
+
+`DestroyDevice`/`Shutdown` immediately invalidate ordinary RHI handles and callback
+tokens. With native leases held, the bridge conservatively retains the old
+session's native allocations/device until all consumers complete and pins release.
+Owned presentation targets are detached at logical shutdown, so ordinary Platform
+window/view lifetime does not extend through that image retirement.
+`GetNativeDeviceInfo` then reports `Retiring`; no new reads may be acquired and
+new sessions reject while retirement remains pending. Texture/device backing
+therefore survives renderer destruction, resize/replacement and cancellation.
+GPU loss is terminal: stop new native use and retire leases; the source lifetime
+handshake still applies. Do not delete the foreign device behind an outstanding
+source retain.
+
+### Qt integration boundary
+
+Qt-specific code belongs in the editor adapter. Qt's
+[Metal texture import](https://doc.qt.io/qt-6/qnativeinterface-qsgmetaltexture.html)
+and [Vulkan texture import](https://doc.qt.io/qt-6/qnativeinterface-qsgvulkantexture.html)
+wrap original native images on the scene-graph render thread without owning them.
+They do not perform the RHI lifetime/synchronization protocol above.
+
+For `QQuickWidget`, admit the device actually returned by its
+[renderer interface](https://doc.qt.io/qt-6/qsgrendererinterface.html).
+[Qt 6.4.3's widget implementation](https://github.com/qt/qtdeclarative/blob/v6.4.3/src/quickwidgets/qquickwidget.cpp)
+selects its top-level backing-store device and overwrites a separately supplied
+`QQuickGraphicsDevice`. Multiple preview widgets in that top-level window can
+share one RHI session only when every native identity matches. Moving between
+top-level windows or recreating the scene graph requires controlled retirement
+before the source device disappears and re-admission of the new context.
+
+Metal's native device/queue queries and image wrapper are available within the
+editor's Qt 6.4 minimum. The documented Vulkan graphics queue family/index queries
+require Qt 6.6; the Qt adapter must report `Unsupported` on older Qt Vulkan builds
+rather than guess a created queue or include private Qt headers. Native Vulkan
+consumers with known valid queue provenance do not depend on Qt.
+
+Produce/acquire at
+[`beforeFrameBegin`](https://doc.qt.io/qt-6/qquickwindow.html#beforeFrameBegin),
+before Qt enqueues its consumer frame. Seal a frame's foreign reads at
+[`afterFrameEnd`](https://doc.qt.io/qt-6/qquickwindow.html#afterFrameEnd), which
+follows submission. `afterRendering` describes recording and is insufficient.
+Use direct connections on the owner/render thread; `QQuickWidget`'s render loop
+is not threaded. The adapter must coordinate scene-graph invalidation, native
+source cleanup and widget destruction with the source retain/release contract.
+
+### Validation
+
+`ludus_rhi_native_interop_consumer` and its relocated installed-SDK counterpart
+create a separately owned native device, admit that exact context into RHI,
+produce an oriented four-color image, and sample its original native texture
+through independent Metal/Vulkan GPU commands. They destroy ordinary texture and
+device owners before verifying all sixteen consumer pixels, then prove balanced
+source release after consumer completion. The fixture includes no RHI-private
+headers. Unit tests cover mismatched logical device/queue, preserved outputs,
+source retention failure, multiple readers, graph/direct/transfer write exclusion,
+replacement, stale identities, GPU-loss status and deferred shutdown. Browser
+backends explicitly reject native sharing. Native CI additionally runs the Vulkan
+journey under validation layers; hardware/workload qualification remains R7 evidence.
+
+Thanks to The Qt Company for the native interface and QQuickWidget contracts,
+and to Khronos for
+[Vulkan synchronization and fence ordering](https://docs.vulkan.org/spec/latest/chapters/synchronization.html).
+The adopted bridge uses one serialized shared queue; generalized external memory
+and cross-queue synchronization are separate future profiles.

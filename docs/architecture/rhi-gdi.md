@@ -733,6 +733,11 @@ implement kernel artifacts/arguments/streams in its compute executor. There is
 no promise that a Slang raster package automatically becomes a CUDA kernel, or
 that CUDA and graphics workloads share storage merely by running on one GPU.
 
+The [native texture sharing contract](../development/fullscreen-rendering.md#native-texture-sharing)
+provides retained same-logical-device, same-queue color reads and admission of an
+existing Metal/Vulkan device. It is independent of external compute and does not
+complete cross-device external memory/semaphores or R14's multi-device scope.
+
 A later GDI external-compute node imports declared inputs/outputs and completion
 obligations. Native zero-copy interop is a separate bridge requiring matching
 physical-device identity, compatible export/import handle types, layout/format,

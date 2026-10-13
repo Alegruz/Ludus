@@ -1,8 +1,14 @@
 #pragma once
 #include "internal/measurement.h"
 #include "internal/raster.h"
+#include <ludus/graphics/rhi/native_interop.h>
 namespace ludus::graphics::rhi::reference
 {
+inline bool NativeAvailable = true, NativePending = false, NativeLost = false;
+inline RasterStatus NativePublishResult = RasterStatus::Ready;
+inline foundation::usize NativePublications = 0, NativeReleases = 0, NativeRetirements = 0;
+inline internal::StorageTable<bool> NativeReadReleased;
+inline foundation::uint32 NativeObjects[4]{};
 inline GpuTiming Timing;
 inline foundation::uint32 TimingLossToken = 0;
 inline RasterStatus TimingAdmission = RasterStatus::Ready;

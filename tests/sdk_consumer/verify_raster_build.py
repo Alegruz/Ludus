@@ -68,3 +68,41 @@ ludus_compile_shader(TARGET raster_consumer NAME raster RASTER SOURCE raster.sla
         failure=run([args.cmake,'--build',build],success=False)
         assert 'group/set zero' in failure or 'bounded profile' in failure or 'remapping' in failure, failure
     print('Installed portable raster: reflected stages, native draws, retained snapshots, rebuild and malformed binding rejection passed')
+
+
+def verify_native_interop(args, run, metal=False):
+    fixture = Path(__file__).parent
+    with tempfile.TemporaryDirectory(prefix='ludus native interop sdk-') as temporary:
+        source = Path(temporary) / 'source'
+        source.mkdir()
+        for name in ('native_interop.cpp', 'native_interop_fixture.h', 'native_interop_metal.mm',
+                     'native_interop_vulkan.cpp', 'native_interop.cmake'):
+            shutil.copy2(fixture / name, source / name)
+        (source / 'shaders').mkdir()
+        shutil.copy2(fixture / 'shaders/native_interop.slang', source / 'shaders/native_interop.slang')
+        (source / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.29)
+project(NativeInteropSdkContract LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(Ludus CONFIG REQUIRED COMPONENTS GraphicsRhi FoundationLogging)
+include(native_interop.cmake)
+ludus_add_native_interop_fixture(native_consumer "${CMAKE_CURRENT_SOURCE_DIR}")
+''')
+        build = Path(temporary) / 'build'
+        command = [args.cmake, '-S', source, '-B', build, '-G', 'Ninja',
+                   '-DCMAKE_MAKE_PROGRAM=' + args.ninja, '-DCMAKE_CXX_COMPILER=' + args.cxx,
+                   '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
+                   '-DCMAKE_PREFIX_PATH=' + str(Path(args.sdk).resolve()) + ';' + args.conan,
+                   '-DLUDUS_SLANG_COMPILER=' + args.slang]
+        if metal:
+            flags = '-stdlib=libc++ -nostdinc++ -isystem "' + args.libcxx + '"'
+            command += ['-DCMAKE_OBJCXX_COMPILER=' + args.cxx, '-DCMAKE_OSX_SYSROOT=' + args.sysroot,
+                        '-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0', '-DCMAKE_CXX_FLAGS=' + flags,
+                        '-DCMAKE_OBJCXX_FLAGS=' + flags]
+        else:
+            command += ['-DLUDUS_SPIRV_VALIDATOR=' + args.validator]
+        run(command)
+        run([args.cmake, '--build', build])
+        run([build / 'native_consumer'])
+    print('Installed native bridge: exact device, retained source, GPU sample and shutdown retirement passed')

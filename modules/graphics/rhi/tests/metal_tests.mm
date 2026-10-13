@@ -1,6 +1,7 @@
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/types.h>
 #include <ludus/graphics/rhi/measurement.h>
+#include <ludus/graphics/rhi/native_interop.h>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 #include <ludus/platform/base/window.h>
@@ -201,6 +202,51 @@ TEST_CASE("Metal presents through a borrowed Cocoa view and restores its layer",
         rhi::Shutdown();
         CHECK(view.wantsLayer == wantsLayer);
         CHECK(view.layer == previous);
+    }
+}
+
+TEST_CASE("Metal detaches a borrowed Cocoa view before retained device retirement", "[rhi][macos][cocoa][gpu]")
+{
+    if (std::getenv("LUDUS_TEST_COCOA") == nullptr)
+    {
+        SKIP("Set LUDUS_TEST_COCOA=1 with a WindowServer session");
+    }
+    @autoreleasepool
+    {
+        Guard guard;
+        RequireDevice();
+        rhi::Shutdown();
+        ludus::platform::WindowManager manager;
+        REQUIRE(manager.Initialize({}));
+        UniquePtr<ludus::platform::Window> window;
+        REQUIRE(manager.CreateWindow({ .Name = "Native bridge retirement", .Width = 160, .Height = 120 }, window));
+        struct LeaseGuard final
+        {
+            rhi::NativeDeviceLease Lease;
+            ~LeaseGuard() noexcept
+            {
+                rhi::Shutdown();
+                static_cast<void>(rhi::ReleaseNativeDevice(Lease));
+            }
+        } retained;
+        const auto native = window->GetNativeWindowInfo();
+        __weak NSView* borrowed = (__bridge NSView*)native.CocoaView;
+        const BOOL wantsLayer = borrowed.wantsLayer;
+        CALayer* previous = borrowed.layer;
+        rhi::DeviceHandle device;
+        rhi::SurfaceHandle surface;
+        REQUIRE(rhi::CreateDevice({}, native, {}, device, surface) == rhi::DeviceStatus::Ready);
+        REQUIRE(rhi::AcquireNativeDevice(device, retained.Lease) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::DestroyDevice(device) == rhi::DeviceStatus::Ready);
+        CHECK(borrowed.wantsLayer == wantsLayer);
+        CHECK(borrowed.layer == previous);
+        window.Reset();
+        rhi::NativeDeviceInfo info;
+        REQUIRE(rhi::GetNativeDeviceInfo(retained.Lease, info) == rhi::RasterStatus::Ready);
+        CHECK(info.Retiring);
+        CHECK(info.Identity.Device != nullptr);
+        REQUIRE(rhi::ReleaseNativeDevice(retained.Lease) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Start({}, {}) == rhi::StartStatus::Ready);
     }
 }
 

@@ -2,6 +2,7 @@
 #include <ludus/foundation/base/checked_integer.hpp>
 
 #include "internal/measurement.h"
+#include "internal/native_interop.h"
 
 #include <ludus/graphics/rhi/graph.h>
 
@@ -87,6 +88,7 @@ struct Record final
     uint32 Request = 0;
     uint32 Callbacks = 0;
     usize References = 0;
+    usize ExternalReads = 0;
     RasterStatus Status = RasterStatus::Failed;
     bool Published = false;
     bool InFrame = false;
@@ -2220,3 +2222,5 @@ GetTextureCpuContent(DeviceHandle device, TextureViewHandle handle, uint32 mip, 
     return CpuTextureContent(At(RasterKind::Texture, record->TextureSlot), record->View.BaseMip + mip, output);
 }
 } // namespace ludus::graphics::rhi
+
+#include "internal/native_interop_services.h"
