@@ -716,13 +716,36 @@ This first host profile requires macOS or Linux. Its source importer supports
 Modern Hall/staircase2's bounded PBRT/PLY/TGA
 subset, with grouped static room surfaces and emissive geometry. It is not a
 universal PBRT/glTF/OBJ importer. Unsupported features preserve the active scene.
-The native viewport selects CPU reference traversal explicitly and shows live
-aspect-preserving progressive output, at most 256 pixels on its longest edge
-and 64 samples, with no denoising. Orbit, pan and zoom restart the capture using
-the editor camera. World binding previews render into an owned GPU attachment
-and present asynchronously through the embedded widget; their longest edge is
-bounded to 1024 pixels. Neither path creates a separate native preview window. Browser scene import
-and a game's automatic Play/load integration are outside this initial profile.
+The embedded native viewport renders the selected World's current snapshot and
+camera through the GPU raster renderer, bounded to 1024 pixels on its longest
+edge. Valid field drafts, orbit, pan, zoom and resize update the GPU view. Both
+project binding previews and imported lit scenes share their original GPU display
+textures with Qt; presentation performs no CPU pixel readback or image upload.
+The renderer tone-maps and encodes its RGBA8 display image once. Unlit textured
+bindings use a linear RGBA8 intermediate; imported lit scenes prefer HDR when
+available.
+
+The raster profile uses authored material emission and the renderer's admitted
+lighting. It does **not** infer indirect illumination from emissive geometry or
+invent editor lights: imported scenes lit solely by emitting meshes can have dark
+non-emissive surfaces. This viewport is an interactive raster view, not the old
+64-sample CPU reference capture. Optional GPU path tracing belongs to the
+renderer API and is not required for ordinary viewport navigation.
+
+Qt Quick's native surface is embedded in the World splitter and uses the basic
+owner-thread render loop. The adapter admits Qt's exact device and queue, imports
+its RGBA8 texture, and retires replaced reads only after Qt submits the consumer
+frame. Resize, scene replacement, Stop and source invalidation release texture
+leases before renderer/device cleanup. Camera and splitter restoration keep the
+existing project-local preferences. The native child surface follows Qt window
+container stacking rules; widgets cannot overlay it arbitrarily.
+
+Metal sharing requires Qt 6.4+ with Qt Quick and the Cocoa display plugin. Vulkan
+sharing requires Qt 6.6+ with Qt Quick and an X11/Wayland display; older Qt builds
+or offscreen plugins keep document editing and asset validation available without
+claiming a GPU preview or falling back to CPU readback. Lightweight builds can
+still disable native preview explicitly. Browser scene import and a game's
+automatic Play/load integration are outside this initial profile.
 
 Keep `assets/` and `.world.json` documents with the project. Retain legacy
 `.lulevel` files when using the scene CLI. They contain the catalog,

@@ -39,7 +39,7 @@ class NativePrerequisiteTests(unittest.TestCase):
                 result = subprocess.run(["/bin/bash", "-e", "-c", command], env=environment,
                                         capture_output=True, text=True, check=True)
                 arguments = result.stdout.splitlines()
-                for package in ("qt6-base-dev", "qt6-wayland", "libvulkan1", "mesa-vulkan-drivers"):
+                for package in ("qt6-base-dev", "qt6-declarative-dev", "qt6-wayland", "libvulkan1", "mesa-vulkan-drivers"):
                     self.assertEqual(package in arguments, editor == "true", package)
 
     @unittest.skipUnless(shutil.which("timeout"), "GNU timeout is provided by the Linux CI runner")

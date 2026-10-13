@@ -12,7 +12,7 @@ runs:
   steps:
     - name: Install upstream Clang 18 and native prerequisites
       shell: bash
-      run: brew install llvm@18 qtbase ccache
+      run: brew install llvm@18 qtbase qtdeclarative ccache
     # Match Linux cache policy: locked dependency identities and rolling compiler
     # snapshots. Do not cache CMake trees, SDKs, shims or generated preset files.
     - name: Restore locked macOS dependencies

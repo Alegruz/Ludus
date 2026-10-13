@@ -610,7 +610,7 @@ TEST_CASE("Embedded World preview follows valid inspector drafts without committ
     auto* panel = world.findChild<RenderPanel*>();
     QSignalSpy loaded(panel, &RenderPanel::Loaded);
     REQUIRE(loaded.wait(5000));
-    auto* viewport = world.findChild<QLabel*>(QStringLiteral("worldViewport"));
+    QWidget* viewport = world.findChild<QWidget*>(QStringLiteral("worldViewport"));
     REQUIRE(viewport != nullptr);
     CHECK(viewport->parentWidget()->objectName() == QStringLiteral("worldSplitter"));
     CHECK_FALSE(viewport->isWindow());

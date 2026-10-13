@@ -120,7 +120,6 @@ private:
     QJsonObject Level_, Candidate_, CandidateRevisions_;
     QJsonValue CatalogExpected_;
     QString Source_;
-    QImage CandidateFrame_;
     bool PublishingCatalog_ = false;
     QByteArray Output_;
     QTemporaryDir Scratch_;

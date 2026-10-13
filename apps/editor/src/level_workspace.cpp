@@ -50,7 +50,6 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     Objects_->setObjectName(QStringLiteral("levelObjects"));
     body->addWidget(Objects_, 1);
     Viewport_ = new PreviewViewport(&Preview_, this, false);
-    Viewport_->setAlignment(Qt::AlignCenter);
 
     Viewport_->setObjectName(QStringLiteral("levelViewport"));
     body->addWidget(Viewport_, 2);
@@ -143,10 +142,9 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
             Rollback(error);
         }
     });
-    connect(&Preview_, &RenderPreview::FrameReady, this, [this](const QImage& frame) {
+    connect(&Preview_, &RenderPreview::FrameReady, this, [this]() {
         if (PublishingCatalog_)
         {
-            CandidateFrame_ = frame;
             return;
         }
         if (AwaitingViewport_)
@@ -154,13 +152,12 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
             AwaitingViewport_ = false;
             if (Operation_ == QStringLiteral("import"))
             {
-                CandidateFrame_ = frame;
                 CommitImport();
                 return;
             }
             CommitCandidate();
         }
-        Viewport_->ShowFrame(frame);
+        Viewport_->ShowFrame();
     });
 #if !defined(Q_OS_WASM)
     connect(&Process_, &QProcess::readyReadStandardOutput, this, [this]() {
@@ -442,14 +439,13 @@ void LevelWorkspace::Completed()
             result.value(QStringLiteral("committed")).toBool() && Process_.exitCode() == 0)
         {
             Cancelling_ = false; // Publication already crossed its atomic commit point.
-            Viewport_->ShowFrame(CandidateFrame_);
+            Viewport_->ShowFrame();
             CommitCandidate();
         }
         else
         {
             Rollback(result.value(QStringLiteral("message")).toString());
         }
-        CandidateFrame_ = {};
         return;
     }
     if (Cancelling_ || Process_.exitCode() != 0 || !result.value(QStringLiteral("ok")).toBool() ||
@@ -640,6 +636,18 @@ void LevelWorkspace::Publish()
         return;
     }
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (PreviewViewport::CanPresent() == false)
+    {
+        if (Operation_ == QStringLiteral("import"))
+        {
+            CommitImport();
+        }
+        else
+        {
+            CommitCandidate();
+        }
+        return;
+    }
     AwaitingViewport_ = true;
     if (!Preview_.Start())
     {
