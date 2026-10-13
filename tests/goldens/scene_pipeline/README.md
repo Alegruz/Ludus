@@ -13,6 +13,13 @@ have been removed; the files here are frozen and are verified only by native tes
 | `expected/files/editor/` | `scene_editor.operate` responses for import → commit-import → save → open → assemble (renamed object) → save, the candidate catalog, and `scenes.json` with the digest of each assembled scene. |
 | `licensed/staircase2.json` | Digest-only goldens for the licensed staircase2 scene. Not checked in CI. |
 
+## Texture cooker goldens
+
+`cmake/shaders/cook_texture.py` is still Python until it is ported, so
+`test_texture_goldens.py` (ctest `ludus_texture_goldens`) re-cooks the texture cases and
+checks `expected/files/texture/` byte for byte. It needs Python 3.12 or later and is
+deleted together with the texture cooker once the C++ port checks the same files.
+
 ## Native consumers
 
 - `ludus_scene_cook_tests` cooks `source/` and checks `cook/scene.luscn` (digest and

@@ -357,7 +357,7 @@ struct EditorSceneResult final
 /// writers are serialised by the project lock.
 /// @param request Operation and inputs.
 /// @param options Cancellation, UUID source and provenance override.
-/// @param outResult Replaced on success.
+/// @param outResult Replaced on success; left unchanged on failure.
 /// @param outError Set on failure.
 /// @return true on success.
 [[nodiscard]] bool OperateEditorScene(const EditorSceneRequest& request,

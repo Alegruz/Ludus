@@ -3564,9 +3564,13 @@ bool OperateEditorScene(const EditorSceneRequest& request,
                         AssetError& outError) noexcept
 {
     Failure failure(outError);
-    outResult.Response.Clear();
-    outResult.Scene.Clear();
-    outResult.Catalog.Clear();
-    return OperateEditorSceneDocuments(request, options, outResult, failure);
+    // Stage into a local result so a failure leaves the caller's previous result untouched.
+    EditorSceneResult staged;
+    if (OperateEditorSceneDocuments(request, options, staged, failure) == false)
+    {
+        return false;
+    }
+    outResult = std::move(staged);
+    return true;
 }
 } // namespace ludus::content::scene_cook
