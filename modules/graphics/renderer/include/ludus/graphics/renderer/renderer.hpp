@@ -107,12 +107,18 @@ struct MeshDescription final
     /// Requires normals; finite nonzero XYZ is normalized/orthogonalized on copy.
     /// W=0 explicitly marks an unavailable vertex tangent and selects UV fallback.
     /// An empty view keeps the UV-derived frame. Mirrored object transforms adjust handedness.
+    // Explicit default preserves partial aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     ludus::foundation::BorrowedView<const ludus::foundation::math::Vector4> Tangents{};
     /// Optional linear RGBA multiplier [0,1], one per vertex; an empty view supplies white.
     /// Used by authored material programs, including alpha acceptance.
+    // Explicit default preserves partial aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     ludus::foundation::BorrowedView<const ludus::foundation::math::Vector4> Colors{};
     /// Optional second material UV set, one per vertex; an empty view copies Texcoords.
     /// Independent of BakeTexcoords; authored material programs select UV0 or UV1.
+    // Explicit default preserves partial aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     ludus::foundation::BorrowedView<const ludus::foundation::math::Vector2> MaterialTexcoords1{};
 };
 /// Ordinary scene values; renderer has no ECS, gameplay camera or UI dependency.
