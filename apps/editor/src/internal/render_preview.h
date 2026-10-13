@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ludus/foundation/base/compiler.h>
 #include <ludus/foundation/base/types.h>
 
 #include <ludus/foundation/base/pointer.hpp>
@@ -45,7 +46,7 @@ public:
                   bool reference);
     void FrameAll() noexcept;
     void SetShading(PreviewShading shading);
-    [[nodiscard]] PreviewShading GetShading() const noexcept
+    [[nodiscard]] LUDUS_INLINE PreviewShading GetShading() const noexcept
     {
         return mShading;
     }
@@ -56,31 +57,31 @@ public:
     [[nodiscard]] QJsonObject Navigation() const;
     void RestoreNavigation(const QJsonObject& state);
     void Tick();
-    [[nodiscard]] bool Running() const noexcept
+    [[nodiscard]] LUDUS_INLINE bool Running() const noexcept
     {
         return OwnsDevice_ || mIsStarting;
     }
-    [[nodiscard]] foundation::uint64 Frames() const noexcept
+    [[nodiscard]] LUDUS_INLINE foundation::uint64 Frames() const noexcept
     {
         return Frames_;
     }
-    [[nodiscard]] QString Status() const
+    [[nodiscard]] LUDUS_INLINE QString Status() const
     {
         return Status_;
     }
-    [[nodiscard]] const RenderScene& Scene() const noexcept
+    [[nodiscard]] LUDUS_INLINE const RenderScene& Scene() const noexcept
     {
         return Scene_;
     }
-    [[nodiscard]] graphics::renderer::ViewDescription ViewDescription() const noexcept
+    [[nodiscard]] LUDUS_INLINE graphics::renderer::ViewDescription ViewDescription() const noexcept
     {
         return Description_;
     }
-    [[nodiscard]] graphics::renderer::ViewReport Report() const noexcept
+    [[nodiscard]] LUDUS_INLINE graphics::renderer::ViewReport Report() const noexcept
     {
         return Report_;
     }
-    [[nodiscard]] bool FrameAvailable() const noexcept
+    [[nodiscard]] LUDUS_INLINE bool FrameAvailable() const noexcept
     {
         return mHasFrame;
     }
@@ -89,7 +90,7 @@ public:
                                  graphics::renderer::ViewportImage& outImage) noexcept;
     void ReleaseFrame(graphics::renderer::ViewportFrame& inoutFrame) noexcept;
     [[nodiscard]] graphics::rhi::RasterStatus PinDevice(graphics::rhi::NativeDeviceLease& outLease) noexcept;
-    [[nodiscard]] bool HasPendingFrame() const noexcept
+    [[nodiscard]] LUDUS_INLINE bool HasPendingFrame() const noexcept
     {
         return mHasPendingFrame;
     }
@@ -103,7 +104,7 @@ Q_SIGNALS:
     void Failed(const QString& error);
 
 private:
-    [[nodiscard]] bool usesLitMaterials() const noexcept
+    [[nodiscard]] LUDUS_INLINE bool usesLitMaterials() const noexcept
     {
         return Scene_.Lit == true && mShading != PreviewShading::Albedo;
     }
