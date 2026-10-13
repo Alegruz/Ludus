@@ -558,12 +558,12 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
             progress.Report = [](void* context, std::string_view stage) noexcept {
                 LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
                 const QString text = DescribeStage(stage);
-                if (!text.isEmpty())
+                if (text.isEmpty() == false)
                 {
                     QMetaObject::invokeMethod(
                         self,
                         [self, text]() {
-                            if (self->Busy_ && !self->Cancelling_)
+                            if (self->Busy_ == true && self->Cancelling_ == false)
                             {
                                 self->Status_->setText(text);
                             }
