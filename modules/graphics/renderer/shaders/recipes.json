@@ -1,0 +1,81 @@
+{
+  "renderer_flat": {
+    "source": "renderer_flat.slang",
+    "vertex": "vertexMain",
+    "fragment": "fragmentMain"
+  },
+  "renderer_composite": {
+    "source": "renderer_composite.slang",
+    "vertex": "vertexMain",
+    "fragment": "fragmentMain"
+  },
+  "renderer_overlay": {
+    "source": "renderer_overlay.slang",
+    "vertex": "vertexMain",
+    "fragment": "fragmentMain"
+  },
+  "renderer_material": {
+    "source": "renderer_material.slang",
+    "vertex": "vertexMain",
+    "fragment": "fragmentMain"
+  },
+  "renderer_shadow": {
+    "source": "renderer_shadow.slang",
+    "vertex": "vertexMain",
+    "fragment": "fragmentMain"
+  },
+  "renderer_output": {
+    "source": "renderer_output.slang",
+    "vertex": "vertexMain",
+    "fragment": "fragmentMain"
+  },
+  "renderer_lit": {
+    "source": "renderer_lit.slang",
+    "vertex": "VertexMain",
+    "fragment": "FragmentMain"
+  },
+  "renderer_lit_shadow": {
+    "source": "renderer_lit.slang",
+    "vertex": "VertexMain",
+    "fragment": "ShadowMain"
+  },
+  "renderer_clustered": {
+    "source": "renderer_clustered.slang",
+    "vertex": "VertexMain",
+    "fragment": "FragmentMain"
+  },
+  "renderer_clustered_shadow": {
+    "source": "renderer_clustered.slang",
+    "vertex": "VertexMain",
+    "fragment": "ShadowMain"
+  },
+  "renderer_surface": {
+    "source": "renderer_surface.slang",
+    "vertex": "VertexMain",
+    "fragment": "FragmentMain"
+  },
+  "renderer_surface_shadow": {
+    "source": "renderer_surface.slang",
+    "vertex": "VertexMain",
+    "fragment": "ShadowMain"
+  },
+  "renderer_clustered_surface": {
+    "source": "renderer_clustered_surface.slang",
+    "vertex": "VertexMain",
+    "fragment": "FragmentMain"
+  },
+  "renderer_clustered_surface_shadow": {
+    "source": "renderer_clustered_surface.slang",
+    "vertex": "VertexMain",
+    "fragment": "ShadowMain"
+  },
+  "renderer_gpu_preview_image": {
+    "source": "renderer_gpu_preview_image.slang",
+    "vertex": "VertexMain",
+    "fragment": "FragmentMain"
+  },
+  "renderer_gpu_preview": {
+    "source": "renderer_gpu_preview.slang",
+    "compute": "ComputeMain"
+  }
+}

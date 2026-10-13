@@ -317,3 +317,14 @@ encoded emitter fixture with no added lights and verifies the expected display
 pixels. Dense-scene accuracy and additional GPU backends require separate
 qualification. See the [GPU preview contract](../architecture/renderer-systems.md#gpu-resident-progressive-preview)
 for budgets, capability rejection, ownership and external-consumer requirements.
+
+## Surface fidelity profile
+
+The [material and lighting fidelity contract](../architecture/renderer-systems.md#material-and-lighting-fidelity)
+extends renderer-authored materials with a packed linear normal/roughness/metallic
+map, and admits authored analytic lights in GPU reference rendering. The current
+LUSCN scene fixture still supplies its declared constant metallic/roughness and
+base-color textures; this renderer change does not reinterpret source PBRT materials
+or add map fields to the interchange format. Captures produced now use reference
+profile version 2. Historical evidence above retains its recorded version;
+acceptance compares captures from the same profile and current binary.

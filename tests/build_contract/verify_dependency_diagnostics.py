@@ -21,7 +21,7 @@ class DependencyDiagnosticsTests(unittest.TestCase):
         self.root.mkdir()
         self.cmake = self.root / "installed SDK/cmake"
         self.cmake.mkdir(parents=True)
-        for name in ("LudusDependencies", "LudusShaders", "LudusReflection",
+        for name in ("LudusDependencies", "LudusShaders", "LudusRendererShaders", "LudusReflection",
                      "EngineSetupPreflight", "EngineDependencyPreflight", "LudusBehavior", "LuauProfile"):
             shutil.copy2(SOURCE / f"cmake/{name}.cmake", self.cmake)
         self.shader = self.root / "sample.slang"

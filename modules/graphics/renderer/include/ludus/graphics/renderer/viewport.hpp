@@ -59,11 +59,18 @@ public:
                                                ludus::foundation::uint32 height,
                                                ludus::foundation::float32 exposure = 1,
                                                ViewportColorMode colorMode = ViewportColorMode::PreferHdr) noexcept;
-    /// Poll setup and producer completion without waiting or reading GPU memory.
+    /// Poll setup/producer completion and publish a pending view only when Ready.
+    /// A failed candidate is discarded, preserving the prior drawable view.
+    /// Returns that failure once; a later poll may use the preserved view.
+    /// No waiting or GPU-memory readback.
     [[nodiscard]] rhi::RasterStatus Poll() noexcept;
     /// Replace the current extracted snapshot/camera atomically. Snapshot contents
     /// are retained by a prepared view; the caller may release the snapshot after
-    /// Ready/Pending. Failure preserves the prior view and report. No PT/BVH setup.
+    /// Ready/Pending. Pending retains the prior drawable view until Poll observes
+    /// successful preparation; another accepted Update supersedes the pending candidate.
+    /// Report describes the accepted candidate (including Pending), not the last
+    /// presented image. Rejection preserves the prior view, pending candidate and
+    /// report. No PT/BVH setup.
     [[nodiscard]] rhi::RasterStatus Update(Snapshot snapshot, const ViewDescription& view, ViewReport& report) noexcept;
     /// Render the latest Ready view into an unleased display image. Closed frame
     /// required; completion starts null. NotReady applies producer/consumer

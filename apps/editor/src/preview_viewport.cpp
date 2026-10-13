@@ -106,7 +106,8 @@ struct PreviewViewport::State final
     rhi::NativeDeviceLease DeviceLease{};
     rhi::NativeDeviceInfo DeviceInfo{};
     Frame Frames[2]{};
-    int32 Active = -1, Pending = -1;
+    int32 Active = -1;
+    int32 Pending = -1;
     uint32 SourcePins = 0;
     bool HasDeviceLease = false;
     bool IsDestroyingWindow = false;

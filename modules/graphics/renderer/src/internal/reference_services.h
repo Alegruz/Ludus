@@ -15,6 +15,19 @@ namespace
 using internal::ReferenceJob;
 using internal::ReferenceStage;
 using internal::ReferenceTriangle;
+// Padding-free fingerprint schema: binary32/u32 = 4 bytes, u64 = 8 bytes.
+// Triangle: positions/normals, UVs, geometric normal/error, area and two IDs.
+// Instance: source ID, row pitch/hash, 14 scalars and seven enum/image words.
+// Map extension: pitch/hash, normal strength, tag/format/dimensions/reserved.
+// Light: source ID/kind, RGB/intensity, position/direction/range/cone scalars.
+constexpr usize FINGERPRINT_TRIANGLE_BYTES = sizeof(float32) * 3 * 3 * 2 + sizeof(float32) * 3 * 2 +
+                                             sizeof(float32) * 2 * 3 + sizeof(float32) + 2 * sizeof(uint32);
+constexpr usize FINGERPRINT_INSTANCE_BYTES = 4 * sizeof(uint64) + 14 * sizeof(float32) + 7 * sizeof(uint32);
+constexpr usize FINGERPRINT_SURFACE_MAP_BYTES = 3 * sizeof(uint64) + sizeof(float32) + 5 * sizeof(uint32);
+constexpr usize FINGERPRINT_LIGHT_BYTES = sizeof(uint64) + sizeof(uint32) + 13 * sizeof(float32);
+constexpr usize FINGERPRINT_ENVIRONMENT_BYTES = 3 * sizeof(float32);
+constexpr uint32 FINGERPRINT_SURFACE_MAP_TAG = 0x53555246; // Numeric SURF tag; encoded little-endian.
+
 bool SameReferenceLight(const DirectLight& a, const DirectLight& b) noexcept
 {
     return a.SourceId == b.SourceId && a.Kind == b.Kind && a.Color == b.Color && a.Intensity == b.Intensity &&
@@ -72,8 +85,16 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
 {
     // One bounded cold scratch stream, serialized without padding or host byte order.
     // Hashes are diagnostics; exact retained identities/parameters control resets.
-    const usize triangleBytes = job.Scene.Triangles.GetSize() * 132;
-    usize bytes = triangleBytes + job.Scene.InstanceCount * 116 + job.Description.LightCount * 64 + 12;
+    const usize triangleBytes = job.Scene.Triangles.GetSize() * FINGERPRINT_TRIANGLE_BYTES;
+    usize bytes = triangleBytes + job.Scene.InstanceCount * FINGERPRINT_INSTANCE_BYTES +
+                  job.Description.LightCount * FINGERPRINT_LIGHT_BYTES + FINGERPRINT_ENVIRONMENT_BYTES;
+    for (usize i = 0; i < job.Scene.InstanceCount; ++i)
+    {
+        if (job.Scene.Instances[i].Surface->HasSurfaceMap)
+        {
+            bytes += FINGERPRINT_SURFACE_MAP_BYTES;
+        }
+    }
     if (bytes > budget)
     {
         return false;
@@ -149,6 +170,23 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         offset += 8;
         Put64(stream.GetData() + offset, textureFingerprint.High);
         offset += 8;
+        if (surface.HasSurfaceMap)
+        {
+            word(FINGERPRINT_SURFACE_MAP_TAG);
+            scalar(surface.NormalScale);
+            word(static_cast<uint32>(instance.SurfaceMap.Format));
+            word(instance.SurfaceMap.Width);
+            word(instance.SurfaceMap.Height);
+            Put64(stream.GetData() + offset, instance.SurfaceMap.RowPitch);
+            offset += 8;
+            const foundation::Fingerprint128 fingerprint =
+                foundation::StableFingerprint128({instance.SurfaceMap.Bytes, instance.SurfaceMap.Size});
+            Put64(stream.GetData() + offset, fingerprint.Low);
+            offset += 8;
+            Put64(stream.GetData() + offset, fingerprint.High);
+            offset += 8;
+            word(0);
+        }
     }
     for (usize i = 0; i < job.Description.LightCount; ++i)
     {
@@ -165,7 +203,11 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         scalar(light.OuterCos);
     }
     vector(job.Description.Environment);
-    const auto fingerprint = foundation::StableFingerprint128({stream.GetData(), offset});
+    if (offset != bytes)
+    {
+        return false;
+    }
+    const foundation::Fingerprint128 fingerprint = foundation::StableFingerprint128({stream.GetData(), offset});
     job.Scene.FingerprintLow = fingerprint.Low;
     job.Scene.FingerprintHigh = fingerprint.High;
     return true;
@@ -295,6 +337,8 @@ Status Renderer::State::PrepareReferenceSurface(const MaterialDescription& surfa
     data->AlphaCutoff = surface.AlphaCutoff;
     data->Emission = lighting->Emission;
     data->HasTexture = !rhi::IsNull(surface.Texture);
+    data->HasSurfaceMap = rhi::IsNull(lighting->SurfaceMap) == false;
+    data->NormalScale = lighting->NormalScale;
     output.Reset(data);
     return Status::Ready;
 }
@@ -435,7 +479,10 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         return status;
     }
     const auto& snapshot = SnapshotRecords[snapshotSlot];
-    usize triangles = 0, instances = 0, emitters = 0;
+    usize triangles = 0;
+    usize instances = 0;
+    usize emitters = 0;
+    usize surfaceMaps = 0;
     uint64 alphaScalars = 0;
     for (usize i = 0; i < snapshot.Count; ++i)
     {
@@ -495,6 +542,20 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
                 alphaScalars += uint64(texture.Width) * texture.Height;
             }
         }
+        if (material.Reference->HasSurfaceMap)
+        {
+            ++surfaceMaps;
+            rhi::TextureCpuContent texture;
+            status = rhi::GetTextureCpuContent(Device, material.SurfaceTexture, description.TextureMip, texture);
+            if (status != Status::Ready)
+            {
+                return status;
+            }
+            if (texture.Format != rhi::RasterFormat::Rgba8Unorm)
+            {
+                return Status::Unsupported;
+            }
+        }
         ++instances;
     }
     const usize pixels = gpuSetup ? 0 : usize(description.Width) * description.Height;
@@ -506,14 +567,18 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         uint64(pixels) * sizeof(internal::ReferenceAccumulator) + uint64(tile) * sizeof(internal::ReferencePath) +
         uint64(tile) * 2 * (sizeof(rhi::RayInput) + sizeof(rhi::RayResult)) +
         uint64(triangles) * sizeof(ReferenceTriangle) + bvhBytes + uint64(emitters) * sizeof(uint32);
-    const uint64 signatureBytes = uint64(triangles) * 132 + uint64(instances) * 116 + uint64(lights.Count) * 64 + 12;
+    const uint64 signatureBytes = uint64(triangles) * FINGERPRINT_TRIANGLE_BYTES +
+                                  uint64(instances) * FINGERPRINT_INSTANCE_BYTES +
+                                  uint64(surfaceMaps) * FINGERPRINT_SURFACE_MAP_BYTES +
+                                  uint64(lights.Count) * FINGERPRINT_LIGHT_BYTES + FINGERPRINT_ENVIRONMENT_BYTES;
     const uint64 nativeSetup =
         oracle ? 0
                : uint64(instances) * (sizeof(rhi::RayInstanceDescription) + sizeof(Array<float32>)) +
                      alphaScalars * sizeof(float32);
     const uint64 transientWide =
         math::Max(signatureBytes, math::Max(nativeSetup, oracle ? uint64(triangles) * sizeof(uint32) : uint64{0}));
-    usize fixed = 0, transient = 0;
+    usize fixed = 0;
+    usize transient = 0;
     // Bounded source counts fit uint64; convert only at the wasm32 allocation boundary.
     if (!foundation::TryIntegerCast(fixedWide, fixed) || !foundation::TryIntegerCast(transientWide, transient))
     {
@@ -570,6 +635,15 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         if (instance.Surface->HasTexture)
         {
             status = rhi::GetTextureCpuContent(Device, material.Texture, description.TextureMip, instance.Texture);
+            if (status != Status::Ready)
+            {
+                return status;
+            }
+        }
+        if (instance.Surface->HasSurfaceMap)
+        {
+            status =
+                rhi::GetTextureCpuContent(Device, material.SurfaceTexture, description.TextureMip, instance.SurfaceMap);
             if (status != Status::Ready)
             {
                 return status;
@@ -636,8 +710,9 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
             const auto areaVector = math::Cross(triangle.Positions[1] - triangle.Positions[0],
                                                 triangle.Positions[2] - triangle.Positions[0]);
             triangle.Area = math::Length(areaVector) * 0.5F;
-            const auto i0 = mesh.Indices[primitive * 3], i1 = mesh.Indices[primitive * 3 + 1],
-                       i2 = mesh.Indices[primitive * 3 + 2];
+            const uint32 i0 = mesh.Indices[primitive * 3];
+            const uint32 i1 = mesh.Indices[primitive * 3 + 1];
+            const uint32 i2 = mesh.Indices[primitive * 3 + 2];
             const auto localNormal =
                 math::Cross(mesh.Positions[i1] - mesh.Positions[i0], mesh.Positions[i2] - mesh.Positions[i0]);
             triangle.GeometricNormal = internal::ReferenceNormalize(normalMatrix * localNormal);
@@ -910,8 +985,9 @@ Status Renderer::CopyReferencePixels(ReferenceCapture handle, ReferencePixel* ou
     {
         const auto& p = pixels[i];
         const auto weight = p.Samples == 0 ? 0.0F : 1 / float32(p.Samples);
-        const auto emission = p.Emission.Value * weight, direct = p.Direct.Value * weight,
-                   indirect = p.Indirect.Value * weight;
+        const math::Vector3 emission = p.Emission.Value * weight;
+        const math::Vector3 direct = p.Direct.Value * weight;
+        const math::Vector3 indirect = p.Indirect.Value * weight;
         output[i] = {emission + direct + indirect, emission, direct, indirect, p.Samples};
     }
     return Status::Ready;
@@ -925,7 +1001,8 @@ namespace
 Status
 ReferenceQuery(ReferenceJob& job, rhi::RayQueryProgram program, ReferenceTraversal traversal, usize rayBudget) noexcept
 {
-    uint64 closest = 0, visibility = 0;
+    uint64 closest = 0;
+    uint64 visibility = 0;
     for (usize i = 0; i < job.QueryCount; ++i)
     {
         const auto origin = internal::ReferenceOrigin(job.Rays[i]);
@@ -1314,7 +1391,8 @@ Renderer::EncodeReferenceHdr(ReferenceCapture handle, uint8* output, usize capac
         return Status::InvalidHandle;
     }
     const auto& job = *record->Job;
-    constexpr usize headerBytes = 256, pixelBytes = 16;
+    constexpr usize headerBytes = 256;
+    constexpr usize pixelBytes = 16;
     if (job.Pixels.GetSize() > (~usize{0} - headerBytes) / pixelBytes)
     {
         return Status::CapacityExceeded;

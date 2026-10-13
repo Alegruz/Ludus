@@ -344,7 +344,7 @@ unpublished candidates explicitly. A program's null texture uses its ready white
 fallback; a null scene surface uses L0's magenta flat/error material. Opaque and
 masked materials use the scene layer and write depth; Painter uses the Overlay
 layer and premultiplies straight color/texture alpha exactly once. This remains an
-unlit schema; the lit baseline is described below. Tangent-space normal maps remain planned.
+unlit schema; the lit baseline is described below. Packed tangent-space normal detail is available in the opt-in [surface fidelity profile](#material-and-lighting-fidelity).
 
 The raw texture JSON contains integer `width`, `height` (1..4096), `format`
 (`R8Unorm`, `Rg8Unorm`, `Rgba8Unorm`, `Rgba8Srgb`), `semantic` (`color`, `data`,
@@ -410,7 +410,7 @@ creates bindings, allocates scene storage or changes an accepted material versio
 
 Initialize flat rendering and views, then call `InitializeLighting(outputVertex,
 outputFragment, flatShadowFragment)` and poll `PollLighting`. Cook the lit source
-with `fragmentMain` and again with `shadowMain`, and pass their vertex, lighting
+with `FragmentMain` and again with `ShadowMain`, and pass their vertex, lighting
 fragment and masked-shadow fragment descriptions to `PrewarmLitProgram`.
 `GetStatus(program)` completes the legal depth/painter variants for linear RGBA8,
 optional RGBA16F, and conventional-depth masked shadows. Opaque/masked lit materials
@@ -437,7 +437,7 @@ constant environment irradiance/radiance and the L3 base texture/tint/alpha sche
 Linear emission/environment components are bounded to 10000. The baseline uses
 single-scatter isotropic GGX, height-correlated Smith visibility, Schlick Fresnel,
 a fixed dielectric F0 of 0.04 and Fresnel-weighted Lambert diffuse. Metallic removes
-diffuse. There is no multiscatter compensation, normal-map/tangent profile, BRDF
+diffuse. The baseline has no multiscatter compensation, normal-map/tangent profile, BRDF
 LUT or environment convolution. Constant specular radiance uses a declared Fresnel
 approximation; it is a deterministic fallback, not a full image-based-lighting bake.
 `EvaluateLitBrdf` is an allocation-free independent CPU reference returning BRDF ×
@@ -564,11 +564,24 @@ Native parallel recording and compute assignment remain optional future work.
 
 ### Clustered lighting and inspection
 
-Cook `renderer_clustered.slang` with `vertexMain`/`fragmentMain` and a separate
-`vertexMain`/`shadowMain` artifact, then use `PrewarmLitProgram`. When cooking,
-list `renderer_lit.slang` in `ludus_compile_shader(DEPENDS ...)`: the clustered
-source includes the existing BRDF/alpha/bake/shadow implementation. The installed
-SDK [scaling consumer](../../tests/sdk_consumer/renderer_scaling.cpp) demonstrates
+Cook the centralized `renderer_clustered` and `renderer_clustered_shadow`
+recipes, then use `PrewarmLitProgram`:
+
+```cmake
+ludus_compile_renderer_shaders(TARGET game SHADERS
+    renderer_clustered renderer_clustered_shadow)
+```
+
+The renderer-owned [recipe manifest](../../modules/graphics/renderer/shaders/recipes.json)
+and separate installed `LudusRendererShaders.cmake` helper own source paths,
+entry points, and FoundationMath/RHI include roots. Engine targets, editor,
+installed SDK consumers and reference-scene use the same recipes. Unknown or
+repeated recipes fail configure; changes to the manifest trigger reconfigure,
+and the offline compiler's depfile tracks included Slang sources. Custom shaders
+still use `ludus_compile_shader`; neither helper acquires tools or compiles at
+runtime. Recipes preserve artifact names and shader layouts, including
+`VertexMain`/`ShadowMain` for clustered shadows. The installed SDK
+[scaling consumer](../../tests/sdk_consumer/renderer_scaling.cpp) demonstrates
 this sequence without private renderer access.
 
 Set `LitMaterialDescription::Clusters` to a borrowed `LightClusterDescription`;
@@ -1223,8 +1236,10 @@ path-tracing performance claim. It never hides a wait/readback in raster submiss
 The profile uses L4's isotropic single-scattering GGX, correlated Smith, Schlick
 Fresnel and Fresnel-weighted Lambert, visible-GGX/cosine mixture sampling with
 explicit null events, one uniformly selected analytic/triangle/environment light
-proposal, power-heuristic MIS and compensated roulette. Point/spot range windows
-match L4. Emission is two-sided; reflection is restricted to the geometric and
+proposal, power-heuristic MIS and compensated roulette. Profile version 2 matches L4 point/spot range windows, the squared smooth cone
+and the 1e-4 square-meter near-light attenuation floor. Version 1 used a different
+spot interpolation and unbounded nonzero-distance attenuation; old captures retain
+that profile identity and cannot be compared as the same integral. Emission is two-sided; reflection is restricted to the geometric and
 shading upper hemispheres. Textured RGB decodes sRGB before fixed-mip filtering;
 alpha stays linear. The capture mip overrides per-material LOD/mip filtering
 and LOD clamps. There is no transmission, volume, spectral transport, coat,
@@ -1743,7 +1758,7 @@ The retained-input setup machinery is shared with RT1; selecting its CPU-oracle
 input retention internally does not execute its CPU tracing loop.
 
 A compute dispatch performs closest/visibility BVH queries, opacity filtering,
-RGB GGX/Lambert sampling, emissive-triangle/constant-environment sampling, MIS,
+RGB GGX/Lambert sampling, analytic-light/emissive-triangle/constant-environment sampling, MIS,
 roulette and compensated accumulation. It uses RT1's addressed Philox dimensions
 and world-space origin error allowance. A second ordered GDI pass draws pixel
 quads using compute-written per-instance RGB/pixel-index records into an RHI
@@ -1757,8 +1772,9 @@ reports completed dispatches, not observed valid sample counts or convergence.
 The explicit quality profile admits at most four live jobs, 4096 requested
 samples, depth eight, the reference secondary-distance/camera bounds and a fixed
 texture mip. It has no denoising, motion history, transmission, spectral transport,
-coating model or native acceleration structure. Analytic lights and baked/shadow
-atlas inputs reject with `Unsupported`; lighting comes from the admitted
+coating model or native acceleration structure. Up to 128 authored directional,
+point and spot lights are admitted without dropping entries. Baked/shadow atlas
+inputs reject with `Unsupported`; lighting comes from the admitted
 emissive surfaces and caller-supplied constant environment. This is a finite-depth
 preview of the prepared RGB profile, not general PBRT fidelity. FP32 BVH triangle
 intersection remains subject to thin/near-edge precision qualification. The
@@ -1819,6 +1835,110 @@ fingerprint matches the CPU capture. The RGB output SHA-256 (including alpha) wa
 `e702b19b7f3f7235cbc6860e66c98c2279c1d81d743016d592679e2e974935dc`.
 See the [scene workflow](../examples/reference-scene.md#gpu-preview-acceptance).
 
+
+## Material and lighting fidelity
+
+This implemented RGB surface milestone extends L4/L5 materials and both reference
+paths. It preserves the baseline untextured-parameter programs and does not infer
+new scene lights or convert raster transparency into glass transmission.
+
+Prewarm `renderer_surface.slang` (bounded forward) or
+`renderer_clustered_surface.slang` (all-light clustered forward), using
+`VertexMain`, `FragmentMain` and `ShadowMain`. The lit/clustered baseline sources
+also use those PascalCase entry names. Source builds supply the FoundationMath
+and RHI shader include directories; installed SDK shader sources share one
+directory. Both profiles retain the existing sixteen-attribute mesh ABI.
+
+Set `LitMaterialDescription::SurfaceMap` to a ready sampled **linear
+Rgba8Unorm** texture. The fixed packed layout uses RG for tangent normal XY
+(`2*channel-1`, positive Z reconstructed), B for perceptual roughness multiplier,
+and A for metallic multiplier. `NormalScale` in [0,8] scales reconstructed XY,
+then renormalizes; zero disables normal detail while preserving parameter sampling.
+Roughness retains the 0.045 floor. For a roughness/metallic-only map, use strength
+zero. This is a separate data texture: base color still decodes its own sRGB
+encoding and alpha remains opacity. Do not feed an ordinary RGB normal map or
+ORM map without packing its channels to this contract.
+
+The map shares the base UV transform, sampler and raster LOD. Ray paths instead
+use the capture's fixed `TextureMip`; that initialized mip must exist and have
+retained CPU content in **both** input textures. CPU retention supplies immutable
+setup bytes, not a GPU transport/readback fallback. Mip filtering is the declared
+filtered-channel model, without footprint-aware ray filtering or specular AA.
+Creation retains an exact texture view and rejects sRGB/data-format mismatch,
+attachments, unavailable resources and incompatible shader programs explicitly.
+Null preserves constant parameters and the mesh normal. Failed creation preserves
+material/report outputs; accepted asynchronous candidates retain the normal
+poll/publish/release contract.
+
+GPU normal-frame math belongs to FoundationMath; the renderer owns channel decoding
+and BRDF/material evaluation. Raster derives the UV frame from fragment position/UV
+derivatives; rays derive it from transformed triangle edges. Both normalize edge
+magnitudes, reject relatively singular UV frames, orthogonalize tangent against the
+shading normal and preserve mirrored UV handedness. Degenerate frames preserve
+the original normal. This UV-derived basis is **not MikkTSpace**: tangent-baked
+assets need a matching conversion/profile before claiming exact source fidelity.
+Ray offsets and visibility remain geometric-normal operations, and below-geometric
+continuations are null events. Shading-normal energy correction is still absent;
+this is the declared RGB reflection profile, not unrestricted physical fidelity.
+
+The forward profile extends the 1040-byte uniform to 1056 bytes and binds the map
+at slot 6. The clustered profile extends 8800 to 8816 bytes, binds the map at 7,
+and shares the existing nearest shadow sampler for cluster indexing. It stays
+within RHI's eight-binding limit while retaining base, bake, shadow and cluster
+inputs. Uniform names, offsets, shapes and shadow subsets are independently checked.
+Older baseline layouts stay admitted and reject non-null maps with `Unsupported`.
+
+GPU reference rendering now copies all normalized authored analytic lights into
+its budgeted scene buffer, uniformly selects among them, finite triangle emitters
+and a positive constant environment, and uses unit MIS weight for delta lights.
+Point/spot shadow segments terminate before the light endpoint. Raster, CPU reference
+and GPU reference use the same units, inverse-square floor, range window and
+squared cone. No lighting selection truncates the reference integral. Existing
+baked/shadow-atlas reference rejection remains explicit.
+
+Pending raster viewport uploads keep the prior drawable view until preparation
+succeeds; a failed candidate is discarded and reported once. Update reports describe
+the accepted candidate, including Pending, rather than the last presented image.
+A regression observes old packets during pending/failure and new packets only after
+success. The closest-hit shader explicitly restricts primitive-index tie breaking
+to equal distances, supplementing its existing closest-distance intersection bound.
+
+The private GPU kernel uniform grows from 208 to 224 bytes, adding an integer
+`SurfaceLayout` record for surface stride, analytic-light offset and kernel ABI 2.
+Old cooked kernels are rejected by reflected uniform-size admission before scene
+allocation; they must be recooked with the installed sources. A regression verifies
+this rejection, so an old six-word surface decoder cannot silently consume the new
+eight-word records. Unsupported runtime layout produces an error pixel.
+
+Reference `ProfileVersion` is 2. LUHDR file schema and addressed sampler version
+remain 1; the decoder retains versions 1/2 as distinct metadata. Maps extend the
+canonical scene fingerprint with normal strength, image layout and immutable bytes;
+unmapped scene fingerprints remain stable. Comparisons require matching profile
+versions. Changing a material/map creates a new snapshot/integral and restarts
+accumulation; old accepted captures and leased viewport images retain their inputs.
+
+Acceptance covers independent packed-channel decoding, rim/zero-strength and
+invalid-output preservation; mirrored/tiny/degenerate UV frames; incompatible
+program and sRGB-map rejection; complete native raster/clustered/CPU/GPU comparisons
+for directional, point and off-axis spot illumination; and texture-owner destruction
+before rendering/capture. Numerical pixel expectations are derived independently,
+not merely compared between two shader variants. Emitted WGSL/GLES layout checks
+cover all profile entries. These small fixtures establish the declared contract;
+full Staircase2 native-query parity and source-PBRT fidelity remain unqualified.
+
+The larger compute artifact is stored byte-for-byte in one generated `.cpp` when
+its textual UTF-8 source reaches 60000 bytes, with only an external array declaration
+in the generated header. This avoids C++'s giant-literal limit and repeated header
+parsing while retaining exact source, line diagnostics and manifest hashes. The
+installed CMake helper owns compilation of the generated companion; no runtime
+concatenation, file loading or shader compiler is introduced.
+
+Thanks to Google/Filament's authors, [*Physically Based Rendering in Filament*,
+§4.4, §5.2.2 and §5.7](https://google.github.io/filament/main/filament.html), for the
+reflection/photometric conventions and tangent-normal surface-detail model. The
+packed layout, UV-derived frame and bounded immutable admission are Ludus choices.
+
+
 ## Implementation phases and acceptance
 
 Complete prepared-scene acceptance uses the existing installed-SDK reference
@@ -1837,7 +1957,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | L1: views and depth (implemented) | GDI/RHI explicit attachments, clear/compare state and frame retention; orthographic/perspective, virtual screens, offscreen/split views | Reverse-Z ordering, clip/UV orientation, letterbox picking, DPI, zero extent, resize and neighboring view preservation |
 | L2: mutable data and overlays (implemented) | Completion-scoped replacement uploads; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
 | L3: material/content versions (implemented) | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
-| L4: lighting baseline (implemented) | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
+| L4: lighting baseline and RGB surface fidelity (implemented) | Lit material, opt-in packed normal/roughness/metallic map, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
 | L5: measured scaling (portable implementation) | Opt-in CPU clustered forward, grouped culling and authored LOD; optional native parallel recording deferred | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |
 | L5.1: budgeted scene capacity (implemented) | Initialization-time registry and snapshot/view workspace reservations; full-order borrowed diagnostics; budgeted RT0 records and configurable static TLAS instance limits | Above-default capacity, partial groups, exact-budget rejection, detached/in-flight retention, stale handles and recovery |
 | L6: optional advanced effects | Temporal/GPU-driven/virtual-residency plans and the RT0–RT4 ray plan | Capability probes and disabled-path support; image/temporal tests and workload-specific gains before default enablement |

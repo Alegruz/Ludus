@@ -147,6 +147,17 @@ struct LitMaterialDescription final
     ludus::foundation::float32 Metallic = 0;
     /// Perceptual roughness in [0.045,1]; alpha is its square.
     ludus::foundation::float32 Roughness = 0.5F;
+    /// Optional ready sampled Rgba8Unorm surface map: RG encodes tangent normal XY
+    /// as 2*channel-1; positive Z is reconstructed. B multiplies perceptual roughness
+    /// (floored at 0.045), A multiplies metallic. It shares Surface UV/sampler/LOD.
+    /// Requires renderer_surface.slang or renderer_clustered_surface.slang; other
+    /// programs return Unsupported. Null preserves the constant surface model.
+    /// Creation retains the exact view; the caller may destroy its texture owner.
+    /// Reference captures require retained CPU bytes for the selected capture mip.
+    rhi::TextureHandle SurfaceMap{};
+    /// Tangent normal XY strength [0,8]; zero disables perturbation, preserving
+    /// roughness/metallic sampling. Degenerate UV frames preserve the mesh normal.
+    ludus::foundation::float32 NormalScale = 1;
     /// Linear surface emission in [0,10000]; does not create a scene light.
     ludus::foundation::math::Vector3 Emission{};
     /// Constant diffuse irradiance in [0,10000], used when a baked chart is absent/invalid.
@@ -165,6 +176,26 @@ struct LitMaterialDescription final
     /// Ready rendered atlas; null supplies unshadowed direct lighting.
     ShadowAtlas Shadows{};
 };
+/// Decoded linear surface-map parameters, with a unit positive-hemisphere tangent normal.
+struct SurfaceParameters final
+{
+    /// Unit tangent-space direction; positive Y follows increasing transformed texture V.
+    ludus::foundation::math::Vector3 NormalTangent{0, 0, 1};
+    /// Texture-modulated metallic in [0,1].
+    ludus::foundation::float32 Metallic = 0;
+    /// Texture-modulated perceptual roughness in [0.045,1].
+    ludus::foundation::float32 Roughness = 0.5F;
+};
+/// Decode a filtered linear RGBA surface-map texel without allocation.
+/// Texel channels/metallic must be [0,1], roughness [0.045,1], strength [0,8].
+/// RG outside the unit disk is normalized to its rim before Z reconstruction;
+/// strength scales XY after reconstruction and the direction is normalized again.
+/// Invalid inputs return InvalidDescription and preserve outParameters.
+[[nodiscard]] rhi::RasterStatus DecodeSurfaceParameters(ludus::foundation::math::Vector4 texel,
+                                                        ludus::foundation::float32 metallic,
+                                                        ludus::foundation::float32 roughness,
+                                                        ludus::foundation::float32 normalScale,
+                                                        SurfaceParameters& outParameters) noexcept;
 /// One atlas cell, authored from an unjittered light view; order selects overlapping cascades.
 struct ShadowRegion final
 {

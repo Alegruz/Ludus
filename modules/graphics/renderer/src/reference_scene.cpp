@@ -131,10 +131,9 @@ int32 Address(int32 coordinate, bool repeat, uint32 extent) noexcept
     const auto remainder = coordinate % size;
     return remainder < 0 ? remainder + size : remainder;
 }
-math::Vector4 Texel(const ReferenceInstance& instance, int32 x, int32 y) noexcept
+math::Vector4
+Texel(const rhi::TextureCpuContent& texture, const rhi::SamplerDescription& sampler, int32 x, int32 y) noexcept
 {
-    const auto& texture = instance.Texture;
-    const auto& sampler = instance.Surface->Sampler;
     const auto column = Address(x, sampler.U == rhi::RasterAddress::Repeat, texture.Width);
     const auto row = Address(y, sampler.V == rhi::RasterAddress::Repeat, texture.Height);
     const auto* p = texture.Bytes + usize(row) * texture.RowPitch + usize(column) * 4;
@@ -230,10 +229,11 @@ rhi::RasterStatus BuildReferenceBvh(ReferenceSceneData& scene) noexcept
     scene.Bounds = scene.Nodes[0].Bounds;
     return rhi::RasterStatus::Ready;
 }
-math::Vector4 SampleReferenceTexture(const ReferenceInstance& instance, math::Vector2 uv) noexcept
+math::Vector4 SampleReferenceImage(const ReferenceSurfaceData& surface,
+                                   const rhi::TextureCpuContent& texture,
+                                   math::Vector2 uv) noexcept
 {
-    const auto& surface = *instance.Surface;
-    if (!surface.HasTexture)
+    if (texture.Bytes == nullptr)
     {
         return {1, 1, 1, 1};
     }
@@ -247,19 +247,76 @@ math::Vector4 SampleReferenceTexture(const ReferenceInstance& instance, math::Ve
                                                            : math::Clamp(uv.X, 0.0F, 1.0F);
     uv.Y = surface.Sampler.V == rhi::RasterAddress::Repeat ? uv.Y - static_cast<float32>(math::Floor(float64(uv.Y)))
                                                            : math::Clamp(uv.Y, 0.0F, 1.0F);
-    const auto x = uv.X * float32(instance.Texture.Width), y = uv.Y * float32(instance.Texture.Height);
+    const float32 x = uv.X * float32(texture.Width);
+    const float32 y = uv.Y * float32(texture.Height);
     if (surface.Sampler.Filter == rhi::RasterFilter::Nearest)
     {
-        return Texel(instance,
+        return Texel(texture,
+                     surface.Sampler,
                      static_cast<int32>(math::Floor(float64(x))),
                      static_cast<int32>(math::Floor(float64(y))));
     }
-    const auto px = x - 0.5F, py = y - 0.5F;
-    const auto ix = static_cast<int32>(math::Floor(float64(px))), iy = static_cast<int32>(math::Floor(float64(py)));
-    const auto tx = px - float32(ix), ty = py - float32(iy);
-    const auto a = Texel(instance, ix, iy) * (1 - tx) + Texel(instance, ix + 1, iy) * tx;
-    const auto b = Texel(instance, ix, iy + 1) * (1 - tx) + Texel(instance, ix + 1, iy + 1) * tx;
+    const float32 px = x - 0.5F;
+    const float32 py = y - 0.5F;
+    const int32 ix = static_cast<int32>(math::Floor(float64(px)));
+    const int32 iy = static_cast<int32>(math::Floor(float64(py)));
+    const float32 tx = px - float32(ix);
+    const float32 ty = py - float32(iy);
+    const math::Vector4 a =
+        Texel(texture, surface.Sampler, ix, iy) * (1 - tx) + Texel(texture, surface.Sampler, ix + 1, iy) * tx;
+    const math::Vector4 b =
+        Texel(texture, surface.Sampler, ix, iy + 1) * (1 - tx) + Texel(texture, surface.Sampler, ix + 1, iy + 1) * tx;
     return a * (1 - ty) + b * ty;
+}
+math::Vector4 SampleReferenceTexture(const ReferenceInstance& instance, math::Vector2 uv) noexcept
+{
+    return SampleReferenceImage(*instance.Surface, instance.Texture, uv);
+}
+math::Vector4 SampleReferenceSurfaceMap(const ReferenceInstance& instance, math::Vector2 uv) noexcept
+{
+    return SampleReferenceImage(*instance.Surface, instance.SurfaceMap, uv);
+}
+math::Vector3 ApplyReferenceNormal(const ReferenceTriangle& triangle,
+                                   const ReferenceSurfaceData& surface,
+                                   math::Vector3 normalWorld,
+                                   math::Vector3 normalTangent) noexcept
+{
+    math::Vector3 edgeUWorld = triangle.Positions[1] - triangle.Positions[0];
+    math::Vector3 edgeVWorld = triangle.Positions[2] - triangle.Positions[0];
+    math::Vector2 edgeUUv =
+        math::Hadamard(triangle.Uvs[1] - triangle.Uvs[0], math::Vector2{surface.UvTransform.X, surface.UvTransform.Y});
+    math::Vector2 edgeVUv =
+        math::Hadamard(triangle.Uvs[2] - triangle.Uvs[0], math::Vector2{surface.UvTransform.X, surface.UvTransform.Y});
+    const float32 uvMagnitude = math::Max(math::Max(math::Abs(edgeUUv.X), math::Abs(edgeUUv.Y)),
+                                          math::Max(math::Abs(edgeVUv.X), math::Abs(edgeVUv.Y)));
+    const float32 worldMagnitude =
+        math::Max(math::Max(math::Max(math::Abs(edgeUWorld.X), math::Abs(edgeUWorld.Y)), math::Abs(edgeUWorld.Z)),
+                  math::Max(math::Max(math::Abs(edgeVWorld.X), math::Abs(edgeVWorld.Y)), math::Abs(edgeVWorld.Z)));
+    if (uvMagnitude <= 1e-30F || worldMagnitude <= 1e-30F)
+    {
+        return normalWorld;
+    }
+    edgeUUv = edgeUUv / uvMagnitude;
+    edgeVUv = edgeVUv / uvMagnitude;
+    edgeUWorld = edgeUWorld / worldMagnitude;
+    edgeVWorld = edgeVWorld / worldMagnitude;
+    const float32 determinant = edgeUUv.X * edgeVUv.Y - edgeUUv.Y * edgeVUv.X;
+    if (math::Abs(determinant) <= 1e-6F * math::Max(math::Abs(edgeUUv.X * edgeVUv.Y), math::Abs(edgeUUv.Y * edgeVUv.X)))
+    {
+        return normalWorld;
+    }
+    math::Vector3 tangentWorld = (edgeUWorld * edgeVUv.Y - edgeVWorld * edgeUUv.Y) / determinant;
+    math::Vector3 bitangentWorld = (edgeVWorld * edgeUUv.X - edgeUWorld * edgeVUv.X) / determinant;
+    tangentWorld = tangentWorld - normalWorld * math::Dot(normalWorld, tangentWorld);
+    if (math::Dot(tangentWorld, tangentWorld) <= 1e-20F)
+    {
+        return normalWorld;
+    }
+    tangentWorld = ReferenceNormalize(tangentWorld);
+    const float32 handedness = math::Dot(math::Cross(normalWorld, tangentWorld), bitangentWorld) < 0 ? -1.0F : 1.0F;
+    bitangentWorld = math::Cross(normalWorld, tangentWorld) * handedness;
+    return ReferenceNormalize(tangentWorld * normalTangent.X + bitangentWorld * normalTangent.Y +
+                              normalWorld * normalTangent.Z);
 }
 bool ReferenceOpacity(const ReferenceInstance& instance, math::Vector2 uv) noexcept
 {

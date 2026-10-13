@@ -17,7 +17,7 @@ ludus_apply_project_defaults(ludus_graphics_renderer)
 install(TARGETS ludus_graphics_renderer EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 # Source is cooked by the existing installed shader helper; no runtime compiler dependency.
-install(FILES shaders/renderer_flat.slang shaders/renderer_composite.slang shaders/renderer_overlay.slang shaders/renderer_material.slang shaders/renderer_lit.slang shaders/renderer_clustered.slang shaders/renderer_shadow.slang shaders/renderer_output.slang shaders/renderer_gpu_preview.slang shaders/renderer_gpu_preview_image.slang DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+install(FILES shaders/recipes.json shaders/renderer_gpu_preview_layout.h shaders/renderer_flat.slang shaders/renderer_composite.slang shaders/renderer_overlay.slang shaders/renderer_material.slang shaders/renderer_lit.slang shaders/renderer_clustered.slang shaders/renderer_shadow.slang shaders/renderer_output.slang shaders/renderer_gpu_preview.slang shaders/renderer_gpu_preview_image.slang shaders/renderer_surface.slang shaders/renderer_clustered_surface.slang shaders/renderer_surface_functions.slang DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     # Exercise the production renderer/RHI registry with the existing deterministic backend.
@@ -40,34 +40,20 @@ if(TARGET ludus_rhi_render_tests)
     if(APPLE)
         target_compile_definitions(ludus_renderer_render_tests PRIVATE LUDUS_TEST_METAL=1)
     endif()
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_gpu_preview
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_gpu_preview.slang" COMPUTE ComputeMain
-        INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders" "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_gpu_preview_image RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_gpu_preview_image.slang" VERTEX VertexMain FRAGMENT FragmentMain
-        INCLUDES "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_flat RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_flat.slang" VERTEX vertexMain FRAGMENT fragmentMain)
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_composite RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_composite.slang" VERTEX vertexMain FRAGMENT fragmentMain)
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_overlay RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_overlay.slang" VERTEX vertexMain FRAGMENT fragmentMain)
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_material RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_material.slang" VERTEX vertexMain FRAGMENT fragmentMain)
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_clustered RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_clustered.slang" VERTEX vertexMain FRAGMENT fragmentMain
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang")
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_clustered_shadow RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_clustered.slang" VERTEX vertexMain FRAGMENT shadowMain
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang")
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_lit RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT fragmentMain)
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_lit_shadow RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_shadow RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_shadow.slang" VERTEX vertexMain FRAGMENT fragmentMain)
-    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_output RASTER
-        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_output.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_gpu_preview)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_gpu_preview_image)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_flat)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_composite)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_overlay)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_material)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_clustered)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_clustered_shadow)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_lit)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_lit_shadow)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_shadow)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_output)
+    ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS
+        renderer_surface renderer_surface_shadow renderer_clustered_surface renderer_clustered_surface_shadow)
     ludus_cook_texture(TARGET ludus_renderer_render_tests NAME l4_bake SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/l4-bake.texture.json")
     ludus_cook_texture(TARGET ludus_renderer_render_tests NAME l3_color
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/l3-color.texture.json")

@@ -484,7 +484,7 @@ jobs:
           SOURCE_POLICY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           python3 scripts/python/source_policy.py --base "$SOURCE_POLICY_BASE" --head "$SOURCE_POLICY_HEAD" --clang-format clang-format-18
-          PYTHONPATH=scripts/python python3 -m unittest test_source_policy -v
+          PYTHONPATH=scripts/python python3 -m unittest test_source_policy test_renderer_shader_recipes -v
       - name: Test S0 Luau source and bytecode integrity contracts
         run: python3 -m unittest discover -s tools/luau-probe -p 'test_*.py' -v
       - name: Test S1 manifest and cook admission contracts

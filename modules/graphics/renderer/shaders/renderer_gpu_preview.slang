@@ -1,5 +1,7 @@
 #include "math.slang"
 #include "raster_bindings.slang"
+#include "renderer_gpu_preview_layout.h"
+#include "renderer_surface_functions.slang"
 
 // GPU preview ports Ludus's frozen RGB transport, not the CPU transport loop.
 // Thanks to Sven Woop, Carsten Benthin and Ingo Wald, "Watertight Ray/Triangle
@@ -30,6 +32,8 @@ LUDUS_SHADER_BINDING(0) cbuffer Parameters
     float4 Options; // secondary range, exposure, reserved
     float4 BoundsMinimumWorld;
     float4 BoundsMaximumWorld;
+    uint4 SurfaceLayout; // surface stride, analytic offset, private kernel ABI, see renderer_gpu_preview_layout.h,
+                         // reserved
 };
 LUDUS_SHADER_BINDING(1) StructuredBuffer<uint4> sceneWords;
 float4 SceneValue(uint index)
@@ -48,7 +52,8 @@ uint Choose(uint p, uint s, uint d, uint count)
     uint threshold = (0u - count) % count;
     for (uint retry = 0; retry < 65536; ++retry)
     {
-        uint lo, hi;
+        uint lo;
+        uint hi;
         MultiplyWide(RandomBits(p, s, d, Sampling.xy, retry), count, lo, hi);
         if (lo >= threshold)
             return hi;
@@ -68,7 +73,7 @@ float2 TexcoordUv(uint t, float2 uv)
 float4 Surface(uint t, uint field)
 {
     uint i = asuint(SceneValue(t * 10).w);
-    return SceneValue(Offsets.w + i * 6 + field);
+    return SceneValue(Offsets.w + i * SurfaceLayout.x + field);
 }
 int Address(int i, int extent, bool repeat)
 {
@@ -77,10 +82,10 @@ int Address(int i, int extent, bool repeat)
     int v = i % extent;
     return v < 0 ? v + extent : v;
 }
-float4 Texel(uint t, int x, int y)
+float4 Texel(uint t, int x, int y, bool isSurfaceMap)
 {
-    uint4 layout = asuint(Surface(t, 5));
-    uint2 size = asuint(Surface(t, 1).zw);
+    uint4 layout = asuint(Surface(t, isSurfaceMap ? 7 : 5));
+    uint2 size = isSurfaceMap ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
     uint flags = layout.y;
     x = Address(x, int(size.x), (flags & 2) != 0);
     y = Address(y, int(size.y), (flags & 4) != 0);
@@ -91,24 +96,24 @@ float4 Texel(uint t, int x, int y)
         c.xyz = select(c.xyz > .04045, pow((c.xyz + .055) / 1.055, 2.4), c.xyz / 12.92);
     return c;
 }
-float4 Texture(uint t, float2 uv)
+float4 Texture(uint t, float2 uv, bool isSurfaceMap = false)
 {
-    if (asuint(Surface(t, 4).w) == 0)
+    if (asuint(Surface(t, isSurfaceMap ? 6 : 4).w) == 0)
         return float4(1);
     float4 transform = Surface(t, 3);
     uv = uv * transform.xy + transform.zw;
-    uint flags = asuint(Surface(t, 5).y);
-    uint2 size = asuint(Surface(t, 1).zw);
+    uint flags = asuint(Surface(t, isSurfaceMap ? 7 : 5).y);
+    uint2 size = isSurfaceMap ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
     uv.x = (flags & 2) != 0 ? frac(uv.x) : saturate(uv.x);
     uv.y = (flags & 4) != 0 ? frac(uv.y) : saturate(uv.y);
     float2 p = uv * float2(size);
     if ((flags & 1) == 0)
-        return Texel(t, int(floor(p.x)), int(floor(p.y)));
+        return Texel(t, int(floor(p.x)), int(floor(p.y)), isSurfaceMap);
     p -= .5;
     int2 cell = int2(floor(p));
     float2 f = frac(p);
-    return lerp(lerp(Texel(t, cell.x, cell.y), Texel(t, cell.x + 1, cell.y), f.x),
-                lerp(Texel(t, cell.x, cell.y + 1), Texel(t, cell.x + 1, cell.y + 1), f.x),
+    return lerp(lerp(Texel(t, cell.x, cell.y, isSurfaceMap), Texel(t, cell.x + 1, cell.y, isSurfaceMap), f.x),
+                lerp(Texel(t, cell.x, cell.y + 1, isSurfaceMap), Texel(t, cell.x + 1, cell.y + 1, isSurfaceMap), f.x),
                 f.y);
 }
 struct Hit
@@ -120,7 +125,8 @@ struct Hit
 bool Box(float3 originWorld, float3 directionWorld, float nearDistanceWorld, float farDistanceWorld, uint node)
 {
     uint b = Offsets.x + node * 3;
-    float3 boundsMinimumWorld = SceneValue(b).xyz, boundsMaximumWorld = SceneValue(b + 1).xyz;
+    float3 boundsMinimumWorld = SceneValue(b).xyz;
+    float3 boundsMaximumWorld = SceneValue(b + 1).xyz;
     for (uint axis = 0; axis < 3; ++axis)
     {
         if (directionWorld[axis] == 0)
@@ -130,8 +136,8 @@ bool Box(float3 originWorld, float3 directionWorld, float nearDistanceWorld, flo
         }
         else
         {
-            float a = (boundsMinimumWorld[axis] - originWorld[axis]) / directionWorld[axis],
-                  c = (boundsMaximumWorld[axis] - originWorld[axis]) / directionWorld[axis];
+            float a = (boundsMinimumWorld[axis] - originWorld[axis]) / directionWorld[axis];
+            float c = (boundsMaximumWorld[axis] - originWorld[axis]) / directionWorld[axis];
             nearDistanceWorld = max(nearDistanceWorld, min(a, c));
             farDistanceWorld = min(farDistanceWorld, max(a, c));
             if (nearDistanceWorld > farDistanceWorld)
@@ -153,20 +159,29 @@ bool Intersect(uint t,
         z = 1;
     if (abs(directionWorld.z) > abs(directionWorld[z]))
         z = 2;
-    uint x = (z + 1) % 3, y = (x + 1) % 3;
+    uint x = (z + 1) % 3;
+    uint y = (x + 1) % 3;
     if (directionWorld[z] < 0)
     {
         uint swap = x;
         x = y;
         y = swap;
     }
-    float3 a = SceneValue(t * 10).xyz - originWorld, b = SceneValue(t * 10 + 1).xyz - originWorld,
-           c = SceneValue(t * 10 + 2).xyz - originWorld;
-    float sx = directionWorld[x] / directionWorld[z], sy = directionWorld[y] / directionWorld[z],
-          sz = 1 / directionWorld[z];
-    float ax = a[x] - sx * a[z], ay = a[y] - sy * a[z], bx = b[x] - sx * b[z], by = b[y] - sy * b[z],
-          cx = c[x] - sx * c[z], cy = c[y] - sy * c[z];
-    float e0 = bx * cy - by * cx, e1 = cx * ay - cy * ax, e2 = ax * by - ay * bx;
+    float3 a = SceneValue(t * 10).xyz - originWorld;
+    float3 b = SceneValue(t * 10 + 1).xyz - originWorld;
+    float3 c = SceneValue(t * 10 + 2).xyz - originWorld;
+    float sx = directionWorld[x] / directionWorld[z];
+    float sy = directionWorld[y] / directionWorld[z];
+    float sz = 1 / directionWorld[z];
+    float ax = a[x] - sx * a[z];
+    float ay = a[y] - sy * a[z];
+    float bx = b[x] - sx * b[z];
+    float by = b[y] - sy * b[z];
+    float cx = c[x] - sx * c[z];
+    float cy = c[y] - sy * c[z];
+    float e0 = bx * cy - by * cx;
+    float e1 = cx * ay - cy * ax;
+    float e2 = ax * by - ay * bx;
     float determinant = e0 + e1 + e2;
     outDistanceWorld = 0;
     outBarycentric = 0;
@@ -197,7 +212,8 @@ Hit Trace(float3 originWorld,
     stack[0] = 0;
     while (pending != 0)
     {
-        uint node = stack[--pending], b = Offsets.x + node * 3;
+        uint node = stack[--pending];
+        uint b = Offsets.x + node * 3;
         if (!Box(originWorld, directionWorld, nearDistanceWorld, hit.DistanceWorld, node))
             continue;
         uint4 range = asuint(SceneValue(b + 2));
@@ -218,7 +234,7 @@ Hit Trace(float3 originWorld,
             float distance;
             float2 uv;
             if (Intersect(t, originWorld, directionWorld, nearDistanceWorld, hit.DistanceWorld, distance, uv) &&
-                (distance < hit.DistanceWorld || t < hit.Triangle))
+                (distance < hit.DistanceWorld || (distance == hit.DistanceWorld && t < hit.Triangle)))
             {
                 hit.Triangle = t;
                 hit.DistanceWorld = distance;
@@ -237,7 +253,8 @@ Hit Trace(float3 originWorld,
 // representable-neighbor offset convention from FoundationMath, not RTX bounds.
 float3 OffsetPositionWorld(float3 positionWorld, uint t, float3 directionWorld)
 {
-    float3 normalWorld = SceneValue(t * 10 + 8).xyz, positionErrorWorld = SceneValue(t * 10 + 9).xyz;
+    float3 normalWorld = SceneValue(t * 10 + 8).xyz;
+    float3 positionErrorWorld = SceneValue(t * 10 + 9).xyz;
     float3 offsetWorld =
         normalWorld * dot(abs(normalWorld), positionErrorWorld) * (dot(normalWorld, directionWorld) < 0 ? -1 : 1);
     float3 offsetPositionWorld = positionWorld + offsetWorld;
@@ -283,15 +300,20 @@ void Evaluate(float3 color,
 {
     outValue = 0;
     outPdf = 0;
-    float nv = dot(normalWorld, v), nl = dot(normalWorld, l);
+    float nv = dot(normalWorld, v);
+    float nl = dot(normalWorld, l);
     if (nv <= 0 || nl <= 0)
         return;
     float3 h = NormalizeOrZero(v + l);
-    float nh = saturate(dot(normalWorld, h)), vh = saturate(dot(v, h)), alpha = roughness * roughness,
-          a2 = alpha * alpha;
-    float denominator = (1 - nh * nh) + nh * nh * a2, distribution = a2 / (PI * denominator * denominator);
-    float gv = sqrt(nv * nv * (1 - a2) + a2), gl = sqrt(nl * nl * (1 - a2) + a2),
-          visibility = .5 / max(nl * gv + nv * gl, 1e-6);
+    float nh = saturate(dot(normalWorld, h));
+    float vh = saturate(dot(v, h));
+    float alpha = roughness * roughness;
+    float a2 = alpha * alpha;
+    float denominator = (1 - nh * nh) + nh * nh * a2;
+    float distribution = a2 / (PI * denominator * denominator);
+    float gv = sqrt(nv * nv * (1 - a2) + a2);
+    float gl = sqrt(nl * nl * (1 - a2) + a2);
+    float visibility = .5 / max(nl * gv + nv * gl, 1e-6);
     float3 f0 = .04 * (1 - metallic) + color * metallic;
     float term = 1 - vh;
     float3 fresnel = f0 + (1 - f0) * term * term * term * term * term;
@@ -303,9 +325,12 @@ float3 SampleBsdf(float3 normalWorld, float3 viewDirectionWorld, float roughness
 {
     if (dot(normalWorld, viewDirectionWorld) <= 0)
         return float3(0);
-    float3 x = NormalizeOrZero(cross(abs(normalWorld.z) < .999 ? float3(0, 0, 1) : float3(0, 1, 0), normalWorld)),
-           y = cross(normalWorld, x);
-    float radius = sqrt(u.y), angle = 2 * PI * u.z, dx = radius * cos(angle), dy = radius * sin(angle);
+    float3 x = NormalizeOrZero(cross(abs(normalWorld.z) < .999 ? float3(0, 0, 1) : float3(0, 1, 0), normalWorld));
+    float3 y = cross(normalWorld, x);
+    float radius = sqrt(u.y);
+    float angle = 2 * PI * u.z;
+    float dx = radius * cos(angle);
+    float dy = radius * sin(angle);
     float3 local;
     if (u.x >= probability)
         local = float3(dx, dy, sqrt(max(0, 1 - u.y)));
@@ -316,18 +341,21 @@ float3 SampleBsdf(float3 normalWorld, float3 viewDirectionWorld, float roughness
         float a = roughness * roughness;
         float3 stretch = NormalizeOrZero(float3(a * lv.xy, lv.z));
         float len = dot(stretch.xy, stretch.xy);
-        float3 tangent = len > 0 ? float3(-stretch.y, stretch.x, 0) / sqrt(len) : float3(1, 0, 0),
-               bitangent = cross(stretch, tangent);
-        float blend = .5 * (1 + stretch.z), wy = (1 - blend) * sqrt(max(0, 1 - dx * dx)) + blend * dy;
+        float3 tangent = len > 0 ? float3(-stretch.y, stretch.x, 0) / sqrt(len) : float3(1, 0, 0);
+        float3 bitangent = cross(stretch, tangent);
+        float blend = .5 * (1 + stretch.z);
+        float wy = (1 - blend) * sqrt(max(0, 1 - dx * dx)) + blend * dy;
         float3 hemisphere = tangent * dx + bitangent * wy + stretch * sqrt(max(0, 1 - dx * dx - wy * wy));
-        float3 hl = NormalizeOrZero(float3(a * hemisphere.xy, max(0, hemisphere.z))),
-               h = x * hl.x + y * hl.y + normalWorld * hl.z;
+        float3 hl = NormalizeOrZero(float3(a * hemisphere.xy, max(0, hemisphere.z)));
+        float3 h = x * hl.x + y * hl.y + normalWorld * hl.z;
         return NormalizeOrZero(h * (2 * dot(viewDirectionWorld, h)) - viewDirectionWorld);
     }
     return NormalizeOrZero(x * local.x + y * local.y + normalWorld * local.z);
 }
 float3 Integrate(uint pixel, uint sample)
 {
+    if (SurfaceLayout.x != LUDUS_GPU_PREVIEW_SURFACE_WORDS || SurfaceLayout.z != LUDUS_GPU_PREVIEW_KERNEL_VERSION)
+        return float3(-1);
     float2 jitter = (Sampling.z & 4) != 0 ? float2(.5) : float2(Random01(pixel, sample, 0), Random01(pixel, sample, 1));
     float2 positionUv = (float2(pixel % Dimensions.x, pixel / Dimensions.x) + jitter) / float2(Dimensions.xy);
     float nearClipZ = (Sampling.z & 1) != 0 ? 1 : 0;
@@ -338,8 +366,8 @@ float3 Integrate(uint pixel, uint sample)
     float3 originWorld = CameraPositionWorld.w != 0 ? nearPositionWorld.xyz : CameraPositionWorld.xyz;
     float3 directionWorld = NormalizeOrZero(
         farPositionWorld.w != 0 ? farPositionWorld.xyz / farPositionWorld.w - originWorld : farPositionWorld.xyz);
-    float minimum = CameraPositionWorld.w != 0 ? 0 : dot(nearPositionWorld.xyz - originWorld, directionWorld),
-          maximum = Options.x;
+    float minimum = CameraPositionWorld.w != 0 ? 0 : dot(nearPositionWorld.xyz - originWorld, directionWorld);
+    float maximum = Options.x;
     if (farPositionWorld.w != 0)
         maximum = dot(farPositionWorld.xyz / farPositionWorld.w - originWorld, directionWorld);
     else
@@ -354,9 +382,11 @@ float3 Integrate(uint pixel, uint sample)
         }
         maximum = maximum * 1.000001 + 1;
     }
-    float3 radiance = 0, throughput = 1, previousPositionWorld = 0;
+    float3 radiance = 0;
+    float3 throughput = 1;
+    float3 previousPositionWorld = 0;
     float previousPdf = 0;
-    uint lights = Counts.z + (HasPositiveComponent(Environment.xyz) ? 1u : 0u);
+    uint lights = Counts.w + Counts.z + (HasPositiveComponent(Environment.xyz) ? 1u : 0u);
     for (uint depth = 0; depth <= Dimensions.z; ++depth)
     {
         Hit hit = Trace(originWorld, directionWorld, minimum, maximum);
@@ -369,8 +399,10 @@ float3 Integrate(uint pixel, uint sample)
             break;
         }
         uint t = hit.Triangle;
-        float3 positionWorld = PositionWorld(t, hit.Barycentric), geometricNormalWorld = SceneValue(t * 10 + 8).xyz,
-               viewDirectionWorld = -directionWorld, emission = Surface(t, 4).xyz;
+        float3 positionWorld = PositionWorld(t, hit.Barycentric);
+        float3 geometricNormalWorld = SceneValue(t * 10 + 8).xyz;
+        float3 viewDirectionWorld = -directionWorld;
+        float3 emission = Surface(t, 4).xyz;
         radiance +=
             throughput * emission *
             (depth == 0 ? 1 : PowerWeight(previousPdf, AreaPdf(t, previousPositionWorld, positionWorld, lights)));
@@ -380,19 +412,74 @@ float3 Integrate(uint pixel, uint sample)
                                              SceneValue(t * 10 + 4).xyz * hit.Barycentric.x +
                                              SceneValue(t * 10 + 5).xyz * hit.Barycentric.y);
         float3 color = saturate(Surface(t, 0).xyz * Texture(t, TexcoordUv(t, hit.Barycentric)).xyz);
-        float metallic = Surface(t, 0).w, roughness = Surface(t, 1).x;
+        float metallic = Surface(t, 0).w;
+        float roughness = Surface(t, 1).x;
+        if (asuint(Surface(t, 6).w) != 0)
+        {
+            SurfaceParameters parameters = DecodeSurfaceParameters(Texture(t, TexcoordUv(t, hit.Barycentric), true),
+                                                                   metallic,
+                                                                   roughness,
+                                                                   Surface(t, 6).x);
+            metallic = parameters.Metallic;
+            roughness = parameters.Roughness;
+            float2 uvScale = Surface(t, 3).xy;
+            normalWorld = ApplyNormalWorld(normalWorld,
+                                           parameters.NormalTangent,
+                                           SceneValue(t * 10 + 1).xyz - SceneValue(t * 10).xyz,
+                                           SceneValue(t * 10 + 2).xyz - SceneValue(t * 10).xyz,
+                                           (SceneValue(t * 10 + 6).zw - SceneValue(t * 10 + 6).xy) * uvScale,
+                                           (SceneValue(t * 10 + 7).xy - SceneValue(t * 10 + 6).xy) * uvScale);
+        }
         uint dimension = 2 + depth * 8;
         if (lights > 0)
         {
             uint selected = Choose(pixel, sample, dimension, lights);
             if (selected == 0xffffffff)
                 return float3(-1);
-            float3 lightDirectionWorld, lightColor = 0, lightPositionWorld = 0;
-            float pdf = 0, range = Options.x;
+            float3 lightDirectionWorld;
+            float3 lightColor = 0;
+            float3 lightPositionWorld = 0;
+            float pdf = 0;
+            float range = Options.x;
             uint emitter = 0xffffffff;
-            if (selected < Counts.z)
+            bool isDelta = false;
+            bool hasFiniteEndpoint = false;
+            if (selected < Counts.w)
             {
-                emitter = asuint(SceneValue(Offsets.z + selected).x);
+                uint light = SurfaceLayout.y + selected * LUDUS_GPU_PREVIEW_LIGHT_WORDS;
+                float4 colorAndKind = SceneValue(light);
+                float4 positionAndRangeWorld = SceneValue(light + 1);
+                float4 directionAndConeWorld = SceneValue(light + 2);
+                lightColor = colorAndKind.xyz;
+                lightDirectionWorld = -directionAndConeWorld.xyz;
+                pdf = 1 / float(lights);
+                isDelta = true;
+                if (colorAndKind.w != 0)
+                {
+                    lightPositionWorld = positionAndRangeWorld.xyz;
+                    float3 offsetWorld = lightPositionWorld - positionWorld;
+                    float distanceSquared = dot(offsetWorld, offsetWorld);
+                    if (distanceSquared <= 0)
+                        return float3(-1);
+                    range = sqrt(distanceSquared);
+                    lightDirectionWorld = offsetWorld / range;
+                    hasFiniteEndpoint = true;
+                    float ratio = range / positionAndRangeWorld.w;
+                    float window = max(1 - ratio * ratio * ratio * ratio, 0);
+                    float angular = 1;
+                    if (colorAndKind.w == 2)
+                    {
+                        float cone =
+                            saturate((dot(-lightDirectionWorld, directionAndConeWorld.xyz) - directionAndConeWorld.w) /
+                                     (SceneValue(light + 3).x - directionAndConeWorld.w));
+                        angular = cone * cone;
+                    }
+                    lightColor *= range <= Options.x ? window * window * angular / max(distanceSquared, 1e-4) : 0;
+                }
+            }
+            else if (selected - Counts.w < Counts.z)
+            {
+                emitter = asuint(SceneValue(Offsets.z + selected - Counts.w).x);
                 float root = sqrt(Random01(pixel, sample, dimension + 1));
                 float2 uv = float2(root * (1 - Random01(pixel, sample, dimension + 2)), 0);
                 uv.y = root - uv.x;
@@ -408,8 +495,9 @@ float3 Integrate(uint pixel, uint sample)
             }
             else
             {
-                float z = 1 - 2 * Random01(pixel, sample, dimension + 1), r = sqrt(max(0, 1 - z * z)),
-                      a = 2 * PI * Random01(pixel, sample, dimension + 2);
+                float z = 1 - 2 * Random01(pixel, sample, dimension + 1);
+                float r = sqrt(max(0, 1 - z * z));
+                float a = 2 * PI * Random01(pixel, sample, dimension + 2);
                 lightDirectionWorld = float3(r * cos(a), r * sin(a), z);
                 pdf = 1 / (float(lights) * 4 * PI);
                 lightColor = Environment.xyz;
@@ -420,13 +508,20 @@ float3 Integrate(uint pixel, uint sample)
             if (pdf > 0 && HasPositiveComponent(lightColor) && dot(normalWorld, lightDirectionWorld) > 0 &&
                 dot(geometricNormalWorld, lightDirectionWorld) > 0)
             {
-                float3 shadowOriginWorld = OffsetPositionWorld(positionWorld, t, lightDirectionWorld),
-                       shadowDirectionWorld = lightDirectionWorld;
+                float3 shadowOriginWorld = OffsetPositionWorld(positionWorld, t, lightDirectionWorld);
+                float3 shadowDirectionWorld = lightDirectionWorld;
                 float distance = range;
                 if (emitter != 0xffffffff)
                 {
-                    float3 shadowEndWorld = OffsetPositionWorld(lightPositionWorld, emitter, -lightDirectionWorld),
-                           offsetWorld = shadowEndWorld - shadowOriginWorld;
+                    float3 shadowEndWorld = OffsetPositionWorld(lightPositionWorld, emitter, -lightDirectionWorld);
+                    float3 offsetWorld = shadowEndWorld - shadowOriginWorld;
+                    distance = length(offsetWorld);
+                    shadowDirectionWorld = NormalizeOrZero(offsetWorld);
+                    distance = asfloat(asuint(distance) - 1);
+                }
+                else if (hasFiniteEndpoint)
+                {
+                    float3 offsetWorld = lightPositionWorld - shadowOriginWorld;
                     distance = length(offsetWorld);
                     shadowDirectionWorld = NormalizeOrZero(offsetWorld);
                     distance = asfloat(asuint(distance) - 1);
@@ -435,8 +530,9 @@ float3 Integrate(uint pixel, uint sample)
                 if (shadow.Triangle == 0xfffffffe)
                     return float3(-1);
                 if (shadow.Triangle == 0xffffffff)
-                    radiance += throughput * value * lightColor *
-                                (dot(normalWorld, lightDirectionWorld) * PowerWeight(pdf, bsdfPdf) / pdf);
+                    radiance +=
+                        throughput * value * lightColor *
+                        (dot(normalWorld, lightDirectionWorld) * (isDelta ? 1 : PowerWeight(pdf, bsdfPdf)) / pdf);
             }
         }
         float3 outgoingDirectionWorld = SampleBsdf(normalWorld,
@@ -477,7 +573,8 @@ float3 Integrate(uint pixel, uint sample)
     if (id.x >= Dimensions.x || id.y >= Dimensions.y)
         return;
     uint pixel = id.y * Dimensions.x + id.x;
-    float4 sum = accumulation[pixel * 2], compensation = accumulation[pixel * 2 + 1];
+    float4 sum = accumulation[pixel * 2];
+    float4 compensation = accumulation[pixel * 2 + 1];
     if (sum.w < float(Sampling.w) && compensation.w == 0)
     {
         float3 sample = Integrate(pixel, uint(sum.w));
@@ -485,7 +582,8 @@ float3 Integrate(uint pixel, uint sample)
             compensation.w = 1;
         else
         {
-            float3 adjusted = sample - compensation.xyz, next = sum.xyz + adjusted;
+            float3 adjusted = sample - compensation.xyz;
+            float3 next = sum.xyz + adjusted;
             compensation.xyz = (next - sum.xyz) - adjusted;
             if (any(!isfinite(next)) || any(!isfinite(compensation.xyz)))
                 compensation.w = 1;
@@ -498,7 +596,8 @@ float3 Integrate(uint pixel, uint sample)
         accumulation[pixel * 2] = sum;
         accumulation[pixel * 2 + 1] = compensation;
     }
-    float3 mean = sum.w > 0 ? sum.xyz / sum.w : float3(0), linear = mean * Options.y;
+    float3 mean = sum.w > 0 ? sum.xyz / sum.w : float3(0);
+    float3 linear = mean * Options.y;
     for (uint channel = 0; channel < 3; ++channel)
     {
         // Finite nonnegative radiance can overflow when exposure is applied.
