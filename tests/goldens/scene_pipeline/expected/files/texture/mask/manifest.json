@@ -1,0 +1,29 @@
+{
+  "source_sha256": "01aaf678067f49a82dfbba8569879c5aa0f168c7a53654a70b8e8415ef52b905",
+  "upload_sha256": "17cf70f941b5deef0c984779c554f3cdc58f3cb70b1cac47bca6ee93a274f43a",
+  "semantic": "mask",
+  "format": "R8Unorm",
+  "levels": [
+    {
+      "width": 4,
+      "height": 2,
+      "offset": 0,
+      "row_pitch": 4,
+      "next_coverage_error": 0.125
+    },
+    {
+      "width": 2,
+      "height": 1,
+      "offset": 8,
+      "row_pitch": 4,
+      "next_coverage_error": 0.375
+    },
+    {
+      "width": 1,
+      "height": 1,
+      "offset": 12,
+      "row_pitch": 4
+    }
+  ],
+  "bake": null
+}

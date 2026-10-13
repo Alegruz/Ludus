@@ -1,0 +1,21 @@
+{
+  "source_sha256": "d6d65eb991f15eb5beee079b36d10156fc824420a82adb4c5bacc8d4d157a591",
+  "upload_sha256": "66bcfb8e4ea400dc687bf8f6a1d52c534336e7a096e84ae2074c4d186ec43aa4",
+  "semantic": "data",
+  "format": "Rg8Unorm",
+  "levels": [
+    {
+      "width": 3,
+      "height": 2,
+      "offset": 0,
+      "row_pitch": 8
+    },
+    {
+      "width": 1,
+      "height": 1,
+      "offset": 16,
+      "row_pitch": 4
+    }
+  ],
+  "bake": null
+}

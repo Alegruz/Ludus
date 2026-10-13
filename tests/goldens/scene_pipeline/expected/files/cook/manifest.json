@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "source": "source",
+  "author": "See retained LICENSE.txt",
+  "license": "See retained LICENSE.txt",
+  "source_format": "PBRT v4 subset + binary PLY + uncompressed TGA",
+  "inputs": {
+    "LICENSE.txt": "08c2562b58802f025bdddaca4841c3cf07d8ca9806c7f14af90d604722b33a45",
+    "models/ceiling_light.ply": "28c41a8ad404614b550c12a5960dc12d5485c09ecb4c521e14386afcfa3b0fdf",
+    "models/floor.ply": "e84bed277ea3014ae0418000f1a4a577ecbfd73edfd0603276644567f21c5283",
+    "models/paint.ply": "daa1f328abee26c689c466e0760fbb7ea880b9cc22131830230e2d050811ecc1",
+    "models/rail.ply": "68360375783c41289a0b8655a3c113ccff2eb5b0734c23c507b4bb2438ddf4ff",
+    "models/wall.ply": "1e166603c12996e41211ff75c9df437cf8875cf158bb698cdb3acbcddf3a99be",
+    "scene-v4.pbrt": "475bb98c53fce62dd627c0572e58171428dbcfda8ef35fef02fabf9d9caaf447",
+    "textures/Tiles.tga": "07e09fb9aa140c14a02585e33fe02a196039b729b3bdb412e4db36a5780df070",
+    "textures/Wallpaper.tga": "9b7f5b70e404a87129b494c899625f6e8b6d894629509d365f48ed3efffd7cda",
+    "textures/wood5.tga": "18547abdb98d773cb5c0ae79c2cea68393d8f6bb331dbd408b327551c85f2654"
+  },
+  "bundle_sha256": "fa4dad3c3ae6e305b417f01ddfd0174658bf71f41df3ade7d45d651196b6b910",
+  "source_ply_meshes": 5,
+  "source_triangles": 15,
+  "discarded_zero_area_triangles": 2,
+  "meshes": 6,
+  "materials": 8,
+  "items": 8,
+  "cooked_triangles": 97,
+  "rendered_triangles": 163,
+  "bytes": 1130148,
+  "camera": {
+    "eye": [
+      -0.0,
+      1.0,
+      6.0
+    ],
+    "target": [
+      0.0,
+      1.0,
+      7.0
+    ],
+    "up": [
+      0.0,
+      1.0,
+      0.0
+    ],
+    "fov_degrees": 45.0
+  },
+  "approximations": [
+    "PBRT coated diffuse mapped to frozen RGB GGX/Lambert; no layer multiple scattering",
+    "conductor eta/k reduced to RGB normal-incidence F0 and Schlick",
+    "diffuse surfaces use L6 dielectric F0 0.04",
+    "L6 surface emission is two-sided; PBRT diffuse area lights default to one-sided",
+    "single retained texture mip; no PBRT footprint/trilinear filtering",
+    "disk tessellation: 64 segments",
+    "emissive planar grids represented by equivalent quads",
+    "PBRT integrator/sampler options replaced by explicit L6 capture settings"
+  ]
+}
