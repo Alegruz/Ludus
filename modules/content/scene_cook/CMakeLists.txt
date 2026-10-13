@@ -1,8 +1,9 @@
-add_library(ludus_scene_cook STATIC src/scene_cook.cpp src/python_compat.cpp src/native_files.cpp)
+add_library(ludus_scene_cook STATIC
+    src/scene_cook.cpp src/scene_assets.cpp src/python_compat.cpp src/python_json.cpp src/native_files.cpp src/uuid.cpp)
 add_library(Ludus::SceneCook ALIAS ludus_scene_cook)
 set_target_properties(ludus_scene_cook PROPERTIES EXPORT_NAME SceneCook)
 target_sources(ludus_scene_cook PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
-    FILES include/ludus/content/scene_cook/scene_cook.h)
+    FILES include/ludus/content/scene_cook/scene_cook.h include/ludus/content/scene_cook/scene_assets.h)
 target_link_libraries(ludus_scene_cook
     PUBLIC Ludus::Content Ludus::FoundationContainers
     PRIVATE Ludus::SceneFormat Ludus::FoundationMath Ludus::FoundationParsingJson Ludus::FoundationStrings)
@@ -35,4 +36,15 @@ if(LUDUS_BUILD_TESTS)
     ludus_enable_test_exceptions(ludus_scene_cook_tests)
     add_test(NAME ludus_scene_cook_tests COMMAND ludus_scene_cook_tests)
     set_tests_properties(ludus_scene_cook_tests PROPERTIES LABELS "unit;content;goldens")
+
+    add_executable(ludus_scene_assets_tests tests/scene_assets_tests.cpp)
+    target_include_directories(ludus_scene_assets_tests PRIVATE src)
+    target_compile_definitions(ludus_scene_assets_tests PRIVATE
+        LUDUS_SCENE_GOLDENS_DIR="${PROJECT_SOURCE_DIR}/tests/goldens/scene_pipeline")
+    target_link_libraries(ludus_scene_assets_tests PRIVATE
+        Ludus::SceneCook Ludus::FoundationParsingJson Ludus::FoundationStrings Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_scene_assets_tests)
+    ludus_enable_test_exceptions(ludus_scene_assets_tests)
+    add_test(NAME ludus_scene_assets_tests COMMAND ludus_scene_assets_tests)
+    set_tests_properties(ludus_scene_assets_tests PROPERTIES LABELS "unit;content;goldens")
 endif()
