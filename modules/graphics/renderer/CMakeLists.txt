@@ -7,7 +7,8 @@ target_sources(ludus_graphics_renderer PUBLIC FILE_SET public_headers TYPE HEADE
     include/ludus/graphics/renderer/overlays.hpp
     include/ludus/graphics/renderer/materials.hpp
     include/ludus/graphics/renderer/lighting.hpp
-    include/ludus/graphics/renderer/reference.hpp)
+    include/ludus/graphics/renderer/reference.hpp
+    include/ludus/graphics/renderer/gpu_preview.hpp)
 target_link_libraries(ludus_graphics_renderer PUBLIC Ludus::FoundationBase Ludus::FoundationMath Ludus::GraphicsRhi
     PRIVATE Ludus::FoundationContainers Ludus::FoundationHash)
 target_compile_options(ludus_graphics_renderer PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
@@ -15,7 +16,7 @@ ludus_apply_project_defaults(ludus_graphics_renderer)
 install(TARGETS ludus_graphics_renderer EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 # Source is cooked by the existing installed shader helper; no runtime compiler dependency.
-install(FILES shaders/renderer_flat.slang shaders/renderer_composite.slang shaders/renderer_overlay.slang shaders/renderer_material.slang shaders/renderer_lit.slang shaders/renderer_clustered.slang shaders/renderer_shadow.slang shaders/renderer_output.slang DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+install(FILES shaders/renderer_flat.slang shaders/renderer_composite.slang shaders/renderer_overlay.slang shaders/renderer_material.slang shaders/renderer_lit.slang shaders/renderer_clustered.slang shaders/renderer_shadow.slang shaders/renderer_output.slang shaders/renderer_gpu_preview.slang shaders/renderer_gpu_preview_image.slang DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     # Exercise the production renderer/RHI registry with the existing deterministic backend.
@@ -30,7 +31,7 @@ if(LUDUS_BUILD_TESTS)
     set_tests_properties(ludus_renderer_tests PROPERTIES LABELS "unit;renderer;build-contract")
 endif()
 if(TARGET ludus_rhi_render_tests)
-    add_executable(ludus_renderer_render_tests tests/render_tests.cpp)
+    add_executable(ludus_renderer_render_tests tests/render_tests.cpp tests/gpu_preview_tests.cpp)
     target_include_directories(ludus_renderer_render_tests PRIVATE ../rhi/src "${PROJECT_SOURCE_DIR}/tests/sdk_consumer")
     target_link_libraries(ludus_renderer_render_tests PRIVATE Ludus::GraphicsText Ludus::FoundationTime Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_renderer_render_tests)
@@ -38,6 +39,10 @@ if(TARGET ludus_rhi_render_tests)
     if(APPLE)
         target_compile_definitions(ludus_renderer_render_tests PRIVATE LUDUS_TEST_METAL=1)
     endif()
+    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_gpu_preview
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_gpu_preview.slang" COMPUTE computeMain)
+    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_gpu_preview_image RASTER
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_gpu_preview_image.slang" VERTEX vertexMain FRAGMENT fragmentMain)
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_flat RASTER
         SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/shaders/renderer_flat.slang" VERTEX vertexMain FRAGMENT fragmentMain)
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME renderer_composite RASTER

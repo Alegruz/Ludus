@@ -771,6 +771,13 @@ compute. Each storage entry uses `StorageRead` or `StorageReadWrite`,
 textures, raster-stage storage access and CPU update/upload of existing storage
 buffers remain deferred.
 
+Compute WGSL uniform verification also admits signed/unsigned 32-bit scalars
+and vectors, plus bounded fixed vec4 integer arrays. Their emitted alignment,
+occupied range and named offsets must match that target's independent reflection.
+Integer fields use the existing opaque public uniform shape; they do not acquire
+a float material schema. Raster/WebGL uniform admission retains its float-only
+rules. This distinction avoids reinterpreting counters/random keys as floats.
+
 The installed shader helper accepts one compute entry:
 
 ```cmake

@@ -15,23 +15,6 @@ namespace
 using internal::ReferenceJob;
 using internal::ReferenceStage;
 using internal::ReferenceTriangle;
-Status ReferenceAdmission(rhi::DeviceHandle device, bool mutation = true) noexcept
-{
-    rhi::DeviceInfo info;
-    switch (rhi::GetDeviceInfo(device, info))
-    {
-        case rhi::DeviceStatus::Ready:
-            return mutation && info.FrameOpen ? Status::InvalidState : Status::Ready;
-        case rhi::DeviceStatus::InvalidHandle:
-            return Status::InvalidHandle;
-        case rhi::DeviceStatus::DeviceLost:
-            return Status::DeviceLost;
-        case rhi::DeviceStatus::Pending:
-            return Status::NotReady;
-        default:
-            return Status::Failed;
-    }
-}
 bool SameReferenceLight(const DirectLight& a, const DirectLight& b) noexcept
 {
     return a.SourceId == b.SourceId && a.Kind == b.Kind && a.Color == b.Color && a.Intensity == b.Intensity &&
@@ -381,7 +364,7 @@ Status Renderer::EnableReferenceRendering(const rhi::ShaderDescription& shader,
     {
         return Status::InvalidDescription;
     }
-    const auto admission = ReferenceAdmission(mState->Device);
+    const auto admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -424,10 +407,14 @@ Status Renderer::DisableReferenceRendering() noexcept
     {
         return Status::InvalidState;
     }
-    const auto admission = ReferenceAdmission(mState->Device);
+    const auto admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
+    }
+    if (mState->GpuPreview)
+    {
+        return Status::InvalidState;
     }
     mState->ClearReference();
     return Status::Ready;
@@ -438,7 +425,8 @@ namespace ludus::graphics::renderer
 {
 Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
                                           const ReferenceCaptureDescription& description,
-                                          core::UniquePtr<internal::ReferenceJob>& output) noexcept
+                                          core::UniquePtr<internal::ReferenceJob>& output,
+                                          bool gpuSetup) noexcept
 {
     LightSelection lights;
     auto status = ValidateReferenceDescription(description, lights);
@@ -495,6 +483,13 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
             {
                 return status;
             }
+            // RT1/GPU preview texel and alpha lookup admit four-channel bytes only.
+            // R9's retained R8/RG8 textures remain legal RHI inputs, but are outside
+            // this reference surface profile; never index them as RGBA.
+            if (texture.Format != rhi::RasterFormat::Rgba8Unorm && texture.Format != rhi::RasterFormat::Rgba8Srgb)
+            {
+                return Status::Unsupported;
+            }
             if (material.Alpha == MaterialAlpha::Masked)
             {
                 alphaScalars += uint64(texture.Width) * texture.Height;
@@ -502,8 +497,9 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         }
         ++instances;
     }
-    const usize pixels = usize(description.Width) * description.Height, tile = Reference->Options.TilePixels;
-    const bool oracle = Reference->Options.Traversal == ReferenceTraversal::CpuOracle;
+    const usize pixels = gpuSetup ? 0 : usize(description.Width) * description.Height;
+    const usize tile = gpuSetup ? 0 : Reference->Options.TilePixels;
+    const bool oracle = gpuSetup || Reference->Options.Traversal == ReferenceTraversal::CpuOracle;
     const uint64 bvhBytes = oracle ? uint64(triangles) * (2 * sizeof(internal::ReferenceBvhNode) + sizeof(uint32)) : 0;
     const uint64 fixedWide =
         sizeof(ReferenceJob) + uint64(instances) * sizeof(internal::ReferenceInstance) +
@@ -802,7 +798,7 @@ Status Renderer::BeginReferenceCapture(Snapshot snapshot,
     {
         return Status::NotReady;
     }
-    const auto admission = ReferenceAdmission(mState->Device);
+    const auto admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -844,7 +840,7 @@ Status Renderer::Release(ReferenceCapture& handle) noexcept
     {
         return Status::InvalidHandle;
     }
-    const auto admission = ReferenceAdmission(mState->Device);
+    const auto admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -864,7 +860,7 @@ Status Renderer::GetStatus(ReferenceCapture handle) const noexcept
     {
         return Status::InvalidHandle;
     }
-    const auto admission = ReferenceAdmission(mState->Device, false);
+    const auto admission = RendererAdmission(mState->Device, false);
     if (admission != Status::Ready)
     {
         return admission;
@@ -1024,7 +1020,7 @@ Status Renderer::AdvanceReferenceCapture(ReferenceCapture handle) noexcept
     {
         return Status::InvalidHandle;
     }
-    const auto admission = ReferenceAdmission(mState->Device);
+    const auto admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -1247,7 +1243,7 @@ Status Renderer::UpdateReferenceCapture(ReferenceCapture handle,
     {
         return Status::InvalidHandle;
     }
-    const auto admission = ReferenceAdmission(mState->Device);
+    const auto admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;

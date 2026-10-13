@@ -264,3 +264,32 @@ For interactive placement and gameplay fields use the single
 The command-line level conversion/capture remains a runtime asset pipeline,
 not a separate editor workspace. Existing `.lulevel` files open in World through
 the documented conversion path.
+
+## GPU preview acceptance
+
+The installed sample also accepts `gpu` as its optional mode. This selects the
+renderer GPU-compute BVH path, requires compute capability and preserves authored
+emissive lighting with a black environment. It performs GPU tracing, shading,
+accumulation and display conversion and returns a leased RHI texture. CPU setup
+builds, packs and uploads the static scene; it does not trace or shade pixels.
+
+```bash
+examples/reference-scene/out/build/linux-clang-development/reference_scene \
+  out/staircase2 out/staircase2 64 32 gpu
+```
+
+Offline acceptance writes `gpu-preview.rgba` (top-left opaque RGBA8, exposure one,
+Reinhard then sRGB) and `gpu-preview.bin`: little-endian width, height, completed
+samples and reserved zero as four uint32 values, then two uint64 scene fingerprint
+words. This sample deliberately reads back its final leased texture to export
+acceptance evidence. A live viewport must share that texture through RHI/Qt with
+producer and consumer completion, without running this export. GPU preview failure
+is exit step 16. Failed execution never selects the CPU reference renderer.
+
+The source profile and approximation limits above still apply. Numerical failure
+is a magenta error pixel; the completed-dispatch count does not assert radiance
+validity. `scene_gpu_preview` tests the installed shaders/API using an independently
+encoded emitter fixture with no added lights and verifies the expected display
+pixels. Dense-scene accuracy and additional GPU backends require separate
+qualification. See the [GPU preview contract](../architecture/renderer-systems.md#gpu-resident-progressive-preview)
+for budgets, capability rejection, ownership and external-consumer requirements.
