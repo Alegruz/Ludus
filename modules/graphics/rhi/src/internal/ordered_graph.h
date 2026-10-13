@@ -499,7 +499,7 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
     for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
-        if (!internal::TextureBinding(layout.GetDescriptorBinding(i).Kind))
+        if (internal::TextureBinding(layout.GetDescriptorBinding(i).Kind) == false)
         {
             continue;
         }
@@ -551,7 +551,7 @@ void RetainPacketTextures(const RasterPacket& packet) noexcept
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
     for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
-        if (!internal::TextureBinding(layout.GetDescriptorBinding(i).Kind))
+        if (internal::TextureBinding(layout.GetDescriptorBinding(i).Kind) == false)
         {
             continue;
         }

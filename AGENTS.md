@@ -176,7 +176,7 @@ when created. Adopted today: `modules/content/scene_cook`,
 | Rule | Enforcement |
 | --- | --- |
 | Private/protected methods camelCase; public methods, free functions, types PascalCase; private members `m` + PascalCase; parameters and locals camelCase; constants UPPER_CASE | clang-tidy `readability-identifier-naming` (per-directory `.clang-tidy`) |
-| `condition == false` instead of `!condition` | `tools/check_naming.py` rule N1 (`./scripts/check --format`) |
+| `condition == false` instead of `!condition` | `tools/check_naming.py` rule N1 (`./scripts/check --format`) for adopted modules; `source_policy.py` for changed C++ lines |
 | `out`/`inout` prefix on non-const reference parameters | `check_naming.py` N2 (presence of a prefix; `out` vs `inout` choice is review-only) |
 | Boolean names read as questions | `check_naming.py` N3 (declarations spelled `bool`) |
 | `OrNull` on nullable pointer parameters | `check_naming.py` N4 (parameters defaulted to `nullptr`); other nullable pointers are review-only |
@@ -212,8 +212,10 @@ rejects the explicit `== true`/`== false` style.
 - Run `python3 scripts/python/source_policy.py --base <base-commit-or-ref>`.
   CI checks added/modified lines against the PR base, including standalone
   samples and tests, without a debt baseline. Existing violations do not permit
-  new ones. This lexical gate checks explicit declarations, shader case/out
-  names, coordinate member labels and interface annotation placement; compiler,
+  new ones. This lexical gate checks explicit declarations, C++ boolean negation,
+  shader case/out names, coordinate member labels and interface annotation
+  placement. Negation checks skip comments, literals and preprocessor directives;
+  they do not infer boolean types or detect bare boolean conditions. Compiler,
   reflection tests, formatting, tidy and semantic review remain required.
 
 ### Review feedback and viewport acceptance
@@ -373,6 +375,9 @@ It applies to production code in `modules/`, `apps/`, and `examples/`.
   modules first; implement a missing operation in its owning module, with an
   explicit allocation/error contract and appropriate tests. A namespace alias or
   wrapper around an STL container/algorithm is not a Ludus implementation.
+- Prefer `StaticArray<T, N>` for fixed-size owned sequences, with a named count.
+  Pass `GetData()` to native pointer/count APIs. Keep raw arrays only when a
+  required ABI or array-reference signature cannot use the engine wrapper.
 - **No standard formatting machinery.** Do not include `<format>` or call
   `std::format`, `std::vformat`, `std::format_to`, `std::vformat_to`, or
   `std::make_format_args` in repository-owned code, including tests. Use the

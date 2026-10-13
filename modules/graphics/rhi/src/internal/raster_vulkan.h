@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ludus/foundation/containers/static_array.hpp>
+
 #include "profile.h"
 // Private implementation included only by rhi_vulkan.cpp. Thanks to AMD GPUOpen,
 // "Vulkan Memory Allocator 3.3.0", Quick start and Memory mapping (flush alignment),
@@ -53,7 +55,7 @@ inline constexpr uint32 DESCRIPTOR_SETS_PER_ARENA = 16;
 struct RasterDescriptorArena final
 {
     VkDescriptorPool Pool = VK_NULL_HANDLE;
-    uint32 Counts[DESCRIPTOR_KINDS]{};
+    foundation::StaticArray<uint32, DESCRIPTOR_KINDS> Counts{};
     uint32 Capacity = 0;
     uint32 LiveSets = 0;
 };
@@ -1330,7 +1332,7 @@ RasterStatus RasterCreateShader(usize slot,
 }
 RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, uint32) noexcept
 {
-    VkDescriptorSetLayoutBinding entries[internal::RASTER_BINDINGS]{};
+    foundation::StaticArray<VkDescriptorSetLayoutBinding, internal::RASTER_BINDINGS> entries{};
     for (usize index = 0; index < info.Count; ++index)
     {
         const RasterBinding& entry = info.Entries[index];
@@ -1359,7 +1361,7 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
     {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = static_cast<uint32>(info.Count),
-        .pBindings = entries,
+        .pBindings = entries.GetData(),
     };
     return RasterError(vkCreateDescriptorSetLayout(gDevice, &create, nullptr, &gRasterLayouts[slot]));
 }
@@ -1371,15 +1373,17 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
     // amortization. Immutable snapshots retire through the common completion
     // registry; individual sets are freed only after their final GPU use.
     RasterVulkanSet& set = gRasterSets[slot];
-    constexpr VkDescriptorType types[DESCRIPTOR_KINDS]{
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        VK_DESCRIPTOR_TYPE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+    constexpr foundation::StaticArray<VkDescriptorType, DESCRIPTOR_KINDS> types = {
+        {
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            VK_DESCRIPTOR_TYPE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+        },
     };
-    uint32 counts[DESCRIPTOR_KINDS]{};
+    foundation::StaticArray<uint32, DESCRIPTOR_KINDS> counts{};
     for (usize entry = 0; entry < layout.Count; ++entry)
     {
         const RasterBinding& binding = layout.Entries[entry];
@@ -1432,7 +1436,7 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
                 arena.Capacity = ~uint32{0} / count;
             }
         }
-        VkDescriptorPoolSize sizes[DESCRIPTOR_KINDS]{};
+        foundation::StaticArray<VkDescriptorPoolSize, DESCRIPTOR_KINDS> sizes{};
         uint32 sizeCount = 0;
         for (usize kind = 0; kind < DESCRIPTOR_KINDS; ++kind)
         {
@@ -1452,7 +1456,7 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
             .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
             .maxSets = arena.Capacity,
             .poolSizeCount = sizeCount,
-            .pPoolSizes = sizes,
+            .pPoolSizes = sizes.GetData(),
         };
         const VkResult result = vkCreateDescriptorPool(gDevice, &create, nullptr, &arena.Pool);
         if (result != VK_SUCCESS)
