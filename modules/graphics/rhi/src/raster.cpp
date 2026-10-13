@@ -443,18 +443,6 @@ bool CopyLayout(std::span<const RasterBinding> entries, RasterLayout& layout) no
     {
         return false;
     }
-    usize storageBindings = 0;
-    for (const auto& entry : entries)
-    {
-        if (entry.Kind == RasterBindingKind::StorageRead || entry.Kind == RasterBindingKind::StorageReadWrite)
-        {
-            ++storageBindings;
-        }
-    }
-    if (storageBindings > 4)
-    {
-        return false;
-    }
     layout.Count = entries.size();
     layout.DescriptorCount = 0;
     for (usize i = 0; i < entries.size(); ++i)
@@ -481,9 +469,51 @@ bool CopyLayout(std::span<const RasterBinding> entries, RasterLayout& layout) no
 RasterStatus ValidateLayoutCapabilities(const RasterLayout& layout) noexcept
 {
     const BindingCapabilities capabilities = backend::BindingLimits();
-    if (layout.DescriptorCount > capabilities.MaxDescriptorsPerSet)
+    if (layout.DescriptorCount > capabilities.MaxDescriptorsPerSet || layout.Count > capabilities.MaxBindings)
     {
         return RasterStatus::Unsupported;
+    }
+    uint32 totalUniforms = 0;
+    uint32 totalSamplers = 0;
+    for (usize entry = 0; entry < layout.Count; ++entry)
+    {
+        totalUniforms += layout.Entries[entry].Kind == RasterBindingKind::UniformBuffer ? 1U : 0U;
+        totalSamplers += layout.Entries[entry].Kind == RasterBindingKind::Sampler ? 1U : 0U;
+    }
+    if (totalUniforms > capabilities.MaxUniformBuffersPerSet || totalSamplers > capabilities.MaxSamplersPerSet)
+    {
+        return RasterStatus::Unsupported;
+    }
+    for (uint32 stage = 1; stage <= 4; stage <<= 1U)
+    {
+        uint32 uniforms = 0;
+        uint32 sampled = 0;
+        uint32 samplers = 0;
+        uint32 storage = 0;
+        for (usize entry = 0; entry < layout.Count; ++entry)
+        {
+            const RasterBinding& binding = layout.Entries[entry];
+            if (binding.Binding >= capabilities.MaxBindings)
+            {
+                return RasterStatus::Unsupported;
+            }
+            if ((static_cast<uint32>(binding.Visibility) & stage) == 0)
+            {
+                continue;
+            }
+            uniforms += binding.Kind == RasterBindingKind::UniformBuffer ? binding.Count : 0U;
+            sampled += TextureBinding(binding.Kind) == true ? binding.Count : 0U;
+            samplers += binding.Kind == RasterBindingKind::Sampler ? binding.Count : 0U;
+            storage +=
+                binding.Kind == RasterBindingKind::StorageRead || binding.Kind == RasterBindingKind::StorageReadWrite
+                    ? binding.Count
+                    : 0U;
+        }
+        if (uniforms > capabilities.MaxUniformBuffersPerStage || sampled > capabilities.MaxSampledTexturesPerStage ||
+            samplers > capabilities.MaxSamplersPerStage || storage > backend::ComputeLimits().MaxStorageBindings)
+        {
+            return RasterStatus::Unsupported;
+        }
     }
     uint32 dynamicUniforms = 0;
     uint32 dynamicStorage = 0;
@@ -711,10 +741,6 @@ RasterStatus CreateBuffer(DeviceHandle device,
         {
             return compute;
         }
-        if (description.Size > backend::ComputeLimits().MaxStorageRange)
-        {
-            return RasterStatus::InvalidDescription;
-        }
     }
     const usize alignment = description.Role == BufferRole::Index16   ? 2
                             : description.Role == BufferRole::Uniform ? 16
@@ -915,7 +941,8 @@ RasterStatus CreateTexture(DeviceHandle device,
         width = width > 1 ? width / 2 : 1;
         height = height > 1 ? height / 2 : 1;
     }
-    if (upload.Bytes.data() == nullptr || occupied != upload.Bytes.size() || occupied > textureLimits.MaxBufferSize)
+    if (upload.Bytes.data() == nullptr || occupied != upload.Bytes.size() ||
+        occupied > textureLimits.MaxTextureUploadBytes)
     {
         return RasterStatus::InvalidDescription;
     }

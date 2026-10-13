@@ -85,8 +85,11 @@ def cook(document):
         if probe_level == requested_levels:
             break
         probe_width, probe_height = max(1, probe_width // 2), max(1, probe_height // 2)
-    if footprint > 64 * 1024 * 1024:
-        raise ValueError('Complete mip upload exceeds the 64 MiB portable profile')
+    upload_budget = document.get("max_upload_bytes", 64 * 1024 * 1024)
+    if type(upload_budget) is not int or not 1 <= upload_budget <= 512 * 1024 * 1024:
+        raise ValueError("max_upload_bytes must be an integer in 1..512 MiB")
+    if footprint > upload_budget:
+        raise ValueError("Complete mip upload exceeds max_upload_bytes (default 64 MiB)")
     if (fmt == 'Rgba8Srgb' and semantic != 'color') or (semantic in ('color', 'normal') and channels != 4):
         raise ValueError('sRGB is color only; color/normal require RGBA8')
     if not isinstance(pixels, list) or len(pixels) != width * height * channels or any(type(v) is not int or not 0 <= v <= 255 for v in pixels):

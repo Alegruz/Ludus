@@ -11,7 +11,7 @@ const {PNG} = require('pngjs');
 const root = resolve(process.argv[2]);
 const output = resolve(process.argv[3] || 'out/raster-browser');
 await mkdir(output, {recursive:true});
-for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm','r8.html','r8.js','r8.wasm','r9.html','r9.js','r9.wasm','r10.html','r10.js','r10.wasm','r11.html','r11.js','r11.wasm']) await access(resolve(root,name));
+for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm','r8.html','r8.js','r8.wasm','r9.html','r9.js','r9.wasm','r10.html','r10.js','r10.wasm','r11.html','r11.js','r11.wasm','r18c.html','r18c.js','r18c.wasm']) await access(resolve(root,name));
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
   const path = resolve(root, '.' + pathname);
@@ -319,6 +319,20 @@ try {
     await context.close();
   }
 
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage(); lastPage = page;
+    const errors = [];
+    page.on('pageerror', error => errors.push(String(error)));
+    page.on('console', message => report.console.push({scenario:'r18c-webgpu',type:message.type(),text:message.text()}));
+    await page.goto(`http://127.0.0.1:${server.address().port}/r18c.html`);
+    await page.waitForFunction(() => ['passed','failed'].includes(document.querySelector('#status')?.dataset.state),null,{timeout:60000});
+    const status = await page.locator('#status').evaluate(node => ({...node.dataset}));
+    assert.equal(status.state,'passed',JSON.stringify(status));
+    assert.deepEqual(errors,[]);
+    report.cases.push({scenario:'r18c-webgpu',bufferBytes:67109120,storageRangeBytes:16777472,storageBindings:5,totalBindings:9,gpuValue:20});
+    await context.close();
+  }
   for (const backend of ['webgpu','webgl2','auto','fallback']) {
     const context = await browser.newContext();
     if (backend === 'fallback') await context.addInitScript(() => Object.defineProperty(navigator,'gpu',{get:() => undefined}));
@@ -333,6 +347,11 @@ try {
         GPUAdapter.prototype.requestDevice = function(descriptor) {
           globalThis.__textureLimitRequests.push({
             adapter: this.limits.maxTextureDimension2D,
+            buffer: this.limits.maxBufferSize,
+            storage: this.limits.maxStorageBufferBindingSize,
+            layers: this.limits.maxTextureArrayLayers,
+            volume: this.limits.maxTextureDimension3D,
+            limits: {...descriptor.requiredLimits},
             requested: descriptor.requiredLimits?.maxTextureDimension2D,
           });
           return request.call(this, descriptor);
@@ -349,6 +368,13 @@ try {
       assert.equal(textureLimitRequests.length, 1);
       assert.equal(textureLimitRequests[0].requested, textureLimitRequests[0].adapter,
         'R18 must request the adapter texture maximum before publishing enabled device limits');
+      const request = textureLimitRequests[0];
+      assert.equal(request.limits.maxBufferSize, request.buffer);
+      assert.equal(request.limits.maxStorageBufferBindingSize, Math.min(request.storage,request.buffer));
+      assert.equal(request.limits.maxTextureArrayLayers, request.layers);
+      assert.equal(request.limits.maxTextureDimension3D, request.volume);
+      assert.equal(request.limits.maxBindingsPerBindGroup, undefined);
+      assert.ok(request.limits.maxStorageBuffersPerShaderStage >= 5);
     } else {
       assert.deepEqual(textureLimitRequests, []);
     }

@@ -569,7 +569,7 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         result.MaxMipLevels = sampled.maxMipLevels;
     }
-    result.MaxArrayLayers = sampled.maxArrayLayers < 256 ? sampled.maxArrayLayers : 256;
+    result.MaxArrayLayers = sampled.maxArrayLayers;
     result.PartialViews = true;
     VkImageFormatProperties cube{}, volume{};
     if (vkGetPhysicalDeviceImageFormatProperties(gPhysical,
@@ -600,7 +600,7 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
                                                                                          0,
                                                                                          &volume) == VK_SUCCESS)
     {
-        result.MaxDimension3D = 256;
+        result.MaxDimension3D = volume.maxExtent.width;
         const uint32 bounds[]{volume.maxExtent.width, volume.maxExtent.height, volume.maxExtent.depth};
         for (const auto bound : bounds)
         {
@@ -656,10 +656,6 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
         }
         result.MaxAttachmentLayers =
             color.maxArrayLayers < depth.maxArrayLayers ? color.maxArrayLayers : depth.maxArrayLayers;
-        if (result.MaxAttachmentLayers > 256)
-        {
-            result.MaxAttachmentLayers = 256;
-        }
         if (result.StencilAttachment)
         {
             stencilDimension =
@@ -821,18 +817,38 @@ BindingCapabilities BindingLimits() noexcept
     {
         textures = limits.maxDescriptorSetSampledImages;
     }
+    uint32 uniforms = limits.maxPerStageDescriptorUniformBuffers < limits.maxDescriptorSetUniformBuffers
+                          ? limits.maxPerStageDescriptorUniformBuffers
+                          : limits.maxDescriptorSetUniformBuffers;
+    uint32 samplers = limits.maxPerStageDescriptorSamplers < limits.maxDescriptorSetSamplers
+                          ? limits.maxPerStageDescriptorSamplers
+                          : limits.maxDescriptorSetSamplers;
+    uniforms = uniforms < internal::RASTER_BINDINGS ? uniforms : static_cast<uint32>(internal::RASTER_BINDINGS);
+    samplers = samplers < internal::RASTER_BINDINGS ? samplers : static_cast<uint32>(internal::RASTER_BINDINGS);
     return
     {
-        .MaxDynamicUniformBuffers =
-            limits.maxDescriptorSetUniformBuffersDynamic < 8 ? limits.maxDescriptorSetUniformBuffersDynamic : 8,
-        .MaxDynamicStorageBuffers =
-            limits.maxDescriptorSetStorageBuffersDynamic < 4 ? limits.maxDescriptorSetStorageBuffersDynamic : 4,
+        .MaxDynamicUniformBuffers = limits.maxDescriptorSetUniformBuffersDynamic < internal::RASTER_BINDINGS
+                                        ? limits.maxDescriptorSetUniformBuffersDynamic
+                                        : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxDynamicStorageBuffers = limits.maxDescriptorSetStorageBuffersDynamic < internal::RASTER_BINDINGS
+                                        ? limits.maxDescriptorSetStorageBuffersDynamic
+                                        : static_cast<uint32>(internal::RASTER_BINDINGS),
         .MaxTextureArrayElements = textures,
         .MaxDescriptorsPerSet = limits.maxPerStageResources < internal::CurrentStorageLimits().DescriptorsPerSet
                                     ? limits.maxPerStageResources
                                     : internal::CurrentStorageLimits().DescriptorsPerSet,
         .HasUniformTextureIndexing = gHasUniformTextureIndexing,
         .HasBindlessTextureIndexing = gHasBindlessTextureIndexing,
+        .MaxBindings = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxUniformBuffersPerStage = uniforms,
+        .MaxSampledTexturesPerStage = textures,
+        .MaxSamplersPerStage = samplers,
+        .MaxUniformBuffersPerSet = limits.maxDescriptorSetUniformBuffers < internal::RASTER_BINDINGS
+                                       ? limits.maxDescriptorSetUniformBuffers
+                                       : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxSamplersPerSet = limits.maxDescriptorSetSamplers < internal::RASTER_BINDINGS
+                                 ? limits.maxDescriptorSetSamplers
+                                 : static_cast<uint32>(internal::RASTER_BINDINGS),
     };
 }
 RasterCapabilities RasterLimits() noexcept
@@ -851,14 +867,29 @@ RasterCapabilities RasterLimits() noexcept
     }
     const uint32 max = properties.limits.maxImageDimension2D;
     const usize alignment = properties.limits.minUniformBufferOffsetAlignment;
-    return {usize{64} * 1024 * 1024,
+    // Thanks to Khronos Group, Vulkan Specification, maintenance3 allocation limits:
+    // https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceMaintenance3Properties.html
+    // Vulkan 1.1 is required; staging and buffer allocations share the enabled allocation bound.
+    VkPhysicalDeviceMaintenance3Properties allocation
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES,
+    };
+    VkPhysicalDeviceProperties2 extended
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &allocation,
+    };
+    vkGetPhysicalDeviceProperties2(gPhysical, &extended);
+    const usize bufferBytes = internal::GetResourceSizeLimit(allocation.maxMemoryAllocationSize);
+    return {bufferBytes,
             max,
             alignment > 256 ? alignment : 256,
             properties.limits.maxUniformBufferRange < 16384 ? properties.limits.maxUniformBufferRange : 16384,
             internal::CurrentStorageLimits().ResourcesPerKind,
             internal::CurrentStorageLimits().DrawsPerFrame,
             properties.limits.maxVertexInputAttributes < 16 ? properties.limits.maxVertexInputAttributes : 16,
-            gRasterHdr};
+            gRasterHdr,
+            bufferBytes};
 }
 ComputeCapabilities ComputeLimits() noexcept
 {
@@ -873,11 +904,16 @@ ComputeCapabilities ComputeLimits() noexcept
     {
         return {};
     }
-    constexpr usize range = usize{16} * 1024 * 1024;
+    const usize range = RasterLimits().MaxBufferSize;
     ComputeCapabilities result;
     result.MaxStorageRange = limits.maxStorageBufferRange < range ? limits.maxStorageBufferRange : range;
     result.StorageOffsetAlignment =
         limits.minStorageBufferOffsetAlignment > 256 ? limits.minStorageBufferOffsetAlignment : 256;
+    const uint32 storageBindings = limits.maxPerStageDescriptorStorageBuffers < limits.maxDescriptorSetStorageBuffers
+                                       ? limits.maxPerStageDescriptorStorageBuffers
+                                       : limits.maxDescriptorSetStorageBuffers;
+    result.MaxStorageBindings =
+        storageBindings < internal::RASTER_BINDINGS ? storageBindings : static_cast<uint32>(internal::RASTER_BINDINGS);
     result.MaxWorkgroupInvocations = 256;
     const uint32 size[3]{256, 256, 64};
     for (usize i = 0; i < 3; ++i)

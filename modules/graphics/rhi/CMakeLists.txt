@@ -216,6 +216,13 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN AND LUDUS_SLANG_COMPILER AND (APPLE OR L
     endforeach()
     add_test(NAME ludus_rhi_r10_consumer COMMAND ludus_rhi_r10_consumer)
     set_tests_properties(ludus_rhi_r10_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
+    add_executable(ludus_rhi_r18c_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r18c.cpp")
+    target_link_libraries(ludus_rhi_r18c_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
+    ludus_apply_project_defaults(ludus_rhi_r18c_consumer)
+    ludus_compile_shader(TARGET ludus_rhi_r18c_consumer NAME r18c
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r18c.slang" COMPUTE ComputeMain)
+    add_test(NAME ludus_rhi_r18c_consumer COMMAND ludus_rhi_r18c_consumer)
+    set_tests_properties(ludus_rhi_r18c_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 60)
     add_executable(ludus_rhi_r9_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r9.cpp")
     target_link_libraries(ludus_rhi_r9_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
     ludus_apply_project_defaults(ludus_rhi_r9_consumer)

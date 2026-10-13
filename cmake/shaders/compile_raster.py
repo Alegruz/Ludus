@@ -10,6 +10,8 @@ import struct
 # Reflect each target independently. No cross-target CPU packing is inferred.
 # Raster rejects storage; compute accepts bounded structured buffers. Both reject
 # resource arrays, extra groups and unsupported inputs.
+RASTER_BINDING_COUNT = 16
+
 def uniform_shape(value):
     kind = value.get('kind')
     if kind == 'scalar' and value.get('scalarType') == 'float32':
@@ -61,7 +63,7 @@ def raster_interface(document, stage, metal=False, native_arrays=False):
         if len(descriptors) != 1 or descriptors[0].get('space', 0) != 0:
             raise RuntimeError('Raster resources require one descriptor in group/set zero')
         index = descriptors[0]['index']
-        if not 0 <= index < 8 or any(e['binding'] == index for e in entries):
+        if not 0 <= index < RASTER_BINDING_COUNT or any(e['binding'] == index for e in entries):
             raise RuntimeError('Raster binding is duplicated or outside the bounded profile')
         resource_type = resource['type']
         count = 1
@@ -160,8 +162,8 @@ def raster_interface(document, stage, metal=False, native_arrays=False):
         group = point.get('threadGroupSize')
         if not isinstance(group, list) or len(group) != 3 or any(type(x) is not int or x <= 0 for x in group) or group[0] * group[1] * group[2] > 256 or any(x > cap for x, cap in zip(group, (256, 256, 64))):
             raise RuntimeError('Compute local workgroup dimensions exceed the bounded profile')
-        if sum(x['kind'].startswith('Storage') for x in entries) > 4:
-            raise RuntimeError('Compute supports at most four storage bindings')
+        if sum(x['kind'].startswith('Storage') for x in entries) > RASTER_BINDING_COUNT:
+            raise RuntimeError('Compute exceeds the implemented storage binding metadata capacity')
         result['workgroup'] = group
     return result
 
@@ -681,7 +683,7 @@ def compile_raster(args, lock):
                 a, b = interfaces[('wgsl', stage)], interfaces[('glsl', stage)]
                 if [(x['binding'], x['kind'], x['size'], x.get('offsets')) for x in a['entries']] != [(x['binding'], x['kind'], x['size'], x.get('offsets')) for x in b['entries']] or a['inputs'] != b['inputs']:
                     raise RuntimeError('Browser raster uniform/layout packing differs between WGSL and GLSL ES')
-                header += ' for (foundation::usize i = 0; i < 8; ++i) { result.UniformBlocks[i] = glsl.UniformBlocks[i]; result.TextureNames[i] = glsl.TextureNames[i]; result.TextureSamplers[i] = glsl.TextureSamplers[i]; }\n'
+                header += ' for (foundation::usize i = 0; i < graphics::rhi::RASTER_BINDING_COUNT; ++i) { result.UniformBlocks[i] = glsl.UniformBlocks[i]; result.TextureNames[i] = glsl.TextureNames[i]; result.TextureSamplers[i] = glsl.TextureSamplers[i]; }\n'
             header += f' return result;\n#else\n return Spirv{stage.title()}();\n#endif\n}}\n'
     header += '}\n'
     manifest = {'compiler': lock['slang'], 'commands': commands, 'interfaces': {backend + '_' + stage: info for (backend, stage), info in interfaces.items()},

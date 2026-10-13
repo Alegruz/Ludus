@@ -3,6 +3,8 @@
 #include "reference_raster.h"
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
+
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
 
@@ -3219,4 +3221,58 @@ TEST_CASE("Native BC5 edge dimensions retain complete blocks and mip packing", "
     REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
     CHECK(residency.InitializedBytes == BYTE_COUNT);
     REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+}
+
+TEST_CASE("R18c array and volume extents admit their exact enabled boundary", "[rhi][raster][r18c]")
+{
+    Session session;
+    constexpr uint32 EXTENT = 2048;
+    constexpr usize UPLOAD_BYTES = usize{EXTENT} * 4;
+    ludus::foundation::StaticArray<uint8, UPLOAD_BYTES> bytes{};
+    TextureHandle texture;
+    TextureDescription description
+    {
+        .Width = 1,
+        .Height = 1,
+        .Dimension = TextureDimension::D2Array,
+        .DepthOrLayers = EXTENT,
+    };
+    SECTION("array") {}
+    SECTION("volume")
+    {
+        description.Dimension = TextureDimension::D3;
+    }
+    REQUIRE(CreateTexture(session.Device, description, {bytes, 4}, texture) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    description.DepthOrLayers = EXTENT + 1;
+    const usize creates = reference::Creates[static_cast<usize>(internal::RasterKind::Texture)];
+    CHECK(CreateTexture(session.Device, description, {bytes, 4}, texture) == RasterStatus::Unsupported);
+    CHECK(IsNull(texture) == true);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Texture)] == creates);
+}
+
+TEST_CASE("R18c complete upload limit is independent of buffer and logical budgets", "[rhi][raster][r18c]")
+{
+    Session session;
+    reference::RasterLimitOverride = backend::RasterLimits();
+    reference::OverrideRasterLimits = true;
+    // Configure a smaller complete-upload limit without changing the enabled buffer size.
+    reference::RasterLimitOverride.MaxBufferSize = 64;
+    reference::RasterLimitOverride.MaxTextureDimension2D = 4096;
+    reference::RasterLimitOverride.MaxUniformRange = 16384;
+    reference::RasterLimitOverride.MaxTextureUploadBytes = 16;
+    constexpr usize BYTE_COUNT = 32;
+    ludus::foundation::StaticArray<uint8, BYTE_COUNT> bytes{};
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device, { .Width = 1, .Height = 1 }, {{bytes.GetData(), 16}, 16}, texture) ==
+            RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    StorageUsage before;
+    REQUIRE(GetStorageUsage(session.Device, before) == RasterStatus::Ready);
+    CHECK(CreateTexture(session.Device, { .Width = 1, .Height = 1 }, {bytes, 32}, texture) ==
+          RasterStatus::InvalidDescription);
+    CHECK(IsNull(texture) == true);
+    StorageUsage after;
+    REQUIRE(GetStorageUsage(session.Device, after) == RasterStatus::Ready);
+    CHECK(after.ResourceBytes == before.ResourceBytes);
 }

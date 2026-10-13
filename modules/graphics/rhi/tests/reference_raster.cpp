@@ -17,6 +17,7 @@ void Reset() noexcept
     ComputeAvailable = true;
     FormatBlendUnavailable = false;
     OverrideRasterLimits = false;
+    HasBindingLimitOverride = false;
     for (bool& unavailable : FormatUnavailable)
     {
         unavailable = false;
@@ -115,7 +116,7 @@ RasterStatus RasterPrepareStorage() noexcept
 ComputeCapabilities ComputeLimits() noexcept
 {
     return reference::ProfileAvailable && reference::ComputeAvailable && Kind() != Backend::WebGL2
-               ? ComputeCapabilities{16777216, 256, {256, 256, 64}, 256, {65535, 65535, 65535}}
+               ? ComputeCapabilities{134217728, 256, {256, 256, 64}, 256, {65535, 65535, 65535}, 8}
                : ComputeCapabilities{};
 }
 RasterStatus ComputeCreatePipeline(usize, const internal::ComputePipelineInfo&, uint32 request) noexcept
@@ -139,15 +140,15 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
     result.HasUnalignedBlockExtents =
         internal::CompressedTexture(format) == true && (Kind() == Backend::Vulkan || Kind() == Backend::Metal);
-    result.MaxArrayLayers = 256;
+    result.MaxArrayLayers = 2048;
     result.MaxCubeDimension = result.MaxSampledDimension2D;
-    result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 256U;
+    result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 2048U;
     result.PartialViews = result.Uses.Sampled;
     result.AttachmentViews = result.DepthSampled = result.StencilAttachment = result.StencilSampled =
         result.Uses.ColorAttachment;
     result.SampleCounts = result.Uses.ColorAttachment ? 5U : 0U;
     result.MaxAttachmentMipLevels = result.Uses.ColorAttachment ? result.MaxMipLevels : 0;
-    result.MaxAttachmentLayers = result.Uses.ColorAttachment ? 256 : 0;
+    result.MaxAttachmentLayers = result.Uses.ColorAttachment ? 2048 : 0;
     if (reference::FormatBlendUnavailable)
     {
         result.Uses.Blendable = false;
@@ -169,6 +170,10 @@ bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
 }
 BindingCapabilities BindingLimits() noexcept
 {
+    if (reference::HasBindingLimitOverride == true)
+    {
+        return reference::BindingLimitOverride;
+    }
     if (reference::ProfileAvailable == false)
     {
         return {};
@@ -176,12 +181,19 @@ BindingCapabilities BindingLimits() noexcept
     const bool hasNativeArrays = Kind() == Backend::Vulkan || Kind() == Backend::Metal;
     return
     {
-        .MaxDynamicUniformBuffers = 8,
-        .MaxDynamicStorageBuffers = Kind() == Backend::WebGL2 ? 0U : 4U,
+        .MaxDynamicUniformBuffers = 16,
+        .MaxDynamicStorageBuffers = Kind() == Backend::WebGL2 ? 0U : 8U,
         .MaxTextureArrayElements = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 1U,
-        .MaxDescriptorsPerSet = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 8U,
+        .MaxDescriptorsPerSet = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 16U,
         .HasUniformTextureIndexing = hasNativeArrays,
         .HasBindlessTextureIndexing = hasNativeArrays == true && internal::IsBindlessRequested() == true,
+        .MaxBindings = 16,
+        .MaxUniformBuffersPerStage = 12,
+        .MaxSampledTexturesPerStage =
+            hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 16U,
+        .MaxSamplersPerStage = 16,
+        .MaxUniformBuffersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .MaxSamplersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
     };
 }
 RasterCapabilities RasterLimits() noexcept
@@ -194,14 +206,15 @@ RasterCapabilities RasterLimits() noexcept
     {
         return reference::RasterLimitOverride;
     }
-    return {usize{64} * 1024 * 1024,
+    return {internal::GetResourceSizeLimit(usize{512} * 1024 * 1024),
             4096,
             256,
             16384,
             internal::CurrentStorageLimits().ResourcesPerKind,
             internal::CurrentStorageLimits().DrawsPerFrame,
             16,
-            reference::HdrAvailable};
+            reference::HdrAvailable,
+            internal::GetResourceSizeLimit(usize{512} * 1024 * 1024)};
 }
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32 request) noexcept

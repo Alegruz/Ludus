@@ -1,6 +1,8 @@
 #include "internal/lifecycle.h"
 #include "reference_raster.h"
 
+#include <ludus/foundation/containers/static_array.hpp>
+
 #include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/graph.h>
 
@@ -161,7 +163,8 @@ TEST_CASE("Compute layouts and workgroup limits reject unsupported contracts wit
         bindings[i] = {i, RasterBindingKind::StorageReadWrite, RasterVisibility::Compute, 4};
     }
     BindingLayoutHandle layout;
-    CHECK(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::InvalidDescription);
+    REQUIRE(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, layout) == RasterStatus::Ready);
     bindings[0].Visibility = RasterVisibility::Fragment;
     CHECK(CreateBindingLayout(session.Device, {bindings, 1}, layout) == RasterStatus::InvalidDescription);
     Kernel kernel(session.Device);
@@ -335,4 +338,58 @@ TEST_CASE("R11 compute offsets are copied and exact storage ranges are declared"
     REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, submission) == RasterStatus::Ready);
     CHECK(reference::DispatchPacket.DynamicOffsetCount == 1);
     CHECK(reference::DispatchPacket.DynamicOffsets[0] == 256);
+}
+
+TEST_CASE("R18c layout entry and per-stage descriptor limits reject before publication", "[rhi][compute][r18c]")
+{
+    ComputeSession session;
+    constexpr usize ENTRY_COUNT = 16;
+    ludus::foundation::StaticArray<RasterBinding, ENTRY_COUNT> bindings{};
+    for (usize entry = 0; entry < ENTRY_COUNT; ++entry)
+    {
+        bindings[entry] =
+        {
+            .Binding = static_cast<uint32>(entry),
+            .Kind = RasterBindingKind::StorageRead,
+            .Visibility = RasterVisibility::Compute,
+            .MinSize = 4,
+        };
+    }
+    BindingLayoutHandle layout;
+    REQUIRE(CreateBindingLayout(session.Device, {bindings.GetData(), 8}, layout) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, layout) == RasterStatus::Ready);
+    StorageUsage before;
+    REQUIRE(GetStorageUsage(session.Device, before) == RasterStatus::Ready);
+    CHECK(CreateBindingLayout(session.Device, {bindings.GetData(), 9}, layout) == RasterStatus::Unsupported);
+    CHECK(GetStatus(session.Device, layout) == RasterStatus::InvalidHandle);
+    for (RasterBinding& binding : bindings)
+    {
+        binding.Kind = RasterBindingKind::UniformBuffer;
+        binding.MinSize = 16;
+    }
+    CHECK(CreateBindingLayout(session.Device, {bindings.GetData(), 13}, layout) == RasterStatus::Unsupported);
+    CHECK(GetStatus(session.Device, layout) == RasterStatus::InvalidHandle);
+    // Stage visibility is counted independently: twelve fragment and four vertex uniforms.
+    for (usize entry = 0; entry < ENTRY_COUNT; ++entry)
+    {
+        bindings[entry].Visibility = entry < 12 ? RasterVisibility::Fragment : RasterVisibility::Vertex;
+    }
+    REQUIRE(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, layout) == RasterStatus::Ready);
+    reference::BindingLimitOverride = backend::BindingLimits();
+    reference::BindingLimitOverride.MaxUniformBuffersPerSet = 12;
+    reference::HasBindingLimitOverride = true;
+    CHECK(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::Unsupported);
+    CHECK(GetStatus(session.Device, layout) == RasterStatus::InvalidHandle);
+    reference::HasBindingLimitOverride = false;
+    bindings[15].Visibility = RasterVisibility::Both;
+    CHECK(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::Unsupported);
+    CHECK(GetStatus(session.Device, layout) == RasterStatus::InvalidHandle);
+    bindings[15].Binding = 16;
+    CHECK(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::InvalidDescription);
+    CHECK(GetStatus(session.Device, layout) == RasterStatus::InvalidHandle);
+    StorageUsage after;
+    REQUIRE(GetStorageUsage(session.Device, after) == RasterStatus::Ready);
+    CHECK(after.ResourceBytes == before.ResourceBytes);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Layout)] == 2);
 }
