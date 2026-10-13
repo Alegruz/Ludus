@@ -35,34 +35,34 @@ math::Matrix4d MultiplyMatrices(const math::Matrix4d& left, const math::Matrix4d
     return result;
 }
 
-math::Matrix4d MakeTranslation(float64 x, float64 y, float64 z) noexcept
+math::Matrix4d MakeTranslation(const math::Vector3d& offset) noexcept
 {
     math::Matrix4d result = math::Matrix4d::Identity();
-    result.Elements[12] = x;
-    result.Elements[13] = y;
-    result.Elements[14] = z;
+    result.Elements[12] = offset.X;
+    result.Elements[13] = offset.Y;
+    result.Elements[14] = offset.Z;
     return result;
 }
 
-math::Matrix4d MakeScale(float64 x, float64 y, float64 z) noexcept
+math::Matrix4d MakeScale(const math::Vector3d& factors) noexcept
 {
     math::Matrix4d result = math::Matrix4d::Identity();
-    result.Elements[0] = x;
-    result.Elements[5] = y;
-    result.Elements[10] = z;
+    result.Elements[0] = factors.X;
+    result.Elements[5] = factors.Y;
+    result.Elements[10] = factors.Z;
     return result;
 }
 
-bool MakeRotation(float64 angleDegrees, float64 x, float64 y, float64 z, math::Matrix4d& outMatrix) noexcept
+bool MakeRotation(float64 angleDegrees, const math::Vector3d& axis, math::Matrix4d& outMatrix) noexcept
 {
-    const float64 length = math::Length(math::Vector3d{x, y, z});
+    const float64 length = math::Length(axis);
     if (length == 0.0 || math::IsFinite(length) == false)
     {
         return false;
     }
-    x /= length;
-    y /= length;
-    z /= length;
+    const float64 x = axis.X / length;
+    const float64 y = axis.Y / length;
+    const float64 z = axis.Z / length;
     const float64 radians = math::DegreesToRadians(angleDegrees);
     const float64 sine = math::Sin(radians);
     const float64 cosine = math::Cos(radians);

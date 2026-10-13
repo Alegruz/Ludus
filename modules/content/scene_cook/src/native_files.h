@@ -40,13 +40,18 @@ class SequentialFile final
 {
 public:
     SequentialFile() noexcept = default;
-    ~SequentialFile() noexcept;
+    ~SequentialFile() noexcept
+    {
+        Close();
+    }
     SequentialFile(const SequentialFile&) = delete;
     SequentialFile& operator=(const SequentialFile&) = delete;
     /// Open path for reading. @return Ok, NotFound or IoError.
     [[nodiscard]] Status Open(std::string_view path) noexcept;
     /// Read up to outBuffer.size() bytes; outCount is zero at end of file.
     [[nodiscard]] Status Read(std::span<uint8> outBuffer, usize& outCount) noexcept;
+    /// Close the file if open; Open may be called again afterwards.
+    void Close() noexcept;
 
 private:
     /// POSIX descriptor; unused where SequentialFile is unsupported.

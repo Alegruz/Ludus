@@ -421,11 +421,12 @@ Status ReadFileBounded(std::string_view path, usize maximum, foundation::Array<u
     return status;
 }
 
-SequentialFile::~SequentialFile() noexcept
+void SequentialFile::Close() noexcept
 {
     if (mDescriptor >= 0)
     {
         (void)close(mDescriptor);
+        mDescriptor = -1;
     }
 }
 
@@ -709,7 +710,7 @@ Status RemoveTree(std::string_view) noexcept
 {
     return Status::Unsupported;
 }
-SequentialFile::~SequentialFile() noexcept = default;
+void SequentialFile::Close() noexcept {}
 Status SequentialFile::Open(std::string_view) noexcept
 {
     return Status::Unsupported;

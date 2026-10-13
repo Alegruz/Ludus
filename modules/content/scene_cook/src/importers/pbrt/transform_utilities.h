@@ -16,11 +16,10 @@ using foundation::core::float64;
 
 /// left x right (right applied first).
 [[nodiscard]] math::Matrix4d MultiplyMatrices(const math::Matrix4d& left, const math::Matrix4d& right) noexcept;
-[[nodiscard]] math::Matrix4d MakeTranslation(float64 x, float64 y, float64 z) noexcept;
-[[nodiscard]] math::Matrix4d MakeScale(float64 x, float64 y, float64 z) noexcept;
+[[nodiscard]] math::Matrix4d MakeTranslation(const math::Vector3d& offset) noexcept;
+[[nodiscard]] math::Matrix4d MakeScale(const math::Vector3d& factors) noexcept;
 /// Rotation by angleDegrees about axis (x, y, z); false for a zero axis.
-[[nodiscard]] bool
-MakeRotation(float64 angleDegrees, float64 x, float64 y, float64 z, math::Matrix4d& outMatrix) noexcept;
+[[nodiscard]] bool MakeRotation(float64 angleDegrees, const math::Vector3d& axis, math::Matrix4d& outMatrix) noexcept;
 /// pbrt LookAt (eye, look, up): camera-from-world; false when degenerate.
 [[nodiscard]] bool MakeLookAt(std::span<const float64> values, math::Matrix4d& outMatrix) noexcept;
 /// Inverse of an affine matrix (last row 0 0 0 1 assumed); false when singular.

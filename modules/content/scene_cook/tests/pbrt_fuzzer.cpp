@@ -11,7 +11,7 @@ extern "C" int LLVMFuzzerTestOneInput(const ludus::foundation::core::uint8* data
     const std::span<const ludus::foundation::core::uint8> input(data, size);
     SceneIr scene;
     DiagnosticLog log;
-    (void)pbrt::ReadSceneFromMemory(input, {}, "fuzz.pbrt", scene, log);
+    (void)pbrt::ReadSceneFromMemory({input, {}, "fuzz.pbrt"}, scene, log);
     IrMesh mesh;
     PlyHeaderSummary summary;
     std::string_view message;
