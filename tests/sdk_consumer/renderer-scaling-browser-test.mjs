@@ -32,6 +32,7 @@ try {
       for (const backend of ['webgpu','webgl2','auto','fallback']) {
         const images = [];
         for (const reference of [false,true]) {
+          console.log(`L5 ${scenario} ${backend} ${ldr?'ldr':'hdr'} ${reference?'reference':'clustered'} starting`);
           const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
           if (backend === 'fallback') await context.addInitScript(() => Object.defineProperty(navigator,'gpu',{get:()=>undefined}));
           const page = await context.newPage();
@@ -39,6 +40,7 @@ try {
           page.on('pageerror',e => errors.push(String(e)));
           page.on('console',m => {if (m.type() === 'error') errors.push(m.text());});
           await page.goto(`http://127.0.0.1:${server.address().port}/renderer-scaling.html?scenario=${scenario}&backend=${backend === 'fallback'?'auto':backend}${reference?'&reference=1':''}${ldr?'&ldr=1':''}`);
+          console.log('L5 page loaded');
           for (const frame of ['5','80']) {
             try { await page.waitForFunction(frame => document.querySelector('#status').dataset.frames === frame || document.querySelector('#status').dataset.state === 'failed',frame,{timeout:30000}); }
             catch (error) { throw new Error(JSON.stringify({scenario,backend,reference,ldr,frame,state:await page.locator('#status').evaluate(n=>({...n.dataset})),errors}),{cause:error}); }
@@ -72,6 +74,10 @@ try {
   }
   await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));
   console.log(`L5 renderer browser: ${report.cases.length} cases passed`);
+} catch (error) {
+  // Report the original failure before browser shutdown can block on a wedged GPU.
+  console.error(error);
+  throw error;
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));
