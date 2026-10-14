@@ -126,8 +126,28 @@ namespace internal
 {
 EnvironmentData::~EnvironmentData() noexcept
 {
-    static_cast<void>(rhi::Destroy(Device, Sampler));
-    static_cast<void>(rhi::Destroy(Device, Texture));
+    if (IsCpuOnly == false)
+    {
+        static_cast<void>(rhi::Destroy(Device, Sampler));
+        static_cast<void>(rhi::Destroy(Device, Texture));
+    }
+}
+rhi::RasterStatus BuildEnvironmentDistribution(EnvironmentData& inoutData) noexcept
+{
+    if (inoutData.Distribution.TryResize(inoutData.Pixels.GetSize()) == false)
+    {
+        return rhi::RasterStatus::OutOfMemory;
+    }
+    inoutData.Weight = 0;
+    for (usize i = 0; i < inoutData.Pixels.GetSize(); ++i)
+    {
+        const math::Vector3 radiance = ReadColor(inoutData.Pixels[i]);
+        const float64 solidAngle = ComputeSolidAngle(inoutData, i);
+        inoutData.Weight +=
+            static_cast<float64>(math::Dot(radiance, math::Vector3{.2126F, .7152F, .0722F})) * solidAngle;
+        inoutData.Distribution[i] = inoutData.Weight;
+    }
+    return rhi::RasterStatus::Ready;
 }
 void RetainEnvironment(EnvironmentData* dataOrNull) noexcept
 {
@@ -315,14 +335,17 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
     dataOrNull->FingerprintLow = fingerprint.Low;
     dataOrNull->FingerprintHigh = fingerprint.High;
     canonical = {};
+    const Status distributionStatus = internal::BuildEnvironmentDistribution(*dataOrNull);
+    if (distributionStatus != Status::Ready)
+    {
+        delete dataOrNull;
+        return distributionStatus;
+    }
     float64 irradiance[internal::ENVIRONMENT_SH_COUNT][3]{};
     for (usize i = 0; i < count; ++i)
     {
         const math::Vector3 radiance = ReadColor(dataOrNull->Pixels[i]);
         const float64 solidAngle = ComputeSolidAngle(*dataOrNull, i);
-        dataOrNull->Weight +=
-            static_cast<float64>(math::Dot(radiance, math::Vector3{.2126F, .7152F, .0722F})) * solidAngle;
-        dataOrNull->Distribution[i] = dataOrNull->Weight;
         const float32 u = (static_cast<float32>(i % dataOrNull->Width) + .5F) / static_cast<float32>(dataOrNull->Width);
         const usize row = i / dataOrNull->Width;
         const float32 v = (static_cast<float32>(row) + .5F) / static_cast<float32>(dataOrNull->Height);

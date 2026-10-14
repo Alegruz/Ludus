@@ -204,6 +204,23 @@ rhi::RasterStatus CameraRay(const ReferenceJob& job, float32 x, float32 y, rhi::
     return rhi::RasterStatus::Ready;
 }
 } // namespace
+math::Vector3 ComputeReferencePositionError(const math::Affine3& meshToWorld, math::Vector3 positionMesh) noexcept
+{
+    // Preserve absolute affine products before cancellation. This is the shared
+    // FP32 profile allowance, not a platform-specific hardware error guarantee.
+    constexpr float32 AFFINE_FP32_ERROR_ALLOWANCE = 1e-6F;
+    return {
+        (math::Abs(meshToWorld.Columns[0].X * positionMesh.X) + math::Abs(meshToWorld.Columns[1].X * positionMesh.Y) +
+         math::Abs(meshToWorld.Columns[2].X * positionMesh.Z) + math::Abs(meshToWorld.Translation.X)) *
+            AFFINE_FP32_ERROR_ALLOWANCE,
+        (math::Abs(meshToWorld.Columns[0].Y * positionMesh.X) + math::Abs(meshToWorld.Columns[1].Y * positionMesh.Y) +
+         math::Abs(meshToWorld.Columns[2].Y * positionMesh.Z) + math::Abs(meshToWorld.Translation.Y)) *
+            AFFINE_FP32_ERROR_ALLOWANCE,
+        (math::Abs(meshToWorld.Columns[0].Z * positionMesh.X) + math::Abs(meshToWorld.Columns[1].Z * positionMesh.Y) +
+         math::Abs(meshToWorld.Columns[2].Z * positionMesh.Z) + math::Abs(meshToWorld.Translation.Z)) *
+            AFFINE_FP32_ERROR_ALLOWANCE,
+    };
+}
 rhi::RasterStatus BuildReferenceBvh(ReferenceSceneData& scene) noexcept
 {
     const auto count = scene.Triangles.GetSize();

@@ -38,6 +38,7 @@ struct ReferenceSurfaceData final
     ReferenceBsdf Bsdf;
     math::Vector4 Tint{1, 1, 1, 1}, UvTransform{1, 1, 0, 0};
     math::Vector3 Emission{};
+    bool IsEmissionTwoSided = true;
     rhi::SamplerDescription Sampler;
     MaterialAlpha Alpha = MaterialAlpha::Opaque;
     float32 AlphaCutoff = 0.5F;
@@ -124,6 +125,7 @@ enum class ReferenceStage : uint8
 struct ReferenceJob final
 {
     rhi::DeviceHandle Device;
+    bool IsCpuOnly = false;
     ReferenceCaptureDescription Description;
     DirectLight Lights[128];
     EnvironmentData* EnvironmentOrNull = nullptr;
@@ -141,8 +143,11 @@ struct ReferenceJob final
     ~ReferenceJob() noexcept
     {
         ReleaseEnvironment(EnvironmentOrNull);
-        static_cast<void>(rhi::Destroy(Device, Batch));
-        static_cast<void>(rhi::Destroy(Device, Scene.Native));
+        if (IsCpuOnly == false)
+        {
+            static_cast<void>(rhi::Destroy(Device, Batch));
+            static_cast<void>(rhi::Destroy(Device, Scene.Native));
+        }
     }
 };
 struct ReferenceCaptureRecord final
@@ -211,6 +216,8 @@ ReferenceRay(math::Vector3 origin, math::Vector3 direction, float32 distance) no
 {
     return {ray.Origin[0], ray.Origin[1], ray.Origin[2]};
 }
+[[nodiscard]] math::Vector3 ComputeReferencePositionError(const math::Affine3& meshToWorld,
+                                                          math::Vector3 positionMesh) noexcept;
 /// Private implementations in reference_scene.cpp; no renderer/resource ownership.
 [[nodiscard]] rhi::RasterStatus BuildReferenceBvh(ReferenceSceneData&) noexcept;
 [[nodiscard]] rhi::RasterStatus
@@ -225,6 +232,14 @@ TraceReferenceOracle(const ReferenceSceneData&, const rhi::RayInput&, rhi::RayRe
                                                  float32 = 0,
                                                  float32 = 0) noexcept;
 [[nodiscard]] bool ReferenceOpacity(const ReferenceInstance&, math::Vector2, float32 = 1) noexcept;
+struct ReferenceProbeAddress final
+{
+    uint32 TriangleIndex = 0;
+    uint32 SampleIndex = 0;
+};
+[[nodiscard]] rhi::RasterStatus EvaluateReferenceDiffuseProbe(ReferenceJob& inoutJob,
+                                                              const ReferenceProbeAddress& address,
+                                                              math::Vector3& outIrradiance) noexcept;
 [[nodiscard]] rhi::RasterStatus PrepareReferenceCamera(ReferenceJob&) noexcept;
 [[nodiscard]] rhi::RasterStatus GenerateReferencePrimary(const ReferenceJob&, ReferencePath&, rhi::RayInput&) noexcept;
 [[nodiscard]] rhi::RasterStatus PrepareReferenceVertex(ReferenceJob&, ReferencePath&, const rhi::RayResult&) noexcept;

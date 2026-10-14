@@ -321,6 +321,8 @@ TEST_CASE("Cooked v3 rejects unknown contracts and invalid transport values atom
           Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, Kind), 3},
           Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, Flags), 2},
           Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, IntensityRgb), 0xBF800000U},
+          Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, InnerCos), 0x3F4CCCCDU},
+          Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, PositionWorld), 0x49800000U},
           Mutation{V3_LIGHT_OFFSET + sizeof(sceneFormat::LightRecord), 201},
           Mutation{V3_ENVIRONMENT_OFFSET, 0x7FC00000U}})
     {
@@ -328,6 +330,7 @@ TEST_CASE("Cooked v3 rejects unknown contracts and invalid transport values atom
         REQUIRE(bytes.TryResize(original.GetSize()) == true);
         std::memcpy(bytes.GetData(), original.GetData(), original.GetSize());
         SetFixtureWord(bytes, mutation.Offset, mutation.Word);
+        CAPTURE(mutation.Offset, mutation.Word);
         REQUIRE(r::SceneDefinition::Decode(bytes.GetData(), bytes.GetSize(), scene) == r::Status::Failed);
         REQUIRE(scene.Materials[0].AreaSourceId == 41);
         REQUIRE(scene.Environment.Pixels[0].X == 16);

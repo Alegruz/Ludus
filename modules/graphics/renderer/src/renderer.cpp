@@ -1,6 +1,7 @@
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/views.hpp>
 
+#include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/stable_sort.hpp>
@@ -70,8 +71,46 @@ namespace
 {
 using internal::Access;
 constexpr usize NO_MATERIAL = ~usize{0}, NO_SHADOW = ~usize{0};
-constexpr usize LIT_BYTES = 1040, CLUSTER_BYTES = 8800;
+constexpr usize SHADOW_DATA_BYTES = SHADOW_DATA_WORDS * sizeof(math::Vector4);
+constexpr usize LIT_SHADOW_OFFSET = (9 + 8 * 4) * sizeof(math::Vector4);
+constexpr usize CLUSTER_SHADOW_OFFSET = (9 + 128 * 4) * sizeof(math::Vector4);
+constexpr usize LIT_BYTES = LIT_SHADOW_OFFSET + SHADOW_DATA_BYTES;
+constexpr usize CLUSTER_GRID_OFFSET = CLUSTER_SHADOW_OFFSET + SHADOW_DATA_BYTES;
+constexpr usize CLUSTER_BYTES = CLUSTER_GRID_OFFSET + 5 * sizeof(math::Vector4);
 constexpr usize AUTHORED_PARAMETER_BYTES = LUDUS_AUTHORED_PARAMETER_WORDS * sizeof(math::Vector4);
+constexpr usize CLUSTER_LIGHT_WORD_COUNT = usize{128} * 4;
+constexpr usize LIGHT_GRID_ROW_COUNT = 3;
+constexpr usize LEGACY_LIGHT_PARAMETER_BYTES = LIT_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES;
+// Owner-thread scratch is charged to Limits::HostBytes. Keeping large reflected
+// layouts here avoids overflowing the browser's default 64 KiB call stack.
+struct LitMaterialParameters final
+{
+    math::Vector4 Tint;
+    math::Vector4 UvTransform;
+    math::Vector4 Options;
+    math::Vector4 Pbr;
+    math::Vector4 Emission;
+    math::Vector4 EnvironmentIrradiance;
+    math::Vector4 EnvironmentRadiance;
+    math::Vector4 BakeScale;
+    math::Vector4 BakeUv;
+    StaticArray<math::Vector4, CLUSTER_LIGHT_WORD_COUNT> Lights{};
+    StaticArray<math::Vector4, SHADOW_DATA_WORDS> ShadowData{};
+    StaticArray<math::Vector4, LIGHT_GRID_ROW_COUNT> GridRows{};
+    math::Vector4 GridMinimum{};
+    math::Vector4 GridScale{};
+    math::Vector4 SurfaceMap{};
+    math::Vector4 Authored{};
+    StaticArray<math::Vector4, internal::ENVIRONMENT_SH_COUNT> IrradianceSh{};
+};
+static_assert(sizeof(LitMaterialParameters) == CLUSTER_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES);
+struct LitMaterialScratch final
+{
+    LitMaterialParameters Parameters{};
+    StaticArray<uint8, LEGACY_LIGHT_PARAMETER_BYTES> Legacy{};
+    LightSelection Selection{};
+};
+using ShadowRegionScratch = StaticArray<ShadowRegion, SHADOW_REGION_CAPACITY>;
 constexpr uint64 LAST_ID = ~uint64{0};
 // An explicit Initialize reserves identity; no resource registration at static initialization.
 std::atomic<uint64> gNextOwner{1};
@@ -394,8 +433,8 @@ struct Renderer::State final
     struct ShadowRecord final : SlotIdentity
     {
         rhi::TextureHandle Texture{};
-        PreparedView Views[4]{};
-        ShadowRegion Regions[4]{};
+        StaticArray<PreparedView, SHADOW_REGION_CAPACITY> Views{};
+        StaticArray<ShadowRegion, SHADOW_REGION_CAPACITY> Regions{};
         usize Count = 0, SnapshotSlot = 0;
         uint32 Width = 0, Height = 0, References = 0;
         bool Rendered = false, Failed = false;
@@ -436,6 +475,8 @@ struct Renderer::State final
     usize HostBytes = 0;
     Status ReserveStorage(const Limits&) noexcept;
     core::UniquePtr<LightClusters> ClusterScratch;
+    core::UniquePtr<LitMaterialScratch> LitScratch;
+    core::UniquePtr<ShadowRegionScratch> ShadowScratch;
     core::UniquePtr<internal::ReferenceState> Reference;
     core::UniquePtr<internal::GpuPreviewState> GpuPreview;
     void DropGpuPreview(usize) noexcept;
@@ -1677,11 +1718,11 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
                         "GridScale"};
     for (usize i = 0; i < (clustered ? 14U : lit ? 11U : 3U); ++i)
     {
-        const auto offset = i == 10   ? (clustered ? usize{8336} : usize{656})
-                            : i == 11 ? usize{8720}
-                            : i == 12 ? usize{8768}
-                            : i == 13 ? usize{8784}
-                                      : i * 16;
+        const usize offset = i == 10   ? (clustered ? CLUSTER_SHADOW_OFFSET : LIT_SHADOW_OFFSET)
+                             : i == 11 ? CLUSTER_GRID_OFFSET
+                             : i == 12 ? CLUSTER_GRID_OFFSET + 3 * sizeof(math::Vector4)
+                             : i == 13 ? CLUSTER_GRID_OFFSET + 4 * sizeof(math::Vector4)
+                                       : i * 16;
         const auto shape =
             i == 9 || i == 10 || i == 11 ? rhi::RasterUniformShape::Float4Array : rhi::RasterUniformShape::Float4;
         bool found = false;
@@ -3501,22 +3542,40 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         return Status::InvalidDescription;
     }
-    if (clustered && !s.ClusterScratch)
+    if (clustered == true && s.ClusterScratch.Get() == nullptr)
     {
         if (sizeof(LightClusters) > s.Capacities.HostBytes - s.HostBytes)
         {
             return Status::CapacityExceeded;
         }
-        auto* workspace = new (std::nothrow) LightClusters;
-        if (workspace == nullptr)
+        LightClusters* workspaceOrNull = new (std::nothrow) LightClusters;
+        if (workspaceOrNull == nullptr)
         {
             return Status::OutOfMemory;
         }
-        s.ClusterScratch.Reset(workspace);
+        s.ClusterScratch.Reset(workspaceOrNull);
         s.HostBytes += sizeof(LightClusters);
     }
     auto* clusters = s.ClusterScratch.Get();
-    LightSelection selected;
+    if (s.LitScratch.Get() == nullptr)
+    {
+        if (sizeof(LitMaterialScratch) > s.Capacities.HostBytes - s.HostBytes)
+        {
+            return Status::CapacityExceeded;
+        }
+        LitMaterialScratch* workspaceOrNull = new (std::nothrow) LitMaterialScratch;
+        if (workspaceOrNull == nullptr)
+        {
+            return Status::OutOfMemory;
+        }
+        s.LitScratch.Reset(workspaceOrNull);
+        s.HostBytes += sizeof(LitMaterialScratch);
+    }
+    LightSelection& selected = s.LitScratch->Selection;
+    selected.Count = 0;
+    selected.Dropped = 0;
+    selected.OverflowCells = 0;
+    selected.Assignments = 0;
     auto status = clustered
                       ? BuildLightClusters(*description.Clusters, description.Lights, description.LightCount, *clusters)
                       : SelectDirectLights(description.Lights, description.LightCount, selected);
@@ -3546,10 +3605,17 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                       texelY = 1 / static_cast<float32>(texture.Height);
         if (bake.SourceId == 0 || bake.SceneRevision == 0 || bake.DependencyRevision == 0 ||
             texture.Format != rhi::RasterFormat::Rgba8Unorm || texture.MipLevels != 1 || texture.Attachment ||
-            texture.Width < 4 || texture.Height < 4 || bake.UvTransform.X < texelX || bake.UvTransform.Y < texelY ||
-            bake.UvTransform.Z + 1e-6F < 1.5F * texelX || bake.UvTransform.W + 1e-6F < 1.5F * texelY ||
-            bake.UvTransform.X + bake.UvTransform.Z > 1 - 1.5F * texelX + 1e-6F ||
-            bake.UvTransform.Y + bake.UvTransform.W > 1 - 1.5F * texelY + 1e-6F)
+            texture.Width < 4 || texture.Height < 4 ||
+            (bake.AreTriangleChartsEnabled == true &&
+             (bake.UvTransform != math::Vector4{1, 1, 0, 0} ||
+              texture.Width > content::scene_format::MAX_BAKE_CHART_DIMENSION ||
+              texture.Height > content::scene_format::MAX_BAKE_CHART_DIMENSION ||
+              (texture.Width & (texture.Width - 1)) != 0 || (texture.Height & (texture.Height - 1)) != 0)) ||
+            (bake.AreTriangleChartsEnabled == false &&
+             (bake.UvTransform.X < texelX || bake.UvTransform.Y < texelY ||
+              bake.UvTransform.Z + 1e-6F < 1.5F * texelX || bake.UvTransform.W + 1e-6F < 1.5F * texelY ||
+              bake.UvTransform.X + bake.UvTransform.Z > 1 - 1.5F * texelX + 1e-6F ||
+              bake.UvTransform.Y + bake.UvTransform.W > 1 - 1.5F * texelY + 1e-6F)))
         {
             return Status::InvalidDescription;
         }
@@ -3595,28 +3661,8 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
         }
     }
     // Explicit vec4 packing is independently verified for every cooked target.
-    struct Parameters final
-    {
-        math::Vector4 Tint;
-        math::Vector4 UvTransform;
-        math::Vector4 Options;
-        math::Vector4 Pbr;
-        math::Vector4 Emission;
-        math::Vector4 EnvironmentIrradiance;
-        math::Vector4 EnvironmentRadiance;
-        math::Vector4 BakeScale;
-        math::Vector4 BakeUv;
-        math::Vector4 Lights[512]{};
-        math::Vector4 ShadowData[24]{};
-        math::Vector4 GridRows[3]{};
-        math::Vector4 GridMinimum{};
-        math::Vector4 GridScale{};
-        math::Vector4 SurfaceMap{};
-        math::Vector4 Authored{};
-        math::Vector4 IrradianceSh[internal::ENVIRONMENT_SH_COUNT]{};
-    };
-    static_assert(sizeof(Parameters) == CLUSTER_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES);
-    Parameters parameters{};
+    LitMaterialParameters& parameters = s.LitScratch->Parameters;
+    std::memset(&parameters, 0, sizeof(parameters));
     parameters.Tint = description.Surface.Tint;
     parameters.UvTransform = description.Surface.UvTransform;
     parameters.Options = {description.Surface.AlphaCutoff,
@@ -3627,7 +3673,10 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                       description.Roughness,
                       static_cast<float32>(selected.Count),
                       atlas != nullptr ? static_cast<float32>(atlas->Count) : 0};
-    parameters.Emission = {description.Emission.X, description.Emission.Y, description.Emission.Z, 0};
+    parameters.Emission = {description.Emission.X,
+                           description.Emission.Y,
+                           description.Emission.Z,
+                           description.IsEmissionTwoSided == true ? 1.F : 0.F};
     parameters.EnvironmentIrradiance = {description.EnvironmentIrradiance.X,
                                         description.EnvironmentIrradiance.Y,
                                         description.EnvironmentIrradiance.Z,
@@ -3664,7 +3713,10 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                                     static_cast<float32>(light.Kind)};
         parameters.Lights[i * 4 + 1] = {light.Position.X, light.Position.Y, light.Position.Z, light.Range};
         parameters.Lights[i * 4 + 2] = {light.Direction.X, light.Direction.Y, light.Direction.Z, light.OuterCos};
-        parameters.Lights[i * 4 + 3] = {light.InnerCos, light.SourceId == bake.DirectLightId ? 1.0F : 0.0F, 0, 0};
+        const bool shouldReplaceDiffuse = light.SourceId == bake.DirectLightId ||
+                                          (bake.HasStaticAreaDirect == true && (light.Kind == LightKind::AreaOneSided ||
+                                                                                light.Kind == LightKind::AreaTwoSided));
+        parameters.Lights[i * 4 + 3] = {light.InnerCos, shouldReplaceDiffuse == true ? 1.0F : 0.0F, 0, 0};
     }
     if (atlas != nullptr)
     {
@@ -3674,23 +3726,28 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
             const auto rows = math::Transpose(region.WorldToClip);
             for (usize row = 0; row < 4; ++row)
             {
-                parameters.ShadowData[i * 6 + row] = rows.Columns[row];
+                parameters.ShadowData[i * SHADOW_REGION_WORDS + row] = rows.Columns[row];
             }
             const auto w = static_cast<float32>(atlas->Width), h = static_cast<float32>(atlas->Height);
             const auto& rect = region.Interior;
-            parameters.ShadowData[i * 6 + 4] = {(static_cast<float32>(rect.X) + 0.5F) / w,
-                                                (static_cast<float32>(rect.Y) + 0.5F) / h,
-                                                (static_cast<float32>(rect.X + rect.Width) - 0.5F) / w,
-                                                (static_cast<float32>(rect.Y + rect.Height) - 0.5F) / h};
+            parameters.ShadowData[i * SHADOW_REGION_WORDS + 4] = {
+                (static_cast<float32>(rect.X) + 0.5F) / w,
+                (static_cast<float32>(rect.Y) + 0.5F) / h,
+                (static_cast<float32>(rect.X + rect.Width) - 0.5F) / w,
+                (static_cast<float32>(rect.Y + rect.Height) - 0.5F) / h};
             usize index = 0;
             while (selected.Lights[index].SourceId != region.Light.SourceId)
             {
                 ++index;
             }
-            parameters.ShadowData[i * 6 + 5] = {region.Bias, static_cast<float32>(index), 1 / w, 1 / h};
+            parameters.ShadowData[i * SHADOW_REGION_WORDS + 5] = {region.Bias,
+                                                                  static_cast<float32>(index),
+                                                                  1 / w,
+                                                                  1 / h};
         }
     }
-    uint8 legacy[LIT_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES]{};
+    uint8* legacy = s.LitScratch->Legacy.GetData();
+    std::memset(legacy, 0, s.LitScratch->Legacy.GetSize());
     if (clustered)
     {
         const auto& grid = *description.Clusters;
@@ -3706,7 +3763,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     else
     {
         std::memcpy(legacy, &parameters, 656);
-        std::memcpy(legacy + 656, parameters.ShadowData, sizeof(parameters.ShadowData));
+        std::memcpy(legacy + LIT_SHADOW_OFFSET, parameters.ShadowData.GetData(), sizeof(parameters.ShadowData));
         std::memcpy(legacy + LIT_BYTES, &parameters.SurfaceMap, sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES);
     }
     status = CreateMaterialData(program,
@@ -3740,12 +3797,26 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
     {
         return Status::InvalidHandle;
     }
-    if (description.Count == 0 || description.Count > 4 || description.Regions == nullptr || description.Width < 4 ||
-        description.Height < 4 || description.Width > 2048 || description.Height > 2048)
+    if (description.Count == 0 || description.Count > SHADOW_REGION_CAPACITY || description.Regions == nullptr ||
+        description.Width < 4 || description.Height < 4 || description.Width > 2048 || description.Height > 2048)
     {
         return Status::InvalidDescription;
     }
-    ShadowRegion regions[4];
+    if (s.ShadowScratch.Get() == nullptr)
+    {
+        if (sizeof(ShadowRegionScratch) > s.Capacities.HostBytes - s.HostBytes)
+        {
+            return Status::CapacityExceeded;
+        }
+        ShadowRegionScratch* workspaceOrNull = new (std::nothrow) ShadowRegionScratch;
+        if (workspaceOrNull == nullptr)
+        {
+            return Status::OutOfMemory;
+        }
+        s.ShadowScratch.Reset(workspaceOrNull);
+        s.HostBytes += sizeof(ShadowRegionScratch);
+    }
+    ShadowRegionScratch& regions = *s.ShadowScratch;
     for (usize i = 0; i < description.Count; ++i)
     {
         regions[i] = description.Regions[i];
@@ -3757,9 +3828,25 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
             return status;
         }
         region.Light = light.Lights[0];
-        if (region.Light.Kind == LightKind::Point)
+        const bool hasCubeProjection = region.Light.Kind == LightKind::Point ||
+                                       region.Light.Kind == LightKind::AreaOneSided ||
+                                       region.Light.Kind == LightKind::AreaTwoSided;
+        if (hasCubeProjection == true)
         {
-            return Status::Unsupported;
+            math::Matrix4 expectedWorldToClip;
+            if (BuildPointShadowMatrix(region.Light.Position,
+                                       region.CubeFace,
+                                       region.NearDistance,
+                                       region.Light.Range,
+                                       expectedWorldToClip) != Status::Ready ||
+                region.WorldToClip != expectedWorldToClip)
+            {
+                return Status::InvalidDescription;
+            }
+        }
+        else if (region.CubeFace != ~uint32{0})
+        {
+            return Status::InvalidDescription;
         }
         const auto& r = region.Interior;
         if (!math::IsFinite(region.WorldToClip) || !math::IsFinite(region.Bias) || region.Bias < 0 ||
@@ -3778,6 +3865,45 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
                 return Status::InvalidDescription;
             }
         }
+    }
+    for (usize i = 0; i < description.Count; ++i)
+    {
+        const ShadowRegion& region = regions[i];
+        if (region.CubeFace == ~uint32{0})
+        {
+            continue;
+        }
+        uint32 faces = 0;
+        for (usize j = 0; j < description.Count; ++j)
+        {
+            const ShadowRegion& candidate = regions[j];
+            if (candidate.Light.SourceId != region.Light.SourceId)
+            {
+                continue;
+            }
+            if (candidate.CubeFace >= POINT_SHADOW_FACES || (faces & (uint32{1} << candidate.CubeFace)) != 0 ||
+                candidate.Light.Kind != region.Light.Kind || candidate.Light.Position != region.Light.Position ||
+                candidate.Light.Direction != region.Light.Direction || candidate.Light.Color != region.Light.Color ||
+                candidate.Light.Intensity != region.Light.Intensity || candidate.Light.Range != region.Light.Range ||
+                candidate.NearDistance != region.NearDistance)
+            {
+                return Status::InvalidDescription;
+            }
+            faces |= uint32{1} << candidate.CubeFace;
+        }
+        if (faces != (uint32{1} << POINT_SHADOW_FACES) - 1)
+        {
+            return Status::InvalidDescription;
+        }
+    }
+    usize freeViews = 0;
+    for (const State::ViewRecord& view : s.ViewRecords)
+    {
+        freeViews += view.Used == false ? 1U : 0U;
+    }
+    if (description.Count > freeViews)
+    {
+        return Status::CapacityExceeded;
     }
     for (usize i = 0; i < snapshot->Count; ++i)
     {
@@ -3808,7 +3934,7 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
     {
         ViewDescription view;
         view.WorldToClip = regions[i].WorldToClip;
-        view.Reference = true;
+        view.Reference = false;
         view.ShadowCasters = true;
         ViewReport report;
         const auto ready = PrepareView(handle, view, atlas.Views[i], report);
@@ -3862,7 +3988,7 @@ Status Renderer::GetStatus(ShadowAtlas handle) const noexcept
     }
     return status;
 }
-Status Renderer::DrawShadowAtlas(ShadowAtlas handle) noexcept
+Status Renderer::DrawShadowAtlas(ShadowAtlas handle, uint32 reservedDraws) noexcept
 {
     auto status = GetStatus(handle);
     if (status != Status::Ready)
@@ -3878,6 +4004,20 @@ Status Renderer::DrawShadowAtlas(ShadowAtlas handle) noexcept
     if (rhi::GetFrameInfo().Width == 0)
     {
         return Status::InvalidState;
+    }
+    rhi::DeviceInfo deviceInfo;
+    if (rhi::GetDeviceInfo(s.Device, deviceInfo) != rhi::DeviceStatus::Ready)
+    {
+        return Status::NotReady;
+    }
+    usize requiredDraws = reservedDraws;
+    for (usize i = 0; i < atlas.Count; ++i)
+    {
+        requiredDraws += s.ViewRecords[Access::Slot(atlas.Views[i])].DrawCount;
+    }
+    if (requiredDraws > deviceInfo.Profile.Raster.DrawsPerFrame)
+    {
+        return Status::CapacityExceeded;
     }
     atlas.Failed = true;
     for (usize region = 0; region < atlas.Count; ++region)

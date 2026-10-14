@@ -12,7 +12,8 @@ function(ludus_compile_renderer_shaders)
     if(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../modules/graphics/renderer/shaders/recipes.json")
         set(directory "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../modules/graphics/renderer/shaders")
         set(includes "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../modules/foundation/math/shaders"
-                     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../modules/graphics/rhi/shaders")
+                     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../modules/graphics/rhi/shaders"
+                     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../modules/graphics/renderer/include/ludus/graphics/renderer")
     endif()
     set(manifest "${directory}/recipes.json")
     ludus_require_file("${manifest}" "Renderer shader recipes" "Restore the renderer source/SDK installation.")

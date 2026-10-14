@@ -1,3 +1,4 @@
+#include "lighting_layout.h"
 #include "math.slang"
 #include "raster_bindings.slang"
 #include "renderer_environment_layout.h"
@@ -21,7 +22,7 @@ struct Parameters
 #else
     float4 Lights[32];
 #endif
-    float4 ShadowData[24];
+    float4 ShadowData[SHADOW_DATA_WORDS];
 #ifdef LUDUS_CLUSTERED
     float4 GridRows[3];
     float4 GridMinimum;
@@ -189,24 +190,26 @@ float ComputeShadowVisibility(int light, Varying input)
 {
     if ((int(input.EyeWorld.w) & 1) == 0)
         return 1;
-    for (int region = 0; region < 4; ++region)
+    bool hasLocalShadowCoverage = false;
+    for (int region = 0; region < SHADOW_REGION_CAPACITY; ++region)
     {
         if (region >= int(material.Pbr.w))
             break;
-        float4 settings = material.ShadowData[region * 6 + 5];
+        float4 settings = material.ShadowData[region * SHADOW_REGION_WORDS + 5];
         if (int(settings.y) != light)
             continue;
+        hasLocalShadowCoverage = hasLocalShadowCoverage || material.Lights[light * 4].w >= 1;
         float4 p = float4(input.PositionWorld, 1);
-        float4 clip = float4(dot(material.ShadowData[region * 6], p),
-                             dot(material.ShadowData[region * 6 + 1], p),
-                             dot(material.ShadowData[region * 6 + 2], p),
-                             dot(material.ShadowData[region * 6 + 3], p));
+        float4 clip = float4(dot(material.ShadowData[region * SHADOW_REGION_WORDS], p),
+                             dot(material.ShadowData[region * SHADOW_REGION_WORDS + 1], p),
+                             dot(material.ShadowData[region * SHADOW_REGION_WORDS + 2], p),
+                             dot(material.ShadowData[region * SHADOW_REGION_WORDS + 3], p));
         if (clip.w <= 1e-6)
             continue;
         float3 ndc = clip.xyz / clip.w;
         if (abs(ndc.x) > 1 || abs(ndc.y) > 1 || ndc.z < 0 || ndc.z > 1)
             continue;
-        float4 rect = material.ShadowData[region * 6 + 4];
+        float4 rect = material.ShadowData[region * SHADOW_REGION_WORDS + 4];
         float2 uv = lerp(rect.xy, rect.zw, float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5));
         float visible = 0;
         for (int tap = 0; tap < 4; ++tap)
@@ -219,7 +222,9 @@ float ComputeShadowVisibility(int light, Varying input)
         }
         return visible;
     }
-    return 1; // Outside the declared cascade/local coverage remains unshadowed.
+    return hasLocalShadowCoverage
+               ? 0
+               : 1; // Local coverage gaps conservatively occlude; directional cascade contract stays explicit.
 }
 float4 SampleBaseTexel(Varying input)
 {
@@ -339,7 +344,12 @@ float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
             bakeTexture.SampleLevel(colorSampler, saturate(input.BakeUv) * material.BakeUv.xy + material.BakeUv.zw, 0)
                 .rgb *
             material.BakeScale.rgb;
-    float3 result = material.Emission.rgb;
+    float3 geometricNormalWorld = cross(ddx(input.PositionWorld), ddy(input.PositionWorld));
+    if (dot(geometricNormalWorld, input.NormalWorld) < 0)
+        geometricNormalWorld = -geometricNormalWorld;
+    float3 result = material.Emission.w > .5 || dot(geometricNormalWorld, viewDirectionWorld) > 0
+                        ? material.Emission.rgb
+                        : float3(0);
 #ifdef LUDUS_AUTHORED_INPUTS
     if (material.SurfaceMap.z > .5)
     {
@@ -422,6 +432,11 @@ float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
                 float cone = saturate((dot(-lightDirectionWorld, direction.xyz) - direction.w) /
                                       max(extra.x - direction.w, 1e-6));
                 attenuation *= cone * cone;
+            }
+            if (color.w == 3 || color.w == 4)
+            {
+                float emitterCosine = dot(-lightDirectionWorld, direction.xyz);
+                attenuation *= color.w == 4 ? abs(emitterCosine) : max(emitterCosine, 0);
             }
         }
         result += EvaluateBrdf(baseColor.rgb,

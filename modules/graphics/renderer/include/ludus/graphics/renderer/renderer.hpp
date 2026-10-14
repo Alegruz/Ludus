@@ -433,7 +433,7 @@ public:
     /// Advance lighting setup without blocking, between frames.
     [[nodiscard]] rhi::RasterStatus PollLighting() noexcept;
     /// Validate renderer_lit.slang or renderer_clustered.slang and prewarm linear RGBA8/RGBA16F plus masked shadows.
-    /// Clustered programs require eight bindings and an 8800-byte fragment uniform range;
+    /// Clustered programs require eight bindings and a 16096-byte fragment uniform range;
     /// pass LitMaterialDescription::Clusters when creating their materials. Unsupported capabilities reject.
     /// Shadow fragment uses the same typed uniform schema and a subset of the lit bindings.
     /// Sixteen vertex locations required; HDR variants are omitted when HdrColor is false.
@@ -450,16 +450,21 @@ public:
                                                       MaterialVersion& output,
                                                       LightSelection& report) noexcept;
     /// Copy light regions and prepare retained conventional-depth caster views/atlas, between frames.
-    /// Invalid gutters/overlap, unsupported masked-unlit casters or point maps preserve null output.
-    /// Ready/Pending grants ownership; drawing is required before material sampling is admitted.
+    /// Invalid gutters/overlap, unsupported masked-unlit casters or incomplete/noncanonical cube maps preserve null
+    /// output. Ready/Pending grants ownership; drawing is required before material sampling is admitted.
     [[nodiscard]] rhi::RasterStatus
     PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& description, ShadowAtlas& output) noexcept;
     /// Poll retained atlas/instance setup. Ready does not mean it has been rendered yet.
     [[nodiscard]] rhi::RasterStatus GetStatus(ShadowAtlas handle) const noexcept;
     /// Render all prepared regions in an acquired frame; no allocation or shader creation.
+    /// @pre Call before indexed draws in this frame; reservedDraws budgets the
+    /// subsequent scene/composition draws. Aggregate packet overflow preserves
+    /// the unrendered candidate before GPU work; other GPU failures may be partial.
+    /// Configure enough Views for every region and retained prior incarnation.
     /// Only one accepted draw per immutable atlas. A partial failure permanently rejects reuse;
     /// recreate a candidate. Caller must end/submit the frame before material creation.
-    [[nodiscard]] rhi::RasterStatus DrawShadowAtlas(ShadowAtlas handle) noexcept;
+    [[nodiscard]] rhi::RasterStatus DrawShadowAtlas(ShadowAtlas handle,
+                                                    ludus::foundation::uint32 reservedDraws = 0) noexcept;
     /// Detach atlas ownership; materials retain the exact rendered texture and caster version.
     [[nodiscard]] rhi::RasterStatus Release(ShadowAtlas& handle) noexcept;
     /// Prepare retained linear scene/display source and immutable exposure/output parameters.
