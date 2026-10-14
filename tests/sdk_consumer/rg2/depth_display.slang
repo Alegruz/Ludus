@@ -9,14 +9,15 @@ struct Varying
 {
     float4 PositionClip : SV_Position;
 };
-[shader("vertex")]
+// The build manifest declares the entry-point stages.
 Varying VSMain(Input value)
 {
     Varying result;
     result.PositionClip = value.PositionClip;
     return result;
 }
-[shader("fragment")]
+
+// Read depth without filtering so the test observes the stored value.
 float4 PSMain(in float4 positionPixel : SV_Position) : SV_Target
 {
     float depthClip = DepthImage.Load(int3(int2(positionPixel.xy), 0));
