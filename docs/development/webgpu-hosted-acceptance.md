@@ -65,7 +65,7 @@ controlled RAF wrapper; actual tab background/resume remains a hosted hardware
 gate. Sandbox/DPR, missing WebGPU, adapter/device rejection, startup cancellation
 and missing asset cases passed. All eight cases passed on commit
 `3fe2c73380bdb9b84b445f84be216e86018bb668` in
-[run 36925039290](https://github.com/Alegruz/Ludus/actions/runs/36925039290).
+[run 36925039290](https://github.com/The-Ludus-Project/Ludus/actions/runs/36925039290).
 Screenshots and report.json are retained in artifact 11193069730. DOM, console
 and screenshot diagnostics are retained on failure. Hosted acceptance is pending.
 

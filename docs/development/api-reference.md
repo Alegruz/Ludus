@@ -41,7 +41,7 @@ Use `@param`, `@return`, `@pre`, `@note` and `@warning` where appropriate.
 Engine errors are explicit; do not add exception contracts. Preserve existing
 source attribution and link lengthy explanations to their architecture owner.
 For a concrete example, read
-[`AllocationDomain`](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp).
+[`AllocationDomain`](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp).
 
 ## API comments and implementation comments
 
