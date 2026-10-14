@@ -2,11 +2,15 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/borrowed_view.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/geometry.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/renderer/environment.hpp>
+#include <ludus/graphics/renderer/lighting_layout.h>
 #include <ludus/graphics/renderer/materials.hpp>
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/raster.h>
@@ -36,6 +40,11 @@ enum class LightKind : ludus::foundation::uint8
     Point,
     /// On-axis candela with a squared smooth cone; angles expressed as cosines.
     Spot,
+    /// Deterministic area quadrature: Intensity is RGB nits times weighted square metres;
+    /// outgoing Direction supplies the Lambertian emitter cosine. Not a delta authoring source.
+    AreaOneSided,
+    /// Same weighted quadrature with the absolute emitter cosine on both sides.
+    AreaTwoSided,
 };
 /// Copied finite light authoring data, independent of scene ownership.
 struct DirectLight final
@@ -46,11 +55,11 @@ struct DirectLight final
     LightKind Kind = LightKind::Directional;
     /// Display-linear RGB hue, each channel in [0,1].
     ludus::foundation::math::Vector3 Color{1, 1, 1};
-    /// Lux for directional, candela for point/spot; [0,1000000].
+    /// Lux for directional, candela for point/spot, nits*m² for area samples; [0,1000000].
     ludus::foundation::float32 Intensity = 1;
     /// Position in meters, each component in [-1000000,1000000].
     ludus::foundation::math::Vector3 Position{};
-    /// Nonzero finite direction for directional/spot; normalized during admission.
+    /// Nonzero finite direction for directional/spot/area; normalized during admission.
     ludus::foundation::math::Vector3 Direction{0, 0, -1};
     /// Point/spot range in meters, [0.01,1000000]; attenuation becomes zero at range.
     ludus::foundation::float32 Range = 10;
@@ -59,6 +68,73 @@ struct DirectLight final
     /// Spot outer half-angle cosine, distinct from InnerCos.
     ludus::foundation::float32 OuterCos = 0.8F;
 };
+/// Number of corners in a triangle emitter.
+inline constexpr ludus::foundation::usize AREA_TRIANGLE_CORNERS = 3;
+/// Bounded deterministic quadrature, trading near-field accuracy for raster cost.
+enum class AreaLightQuadrature : ludus::foundation::uint8
+{
+    Centroid,   ///< One sample at the centroid; coarse near-field approximation.
+    ThreePoint, ///< Three symmetric barycentric samples, each with area/3 weight.
+};
+/// Finite world-space Lambertian triangle emitter; power must be resolved first.
+struct TriangleAreaLightDescription final
+{
+    ludus::foundation::StaticArray<ludus::foundation::math::Vector3, AREA_TRIANGLE_CORNERS>
+        PositionsWorld{};                        ///< Winding defines outward emitting normal; metres.
+    ludus::foundation::math::Vector3 Emission{}; ///< Nonnegative RGB nits, each channel at most 10000.
+    ludus::foundation::uint64 FirstSampleSourceId =
+        0; ///< Nonzero base ID; consecutive IDs must fit uint64 and be unique in the final light list.
+    ludus::foundation::float32 Range = 100; ///< Smooth transport/shadow range in metres, [.01,1e6].
+    bool IsTwoSided = false;                ///< Whether both geometric sides emit.
+    AreaLightQuadrature Quadrature = AreaLightQuadrature::Centroid; ///< Declared integration approximation.
+};
+/// Owned fixed-capacity output; no allocation, retained pointers or GPU resources.
+struct AreaLightSamples final
+{
+    ludus::foundation::StaticArray<DirectLight, AREA_TRIANGLE_CORNERS>
+        Lights{};                        ///< Valid prefix of quadrature samples.
+    ludus::foundation::uint32 Count = 0; ///< One or three samples on success.
+};
+/// Expand a nondegenerate finite triangle into weighted Lambertian samples.
+/// Returns CapacityExceeded if radiance*sample area exceeds the direct-light
+/// intensity budget; malformed inputs return InvalidDescription. All failures
+/// preserve outSamples. This quadrature does not reproduce finite-source soft
+/// shadows exactly; each sample needs six cube shadow faces for visibility.
+[[nodiscard]] rhi::RasterStatus BuildTriangleAreaLights(const TriangleAreaLightDescription& description,
+                                                        AreaLightSamples& outSamples) noexcept;
+/// One connected planar source patch; triangle tessellation does not change its
+/// area-weighted centroid or emitted power. Borrowed inputs are consumed synchronously.
+struct PlanarAreaLightDescription final
+{
+    ludus::foundation::BorrowedView<const ludus::foundation::math::Vector3>
+        PositionsMesh; ///< Finite mesh-local positions; borrowed for this call.
+    ludus::foundation::BorrowedView<const ludus::foundation::uint32>
+        Indices; ///< Triangle list with consistent outward winding; producer guarantees one connected patch.
+    ludus::foundation::math::Affine3
+        MeshToWorld{};                           ///< Finite nonsingular transform; areas are computed in world metres.
+    ludus::foundation::math::Vector3 Emission{}; ///< Resolved RGB nits, each channel in [0,10000].
+    ludus::foundation::uint64 SourceId = 0;      ///< Unique nonzero proxy identity.
+    ludus::foundation::float32 Range = 100;      ///< Smooth attenuation/shadow range in metres.
+    bool IsTwoSided = false;                     ///< Emit from both geometric sides.
+};
+/// Construct one tessellation-independent centroid quadrature sample. Validate
+/// bounds, nondegeneracy, consistent normals and coplanarity within 0.1 mm plus
+/// FP32 coordinate error. Centroid must lie inside one supplied triangle;
+/// unsupported curved/disjoint/concave-centroid sources preserve outLight.
+/// Connectivity is a producer contract, not a topology proof. Near-field light
+/// shape and soft shadows are approximated; report this declared quality profile.
+[[nodiscard]] rhi::RasterStatus BuildPlanarAreaLight(const PlanarAreaLightDescription& description,
+                                                     DirectLight& outLight) noexcept;
+/// Cube projection count per point or area sample.
+inline constexpr ludus::foundation::uint32 POINT_SHADOW_FACES = 6;
+/// Build a conventional-depth 90-degree point-light projection, faces in order
+/// +X,-X,+Y,-Y,+Z,-Z. Distances are metres, with 0 < nearDistance < farDistance.
+/// Invalid/nonrepresentable input preserves outWorldToClip; no allocation.
+[[nodiscard]] rhi::RasterStatus BuildPointShadowMatrix(ludus::foundation::math::Vector3 positionWorld,
+                                                       ludus::foundation::uint32 face,
+                                                       ludus::foundation::float32 nearDistance,
+                                                       ludus::foundation::float32 farDistance,
+                                                       ludus::foundation::math::Matrix4& outWorldToClip) noexcept;
 /// Stable bounded forward list; entries sorted by SourceId, not brightness or opaque depth.
 struct LightSelection final
 {
@@ -127,6 +203,13 @@ struct BakedLighting final
     /// Bake UV scale XY and offset ZW, selecting at least two interior texel centers per axis.
     /// Bounds must leave a replicated gutter texel plus half a texel on every side (1e-6 UV rounding tolerance).
     ludus::foundation::math::Vector4 UvTransform{1, 1, 0, 0};
+    /// True selects independent guttered triangle charts from SceneFormat helpers,
+    /// with identity UvTransform and no mipmaps. False retains the legacy subrectangle
+    /// transform admission. The producer must replicate each chart's gutter texels.
+    bool AreTriangleChartsEnabled = false;
+    /// True declares static area direct diffuse in this chart; do not also submit
+    /// raster area samples for its diffuse term. Analytic direct stays raster.
+    bool HasStaticAreaDirect = false;
     /// Exact nonzero source identity and authoring revisions required for bake validity.
     ludus::foundation::uint64 SourceId = 0;
     /// Scene bake revision; SceneItem must supply the same value.
@@ -136,7 +219,8 @@ struct BakedLighting final
     /// Exact local-to-world used by the bake; moved objects use environment fallback.
     ludus::foundation::math::Affine3 Transform{};
     /// Optional baked direct-light identity; replace that light's diffuse term only for valid bakes.
-    /// Zero means indirect-only. One chart replaces at most one direct diffuse term; dynamic direct specular remains.
+    /// Zero replaces no analytic direct term; HasStaticAreaDirect separately declares area diffuse. One chart replaces
+    /// at most one direct diffuse term; dynamic direct specular remains.
     ludus::foundation::uint64 DirectLightId = 0;
 };
 /// Immutable unlit base schema plus the L4 metallic/roughness lighting terms.
@@ -171,6 +255,9 @@ struct LitMaterialDescription final
     const EnvironmentMap* EnvironmentOrNull = nullptr;
     /// Linear surface emission in [0,10000]; does not create a scene light.
     ludus::foundation::math::Vector3 Emission{};
+    /// Legacy default is two-sided emission. False emits only from front-facing geometry;
+    /// reference transport evaluates the triangle's geometric winding.
+    bool IsEmissionTwoSided = true;
     /// Optional ready RGBA8 linear/sRGB RGB multiplier for Emission; alpha ignored.
     /// Authored recipes only. Shares the selected material UV transform and sampler.
     /// Creation retains its exact view; reference requires CPU bytes at TextureMip.
@@ -214,8 +301,12 @@ struct SurfaceParameters final
 /// One atlas cell, authored from an unjittered light view; order selects overlapping cascades.
 struct ShadowRegion final
 {
-    /// Exact directional or spot light description; point-light maps are Unsupported.
+    /// Exact light description. Point/area samples require all six canonical cube faces.
     DirectLight Light{};
+    /// Cube face 0..5 for point/area; all ones for directional/spot projections.
+    ludus::foundation::uint32 CubeFace = ~ludus::foundation::uint32{0};
+    /// Cube near distance in metres; canonical far distance is Light.Range.
+    ludus::foundation::float32 NearDistance = .01F;
     /// Canonical conventional-depth light projection, Z [0,1], XY [-1,1], Y up.
     ludus::foundation::math::Matrix4 WorldToClip = ludus::foundation::math::Matrix4::Identity();
     /// Inner drawing rectangle; must leave at least one texel of clear gutter on every side.
@@ -223,7 +314,7 @@ struct ShadowRegion final
     /// Receiver bias in normalized light depth, [0,0.01], independent of camera reverse-Z.
     ludus::foundation::float32 Bias = 0.001F;
 };
-/// Bounded four-cell shadow atlas. Typical layout: two directional cascades and two spots.
+/// Bounded 80-region atlas; thirteen point/area samples with all six cube faces.
 struct ShadowAtlasDescription final
 {
     /// RGBA8 atlas width, [4,2048], subject to device limits.
@@ -232,7 +323,7 @@ struct ShadowAtlasDescription final
     ludus::foundation::uint32 Height = 256;
     /// Borrowed disjoint guttered regions; copied during preparation.
     const ShadowRegion* Regions = nullptr;
-    /// Positive count, at most four; cascades may share one directional light identity.
+    /// Positive count, at most SHADOW_REGION_CAPACITY; cascades may share one directional light identity.
     ludus::foundation::usize Count = 0;
 };
 /// Fit a stabilized directional light projection to finite receiver/caster bounds.

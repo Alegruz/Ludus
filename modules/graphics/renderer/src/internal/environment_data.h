@@ -22,6 +22,7 @@ struct EnvironmentSample final
 struct EnvironmentData final
 {
     rhi::DeviceHandle Device{};
+    bool IsCpuOnly = false;
     rhi::TextureHandle Texture{};
     rhi::SamplerHandle Sampler{};
     Array<math::Vector4> Pixels;
@@ -38,6 +39,7 @@ struct EnvironmentData final
     usize CpuBytes = 0;
     ~EnvironmentData() noexcept;
 };
+[[nodiscard]] rhi::RasterStatus BuildEnvironmentDistribution(EnvironmentData& inoutData) noexcept;
 void RetainEnvironment(EnvironmentData* dataOrNull) noexcept;
 void ReleaseEnvironment(EnvironmentData* dataOrNull) noexcept;
 void EvaluateEnvironmentBasis(math::Vector3 direction, float32* outBasis) noexcept;

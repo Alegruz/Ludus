@@ -318,7 +318,7 @@ TEST_CASE("Interactive raster viewport updates World snapshots and camera withou
     viewport.Reset();
 }
 
-TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU reference",
+TEST_CASE("Surface maps and authored punctual/area lights agree across raster and GPU reference",
           "[renderer][gpu][fidelity]")
 {
     rhi::Shutdown();
@@ -334,6 +334,7 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
     rhi::DeviceDescription deviceDescription;
     deviceDescription.Required.PortableRaster = true;
     deviceDescription.Required.Compute = true;
+    deviceDescription.Storage.ResourcesPerKind = 128;
     const rhi::DeviceStatus started =
         rhi::CreateDevice({}, { .Width = 8, .Height = 8 }, deviceDescription, device, surface);
 #if defined(LUDUS_TEST_METAL)
@@ -409,12 +410,17 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
     rr::LightSelection selection;
     rr::MaterialVersion retained;
     REQUIRE(renderer.CreateLitMaterial(program, material, retained, selection) == S::Ready);
-    constexpr uint32 LIGHT_CASE_COUNT = 4;
+    constexpr uint32 LIGHT_CASE_COUNT = 7;
     constexpr usize RASTER_MATERIAL_COUNT = usize{LIGHT_CASE_COUNT} * 2;
     rr::MaterialVersion rasterMaterials[RASTER_MATERIAL_COUNT];
     const auto selectLight = [&light](uint32 kind) {
-        light.Kind = kind == 3 ? rr::LightKind::Point : static_cast<rr::LightKind>(kind);
-        light.Direction = kind == 2 ? math::Vector3{0, 0, 1} : math::Vector3{-.6F, 0, .8F};
+        light.Kind = kind == 3                ? rr::LightKind::Point
+                     : kind == 4 || kind == 6 ? rr::LightKind::AreaOneSided
+                     : kind == 5              ? rr::LightKind::AreaTwoSided
+                                              : static_cast<rr::LightKind>(kind);
+        light.Direction = kind == 2 || kind == 4 ? math::Vector3{0, 0, 1}
+                          : kind >= 5            ? math::Vector3{0, 0, -1}
+                                                 : math::Vector3{-.6F, 0, .8F};
         light.Position = kind == 3 ? math::Vector3{.003F, 0, .696F} : math::Vector3{.6F, 0, -.1F};
         light.Intensity = kind == 3 ? .0001F : 1;
     };
@@ -462,7 +468,14 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
         rr::ReferencePixel reference;
         REQUIRE(renderer.CopyReferencePixels(oracle, &reference, 1) == S::Ready);
         REQUIRE(reference.Samples == 1);
-        REQUIRE(reference.Direct.X > .01F);
+        if (kind == 6)
+        {
+            REQUIRE(reference.Direct.X == 0);
+        }
+        else
+        {
+            REQUIRE(reference.Direct.X > .01F);
+        }
         // Independent center-pixel expectation: linear data, reconstructed tangent
         // direction, clockwise mesh normal, texture-removed metallic and fixed BRDF.
         const float32 normalY = 1.0F / 255;
@@ -481,7 +494,8 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
             // The near point is 0.005m away: intensity 1e-4 / the 1e-4 m²
             // attenuation floor equals one, rather than the unbounded value four.
             const float32 cone = (.8F - .5F) / (.95F - .5F);
-            expected = expected * (window * window * (kind == 2 ? cone * cone : 1));
+            const float32 emitterCosine = kind == 6 ? 0.F : kind >= 4 ? .8F : 1.F;
+            expected = expected * (window * window * (kind == 2 ? cone * cone : emitterCosine));
         }
         CHECK(math::Length(reference.Direct - expected) < .00001F);
         for (uint32 mode = 0; mode < 2; ++mode)
@@ -664,7 +678,7 @@ TEST_CASE("CPU and GPU reference transport retained HDR source radiance and auth
     REQUIRE(renderer.CopyReferencePixels(oracle, reference, CAPTURE_PIXELS) == S::Ready);
     rr::ReferenceCaptureInfo information;
     REQUIRE(renderer.GetReferenceCaptureInfo(oracle, information) == S::Ready);
-    CHECK(information.ProfileVersion == 3);
+    CHECK(information.ProfileVersion == 4);
     CHECK(information.InvalidContributions == 0);
     rhi::SubmissionToken completion;
     for (uint32 sample = 1; sample <= capture.TargetSamples; ++sample)

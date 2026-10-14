@@ -17,13 +17,13 @@ using internal::ReferenceStage;
 using internal::ReferenceTriangle;
 // Padding-free fingerprint schema: binary32/u32 = 4 bytes, u64 = 8 bytes.
 // Triangle: positions/normals, UVs, geometric normal/error, area and two IDs.
-// Instance: source ID, color/emission pitches and hashes, 14 scalars, 13 enum/image words.
+// Instance: source ID, color/emission pitches and hashes, 14 scalars, 14 enum/image words including emitter sidedness.
 // Map extension: pitch/hash, normal strength, tag/format/dimensions/reserved.
 // Light: source ID/kind, RGB/intensity, position/direction/range/cone scalars.
 constexpr usize FINGERPRINT_TRIANGLE_BYTES = sizeof(float32) * 3 * 3 * 2 + sizeof(float32) * 3 * 2 +
                                              sizeof(float32) * 2 * 3 + sizeof(float32) + 2 * sizeof(uint32) +
                                              sizeof(float32) * 3 * 2 * 4;
-constexpr usize FINGERPRINT_INSTANCE_BYTES = 7 * sizeof(uint64) + 14 * sizeof(float32) + 13 * sizeof(uint32);
+constexpr usize FINGERPRINT_INSTANCE_BYTES = 7 * sizeof(uint64) + 14 * sizeof(float32) + 14 * sizeof(uint32);
 constexpr usize FINGERPRINT_SURFACE_MAP_BYTES = 3 * sizeof(uint64) + sizeof(float32) + 5 * sizeof(uint32);
 constexpr usize FINGERPRINT_LIGHT_BYTES = sizeof(uint64) + sizeof(uint32) + 13 * sizeof(float32);
 constexpr usize FINGERPRINT_ENVIRONMENT_BYTES = 3 * sizeof(float32);
@@ -169,6 +169,7 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         word(surface.AreAuthoredInputsEnabled ? 1U : 0U);
         word(surface.MaterialUvSet);
         word(surface.HasEmissionMap ? 1U : 0U);
+        word(surface.IsEmissionTwoSided == true ? 1U : 0U);
         word(instance.EmissionMap.Width);
         word(instance.EmissionMap.Height);
         word(static_cast<uint32>(instance.EmissionMap.Format));
@@ -375,6 +376,7 @@ Status Renderer::State::PrepareReferenceSurface(const MaterialDescription& surfa
     data->Alpha = surface.Alpha;
     data->AlphaCutoff = surface.AlphaCutoff;
     data->Emission = lighting->Emission;
+    data->IsEmissionTwoSided = lighting->IsEmissionTwoSided;
     data->HasTexture = !rhi::IsNull(surface.Texture);
     data->HasSurfaceMap = rhi::IsNull(lighting->SurfaceMap) == false;
     data->HasEmissionMap = rhi::IsNull(lighting->EmissionMap) == false;
@@ -762,19 +764,8 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
                 job->Scene.Bounds = math::Merge(job->Scene.Bounds, {p, p});
                 // Conservative FP32 affine/barycentric arithmetic allowance, using
                 // absolute products before cancellation, not a scene-sized epsilon.
-                const auto local = mesh.Positions[vertex];
-                const auto& a = item.Input.Transform;
-                const math::Vector3 error{
-                    (math::Abs(a.Columns[0].X * local.X) + math::Abs(a.Columns[1].X * local.Y) +
-                     math::Abs(a.Columns[2].X * local.Z) + math::Abs(a.Translation.X)) *
-                        1e-6F,
-                    (math::Abs(a.Columns[0].Y * local.X) + math::Abs(a.Columns[1].Y * local.Y) +
-                     math::Abs(a.Columns[2].Y * local.Z) + math::Abs(a.Translation.Y)) *
-                        1e-6F,
-                    (math::Abs(a.Columns[0].Z * local.X) + math::Abs(a.Columns[1].Z * local.Y) +
-                     math::Abs(a.Columns[2].Z * local.Z) + math::Abs(a.Translation.Z)) *
-                        1e-6F,
-                };
+                const math::Vector3 error =
+                    internal::ComputeReferencePositionError(item.Input.Transform, mesh.Positions[vertex]);
                 triangle.Error = {math::Max(triangle.Error.X, error.X),
                                   math::Max(triangle.Error.Y, error.Y),
                                   math::Max(triangle.Error.Z, error.Z)};

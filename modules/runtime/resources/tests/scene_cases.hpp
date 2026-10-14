@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/base/byte_order.hpp>
 #include <ludus/runtime/resources/scene.h>
 
 #include <cstring>
@@ -146,4 +148,207 @@ TEST_CASE("Cooked scene v2 preserves explicit sampler addressing and rejects unk
     bytes[72] = 0;
     REQUIRE(r::SceneDefinition::Decode(bytes.GetData(), bytes.GetSize(), scene) == r::Status::Ok);
     REQUIRE_FALSE(scene.Materials[0].Repeat);
+}
+
+namespace
+{
+namespace sceneFormat = ludus::content::scene_format;
+constexpr usize V3_VERTEX_COUNT = 3;
+constexpr usize V3_LIGHT_COUNT = 2;
+constexpr usize V3_PIXEL_COUNT = 2;
+constexpr usize V3_MATERIAL_OFFSET = sizeof(sceneFormat::Header);
+constexpr usize V3_VERTEX_OFFSET =
+    V3_MATERIAL_OFFSET + sizeof(sceneFormat::MaterialRecordV3) + sizeof(sceneFormat::MeshRecord);
+constexpr usize V3_OBJECT_OFFSET =
+    V3_VERTEX_OFFSET + V3_VERTEX_COUNT * sizeof(sceneFormat::VertexRecordV3) + V3_VERTEX_COUNT * sizeof(uint32);
+constexpr usize V3_LIGHTING_OFFSET = V3_OBJECT_OFFSET + sizeof(sceneFormat::ObjectRecordV3);
+constexpr usize V3_LIGHT_OFFSET = V3_LIGHTING_OFFSET + sizeof(sceneFormat::LightingRecord);
+constexpr usize V3_ENVIRONMENT_OFFSET = V3_LIGHT_OFFSET + V3_LIGHT_COUNT * sizeof(sceneFormat::LightRecord);
+constexpr usize V3_BUNDLE_BYTES = V3_ENVIRONMENT_OFFSET + V3_PIXEL_COUNT * sceneFormat::ENVIRONMENT_TEXEL_BYTES;
+Array<uint8> MakeLightingFixture()
+{
+    Array<uint8> bytes;
+    REQUIRE(bytes.TryResize(V3_BUNDLE_BYTES) == true);
+    usize offset = 0;
+    auto writeInteger = [&](uint32 value) {
+        REQUIRE(
+            ludus::foundation::core::TryWriteLittleEndian<uint32>(value, {bytes.GetData() + offset, sizeof(value)}) ==
+            true);
+        offset += sizeof(value);
+    };
+    auto writeIdentity = [&](uint64 value) {
+        REQUIRE(
+            ludus::foundation::core::TryWriteLittleEndian<uint64>(value, {bytes.GetData() + offset, sizeof(value)}) ==
+            true);
+        offset += sizeof(value);
+    };
+    auto writeNumber = [&](float32 value) {
+        uint32 bits = 0;
+        std::memcpy(&bits, &value, sizeof(value));
+        writeInteger(bits);
+    };
+    std::memcpy(bytes.GetData(), sceneFormat::MAGIC.data(), sceneFormat::MAGIC.size());
+    offset = sceneFormat::MAGIC.size();
+    for (uint32 value : {sceneFormat::VERSION_3, 1U, 1U, 0U, 1U})
+    {
+        writeInteger(value);
+    }
+    for (float32 value : {0.F, 0.F, 3.F, 0.F, 0.F, 0.F, 0.F, 1.F, 0.F, 1.F})
+    {
+        writeNumber(value);
+    }
+    writeInteger(sceneFormat::NO_TEXTURE);
+    writeInteger(sceneFormat::ADDRESS_REPEAT);
+    for (float32 value : {0.F, .5F, 1.F, 2.F, 3.F})
+    {
+        writeNumber(value);
+    }
+    writeInteger(sceneFormat::EMISSION_HAS_POWER);
+    writeIdentity(41);
+    writeNumber(1200);
+    writeInteger(0);
+    writeInteger(V3_VERTEX_COUNT);
+    writeInteger(V3_VERTEX_COUNT);
+    for (ludus::foundation::math::Vector3 position : {ludus::foundation::math::Vector3{0, 0, 0},
+                                                      ludus::foundation::math::Vector3{1, 0, 0},
+                                                      ludus::foundation::math::Vector3{0, 1, 0}})
+    {
+        for (float32 value : {position.X, position.Y, position.Z, 0.F, 0.F, 1.F, 4.F, 5.F, .25F, .75F})
+        {
+            writeNumber(value);
+        }
+    }
+    for (uint32 index : {0U, 1U, 2U})
+    {
+        writeInteger(index);
+    }
+    writeInteger(0);
+    writeInteger(0);
+    for (float32 value : {1.F, 0.F, 0.F, 0.F, 1.F, 0.F, 0.F, 0.F, 1.F, 0.F, 0.F, 0.F})
+    {
+        writeNumber(value);
+    }
+    writeIdentity(101);
+    writeInteger(sceneFormat::LIGHTING_PROFILE_REC709_PHOTOMETRIC);
+    writeInteger(V3_LIGHT_COUNT);
+    writeInteger(V3_PIXEL_COUNT);
+    writeInteger(1);
+    for (float32 value : {2.F, 3.F, 4.F})
+    {
+        writeNumber(value);
+    }
+    for (uint64 identity : {201ULL, 202ULL})
+    {
+        writeIdentity(identity);
+        writeInteger(sceneFormat::LIGHT_SPOT);
+        writeInteger(identity == 201 ? sceneFormat::LIGHT_ENABLED : 0);
+        for (float32 value : {100.F, 200.F, 300.F, 1.F, 2.F, 3.F, 0.F, -1.F, 0.F, 50.F, .9F, .8F})
+        {
+            writeNumber(value);
+        }
+    }
+    for (float32 value : {16.F, 8.F, 4.F, 1.F, 2.F, 3.F})
+    {
+        writeNumber(value);
+    }
+    REQUIRE(offset == bytes.GetSize());
+    return bytes;
+}
+void SetFixtureWord(Array<uint8>& inoutBytes, usize offset, uint32 value)
+{
+    REQUIRE(
+        ludus::foundation::core::TryWriteLittleEndian<uint32>(value, {inoutBytes.GetData() + offset, sizeof(value)}) ==
+        true);
+}
+} // namespace
+TEST_CASE("Cooked v3 preserves authored photometric lights, sided emitters, separate bake UVs and HDR",
+          "[resources][scene]")
+{
+    Array<uint8> bytes = MakeLightingFixture();
+    r::SceneDefinition scene;
+    REQUIRE(r::SceneDefinition::Decode(bytes.GetData(), bytes.GetSize(), scene) == r::Status::Ok);
+    REQUIRE(scene.Materials[0].HasEmissionPower == true);
+    REQUIRE(scene.Materials[0].IsEmissionTwoSided == false);
+    REQUIRE(scene.Materials[0].AreaSourceId == 41);
+    REQUIRE(scene.Materials[0].EmissionPower == 1200);
+    REQUIRE(scene.Objects[0].SourceId == 101);
+    REQUIRE(scene.Meshes[0].Texcoords[0].X == 4);
+    REQUIRE(scene.Meshes[0].BakeTexcoords[0].X == .25F);
+    REQUIRE(scene.Meshes[0].BakeTexcoords[0].Y == .75F);
+    REQUIRE(scene.Lights.GetSize() == V3_LIGHT_COUNT);
+    REQUIRE(scene.Lights[0].SourceId == 201);
+    REQUIRE(scene.Lights[0].Kind == r::SceneLightKind::Spot);
+    REQUIRE(scene.Lights[0].IntensityRgb.Y == 200);
+    REQUIRE(scene.Lights[0].IsEnabled == true);
+    REQUIRE(scene.Lights[1].IsEnabled == false);
+    REQUIRE(scene.Environment.Width == 2);
+    REQUIRE(scene.Environment.Height == 1);
+    REQUIRE(scene.Environment.Rgb.Y == 3);
+    REQUIRE(scene.Environment.Pixels[0].X == 16);
+    REQUIRE(scene.Environment.Pixels[1].Z == 3);
+    const uint64 expectedBytes = sizeof(r::SceneMaterial) + sizeof(r::SceneMesh) + sizeof(r::SceneObject) +
+                                 V3_VERTEX_COUNT * (2 * sizeof(ludus::foundation::math::Vector3) +
+                                                    2 * sizeof(ludus::foundation::math::Vector2) + sizeof(uint32)) +
+                                 V3_LIGHT_COUNT * sizeof(r::SceneLight) +
+                                 V3_PIXEL_COUNT * sizeof(ludus::foundation::math::Vector3);
+    REQUIRE(scene.Bytes() == expectedBytes);
+    for (usize count = 0; count < bytes.GetSize(); ++count)
+    {
+        REQUIRE(r::SceneDefinition::Decode(bytes.GetData(), count, scene) == r::Status::Failed);
+        REQUIRE(scene.Environment.Pixels[0].X == 16);
+        REQUIRE(scene.Objects[0].SourceId == 101);
+    }
+}
+TEST_CASE("Cooked v3 rejects unknown contracts and invalid transport values atomically", "[resources][scene]")
+{
+    const Array<uint8> original = MakeLightingFixture();
+    r::SceneDefinition scene;
+    REQUIRE(r::SceneDefinition::Decode(original.GetData(), original.GetSize(), scene) == r::Status::Ok);
+    struct Mutation final
+    {
+        usize Offset;
+        uint32 Word;
+    };
+    for (const Mutation mutation :
+         {Mutation{V3_MATERIAL_OFFSET + offsetof(sceneFormat::MaterialRecordV3, EmissionFlags), 4},
+          Mutation{V3_MATERIAL_OFFSET + offsetof(sceneFormat::MaterialRecordV3, AreaSourceId), 0},
+          Mutation{V3_MATERIAL_OFFSET + offsetof(sceneFormat::MaterialRecordV3, Reserved), 1},
+          Mutation{V3_VERTEX_OFFSET + offsetof(sceneFormat::VertexRecordV3, BakeUv), 0x40000000U},
+          Mutation{V3_OBJECT_OFFSET + offsetof(sceneFormat::ObjectRecordV3, SourceId), 0},
+          Mutation{V3_LIGHTING_OFFSET + offsetof(sceneFormat::LightingRecord, Profile), 2},
+          Mutation{V3_LIGHTING_OFFSET + offsetof(sceneFormat::LightingRecord, LightCount), sceneFormat::MAX_LIGHTS + 1},
+          Mutation{V3_LIGHTING_OFFSET + offsetof(sceneFormat::LightingRecord, EnvironmentWidth), 0},
+          Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, Kind), 3},
+          Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, Flags), 2},
+          Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, IntensityRgb), 0xBF800000U},
+          Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, InnerCos), 0x3F4CCCCDU},
+          Mutation{V3_LIGHT_OFFSET + offsetof(sceneFormat::LightRecord, PositionWorld), 0x49800000U},
+          Mutation{V3_LIGHT_OFFSET + sizeof(sceneFormat::LightRecord), 201},
+          Mutation{V3_ENVIRONMENT_OFFSET, 0x7FC00000U}})
+    {
+        Array<uint8> bytes;
+        REQUIRE(bytes.TryResize(original.GetSize()) == true);
+        std::memcpy(bytes.GetData(), original.GetData(), original.GetSize());
+        SetFixtureWord(bytes, mutation.Offset, mutation.Word);
+        REQUIRE(r::SceneDefinition::Decode(bytes.GetData(), bytes.GetSize(), scene) == r::Status::Failed);
+        REQUIRE(scene.Materials[0].AreaSourceId == 41);
+        REQUIRE(scene.Environment.Pixels[0].X == 16);
+    }
+}
+TEST_CASE("Legacy cooked lighting retains two-sided emitters and deterministic scene identities", "[resources][scene]")
+{
+    for (uint32 version : {sceneFormat::VERSION_1, sceneFormat::VERSION_2})
+    {
+        const Array<uint8> bytes = SceneFixture(version);
+        r::SceneDefinition scene;
+        REQUIRE(r::SceneDefinition::Decode(bytes.GetData(), bytes.GetSize(), scene) == r::Status::Ok);
+        REQUIRE(scene.Materials[0].IsEmissionTwoSided == true);
+        REQUIRE(scene.Materials[0].HasEmissionPower == false);
+        REQUIRE(scene.Materials[0].AreaSourceId == 1);
+        REQUIRE(scene.Objects[0].SourceId == 1);
+        REQUIRE(scene.Lights.IsEmpty() == true);
+        REQUIRE(scene.Environment.Pixels.IsEmpty() == true);
+        REQUIRE(scene.Environment.Rgb.X == 0);
+        REQUIRE(scene.Meshes[0].BakeTexcoords.IsEmpty() == true);
+    }
 }

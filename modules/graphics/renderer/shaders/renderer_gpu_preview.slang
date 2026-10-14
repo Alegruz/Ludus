@@ -477,6 +477,8 @@ float3 Integrate(uint pixel, uint sample)
         float3 geometricNormalWorld = SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 8).xyz;
         float3 viewDirectionWorld = -directionWorld;
         float3 emission = Surface(t, 4).xyz * Texture(t, TexcoordUv(t, hit.Barycentric), 2).xyz;
+        if (asuint(Surface(t, 5).w) == 0 && dot(geometricNormalWorld, viewDirectionWorld) <= 0)
+            emission = float3(0);
         radiance +=
             throughput * emission *
             (depth == 0 ? 1 : PowerWeight(previousPdf, AreaPdf(t, previousPositionWorld, positionWorld, lights)));
@@ -568,6 +570,11 @@ float3 Integrate(uint pixel, uint sample)
                                      (SceneValue(light + 3).x - directionAndConeWorld.w));
                         angular = cone * cone;
                     }
+                    if (colorAndKind.w == 3 || colorAndKind.w == 4)
+                    {
+                        float emitterCosine = dot(-lightDirectionWorld, directionAndConeWorld.xyz);
+                        angular = colorAndKind.w == 4 ? abs(emitterCosine) : max(emitterCosine, 0);
+                    }
                     lightColor *= range <= Options.x ? window * window * angular / max(distanceSquared, 1e-4) : 0;
                 }
             }
@@ -582,10 +589,13 @@ float3 Integrate(uint pixel, uint sample)
                 range = length(offsetWorld);
                 lightDirectionWorld = NormalizeOrZero(offsetWorld);
                 pdf = AreaPdf(emitter, positionWorld, lightPositionWorld, lights);
-                if (range <= Options.x && (asuint(Surface(emitter, 5).z) == 0 ||
-                                           Texture(emitter, TexcoordUv(emitter, uv)).w * Surface(emitter, 2).w *
-                                                   InterpolateTriangle(emitter, 13, uv).w >=
-                                               Surface(emitter, 1).y))
+                if ((asuint(Surface(emitter, 5).w) != 0 ||
+                     dot(SceneValue(emitter * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 8).xyz, -lightDirectionWorld) > 0) &&
+                    range <= Options.x &&
+                    (asuint(Surface(emitter, 5).z) == 0 || Texture(emitter, TexcoordUv(emitter, uv)).w *
+                                                                   Surface(emitter, 2).w *
+                                                                   InterpolateTriangle(emitter, 13, uv).w >=
+                                                               Surface(emitter, 1).y))
                     lightColor = Surface(emitter, 4).xyz * Texture(emitter, TexcoordUv(emitter, uv), 2).xyz;
             }
             else

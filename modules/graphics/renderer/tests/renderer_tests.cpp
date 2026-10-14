@@ -779,7 +779,7 @@ namespace
 struct LitFixture final
 {
     rhi::RasterShaderInput Inputs[16];
-    rhi::RasterBinding Bindings[8]{{0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, 1040},
+    rhi::RasterBinding Bindings[8]{{0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, 8336},
                                    {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
                                    {2, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
                                    {3, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
@@ -823,13 +823,13 @@ struct LitFixture final
         Fragment.Artifact.WgslEntry = "fragmentMain";
         if (clustered)
         {
-            Bindings[0].MinSize = 8800;
+            Bindings[0].MinSize = 16096;
             Bindings[6] = {6, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0};
             Bindings[7] = {7, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0};
             Members[10].Offset = 8336;
-            Members[11] = {0, "GridRows", 8720, rhi::RasterUniformShape::Float4Array};
-            Members[12] = {0, "GridMinimum", 8768, rhi::RasterUniformShape::Float4};
-            Members[13] = {0, "GridScale", 8784, rhi::RasterUniformShape::Float4};
+            Members[11] = {0, "GridRows", 16016, rhi::RasterUniformShape::Float4Array};
+            Members[12] = {0, "GridMinimum", 16064, rhi::RasterUniformShape::Float4};
+            Members[13] = {0, "GridScale", 16080, rhi::RasterUniformShape::Float4};
         }
         Fragment.Bindings = {Bindings, clustered ? 8U : 6U};
         Fragment.UniformMembers = {Members, clustered ? 14U : 11U};
@@ -1016,7 +1016,8 @@ TEST_CASE("L4 rejects malformed light/layout/bake data before publication", "[re
     CHECK(session.Renderer.PrepareShadowAtlas(snapshot, {16, 16, regions, 2}, atlas) ==
           rhi::RasterStatus::InvalidDescription);
     regions[0].Light.Kind = rr::LightKind::Point;
-    CHECK(session.Renderer.PrepareShadowAtlas(snapshot, {16, 16, regions, 1}, atlas) == rhi::RasterStatus::Unsupported);
+    CHECK(session.Renderer.PrepareShadowAtlas(snapshot, {16, 16, regions, 1}, atlas) ==
+          rhi::RasterStatus::InvalidDescription);
 }
 
 TEST_CASE("L4 capability negotiation admits LDR without HDR pipelines", "[renderer][l4]")
@@ -1972,8 +1973,8 @@ TEST_CASE("Surface map admission preserves outputs and rejects incompatible prog
     {
         members[i] = fixture.Members[i];
     }
-    members[11] = {0, "SurfaceMap", 1040, rhi::RasterUniformShape::Float4};
-    fixture.Bindings[0].MinSize = 1056;
+    members[11] = {0, "SurfaceMap", 8336, rhi::RasterUniformShape::Float4};
+    fixture.Bindings[0].MinSize = 8352;
     fixture.Bindings[6] = {6, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0};
     fixture.Fragment.Bindings = {fixture.Bindings, 7};
     fixture.Fragment.UniformMembers = members;
@@ -2129,4 +2130,61 @@ TEST_CASE("HDR importance sampling uses exact solid angles and leaves dark cells
               Catch::Approx(result.Pdf).margin(1e-6));
         CHECK(rr::internal::EvaluateEnvironment(environment, result.DirectionWorld) == result.Radiance);
     }
+}
+
+TEST_CASE("All thirteen area proxies require complete cube coverage and atomic draw budget admission",
+          "[renderer][lighting]")
+{
+    constexpr usize SOURCE_COUNT = 13;
+    constexpr usize REGION_COUNT = SOURCE_COUNT * rr::POINT_SHADOW_FACES;
+    constexpr uint32 CELL_PIXELS = 16;
+    rr::Limits limits;
+    limits.Views = 160;
+    rhi::StorageLimits storage;
+    storage.ResourcesPerKind = 256;
+    Session session(true, limits, storage);
+    LitFixture fixture;
+    fixture.Enable(session);
+    const rr::SceneItem item = session.Item(1);
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    StaticArray<rr::ShadowRegion, REGION_COUNT> regions;
+    for (usize i = 0; i < REGION_COUNT; ++i)
+    {
+        rr::ShadowRegion& region = regions[i];
+        region.Light.SourceId = i / rr::POINT_SHADOW_FACES + 1;
+        region.Light.Kind = rr::LightKind::AreaOneSided;
+        region.Light.Position = {0, 0, 1};
+        region.Light.Direction = {0, 0, -1};
+        region.CubeFace = static_cast<uint32>(i % rr::POINT_SHADOW_FACES);
+        REQUIRE(rr::BuildPointShadowMatrix(region.Light.Position,
+                                           region.CubeFace,
+                                           region.NearDistance,
+                                           region.Light.Range,
+                                           region.WorldToClip) == rhi::RasterStatus::Ready);
+        region.Interior = {static_cast<uint32>(i / rr::POINT_SHADOW_FACES) * CELL_PIXELS + 1,
+                           region.CubeFace * CELL_PIXELS + 1,
+                           CELL_PIXELS - 4,
+                           CELL_PIXELS - 4};
+    }
+    rr::ShadowAtlas atlas;
+    const rr::ShadowAtlasDescription description{static_cast<uint32>(SOURCE_COUNT) * CELL_PIXELS,
+                                                 rr::POINT_SHADOW_FACES * CELL_PIXELS,
+                                                 regions.GetData(),
+                                                 REGION_COUNT};
+    rr::ShadowAtlasDescription missing = description;
+    --missing.Count;
+    REQUIRE(session.Renderer.PrepareShadowAtlas(snapshot, missing, atlas) == rhi::RasterStatus::InvalidDescription);
+    REQUIRE(session.Renderer.PrepareShadowAtlas(snapshot, description, atlas) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::BeginFrame(session.Device, session.Surface) == rhi::DeviceStatus::Ready);
+    REQUIRE(session.Renderer.DrawShadowAtlas(atlas, storage.DrawsPerFrame + 1) == rhi::RasterStatus::CapacityExceeded);
+    REQUIRE(session.Renderer.GetStatus(atlas) == rhi::RasterStatus::Ready);
+    const usize earlierDraws = rhi::reference::Draws;
+    REQUIRE(session.Renderer.DrawShadowAtlas(atlas) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::reference::Draws - earlierDraws ==
+            SOURCE_COUNT); // One visible -Z face per source; other faces cull the caster.
+    rhi::SubmissionToken completion;
+    REQUIRE(rhi::EndFrame(session.Device, completion) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(atlas) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
 }

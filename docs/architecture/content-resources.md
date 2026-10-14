@@ -304,3 +304,45 @@ Follow [level loading](level-data.md) for candidate activation and
 [frame updates](frame-update.md) for presentation delivery. This package adds
 resource mechanics without making Content depend on the world or inventing
 built-in entity kinds. A standalone audio sample must remain possible.
+
+### Authored scene lighting (LUSCN v3)
+
+LUSCN version 3 retains the 68-byte header and texture payloads. Its material,
+vertex and object records are respectively 48, 40 and 64 bytes. An object gains a
+stable nonzero scene-local identity; a vertex gains independent normalized bake
+coordinates. Material emission retains its sidedness, emitter equivalence-group
+identity and optional per-placement luminous flux. Producers resolve requested
+power independently for each bound Shape using its world-space area and emitting
+side count. Merging emitters is valid only when their resolved RGB luminance,
+sidedness and power semantics agree. The existing six-mesh/eight-material limits
+remain explicit admission limits; exceeding them must fail with a diagnostic.
+
+The final 28-byte lighting trailer selects the fixed linear Rec.709 photometric
+proxy, followed by at most 128 analytic light records of 64 bytes each and an
+optional tightly packed float32 RGB environment. Directional RGB intensity is
+illuminance in lux; point/spot intensity is candela. Emission and environment
+radiance use RGB nits. This proxy deliberately approximates spectral authoring;
+it does not promise PBRT spectral parity. Environment images are equirectangular,
+rows north to south, with an explicit RGB multiplier. Zero dimensions select
+constant RGB radiance; a black value means no environment. Mapping conversion
+belongs to the producer, before serialization; equal-area maps cannot be labelled
+equirectangular without resampling. HDR pixels are retained without tone mapping.
+
+The canonical field schema, offsets, flags and bounds live in
+`ludus/content/scene_format/luscn.h`. Serialization is field-by-field little-endian,
+never a host-struct copy. The runtime decoder rejects unknown versions/profiles,
+flags, duplicate instance or analytic-light IDs, invalid ranges, malformed HDR
+payloads and nonfinite values. Decode works on a worker and publishes owned
+immutable arrays only on success; every failure preserves the caller's previous
+scene. Version 1/2 input retains its original material and sampler semantics,
+two-sided emission, black environment and empty analytic light list. Stable IDs
+are derived from legacy object and emissive-material order.
+
+The allocation-free `BakeChartLayout` helpers assign a four-texel tile to each
+triangle: a two-by-two interior plus one-texel replicated gutter. Producers
+duplicate indexed vertices before assigning chart UVs; source texture UVs remain
+separate. Sample without mipmaps. Distinct placements require independent baked
+irradiance because transforms and visibility differ. Chart allocation, mesh
+vertex expansion and irradiance storage must all fit their explicit budgets;
+packing does not establish a valid bake or perform transport. The first layout
+supports coarse per-triangle irradiance and is not a general lightmap unwrapper.

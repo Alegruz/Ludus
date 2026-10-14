@@ -1,7 +1,10 @@
 #include <ludus/graphics/renderer/lighting.hpp>
 
+#include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/math/status.hpp>
+#include <ludus/foundation/math/summation.hpp>
 
 namespace ludus::graphics::renderer
 {
@@ -42,7 +45,7 @@ namespace
 {
 bool Bounded(math::Vector3 value, float32 minimum, float32 maximum) noexcept
 {
-    return math::IsFinite(value) && value.X >= minimum && value.X <= maximum && value.Y >= minimum &&
+    return math::IsFinite(value) == true && value.X >= minimum && value.X <= maximum && value.Y >= minimum &&
            value.Y <= maximum && value.Z >= minimum && value.Z <= maximum;
 }
 float32 Fifth(float32 value) noexcept
@@ -50,18 +53,269 @@ float32 Fifth(float32 value) noexcept
     const auto square = value * value;
     return square * square * value;
 }
-bool NormalizeLight(DirectLight& light) noexcept
+bool NormalizeLight(DirectLight& inoutLight) noexcept
 {
-    return light.SourceId != 0 && static_cast<uint8>(light.Kind) <= 2 && Bounded(light.Color, 0, 1) &&
-           math::IsFinite(light.Intensity) && light.Intensity >= 0 && light.Intensity <= 1000000 &&
-           Bounded(light.Position, -1000000, 1000000) && math::IsFinite(light.Direction) &&
-           math::IsFinite(light.Range) && light.Range >= 0.01F && light.Range <= 1000000 &&
-           math::IsFinite(light.InnerCos) && math::IsFinite(light.OuterCos) && light.OuterCos > -1 &&
-           light.OuterCos < light.InnerCos && light.InnerCos <= 1 &&
+    DirectLight& light = inoutLight;
+    return light.SourceId != 0 && static_cast<uint8>(light.Kind) <= static_cast<uint8>(LightKind::AreaTwoSided) &&
+           Bounded(light.Color, 0, 1) == true && math::IsFinite(light.Intensity) == true && light.Intensity >= 0 &&
+           light.Intensity <= 1000000 && Bounded(light.Position, -1000000, 1000000) == true &&
+           math::IsFinite(light.Direction) == true && math::IsFinite(light.Range) == true && light.Range >= 0.01F &&
+           light.Range <= 1000000 && math::IsFinite(light.InnerCos) == true && math::IsFinite(light.OuterCos) == true &&
+           light.OuterCos > -1 && light.OuterCos < light.InnerCos && light.InnerCos <= 1 &&
            (light.Kind == LightKind::Point ||
             math::TryNormalize(light.Direction, light.Direction) == math::MathStatus::Success);
 }
 } // namespace
+rhi::RasterStatus BuildTriangleAreaLights(const TriangleAreaLightDescription& description,
+                                          AreaLightSamples& outSamples) noexcept
+{
+    const uint32 sampleCount = description.Quadrature == AreaLightQuadrature::ThreePoint ? 3U : 1U;
+    if (description.FirstSampleSourceId == 0 || description.FirstSampleSourceId > ~uint64{0} - (sampleCount - 1) ||
+        Bounded(description.Emission, 0, 10000) == false || math::IsFinite(description.Range) == false ||
+        description.Range < .01F || description.Range > 1000000 ||
+        static_cast<uint8>(description.Quadrature) > static_cast<uint8>(AreaLightQuadrature::ThreePoint))
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    for (const math::Vector3& positionWorld : description.PositionsWorld)
+    {
+        if (Bounded(positionWorld, -1000000, 1000000) == false)
+        {
+            return rhi::RasterStatus::InvalidDescription;
+        }
+    }
+    const math::Vector3 cross = math::Cross(description.PositionsWorld[1] - description.PositionsWorld[0],
+                                            description.PositionsWorld[2] - description.PositionsWorld[0]);
+    const float32 area = math::Length(cross) * .5F;
+    math::Vector3 normalWorld;
+    if (math::IsFinite(area) == false || area <= 0 ||
+        math::TryNormalize(cross, normalWorld) != math::MathStatus::Success)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    // Thanks to Pharr, Jakob and Humphreys, Physically Based Rendering, 4th ed.,
+    // section 12.5 Area Lights, https://pbr-book.org/4ed/Light_Sources/Area_Lights.
+    // Adopt Lambertian Le*dA*cos(theta) transport and geometric sidedness.
+    // This original bounded centroid/three-point raster quadrature replaces
+    // stochastic continuous area sampling and approximates finite-source visibility.
+    AreaLightSamples samples;
+    samples.Count = sampleCount;
+    const float32 maximum =
+        math::Max(description.Emission.X, math::Max(description.Emission.Y, description.Emission.Z));
+    const float32 intensity = maximum * area / float32(samples.Count);
+    if (math::IsFinite(intensity) == false || intensity > 1000000)
+    {
+        return rhi::RasterStatus::CapacityExceeded;
+    }
+    for (usize i = 0; i < samples.Count; ++i)
+    {
+        DirectLight& light = samples.Lights[i];
+        light.SourceId = description.FirstSampleSourceId + i;
+        light.Kind = description.IsTwoSided == true ? LightKind::AreaTwoSided : LightKind::AreaOneSided;
+        light.Color = maximum > 0 ? description.Emission / maximum : math::Vector3{};
+        light.Intensity = intensity;
+        light.Direction = normalWorld;
+        light.Range = description.Range;
+        if (samples.Count == 1)
+        {
+            light.Position = description.PositionsWorld[0] / 3.F + description.PositionsWorld[1] / 3.F +
+                             description.PositionsWorld[2] / 3.F;
+        }
+        else
+        {
+            light.Position = description.PositionsWorld[i] * (2.F / 3.F) +
+                             description.PositionsWorld[(i + 1) % AREA_TRIANGLE_CORNERS] * (1.F / 6.F) +
+                             description.PositionsWorld[(i + 2) % AREA_TRIANGLE_CORNERS] * (1.F / 6.F);
+        }
+    }
+    outSamples = samples;
+    return rhi::RasterStatus::Ready;
+}
+rhi::RasterStatus BuildPlanarAreaLight(const PlanarAreaLightDescription& description, DirectLight& outLight) noexcept
+{
+    if (description.PositionsMesh.IsValid() == false || description.Indices.IsValid() == false ||
+        description.PositionsMesh.IsEmpty() == true || description.Indices.IsEmpty() == true ||
+        description.Indices.GetSize() > content::scene_format::MAX_INDICES ||
+        description.Indices.GetSize() % AREA_TRIANGLE_CORNERS != 0 || description.SourceId == 0 ||
+        Bounded(description.Emission, 0, 10000) == false)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    math::Matrix3 normalMeshToWorld;
+    if (math::TryNormalMatrix(description.MeshToWorld, {}, normalMeshToWorld) != math::MathStatus::Success)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    math::CompensatedSum totalArea;
+    StaticArray<math::CompensatedSum, AREA_TRIANGLE_CORNERS> weightedPosition;
+    math::Vector3 normalWorld;
+    math::Vector3 originWorld;
+    float32 planeTolerance = .0001F; // Metres: 0.1 mm plus affine FP32 coordinate allowance.
+    for (usize triangle = 0; triangle < description.Indices.GetSize() / AREA_TRIANGLE_CORNERS; ++triangle)
+    {
+        StaticArray<math::Vector3, AREA_TRIANGLE_CORNERS> positionMesh;
+        StaticArray<math::Vector3, AREA_TRIANGLE_CORNERS> positionWorld;
+        for (usize corner = 0; corner < AREA_TRIANGLE_CORNERS; ++corner)
+        {
+            const uint32 vertex = description.Indices[triangle * AREA_TRIANGLE_CORNERS + corner];
+            if (vertex >= description.PositionsMesh.GetSize())
+            {
+                return rhi::RasterStatus::InvalidDescription;
+            }
+            positionMesh[corner] = description.PositionsMesh[vertex];
+            positionWorld[corner] = math::TransformPoint(description.MeshToWorld, positionMesh[corner]);
+            if (Bounded(positionWorld[corner], -1000000, 1000000) == false)
+            {
+                return rhi::RasterStatus::InvalidDescription;
+            }
+            planeTolerance = math::Max(planeTolerance, math::Length(positionWorld[corner]) * 2e-6F);
+        }
+        math::Vector3 triangleNormalWorld;
+        const math::Vector3 normalMesh =
+            math::Cross(positionMesh[1] - positionMesh[0], positionMesh[2] - positionMesh[0]);
+        const float32 area =
+            math::Length(math::Cross(positionWorld[1] - positionWorld[0], positionWorld[2] - positionWorld[0])) * .5F;
+        if (math::IsFinite(area) == false || area <= 0 ||
+            math::TryNormalize(normalMeshToWorld * normalMesh, triangleNormalWorld) != math::MathStatus::Success)
+        {
+            return rhi::RasterStatus::InvalidDescription;
+        }
+        if (triangle == 0)
+        {
+            normalWorld = triangleNormalWorld;
+            originWorld = positionWorld[0];
+        }
+        if (math::Dot(normalWorld, triangleNormalWorld) < 1 - 1e-5F)
+        {
+            return rhi::RasterStatus::Unsupported;
+        }
+        for (const math::Vector3& position : positionWorld)
+        {
+            if (math::Abs(math::Dot(position - originWorld, normalWorld)) > planeTolerance)
+            {
+                return rhi::RasterStatus::Unsupported;
+            }
+        }
+        totalArea.Add(float64(area));
+        for (const math::Vector3& position : positionWorld)
+        {
+            weightedPosition[0].Add(float64(position.X) * float64(area) / 3);
+            weightedPosition[1].Add(float64(position.Y) * float64(area) / 3);
+            weightedPosition[2].Add(float64(position.Z) * float64(area) / 3);
+        }
+    }
+    const float64 area = totalArea.GetResult();
+    const math::Vector3 centroidWorld{float32(weightedPosition[0].GetResult() / area),
+                                      float32(weightedPosition[1].GetResult() / area),
+                                      float32(weightedPosition[2].GetResult() / area)};
+    bool isCentroidOnPatch = false;
+    for (usize triangle = 0; triangle < description.Indices.GetSize() / AREA_TRIANGLE_CORNERS; ++triangle)
+    {
+        const math::Vector3 a =
+            math::TransformPoint(description.MeshToWorld,
+                                 description.PositionsMesh[description.Indices[triangle * AREA_TRIANGLE_CORNERS]]);
+        const math::Vector3 b =
+            math::TransformPoint(description.MeshToWorld,
+                                 description.PositionsMesh[description.Indices[triangle * AREA_TRIANGLE_CORNERS + 1]]);
+        const math::Vector3 c =
+            math::TransformPoint(description.MeshToWorld,
+                                 description.PositionsMesh[description.Indices[triangle * AREA_TRIANGLE_CORNERS + 2]]);
+        const float32 sign = math::Dot(math::Cross(b - a, c - a), normalWorld) >= 0 ? 1.F : -1.F;
+        if (math::Dot(math::Cross(b - a, centroidWorld - a), normalWorld) * sign / math::Length(b - a) >=
+                -planeTolerance &&
+            math::Dot(math::Cross(c - b, centroidWorld - b), normalWorld) * sign / math::Length(c - b) >=
+                -planeTolerance &&
+            math::Dot(math::Cross(a - c, centroidWorld - c), normalWorld) * sign / math::Length(a - c) >=
+                -planeTolerance)
+        {
+            isCentroidOnPatch = true;
+            break;
+        }
+    }
+    if (isCentroidOnPatch == false)
+    {
+        return rhi::RasterStatus::Unsupported;
+    }
+    const float32 maximum =
+        math::Max(description.Emission.X, math::Max(description.Emission.Y, description.Emission.Z));
+    const float64 intensity = float64(maximum) * area;
+    if (math::IsFinite(intensity) == false || intensity > 1000000)
+    {
+        return rhi::RasterStatus::CapacityExceeded;
+    }
+    DirectLight light;
+    light.SourceId = description.SourceId;
+    light.Kind = description.IsTwoSided == true ? LightKind::AreaTwoSided : LightKind::AreaOneSided;
+    light.Color = maximum > 0 ? description.Emission / maximum : math::Vector3{};
+    light.Intensity = float32(intensity);
+    light.Position = centroidWorld;
+    light.Direction = normalWorld;
+    light.Range = description.Range;
+    if (NormalizeLight(light) == false)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    outLight = light;
+    return rhi::RasterStatus::Ready;
+}
+rhi::RasterStatus BuildPointShadowMatrix(math::Vector3 positionWorld,
+                                         uint32 face,
+                                         float32 nearDistance,
+                                         float32 farDistance,
+                                         math::Matrix4& outWorldToClip) noexcept
+{
+    if (face >= POINT_SHADOW_FACES || Bounded(positionWorld, -1000000, 1000000) == false ||
+        math::IsFinite(nearDistance) == false || math::IsFinite(farDistance) == false || nearDistance <= 0 ||
+        farDistance <= nearDistance || farDistance > 1000000)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    math::Vector3 directionWorld;
+    math::Vector3 upWorld{0, 1, 0};
+    switch (face)
+    {
+        case 0:
+            directionWorld = {1, 0, 0};
+            break;
+        case 1:
+            directionWorld = {-1, 0, 0};
+            break;
+        case 2:
+            directionWorld = {0, 1, 0};
+            upWorld = {0, 0, -1};
+            break;
+        case 3:
+            directionWorld = {0, -1, 0};
+            upWorld = {0, 0, 1};
+            break;
+        case 4:
+            directionWorld = {0, 0, 1};
+            break;
+        default:
+            directionWorld = {0, 0, -1};
+            break;
+    }
+    math::Matrix4 worldToView;
+    math::Matrix4 viewToClip;
+    if (math::TryLookAt(positionWorld, positionWorld + directionWorld, upWorld, worldToView) !=
+            math::MathStatus::Success ||
+        math::TryPerspectiveReverseZ(math::kPiF * .5F, 1, nearDistance, farDistance, viewToClip) !=
+            math::MathStatus::Success)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    for (math::Vector4& column : viewToClip.Columns)
+    {
+        column.Z = column.W - column.Z;
+    }
+    const math::Matrix4 worldToClip = viewToClip * worldToView;
+    if (math::IsFinite(worldToClip) == false)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    outWorldToClip = worldToClip;
+    return rhi::RasterStatus::Ready;
+}
 rhi::RasterStatus NormalizeDirectLights(const DirectLight* lights, usize count, LightSelection& output) noexcept
 {
     if (count > 128)

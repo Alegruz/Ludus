@@ -141,6 +141,12 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
                 const auto t = math::Clamp((cosine - light.OuterCos) / (light.InnerCos - light.OuterCos), 0.0F, 1.0F);
                 angular = t * t;
             }
+            if (light.Kind == LightKind::AreaOneSided || light.Kind == LightKind::AreaTwoSided)
+            {
+                const float32 emitterCosine = math::Dot(light.Direction, -result.Direction);
+                angular =
+                    light.Kind == LightKind::AreaTwoSided ? math::Abs(emitterCosine) : math::Max(emitterCosine, 0.F);
+            }
             result.Radiance = result.Radiance * (window * window * angular / math::Max(square, 1e-4F));
         }
         return result;
@@ -166,7 +172,9 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
         result.FiniteEndpoint = true;
         result.Pdf = AreaPdf(triangle, point, result.Point, count);
         const auto& instance = job.Scene.Instances[triangle.Instance];
-        if (result.Distance <= job.Description.SecondaryDistance &&
+        if ((instance.Surface->IsEmissionTwoSided == true ||
+             math::Dot(triangle.GeometricNormal, -result.Direction) > 0) &&
+            result.Distance <= job.Description.SecondaryDistance &&
             ReferenceOpacity(instance,
                              Uv(triangle, u, v),
                              triangle.Colors[0].W * (1 - u - v) + triangle.Colors[1].W * u + triangle.Colors[2].W * v))
@@ -237,7 +245,8 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     const auto point = Position(triangle, hit.U, hit.V);
     const auto view = -ReferenceDirection(path.Ray);
     const auto& surface = *instance.Surface;
-    if (Positive(surface.Emission))
+    if (Positive(surface.Emission) == true &&
+        (surface.IsEmissionTwoSided == true || math::Dot(triangle.GeometricNormal, view) > 0))
     {
         const auto pdf = AreaPdf(triangle, path.PreviousPoint, point, lights);
         if (!math::IsFinite(pdf) || pdf < 0)
@@ -386,5 +395,108 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     return ValidContribution(path.Emission) && ValidContribution(path.Direct) && ValidContribution(path.Indirect)
                ? rhi::RasterStatus::Ready
                : Invalid(job, path);
+}
+rhi::RasterStatus EvaluateReferenceDiffuseProbe(ReferenceJob& inoutJob,
+                                                const ReferenceProbeAddress& address,
+                                                math::Vector3& outIrradiance) noexcept
+{
+    const uint32 triangleIndex = address.TriangleIndex;
+    const uint32 sampleIndex = address.SampleIndex;
+    const ReferenceTriangle& triangle = inoutJob.Scene.Triangles[triangleIndex];
+    const math::Vector3 pointWorld = Position(triangle, 1.F / 3.F, 1.F / 3.F);
+    const math::Vector3 normalWorld = triangle.GeometricNormal;
+    ReferencePath path;
+    path.Pixel = triangleIndex;
+    path.Sample = sampleIndex;
+    // At a virtual white diffuse receiver, cosine sampling turns the irradiance
+    // integral into PI times incoming radiance. Reuse the reference MIS/BSDF
+    // transport after this first event; analytic direct remains the raster term.
+    const LightProposal proposal = SampleLight(inoutJob, path, pointWorld);
+    math::Vector3 directIrradiance;
+    const float32 cosine = math::Max(math::Dot(normalWorld, proposal.Direction), 0.F);
+    if (proposal.Delta == false && proposal.Pdf > 0 && cosine > 0)
+    {
+        math::Vector3 originWorld = Offset(pointWorld, triangle, proposal.Direction);
+        math::Vector3 directionWorld = proposal.Direction;
+        float32 distance = proposal.Distance;
+        if (proposal.FiniteEndpoint == true)
+        {
+            math::Vector3 endpointWorld;
+            if (math::TryOffsetRayOrigin({proposal.Point, proposal.Error, proposal.Normal, -directionWorld},
+                                         endpointWorld) != math::MathStatus::Success)
+            {
+                return rhi::RasterStatus::Failed;
+            }
+            const math::Vector3 deltaWorld = endpointWorld - originWorld;
+            distance = math::Length(deltaWorld);
+            if (distance <= 0)
+            {
+                return rhi::RasterStatus::Failed;
+            }
+            directionWorld = deltaWorld / distance;
+            distance = math::NextFloatDown(distance);
+        }
+        rhi::RayInput shadow = ReferenceRay(originWorld, directionWorld, distance);
+        shadow.VisibilityOnly = 1;
+        rhi::RayResult visibility;
+        if (TraceReferenceOracle(inoutJob.Scene, shadow, visibility) != rhi::RasterStatus::Ready)
+        {
+            return rhi::RasterStatus::Failed;
+        }
+        if (visibility.Hit == 0)
+        {
+            directIrradiance =
+                proposal.Radiance * (cosine / proposal.Pdf * ReferencePowerWeight(proposal.Pdf, cosine / math::kPiF));
+        }
+    }
+    const float32 radius = math::Sqrt(ReferenceRandom(inoutJob, path, 0));
+    const float32 angle = math::kTauF * ReferenceRandom(inoutJob, path, 1);
+    const float32 cosineSample = math::Sqrt(math::Max(0.F, 1 - radius * radius));
+    const math::Vector3 upWorld = math::Abs(normalWorld.Y) > .9F ? math::Vector3{1, 0, 0} : math::Vector3{0, 1, 0};
+    const math::Vector3 tangentWorld = ReferenceNormalize(math::Cross(upWorld, normalWorld));
+    const math::Vector3 bitangentWorld = math::Cross(normalWorld, tangentWorld);
+    const math::Vector3 directionWorld =
+        ReferenceNormalize(tangentWorld * (radius * math::Cos(angle)) + bitangentWorld * (radius * math::Sin(angle)) +
+                           normalWorld * cosineSample);
+    path.Depth = 1;
+    path.Throughput = {math::kPiF, math::kPiF, math::kPiF};
+    path.PreviousPoint = pointWorld;
+    path.PreviousPdf = cosineSample / math::kPiF;
+    path.Ray = ReferenceRay(Offset(pointWorld, triangle, directionWorld),
+                            directionWorld,
+                            inoutJob.Description.SecondaryDistance);
+    while (path.Active == true)
+    {
+        rhi::RayResult hit;
+        if (TraceReferenceOracle(inoutJob.Scene, path.Ray, hit) != rhi::RasterStatus::Ready ||
+            PrepareReferenceVertex(inoutJob, path, hit) != rhi::RasterStatus::Ready)
+        {
+            return rhi::RasterStatus::Failed;
+        }
+        if (path.HasShadow == true)
+        {
+            rhi::RayResult visibility;
+            if (TraceReferenceOracle(inoutJob.Scene, path.Shadow, visibility) != rhi::RasterStatus::Ready)
+            {
+                return rhi::RasterStatus::Failed;
+            }
+            if (visibility.Hit == 0)
+            {
+                path.Indirect = path.Indirect + path.PendingDirect;
+            }
+        }
+        if (path.HasNext == false)
+        {
+            break;
+        }
+        path.Ray = path.Next;
+    }
+    const math::Vector3 irradiance = directIrradiance + path.Direct + path.Indirect;
+    if (ValidContribution(irradiance) == false)
+    {
+        return rhi::RasterStatus::Failed;
+    }
+    outIrradiance = irradiance;
+    return rhi::RasterStatus::Ready;
 }
 } // namespace ludus::graphics::renderer::internal

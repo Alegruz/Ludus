@@ -166,9 +166,9 @@ struct ReferenceCaptureInfo final
 {
     /// Explicit selected traversal; NativeQueries never denotes a CPU fallback.
     ReferenceTraversal Traversal = ReferenceTraversal::NativeQueries;
-    /// RGB surface/integrator schema: version 2 adds packed surface maps and
-    /// matches raster squared spot-cone falloff and bounded near-light attenuation.
-    ludus::foundation::uint32 ProfileVersion = 3;
+    /// RGB surface/integrator schema: version 4 records emitter sidedness and
+    /// weighted area samples; earlier surface-map/range semantics are preserved.
+    ludus::foundation::uint32 ProfileVersion = LIGHTING_PROFILE_VERSION;
     /// Frozen Philox address and dimension convention version.
     ludus::foundation::uint32 SamplerVersion = 1;
     /// Original capture seed.

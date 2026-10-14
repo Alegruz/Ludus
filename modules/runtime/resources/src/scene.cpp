@@ -2,6 +2,7 @@
 
 #include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/base/compiler.h>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 
@@ -28,38 +29,49 @@ static_assert(sizeof(format::Header::Eye) == sizeof(math::Vector3));
 class Reader final
 {
 public:
-    Reader(const uint8* bytes, usize count) noexcept : mBytes(bytes), mRemaining(count) {}
+    LUDUS_INLINE Reader(const uint8* bytes, usize count) noexcept : mBytes(bytes), mRemaining(count) {}
     const uint8* Take(usize count) noexcept
     {
         if (count > mRemaining)
         {
             return nullptr;
         }
-        const auto* result = mBytes;
+        const uint8* result = mBytes;
         mBytes += count;
         mRemaining -= count;
         return result;
     }
-    bool Read(uint32& value) noexcept
+    bool Read(uint32& outValue) noexcept
     {
-        const auto* bytes = Take(4);
-        return bytes != nullptr && foundation::core::TryReadLittleEndian<uint32>({bytes, 4}, value) == true;
+        const uint8* bytesOrNull = Take(sizeof(uint32));
+        return bytesOrNull != nullptr &&
+               foundation::core::TryReadLittleEndian<uint32>({bytesOrNull, sizeof(uint32)}, outValue) == true;
     }
-    bool Read(float32& value) noexcept
+    bool Read(uint64& outValue) noexcept
+    {
+        const uint8* bytesOrNull = Take(sizeof(uint64));
+        return bytesOrNull != nullptr &&
+               foundation::core::TryReadLittleEndian<uint64>({bytesOrNull, sizeof(uint64)}, outValue) == true;
+    }
+    bool Read(float32& outValue) noexcept
     {
         uint32 bits = 0;
         if (Read(bits) == false)
         {
             return false;
         }
-        std::memcpy(&value, &bits, sizeof(value));
-        return math::IsFinite(value);
+        std::memcpy(&outValue, &bits, sizeof(outValue));
+        return math::IsFinite(outValue);
     }
-    bool Read(math::Vector3& value) noexcept
+    bool Read(math::Vector3& outValue) noexcept
     {
-        return Read(value.X) == true && Read(value.Y) == true && Read(value.Z) == true;
+        return Read(outValue.X) == true && Read(outValue.Y) == true && Read(outValue.Z) == true;
     }
-    [[nodiscard]] usize Remaining() const noexcept
+    bool Read(math::Vector2& outValue) noexcept
+    {
+        return Read(outValue.X) == true && Read(outValue.Y) == true;
+    }
+    [[nodiscard]] LUDUS_INLINE usize Remaining() const noexcept
     {
         return mRemaining;
     }
@@ -68,6 +80,78 @@ private:
     const uint8* mBytes;
     usize mRemaining;
 };
+bool IsNonnegative(const math::Vector3& value, float32 maximum) noexcept
+{
+    return value.X >= 0 && value.Y >= 0 && value.Z >= 0 && value.X <= maximum && value.Y <= maximum &&
+           value.Z <= maximum;
+}
+bool IsNonzero(const math::Vector3& value) noexcept
+{
+    return value.X != 0 || value.Y != 0 || value.Z != 0;
+}
+Status ReadLighting(Reader& inoutReader, SceneDefinition& inoutScene) noexcept
+{
+    uint32 profile = 0;
+    uint32 lightCount = 0;
+    SceneEnvironment& environment = inoutScene.Environment;
+    if (inoutReader.Read(profile) == false || profile != format::LIGHTING_PROFILE_REC709_PHOTOMETRIC ||
+        inoutReader.Read(lightCount) == false || lightCount > format::MAX_LIGHTS ||
+        inoutReader.Read(environment.Width) == false || inoutReader.Read(environment.Height) == false ||
+        environment.Width > format::MAX_ENVIRONMENT_DIMENSION ||
+        environment.Height > format::MAX_ENVIRONMENT_DIMENSION ||
+        ((environment.Width == 0) != (environment.Height == 0)) || inoutReader.Read(environment.Rgb) == false ||
+        IsNonnegative(environment.Rgb, format::MAX_EMISSION) == false)
+    {
+        return Status::Failed;
+    }
+    const usize pixelCount = usize(environment.Width) * environment.Height;
+    const usize payloadBytes =
+        usize(lightCount) * sizeof(format::LightRecord) + pixelCount * format::ENVIRONMENT_TEXEL_BYTES;
+    if (payloadBytes != inoutReader.Remaining())
+    {
+        return Status::Failed;
+    }
+    if (inoutScene.Lights.TryResize(lightCount) == false || environment.Pixels.TryResize(pixelCount) == false)
+    {
+        return Status::OutOfMemory;
+    }
+    for (usize i = 0; i < lightCount; ++i)
+    {
+        SceneLight& light = inoutScene.Lights[i];
+        uint32 kind = 0;
+        uint32 flags = 0;
+        if (inoutReader.Read(light.SourceId) == false || light.SourceId == 0 || inoutReader.Read(kind) == false ||
+            kind > format::LIGHT_SPOT || inoutReader.Read(flags) == false || (flags & ~format::LIGHT_ENABLED) != 0 ||
+            inoutReader.Read(light.IntensityRgb) == false ||
+            IsNonnegative(light.IntensityRgb, format::MAX_LIGHT_INTENSITY) == false ||
+            inoutReader.Read(light.PositionWorld) == false || math::Abs(light.PositionWorld.X) > 1000000 ||
+            math::Abs(light.PositionWorld.Y) > 1000000 || math::Abs(light.PositionWorld.Z) > 1000000 ||
+            inoutReader.Read(light.DirectionWorld) == false || IsNonzero(light.DirectionWorld) == false ||
+            inoutReader.Read(light.Range) == false || light.Range < .01F || light.Range > format::MAX_LIGHT_INTENSITY ||
+            inoutReader.Read(light.InnerCos) == false || inoutReader.Read(light.OuterCos) == false ||
+            light.InnerCos < -1 || light.InnerCos > 1 || light.OuterCos < -1 || light.OuterCos > light.InnerCos)
+        {
+            return Status::Failed;
+        }
+        for (usize j = 0; j < i; ++j)
+        {
+            if (inoutScene.Lights[j].SourceId == light.SourceId)
+            {
+                return Status::Failed;
+            }
+        }
+        light.Kind = static_cast<SceneLightKind>(kind);
+        light.IsEnabled = (flags & format::LIGHT_ENABLED) != 0;
+    }
+    for (math::Vector3& pixel : environment.Pixels)
+    {
+        if (inoutReader.Read(pixel) == false || IsNonnegative(pixel, format::MAX_EMISSION) == false)
+        {
+            return Status::Failed;
+        }
+    }
+    return Status::Ok;
+}
 std::atomic<uint64> NextEpoch{1};
 uint64 ReserveEpoch() noexcept
 {
@@ -83,27 +167,32 @@ uint64 ReserveEpoch() noexcept
     return 0;
 }
 } // namespace
-Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition& output) noexcept
+Status SceneDefinition::Decode(const uint8* bytesOrNull, usize count, SceneDefinition& outScene) noexcept
 {
-    if (bytes == nullptr || count < sizeof(format::Header) || count > format::MAX_BUNDLE_BYTES)
+    if (bytesOrNull == nullptr || count < sizeof(format::Header) || count > format::MAX_BUNDLE_BYTES)
     {
         return Status::Failed;
     }
-    Reader reader(bytes, count);
-    const auto* magic = reader.Take(format::MAGIC.size());
-    uint32 version = 0, meshes = 0, materials = 0, textures = 0, objects = 0;
+    Reader reader(bytesOrNull, count);
+    const uint8* magic = reader.Take(format::MAGIC.size());
+    uint32 version = 0;
+    uint32 meshes = 0;
+    uint32 materials = 0;
+    uint32 textures = 0;
+    uint32 objects = 0;
     SceneDefinition scene;
     if (std::memcmp(magic, format::MAGIC.data(), format::MAGIC.size()) != 0 || reader.Read(version) == false ||
-        (version != format::VERSION_1 && version != format::VERSION_2) || reader.Read(meshes) == false || meshes == 0 ||
-        meshes > format::MAX_MESHES || reader.Read(materials) == false || materials == 0 ||
-        materials > format::MAX_MATERIALS || reader.Read(textures) == false || textures > format::MAX_TEXTURES ||
-        reader.Read(objects) == false || objects == 0 || objects > format::MAX_OBJECTS ||
-        reader.Read(scene.Eye) == false || reader.Read(scene.Target) == false || reader.Read(scene.Up) == false ||
-        reader.Read(scene.VerticalFov) == false)
+        (version != format::VERSION_1 && version != format::VERSION_2 && version != format::VERSION_3) ||
+        reader.Read(meshes) == false || meshes == 0 || meshes > format::MAX_MESHES || reader.Read(materials) == false ||
+        materials == 0 || materials > format::MAX_MATERIALS || reader.Read(textures) == false ||
+        textures > format::MAX_TEXTURES || reader.Read(objects) == false || objects == 0 ||
+        objects > format::MAX_OBJECTS || reader.Read(scene.Eye) == false || reader.Read(scene.Target) == false ||
+        reader.Read(scene.Up) == false || reader.Read(scene.VerticalFov) == false)
     {
         return Status::Failed;
     }
-    math::Matrix4 view, projection;
+    math::Matrix4 view;
+    math::Matrix4 projection;
     if (math::TryLookAt(scene.Eye, scene.Target, scene.Up, view) != math::MathStatus::Success ||
         math::TryPerspectiveReverseZ(scene.VerticalFov, 1, .05F, 100, projection) != math::MathStatus::Success)
     {
@@ -115,7 +204,7 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
         return Status::OutOfMemory;
     }
     usize textureBytes = 0;
-    for (auto& texture : scene.Textures)
+    for (SceneTexture& texture : scene.Textures)
     {
         uint32 size = 0;
         if (reader.Read(texture.Width) == false || reader.Read(texture.Height) == false || reader.Read(size) == false ||
@@ -126,8 +215,8 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
         {
             return Status::Failed;
         }
-        const auto* pixels = reader.Take(size);
-        if (pixels == nullptr)
+        const uint8* pixelsOrNull = reader.Take(size);
+        if (pixelsOrNull == nullptr)
         {
             return Status::Failed;
         }
@@ -135,56 +224,84 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
         {
             return Status::OutOfMemory;
         }
-        std::memcpy(texture.Pixels.GetData(), pixels, size);
+        std::memcpy(texture.Pixels.GetData(), pixelsOrNull, size);
         textureBytes += size;
     }
-    for (auto& material : scene.Materials)
+    for (usize materialIndex = 0; materialIndex < scene.Materials.GetSize(); ++materialIndex)
     {
+        SceneMaterial& material = scene.Materials[materialIndex];
         uint32 address = 0;
         if (reader.Read(material.Texture) == false ||
-            (version == format::VERSION_2 && (reader.Read(address) == false || address > format::ADDRESS_REPEAT)))
+            (version >= format::VERSION_2 && (reader.Read(address) == false || address > format::ADDRESS_REPEAT)))
         {
             return Status::Failed;
         }
-        material.Repeat = version == format::VERSION_2 ? address == format::ADDRESS_REPEAT
+        material.Repeat = version >= format::VERSION_2 ? address == format::ADDRESS_REPEAT
                                                        : material.Texture > 0 && material.Texture < textures;
         if (reader.Read(material.Metallic) == false || reader.Read(material.Roughness) == false ||
             reader.Read(material.Emission) == false ||
             (material.Texture != format::NO_TEXTURE && material.Texture >= textures) || material.Metallic < 0 ||
             material.Metallic > 1 || material.Roughness < format::MIN_ROUGHNESS || material.Roughness > 1 ||
-            material.Emission.X < 0 || material.Emission.Y < 0 || material.Emission.Z < 0 ||
-            material.Emission.X > format::MAX_EMISSION || material.Emission.Y > format::MAX_EMISSION ||
-            material.Emission.Z > format::MAX_EMISSION)
+            IsNonnegative(material.Emission, format::MAX_EMISSION) == false)
         {
             return Status::Failed;
         }
+        material.AreaSourceId = IsNonzero(material.Emission) == true ? materialIndex + 1 : 0;
+        if (version == format::VERSION_3)
+        {
+            uint32 flags = 0;
+            uint32 reserved = 0;
+            if (reader.Read(flags) == false || (flags & ~format::EMISSION_FLAGS) != 0 ||
+                reader.Read(material.AreaSourceId) == false || reader.Read(material.EmissionPower) == false ||
+                reader.Read(reserved) == false || reserved != 0 || material.EmissionPower < 0 ||
+                material.EmissionPower > format::MAX_LIGHT_INTENSITY)
+            {
+                return Status::Failed;
+            }
+            material.IsEmissionTwoSided = (flags & format::EMISSION_TWO_SIDED) != 0;
+            material.HasEmissionPower = (flags & format::EMISSION_HAS_POWER) != 0;
+            if ((material.HasEmissionPower == false && material.EmissionPower != 0) ||
+                (IsNonzero(material.Emission) == true && material.AreaSourceId == 0))
+            {
+                return Status::Failed;
+            }
+        }
     }
     usize vertexTotal = 0;
-    for (auto& mesh : scene.Meshes)
+    const usize vertexBytes =
+        version == format::VERSION_3 ? sizeof(format::VertexRecordV3) : sizeof(format::VertexRecord);
+    for (SceneMesh& mesh : scene.Meshes)
     {
-        uint32 vertices = 0, indices = 0;
+        uint32 vertices = 0;
+        uint32 indices = 0;
         if (reader.Read(vertices) == false || reader.Read(indices) == false || vertices == 0 ||
             vertices > format::MAX_VERTICES || indices == 0 || indices > format::MAX_INDICES || indices % 3 != 0 ||
             vertexTotal + vertices > format::MAX_VERTICES ||
-            usize(vertices) * sizeof(format::VertexRecord) + usize(indices) * sizeof(uint32) > reader.Remaining())
+            usize(vertices) * vertexBytes + usize(indices) * sizeof(uint32) > reader.Remaining())
         {
             return Status::Failed;
         }
         if (mesh.Positions.TryResize(vertices) == false || mesh.Normals.TryResize(vertices) == false ||
-            mesh.Texcoords.TryResize(vertices) == false || mesh.Indices.TryResize(indices) == false)
+            mesh.Texcoords.TryResize(vertices) == false || mesh.Indices.TryResize(indices) == false ||
+            (version == format::VERSION_3 && mesh.BakeTexcoords.TryResize(vertices) == false))
         {
             return Status::OutOfMemory;
         }
         for (usize i = 0; i < vertices; ++i)
         {
             if (reader.Read(mesh.Positions[i]) == false || reader.Read(mesh.Normals[i]) == false ||
-                reader.Read(mesh.Texcoords[i].X) == false || reader.Read(mesh.Texcoords[i].Y) == false ||
-                (mesh.Normals[i].X == 0 && mesh.Normals[i].Y == 0 && mesh.Normals[i].Z == 0))
+                reader.Read(mesh.Texcoords[i]) == false || IsNonzero(mesh.Normals[i]) == false)
+            {
+                return Status::Failed;
+            }
+            if (version == format::VERSION_3 &&
+                (reader.Read(mesh.BakeTexcoords[i]) == false || mesh.BakeTexcoords[i].X < 0 ||
+                 mesh.BakeTexcoords[i].X > 1 || mesh.BakeTexcoords[i].Y < 0 || mesh.BakeTexcoords[i].Y > 1))
             {
                 return Status::Failed;
             }
         }
-        for (auto& index : mesh.Indices)
+        for (uint32& index : mesh.Indices)
         {
             if (reader.Read(index) == false || index >= vertices)
             {
@@ -193,14 +310,16 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
         }
         vertexTotal += vertices;
     }
-    for (auto& object : scene.Objects)
+    for (usize i = 0; i < scene.Objects.GetSize(); ++i)
     {
+        SceneObject& object = scene.Objects[i];
+        object.SourceId = i + 1;
         if (reader.Read(object.Mesh) == false || object.Mesh >= meshes || reader.Read(object.Material) == false ||
             object.Material >= materials)
         {
             return Status::Failed;
         }
-        for (auto& column : object.Transform.Columns)
+        for (math::Vector3& column : object.Transform.Columns)
         {
             if (reader.Read(column) == false)
             {
@@ -213,25 +332,50 @@ Status SceneDefinition::Decode(const uint8* bytes, usize count, SceneDefinition&
         {
             return Status::Failed;
         }
+        if (version == format::VERSION_3)
+        {
+            if (reader.Read(object.SourceId) == false || object.SourceId == 0)
+            {
+                return Status::Failed;
+            }
+            for (usize j = 0; j < i; ++j)
+            {
+                if (scene.Objects[j].SourceId == object.SourceId)
+                {
+                    return Status::Failed;
+                }
+            }
+        }
+    }
+    if (version == format::VERSION_3)
+    {
+        const Status lightingStatus = ReadLighting(reader, scene);
+        if (lightingStatus != Status::Ok)
+        {
+            return lightingStatus;
+        }
     }
     if (reader.Remaining() != 0)
     {
         return Status::Failed;
     }
-    output = foundation::Move(scene);
+    outScene = foundation::Move(scene);
     return Status::Ok;
 }
 uint64 SceneDefinition::Bytes() const noexcept
 {
     uint64 bytes = Textures.GetSize() * sizeof(SceneTexture) + Materials.GetSize() * sizeof(SceneMaterial) +
-                   Meshes.GetSize() * sizeof(SceneMesh) + Objects.GetSize() * sizeof(SceneObject);
-    for (const auto& texture : Textures)
+                   Meshes.GetSize() * sizeof(SceneMesh) + Objects.GetSize() * sizeof(SceneObject) +
+                   Lights.GetSize() * sizeof(SceneLight) + Environment.Pixels.GetSize() * sizeof(math::Vector3);
+    for (const SceneTexture& texture : Textures)
     {
         bytes += texture.Pixels.GetSize();
     }
-    for (const auto& mesh : Meshes)
+    for (const SceneMesh& mesh : Meshes)
     {
-        bytes += mesh.Positions.GetSize() * 32 + mesh.Indices.GetSize() * 4;
+        bytes += mesh.Positions.GetSize() * sizeof(math::Vector3) + mesh.Normals.GetSize() * sizeof(math::Vector3) +
+                 mesh.Texcoords.GetSize() * sizeof(math::Vector2) +
+                 mesh.BakeTexcoords.GetSize() * sizeof(math::Vector2) + mesh.Indices.GetSize() * sizeof(uint32);
     }
     return bytes;
 }

@@ -488,7 +488,7 @@ terms, counted by `ViewReport::BakeFallbacks`. No stale chart is silently applie
 ### Immutable shadow atlases
 
 `PrepareShadowAtlas(snapshot, description, atlas)` retains the exact opaque/masked
-caster snapshot and up to four light views in a [4,2048] RGBA8 atlas. Call `GetStatus`,
+caster snapshot and up to 80 light views in a [4,2048] RGBA8 atlas. Call `GetStatus`,
 then draw once with `DrawShadowAtlas` inside an acquired frame and successfully end
 that frame before publishing materials using it. Partial drawing failure poisons the
 candidate; a failed/aborted frame requires discarding it and preparing another.
@@ -501,8 +501,12 @@ All cells use conventional Z [0,1], clear depth one, independent of camera rever
 Depth is packed into RG16 within RGBA8; nearest 2×2 manual PCF clamps each sample to
 that cell's interior texel centers. Receiver bias is explicit [0,0.01] in normalized
 light depth. Region order chooses the first containing projection, permitting two
-explicit directional cascades and spot projections. Point lights remain supported
-for direct evaluation; point shadow maps return Unsupported. Opaque flat/unlit
+explicit directional cascades and spot projections. Point and weighted area
+samples require six canonical cube projections: +X, -X, +Y, -Y, +Z, -Z. Use
+`BuildPointShadowMatrix` with a positive explicit near distance and far equal to
+Light.Range; all six faces and matching source terms are validated before
+preparation. Local uncovered receiver regions conservatively occlude, while
+uncovered directional cascade regions retain the declared unshadowed fallback. Opaque flat/unlit
 geometry casts; masked casters require the lit alpha shader; painters never cast.
 
 `BuildDirectionalShadowMatrix` fits finite unjittered caster/receiver bounds, snaps
@@ -2074,7 +2078,7 @@ GPU packing stores the normalized CDF in binary32 and evaluates the correspondin
 quantized density. Both use piecewise-constant source radiance. Black maps have a
 valid zero-radiance distribution. Tangents, vertex color, routed UVs and emission
 maps are copied/fingerprinted with the integral. Reference profile and compute
-kernel ABI are version **3**; existing LUHDR container/sampler versions stay one.
+kernel ABI are version **4** (geometric emission sidedness); existing LUHDR container/sampler versions stay one.
 Historical evidence retains its original profile identity.
 
 CPU oracle and compute preview implement authored masked coverage. Native query
@@ -2111,3 +2115,102 @@ nonnull pointer with the declared width/height extent. Move parameters are
 named `other`, because they transfer ownership rather than output through an
 lvalue reference. Shared/weak smart pointers are not currently a Foundation
 facility; synchronous mesh borrowing does not require shared ownership.
+
+
+### Authored static area lighting and worker diffuse transport
+
+The [scene interchange contract](content-resources.md#authored-scene-lighting-luscn-v3)
+retains analytic photometric lights, geometric emitter sidedness, per-placement
+power and linear HDR source radiance. Version 1/2 decoder identities derive from
+object/material order and retain two-sided emission. The renderer creates no
+invented fill lights. Importers declare their fixed Rec.709 photometric proxy;
+this does not establish PBRT spectral equivalence.
+
+`BuildTriangleAreaLights` generates one centroid or three symmetric weighted
+Lambertian samples. `BuildPlanarAreaLight` instead produces one area-weighted
+centroid for a consistently oriented connected planar source, so triangulating a
+disk or quad does not multiply its proxy lights. It validates nondegeneracy,
+coplanarity and a centroid inside the supplied mesh. Connectivity is a producer
+contract, not a topology proof. Curved sources or concave patches whose centroid
+is outside fail explicitly. These are declared finite-source quadrature
+approximations: near-field intensity, light shape and soft shadows are not exact.
+Distances are metres; a weighted area sample stores RGB nits times square metres
+and evaluates its emitting cosine over squared distance, with the existing
+bounded range window. `AreaOneSided` clamps the cosine; `AreaTwoSided` uses its
+absolute value. Material emission sidedness is also retained by raster and CPU/
+compute reference transport, including mirrored placements.
+
+The 80-region atlas admits thirteen six-face point/area proxies without reducing
+the 128-entry clustered list. The authored clustered fragment uniform is 16272
+bytes, within the 16 KiB portable profile. Use clustered recipes when more than
+eight lights are present; forward selection still reports its dropped count.
+Each region owns a prepared view with conservative light-frustum culling and
+compatible packet grouping; casters remain full-detail and independent of the
+main camera. Configure at least 156 views plus ordinary
+views for overlapping replacements of a 78-region atlas, and sufficient RHI
+resource, binding and byte budgets (the reference acceptance uses 160 views and
+256 resources per kind). `DrawShadowAtlas` runs before indexed draws in its frame
+and preflights its aggregate packet count plus caller-reserved later draws against
+the enabled per-frame draw budget. The direct pass loop does not consume GDI's
+per-graph pass budget. Other backend failures can still partially encode a
+candidate; discard it and keep the previous published image.
+
+`StaticLightingBake` prepares CPU-only world-space geometry/BVH and immutable
+surface terms on a worker. `Step(maxPathSamples)` advances a bounded number of
+complete paths; initialization and final chart encoding also run on the worker.
+No renderer registry, native ray-query API, GPU upload, readback or Qt state is
+touched there. Keep the input scene's texture storage immutable and alive until
+the job is destroyed. Serial worker calls may be cancelled by ceasing work and
+destroying the job; composition must discard results with obsolete exact
+revisions before publication.
+
+The virtual diffuse receiver uses cosine-hemisphere sampling plus the reference
+integrator's same-measure next-event MIS, visibility, metallic/roughness transport
+and compensated roulette. It includes **all admitted emissive triangles** and
+raw authored environment direct diffuse, plus subsequent indirect transport.
+Analytic direct diffuse stays in raster. The declared path-depth/range bounds
+introduce truncation bias, sample count controls variance, and per-triangle
+centroid reconstruction is spatially coarse. There is no denoiser or general
+lightmap unwrap. The private probe shares the CPU reference's BVH, opacity,
+surface/emission sampling, random primitives, MIS and continuation code.
+
+Ready charts are per placement and contain linear RGBA8 irradiance plus a
+per-channel scale, fully replicated four-texel triangle tiles, stable SourceId,
+exact scene/dependency revisions and mesh-to-world transform. GPU upload occurs
+on the RHI owner after worker completion. Assign the SceneFormat helper UVs to
+deindexed vertices, keep source UVs separate, select no mipmaps, and enable
+`BakedLighting::AreTriangleChartsEnabled` with the returned identity UV transform.
+`HasStaticAreaDirect` suppresses the area proxy's diffuse term only when that
+chart is valid. `DirectLightId=0` replaces no analytic direct term; area diffuse
+is separately declared. A matching chart replaces the environment diffuse term
+and retains the shadowed proxy specular term. A stale chart falls back to raster
+area diffuse and increments the existing bake diagnostics.
+
+Publish a ready shadowed direct-light candidate while worker indirect preparation
+runs, with an explicit preparation status. Retain the previous drawable until
+that first direct candidate is Ready. Publish the completed charts as a new
+immutable material/snapshot version only when their provenance still matches the
+selected World. Failed/pending replacements retain the current drawable. Camera
+navigation never requires a progressive path-tracing preview or a finished bake.
+Area specular uses the shadowed planar centroid proxy; it is approximate but must
+include every admitted source rather than the brightest source alone.
+
+Transport draws on Matt Pharr, Wenzel Jakob and Greg Humphreys, *Physically Based
+Rendering*, 4th edition, sections [12.5 (area lights)](https://pbr-book.org/4ed/Light_Sources/Area_Lights)
+and [13.4 (path tracing)](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer).
+The implementation acknowledges these authors beside the shared transport code;
+the deterministic raster quadrature and coarse triangle chart layout are explicit
+Ludus departures.
+
+For live World material edits, supply the optional per-object
+`StaticLightingBakeDescription::Surfaces` overrides. They copy the current tint,
+UV transform, metallic/roughness, resolved emission/sidedness and opaque/masked
+coverage. Texture indices reference the immutable retained CPU scene array;
+normal/surface maps and routed secondary material UVs are outside this interchange
+bake profile and must be diagnosed by its adapter. Resolve authored power against
+the current placement before supplying overridden emission. Overrides use the
+raster material's white untextured base contract; an empty list retains the
+legacy decoded scene's black untextured semantics. The override array is consumed
+at Initialize, while the source texture bytes remain borrowed through destruction.
+Use a bake revision key for physical geometry/material/light/environment changes;
+camera movement and exposure do not change these view-independent irradiance charts.
