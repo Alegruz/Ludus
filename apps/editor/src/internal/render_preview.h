@@ -38,6 +38,10 @@ public:
     [[nodiscard]] bool SetScene(const RenderScene& scene);
     [[nodiscard]] bool Start();
     [[nodiscard]] bool AdmitDevice(const graphics::rhi::NativeDeviceDescription& native);
+    /// Start an engine-owned headless device for viewports that cannot share Qt's device.
+    /// Frames are then copied to the CPU by the viewport (see OffscreenFrameReader).
+    /// @return False when no preview start is pending or the device cannot start.
+    [[nodiscard]] bool AdmitOffscreenDevice();
     void Stop() noexcept;
     void Navigate(foundation::int32 camera,
                   foundation::float32 yaw,
@@ -89,6 +93,11 @@ public:
     [[nodiscard]] bool TakeFrame(graphics::renderer::ViewportFrame& outFrame,
                                  graphics::renderer::ViewportImage& outImage) noexcept;
     void ReleaseFrame(graphics::renderer::ViewportFrame& inoutFrame) noexcept;
+    /// Borrowed handle of the owned device; null while no device is admitted.
+    [[nodiscard]] LUDUS_INLINE graphics::rhi::DeviceHandle GetDevice() const noexcept
+    {
+        return Device_;
+    }
     [[nodiscard]] graphics::rhi::RasterStatus PinDevice(graphics::rhi::NativeDeviceLease& outLease) noexcept;
     [[nodiscard]] LUDUS_INLINE bool HasPendingFrame() const noexcept
     {

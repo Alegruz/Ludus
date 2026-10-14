@@ -1940,7 +1940,9 @@ before the source device disappears and re-admission of the new context.
 Metal's native device/queue queries and image wrapper are available within the
 editor's Qt 6.4 minimum. The documented Vulkan graphics queue family/index queries
 require Qt 6.6; the Qt adapter must report `Unsupported` on older Qt Vulkan builds
-rather than guess a created queue or include private Qt headers. Native Vulkan
+rather than guess a created queue or include private Qt headers. The editor then
+uses its own headless device and CPU readback instead (see
+[the editor workspace guide](editor-workspace.md)). Native Vulkan
 consumers with known valid queue provenance do not depend on Qt.
 
 Produce/acquire at
