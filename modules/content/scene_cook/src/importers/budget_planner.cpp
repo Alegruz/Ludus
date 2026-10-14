@@ -15,7 +15,7 @@ namespace format = content::scene_format;
 [[nodiscard]] bool IsCancelled(const Cancellation* cancelOrNull) noexcept
 {
     return cancelOrNull != nullptr && cancelOrNull->Requested != nullptr &&
-           cancelOrNull->Requested(cancelOrNull->Context) == true;
+           cancelOrNull->Requested(cancelOrNull->ContextOrNull) == true;
 }
 
 [[nodiscard]] bool IsEmissive(const IrShape& shape) noexcept
@@ -184,25 +184,25 @@ PlanBudget(const SceneIr& scene, DiagnosticLog& inoutLog, CookPlan& outPlan, con
             }
             continue;
         }
-        MaterialUse* use = nullptr;
+        MaterialUse* useOrNull = nullptr;
         for (MaterialUse& existing : uses)
         {
             if (existing.Material == shape.Material)
             {
-                use = &existing;
+                useOrNull = &existing;
                 break;
             }
         }
-        if (use == nullptr)
+        if (useOrNull == nullptr)
         {
-            use = uses.TryAddInPlace();
-            if (use == nullptr)
+            useOrNull = uses.TryAddInPlace();
+            if (useOrNull == nullptr)
             {
                 return Status::OutOfMemory;
             }
-            use->Material = shape.Material;
+            useOrNull->Material = shape.Material;
         }
-        use->Area += placement.Area;
+        useOrNull->Area += placement.Area;
     }
     Array<uint32> useOrder;
     if (useOrder.TryResize(uses.GetSize()) == false)

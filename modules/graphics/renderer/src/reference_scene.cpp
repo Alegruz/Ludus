@@ -272,6 +272,13 @@ math::Vector4 SampleReferenceTexture(const ReferenceInstance& instance, math::Ve
 {
     return SampleReferenceImage(*instance.Surface, instance.Texture, uv);
 }
+math::Vector3 SampleReferenceEmission(const ReferenceInstance& instance, math::Vector2 uv) noexcept
+{
+    const math::Vector4 texel = instance.Surface->HasEmissionMap
+                                    ? SampleReferenceImage(*instance.Surface, instance.EmissionMap, uv)
+                                    : math::Vector4{1, 1, 1, 1};
+    return math::Hadamard(instance.Surface->Emission, math::Vector3{texel.X, texel.Y, texel.Z});
+}
 math::Vector4 SampleReferenceSurfaceMap(const ReferenceInstance& instance, math::Vector2 uv) noexcept
 {
     return SampleReferenceImage(*instance.Surface, instance.SurfaceMap, uv);
@@ -279,8 +286,24 @@ math::Vector4 SampleReferenceSurfaceMap(const ReferenceInstance& instance, math:
 math::Vector3 ApplyReferenceNormal(const ReferenceTriangle& triangle,
                                    const ReferenceSurfaceData& surface,
                                    math::Vector3 normalWorld,
-                                   math::Vector3 normalTangent) noexcept
+                                   math::Vector3 normalTangent,
+                                   float32 u,
+                                   float32 v) noexcept
 {
+    const math::Vector4 authored =
+        triangle.Tangents[0] * (1 - u - v) + triangle.Tangents[1] * u + triangle.Tangents[2] * v;
+    if (surface.AreAuthoredInputsEnabled == true && math::Abs(authored.W) > .5F)
+    {
+        math::Vector3 tangent{authored.X, authored.Y, authored.Z};
+        if (math::TryNormalize(tangent - normalWorld * math::Dot(normalWorld, tangent), tangent) !=
+            math::MathStatus::Success)
+        {
+            return normalWorld;
+        }
+        const math::Vector3 bitangent = math::Cross(normalWorld, tangent) * (authored.W < 0 ? -1.0F : 1.0F);
+        return ReferenceNormalize(tangent * normalTangent.X + bitangent * normalTangent.Y +
+                                  normalWorld * normalTangent.Z);
+    }
     math::Vector3 edgeUWorld = triangle.Positions[1] - triangle.Positions[0];
     math::Vector3 edgeVWorld = triangle.Positions[2] - triangle.Positions[0];
     math::Vector2 edgeUUv =
@@ -318,10 +341,11 @@ math::Vector3 ApplyReferenceNormal(const ReferenceTriangle& triangle,
     return ReferenceNormalize(tangentWorld * normalTangent.X + bitangentWorld * normalTangent.Y +
                               normalWorld * normalTangent.Z);
 }
-bool ReferenceOpacity(const ReferenceInstance& instance, math::Vector2 uv) noexcept
+bool ReferenceOpacity(const ReferenceInstance& instance, math::Vector2 uv, float32 vertexAlpha) noexcept
 {
     return instance.Surface->Alpha != MaterialAlpha::Masked ||
-           SampleReferenceTexture(instance, uv).W * instance.Surface->Tint.W >= instance.Surface->AlphaCutoff;
+           SampleReferenceTexture(instance, uv).W * instance.Surface->Tint.W * vertexAlpha >=
+               instance.Surface->AlphaCutoff;
 }
 rhi::RasterStatus
 TraceReferenceOracle(const ReferenceSceneData& scene, const rhi::RayInput& ray, rhi::RayResult& output) noexcept
@@ -373,7 +397,12 @@ TraceReferenceOracle(const ReferenceSceneData& scene, const rhi::RayInput& ray, 
             }
             const auto u = intersection.U, v = intersection.V;
             const auto uv = triangle.Uvs[0] * (1 - u - v) + triangle.Uvs[1] * u + triangle.Uvs[2] * v;
-            if (!ReferenceOpacity(scene.Instances[triangle.Instance], uv))
+            const ReferenceInstance& instance = scene.Instances[triangle.Instance];
+            const float32 alpha =
+                triangle.Colors[0].W * (1 - u - v) + triangle.Colors[1].W * u + triangle.Colors[2].W * v;
+            if (instance.Surface->Alpha == MaterialAlpha::Masked &&
+                SampleReferenceTexture(instance, uv).W * instance.Surface->Tint.W * alpha <
+                    instance.Surface->AlphaCutoff)
             {
                 continue;
             }

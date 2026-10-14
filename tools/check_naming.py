@@ -6,10 +6,11 @@ config/naming_scopes.txt so existing code is migrated when it is touched
 rather than all at once:
 
   N1  Use `condition == false` instead of `!condition`.
-  N2  Non-const reference parameters start with `out` or `inout`.
+  N2  Non-const lvalue reference parameters start with `out` or `inout`.
+      Rvalue reference parameters omit these prefixes.
   N3  Boolean variables, members and parameters read as questions
       (is/has/should/can/was/are/does/did prefix, optional `m` member prefix).
-  N4  Pointer parameters defaulted to nullptr end in `OrNull`.
+  N4  Ordinary pointer declarations explicitly initialized to null end in `OrNull`.
 
 Private member functions in camelCase are enforced by clang-tidy
 (readability-identifier-naming in the scoped .clang-tidy files). Rules that need
@@ -27,6 +28,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/python"))
+from naming_rules import pointer_findings  # noqa: E402
+
 SOURCE_SUFFIXES = {".h", ".hpp", ".cpp"}
 QUESTION = re.compile(r"^m?(is|has|should|can|was|are|does|did|Is|Has|Should|Can|Was|Are|Does|Did)[A-Z0-9]")
 
@@ -34,7 +38,6 @@ NEGATION = re.compile(r"!(?!=)\s*[A-Za-z_(]")
 # `Type& name` followed by , ) or = in a parameter list (after `(` or `,`).
 REFERENCE_PARAMETER = re.compile(r"(?:\(|,)\s*((?:[\w:]+(?:<[^()]*?>)?)(?:\s*\[[^\]]*\])?)&\s+([A-Za-z_]\w*)\s*(?=[,)=])")
 BOOLEAN_DECLARATION = re.compile(r"\bbool\s+([A-Za-z_]\w*)\s*(?=[=;{,)\[])")
-NULL_DEFAULT_POINTER = re.compile(r"\*\s*([A-Za-z_]\w*)\s*=\s*nullptr\s*(?=[,)])")
 
 
 def blank_comments_and_literals(text: str) -> str:
@@ -115,10 +118,8 @@ def check_file(root: Path, path: Path) -> list[str]:
         if name == "operator" or QUESTION.match(name) or re.match(r"^(out|inout)(Is|Has|Should|Can|Was|Are|Does|Did)[A-Z]", name):
             continue
         report(match.start(1), "N3", f"boolean `{name}` should read as a question (is/has/should/can...)")
-    for match in NULL_DEFAULT_POINTER.finditer(text):
-        name = match.group(1)
-        if not name.endswith("OrNull"):
-            report(match.start(1), "N4", f"nullable pointer parameter `{name}` must end in OrNull")
+    for offset, rule, message in pointer_findings(text):
+        report(offset, rule, message)
     return findings
 
 

@@ -184,7 +184,8 @@ BindingCapabilities BindingLimits() noexcept
         .MaxDynamicUniformBuffers = 16,
         .MaxDynamicStorageBuffers = Kind() == Backend::WebGL2 ? 0U : 8U,
         .MaxTextureArrayElements = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 1U,
-        .MaxDescriptorsPerSet = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet : 16U,
+        .MaxDescriptorsPerSet = hasNativeArrays == true ? internal::CurrentStorageLimits().DescriptorsPerSet
+                                                        : static_cast<uint32>(internal::RASTER_BINDINGS),
         .HasUniformTextureIndexing = hasNativeArrays,
         .HasBindlessTextureIndexing = hasNativeArrays == true && internal::IsBindlessRequested() == true,
         .MaxBindings = 16,

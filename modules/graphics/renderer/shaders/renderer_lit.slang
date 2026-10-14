@@ -1,5 +1,6 @@
 #include "math.slang"
 #include "raster_bindings.slang"
+#include "renderer_environment_layout.h"
 // Thanks to Google/Filament authors, Physically Based Rendering in Filament,
 // sections 4.4 and 5.2.2, https://google.github.io/filament/main/filament.html.
 // GGX + correlated Smith + Schlick, Fresnel-weighted Lambert, single scattering.
@@ -29,6 +30,10 @@ struct Parameters
 #ifdef LUDUS_SURFACE_FIDELITY
     float4 SurfaceMap;
 #endif
+#ifdef LUDUS_AUTHORED_INPUTS
+    float4 Authored;
+    float4 IrradianceSh[LUDUS_ENVIRONMENT_SH_COEFFICIENTS];
+#endif
 };
 LUDUS_SHADER_BINDING(0) ConstantBuffer<Parameters> material : register(b0);
 LUDUS_SHADER_BINDING(1) Texture2D<float4> colorTexture : register(t1);
@@ -50,6 +55,17 @@ LUDUS_SHADER_BINDING(6) Texture2D<float4> surfaceTexture : register(t6);
 #ifdef LUDUS_SURFACE_FIDELITY
 #    include "renderer_surface_functions.slang"
 #endif
+#ifdef LUDUS_AUTHORED_INPUTS
+#    ifdef LUDUS_CLUSTERED
+LUDUS_SHADER_BINDING(8) Texture2D<float4> environmentTexture : register(t8);
+LUDUS_SHADER_BINDING(9) SamplerState environmentSampler : register(s9);
+LUDUS_SHADER_BINDING(10) Texture2D<float4> emissionTexture : register(t10);
+#    else
+LUDUS_SHADER_BINDING(7) Texture2D<float4> environmentTexture : register(t7);
+LUDUS_SHADER_BINDING(8) SamplerState environmentSampler : register(s8);
+LUDUS_SHADER_BINDING(9) Texture2D<float4> emissionTexture : register(t9);
+#    endif
+#endif
 struct Input
 {
     LUDUS_SHADER_LOCATION(0) float3 PositionMesh : POSITION;
@@ -63,9 +79,15 @@ struct Input
     LUDUS_SHADER_LOCATION(8) float4 MeshToWorldRow0 : TEXCOORD5;
     LUDUS_SHADER_LOCATION(9) float4 MeshToWorldRow1 : TEXCOORD6;
     LUDUS_SHADER_LOCATION(10) float4 MeshToWorldRow2 : TEXCOORD7;
+#ifdef LUDUS_AUTHORED_INPUTS
+    LUDUS_SHADER_LOCATION(11) float4 TangentMesh : TEXCOORD8;
+    LUDUS_SHADER_LOCATION(12) float4 ColorVertex : TEXCOORD9;
+    LUDUS_SHADER_LOCATION(13) float2 MaterialUv1 : TEXCOORD10;
+#else
     LUDUS_SHADER_LOCATION(11) float4 NormalMeshToWorldRow0 : TEXCOORD8;
     LUDUS_SHADER_LOCATION(12) float4 NormalMeshToWorldRow1 : TEXCOORD9;
     LUDUS_SHADER_LOCATION(13) float4 NormalMeshToWorldRow2 : TEXCOORD10;
+#endif
     LUDUS_SHADER_LOCATION(14) float4 EyeWorld : TEXCOORD11;
     LUDUS_SHADER_LOCATION(15) float2 BakeUv : TEXCOORD12;
 };
@@ -78,6 +100,11 @@ struct Varying
     float4 EyeWorld : TEXCOORD3;
     float2 BakeUv : TEXCOORD4;
     float IsBakeValid : TEXCOORD5;
+#ifdef LUDUS_AUTHORED_INPUTS
+    float4 TangentWorld : TEXCOORD7;
+    float4 ColorVertex : TEXCOORD8;
+    float2 MaterialUv1 : TEXCOORD9;
+#endif
 #ifdef LUDUS_CLUSTERED
     float IsDirectReference : TEXCOORD6;
 #endif
@@ -92,9 +119,33 @@ struct Varying
                                  dot(input.MeshToClipRow3, p));
     output.PositionWorld =
         float3(dot(input.MeshToWorldRow0, p), dot(input.MeshToWorldRow1, p), dot(input.MeshToWorldRow2, p));
+#ifdef LUDUS_AUTHORED_INPUTS
+    float3 column0World = float3(input.MeshToWorldRow0.x, input.MeshToWorldRow1.x, input.MeshToWorldRow2.x);
+    float3 column1World = float3(input.MeshToWorldRow0.y, input.MeshToWorldRow1.y, input.MeshToWorldRow2.y);
+    float3 column2World = float3(input.MeshToWorldRow0.z, input.MeshToWorldRow1.z, input.MeshToWorldRow2.z);
+    // Positive common rescaling keeps cross/determinant products finite without
+    // changing normal direction or mirrored handedness.
+    float magnitude = max(max(max(abs(column0World.x), abs(column0World.y)), abs(column0World.z)),
+                          max(max(max(abs(column1World.x), abs(column1World.y)), abs(column1World.z)),
+                              max(max(abs(column2World.x), abs(column2World.y)), abs(column2World.z))));
+    column0World /= magnitude;
+    column1World /= magnitude;
+    column2World /= magnitude;
+    float determinant = dot(column0World, cross(column1World, column2World));
+    output.NormalWorld = NormalizeOrZero((cross(column1World, column2World) * input.NormalMesh.x +
+                                          cross(column2World, column0World) * input.NormalMesh.y +
+                                          cross(column0World, column1World) * input.NormalMesh.z) /
+                                         determinant);
+    float3 tangentWorld =
+        column0World * input.TangentMesh.x + column1World * input.TangentMesh.y + column2World * input.TangentMesh.z;
+    output.TangentWorld = float4(tangentWorld, input.TangentMesh.w * (determinant < 0 ? -1 : 1));
+    output.ColorVertex = input.ColorVertex;
+    output.MaterialUv1 = input.MaterialUv1;
+#else
     output.NormalWorld = NormalizeOrZero(float3(dot(input.NormalMeshToWorldRow0.xyz, input.NormalMesh),
                                                 dot(input.NormalMeshToWorldRow1.xyz, input.NormalMesh),
                                                 dot(input.NormalMeshToWorldRow2.xyz, input.NormalMesh)));
+#endif
     output.TexcoordUv = input.TexcoordUv;
     output.EyeWorld = input.EyeWorld;
     output.BakeUv = input.BakeUv;
@@ -127,12 +178,12 @@ float3 EvaluateBrdf(float3 baseColor,
     float a = roughness * roughness;
     float a2 = a * a;
     float d = (1 - nh * nh) + nh * nh * a2;
-    float distribution = a2 / (3.141592653589793 * d * d);
+    float distribution = a2 / (PI * d * d);
     float visibility = 0.5 / max(nl * sqrt(nv * nv * (1 - a2) + a2) + nv * sqrt(nl * nl * (1 - a2) + a2), 1e-6);
     float3 f0 = lerp(float3(0.04), baseColor, metallic);
     float3 fresnel = f0 + (1 - f0) * ComputeFifth(1 - lh);
     return nl * (distribution * visibility * fresnel +
-                 baseColor * (1 - metallic) * (1 - fresnel) * (isBakedDiffuse ? 0 : 1) / 3.141592653589793);
+                 baseColor * (1 - metallic) * (1 - fresnel) * (isBakedDiffuse ? 0 : 1) / PI);
 }
 float ComputeShadowVisibility(int light, Varying input)
 {
@@ -172,14 +223,56 @@ float ComputeShadowVisibility(int light, Varying input)
 }
 float4 SampleBaseTexel(Varying input)
 {
-    float2 uv = input.TexcoordUv * material.UvTransform.xy + material.UvTransform.zw;
+    float2 materialUv = input.TexcoordUv;
+#ifdef LUDUS_AUTHORED_INPUTS
+    if (material.Authored.y > .5)
+        materialUv = input.MaterialUv1;
+#endif
+    float2 uv = materialUv * material.UvTransform.xy + material.UvTransform.zw;
     float4 texel = material.Options.y < 0 ? colorTexture.Sample(colorSampler, uv)
                                           : colorTexture.SampleLevel(colorSampler, uv, material.Options.y);
     float4 baseColor = texel * material.Tint;
+#ifdef LUDUS_AUTHORED_INPUTS
+    if (material.Authored.x > .5)
+        baseColor *= input.ColorVertex;
+#endif
     if (material.Options.z == 1 && baseColor.a < material.Options.x)
         discard;
     return baseColor;
 }
+#ifdef LUDUS_AUTHORED_INPUTS
+// Thanks to Guy/Agopian, Filament sections 5.3 and 9.6 (URL above): SH diffuse
+// and prefiltered GGX split-sum IBL. DFG uses Lazarov's fit documented by Filament.
+float2 ComputeEnvironmentUv(in float3 directionWorld)
+{
+    float longitude = atan2(directionWorld.z, directionWorld.x) / 6.283185307179586;
+    return float2(longitude - floor(longitude), atan2(length(directionWorld.xz), directionWorld.y) / PI);
+}
+float3 EvaluateEnvironmentIrradiance(in float3 normalWorld)
+{
+    float basis[LUDUS_ENVIRONMENT_SH_COEFFICIENTS] = {
+        .2820947918,
+        .4886025119 * normalWorld.y,
+        .4886025119 * normalWorld.z,
+        .4886025119 * normalWorld.x,
+        1.0925484306 * normalWorld.x * normalWorld.y,
+        1.0925484306 * normalWorld.y * normalWorld.z,
+        .3153915653 * (3 * normalWorld.z * normalWorld.z - 1),
+        1.0925484306 * normalWorld.x * normalWorld.z,
+        .5462742153 * (normalWorld.x * normalWorld.x - normalWorld.y * normalWorld.y)};
+    float3 irradiance = float3(0);
+    for (int coefficient = 0; coefficient < LUDUS_ENVIRONMENT_SH_COEFFICIENTS; ++coefficient)
+        irradiance += material.IrradianceSh[coefficient].rgb * basis[coefficient];
+    return max(irradiance, float3(0));
+}
+float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
+{
+    float4 coefficients = roughness * float4(-1, -.0275, -.572, .022) + float4(1, .0425, 1.04, -.04);
+    float approximation =
+        min(coefficients.x * coefficients.x, exp2(-9.28 * cosineView)) * coefficients.x + coefficients.y;
+    return float2(-1.04, 1.04) * approximation + coefficients.zw;
+}
+#endif
 [shader("fragment")] float4 FragmentMain(Varying input) : SV_Target
 {
     float4 baseColor = SampleBaseTexel(input);
@@ -191,33 +284,76 @@ float4 SampleBaseTexel(Varying input)
 #ifdef LUDUS_SURFACE_FIDELITY
     if (material.SurfaceMap.y > .5)
     {
-        float2 uv = input.TexcoordUv * material.UvTransform.xy + material.UvTransform.zw;
+        float2 materialUv = input.TexcoordUv;
+#    ifdef LUDUS_AUTHORED_INPUTS
+        if (material.Authored.y > .5)
+            materialUv = input.MaterialUv1;
+#    endif
+        float2 uv = materialUv * material.UvTransform.xy + material.UvTransform.zw;
         float4 texel = material.Options.y < 0 ? surfaceTexture.Sample(colorSampler, uv)
                                               : surfaceTexture.SampleLevel(colorSampler, uv, material.Options.y);
         SurfaceParameters parameters = DecodeSurfaceParameters(texel, metallic, roughness, material.SurfaceMap.x);
         metallic = parameters.Metallic;
         roughness = parameters.Roughness;
-        normalWorld = ApplyNormalWorld(normalWorld,
-                                       parameters.NormalTangent,
-                                       ddx(input.PositionWorld),
-                                       ddy(input.PositionWorld),
-                                       ddx(uv),
-                                       ddy(uv));
+#    ifdef LUDUS_AUTHORED_INPUTS
+        if (material.Authored.x > .5 && abs(input.TangentWorld.w) > .5)
+        {
+            float3 tangentWorld =
+                NormalizeOrZero(input.TangentWorld.xyz - normalWorld * dot(normalWorld, input.TangentWorld.xyz));
+            float3 bitangentWorld = cross(normalWorld, tangentWorld) * input.TangentWorld.w;
+            normalWorld =
+                NormalizeOrZero(tangentWorld * parameters.NormalTangent.x +
+                                bitangentWorld * parameters.NormalTangent.y + normalWorld * parameters.NormalTangent.z);
+        }
+        else
+#    endif
+            normalWorld = ApplyNormalWorld(normalWorld,
+                                           parameters.NormalTangent,
+                                           ddx(input.PositionWorld),
+                                           ddy(input.PositionWorld),
+                                           ddx(uv),
+                                           ddy(uv));
     }
 #endif
     float nv = max(dot(normalWorld, viewDirectionWorld), 0);
     float3 f0 = lerp(float3(0.04), baseColor.rgb, metallic);
     float3 f = f0 + (1 - f0) * ComputeFifth(1 - nv);
     float3 irradiance = material.EnvironmentIrradiance.rgb;
+    float3 specularEnvironment = material.EnvironmentRadiance.rgb * f;
+#ifdef LUDUS_AUTHORED_INPUTS
+    if (material.Authored.z > .5)
+    {
+        irradiance = EvaluateEnvironmentIrradiance(normalWorld);
+        float3 reflectionWorld = reflect(-viewDirectionWorld, normalWorld);
+        float3 radiance =
+            environmentTexture
+                .SampleLevel(environmentSampler, ComputeEnvironmentUv(reflectionWorld), roughness * material.Authored.w)
+                .rgb *
+            material.IrradianceSh[0].w;
+        float2 dfg = EvaluateEnvironmentDfg(roughness, nv);
+        specularEnvironment = radiance * (f0 * dfg.x + dfg.y);
+    }
+#endif
     if (input.IsBakeValid > 0.5)
         irradiance =
             bakeTexture.SampleLevel(colorSampler, saturate(input.BakeUv) * material.BakeUv.xy + material.BakeUv.zw, 0)
                 .rgb *
             material.BakeScale.rgb;
     float3 result = material.Emission.rgb;
+#ifdef LUDUS_AUTHORED_INPUTS
+    if (material.SurfaceMap.z > .5)
+    {
+        float2 emissionUv =
+            (material.Authored.y > .5 ? input.MaterialUv1 : input.TexcoordUv) * material.UvTransform.xy +
+            material.UvTransform.zw;
+        float3 emission = material.Options.y < 0
+                              ? emissionTexture.Sample(colorSampler, emissionUv).rgb
+                              : emissionTexture.SampleLevel(colorSampler, emissionUv, material.Options.y).rgb;
+        result *= emission;
+    }
+#endif
     if (nv > 0)
-        result += irradiance * baseColor.rgb * (1 - metallic) * (1 - f) / 3.141592653589793 +
-                  material.EnvironmentRadiance.rgb * f;
+        result += irradiance * baseColor.rgb * (1 - metallic) * (1 - f) / PI + specularEnvironment;
 #ifdef LUDUS_CLUSTERED
     float4 world = float4(input.PositionWorld, 1);
     float3 grid =

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <new>
 
+#include "internal/environment_data.h"
 #include "internal/gpu_preview_data.h"
 #include "internal/reference_data.h"
 
@@ -30,6 +31,10 @@ namespace internal
 {
 struct Access final
 {
+    static EnvironmentData* GetEnvironment(const EnvironmentMap* mapOrNull) noexcept
+    {
+        return mapOrNull != nullptr ? mapOrNull->mDataOrNull : nullptr;
+    }
     template <typename T>
     static uint64 Owner(T value) noexcept
     {
@@ -66,6 +71,7 @@ namespace
 using internal::Access;
 constexpr usize NO_MATERIAL = ~usize{0}, NO_SHADOW = ~usize{0};
 constexpr usize LIT_BYTES = 1040, CLUSTER_BYTES = 8800;
+constexpr usize AUTHORED_PARAMETER_BYTES = LUDUS_AUTHORED_PARAMETER_WORDS * sizeof(math::Vector4);
 constexpr uint64 LAST_ID = ~uint64{0};
 // An explicit Initialize reserves identity; no resource registration at static initialization.
 std::atomic<uint64> gNextOwner{1};
@@ -203,6 +209,9 @@ struct Vertex final
     math::Vector2 Uv;
     math::Vector3 Normal;
     math::Vector2 BakeUv;
+    math::Vector4 Tangent;
+    math::Vector4 Color;
+    math::Vector2 MaterialUv1;
 };
 struct Instance final
 {
@@ -210,7 +219,7 @@ struct Instance final
     math::Vector4 Color;
     math::Vector4 WorldRows[3], NormalRows[3], Eye;
 };
-static_assert(sizeof(math::Vector3) == 12 && sizeof(Vertex) == 40 && sizeof(Instance) == 192);
+static_assert(sizeof(math::Vector3) == 12 && sizeof(Vertex) == LUDUS_AUTHORED_VERTEX_BYTES && sizeof(Instance) == 192);
 struct Rect final
 {
     float64 Left = -1, Bottom = -1, Right = 1, Top = 1;
@@ -345,6 +354,7 @@ struct Renderer::State final
         bool Hdr = false;
         bool Clustered = false;
         bool HasSurfaceMapProfile = false;
+        bool HasAuthoredProfile = false;
         uint32 VariantCount = 6;
         rhi::PipelineRequest Requests[7]{};
         rhi::RasterPipelineHandle Pipelines[6]{};
@@ -375,6 +385,9 @@ struct Renderer::State final
         rhi::TextureViewHandle BakeTexture{};
         rhi::TextureViewHandle ShadowTexture{};
         rhi::TextureViewHandle SurfaceTexture{};
+        internal::EnvironmentData* EnvironmentOrNull = nullptr;
+        rhi::TextureViewHandle EnvironmentTexture{};
+        rhi::TextureViewHandle EmissionTexture{};
         rhi::SamplerHandle ShadowSampler{};
         BakedLighting Bake;
     };
@@ -560,6 +573,9 @@ struct Renderer::State final
             static_cast<void>(rhi::Destroy(Device, m.Parameters));
             static_cast<void>(rhi::Destroy(Device, m.BakeTexture));
             static_cast<void>(rhi::Destroy(Device, m.SurfaceTexture));
+            static_cast<void>(rhi::Destroy(Device, m.EnvironmentTexture));
+            internal::ReleaseEnvironment(m.EnvironmentOrNull);
+            static_cast<void>(rhi::Destroy(Device, m.EmissionTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowSampler));
             static_cast<void>(rhi::Destroy(Device, m.ClusterView));
@@ -1563,17 +1579,25 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
 {
     const bool lit = shadow != nullptr;
     bool hasSurfaceMapProfile = false;
+    bool hasAuthoredProfile = false;
     for (const rhi::RasterUniformMember& member : fragment.UniformMembers)
     {
         hasSurfaceMapProfile = hasSurfaceMapProfile || member.Name == "SurfaceMap";
+        hasAuthoredProfile = hasAuthoredProfile || member.Name == "Authored";
     }
     if (hasSurfaceMapProfile == true && lit == false)
     {
         return Status::InvalidDescription;
     }
-    const bool clustered = lit && fragment.Bindings.size() == 8;
-    const usize bindingCount = clustered ? 8U : lit ? (hasSurfaceMapProfile ? 7U : 6U) : 3U;
-    const usize memberCount = (clustered ? 14U : lit ? 11U : 3U) + (hasSurfaceMapProfile ? 1U : 0U);
+    const bool clustered = lit && fragment.Bindings.size() == (hasAuthoredProfile ? 11U : 8U);
+    const usize bindingCount = (clustered ? 8U
+                                : lit     ? (hasSurfaceMapProfile ? 7U : 6U)
+                                          : 3U) +
+                               (hasAuthoredProfile ? 3U : 0U);
+    const usize memberCount = (clustered ? 14U
+                               : lit     ? 11U
+                                         : 3U) +
+                              (hasSurfaceMapProfile ? 1U : 0U) + (hasAuthoredProfile ? 2U : 0U);
     if (!mState || mState->Setup != Status::Ready || (lit && mState->LightingSetup != Status::Ready))
     {
         return Status::NotReady;
@@ -1591,16 +1615,20 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     }
     for (usize i = 0; i < (lit ? 16U : 7U); ++i)
     {
-        const auto format = (i == 0 || i == 7)    ? rhi::RasterVertexFormat::Float3
-                            : (i == 6 || i == 15) ? rhi::RasterVertexFormat::Float2
-                                                  : rhi::RasterVertexFormat::Float4;
+        const rhi::RasterVertexFormat format = (hasAuthoredProfile && i == 13) ? rhi::RasterVertexFormat::Float2
+                                               : (i == 0 || i == 7)            ? rhi::RasterVertexFormat::Float3
+                                               : (i == 6 || i == 15)           ? rhi::RasterVertexFormat::Float2
+                                                                               : rhi::RasterVertexFormat::Float4;
         if (vertex.Inputs[i].Location != i || vertex.Inputs[i].Format != format)
         {
             return Status::InvalidDescription;
         }
     }
-    const usize byteSize = (clustered ? CLUSTER_BYTES : lit ? LIT_BYTES : 48) + (hasSurfaceMapProfile ? 16U : 0U);
-    const rhi::RasterBinding expected[]{
+    const usize byteSize = (clustered ? CLUSTER_BYTES
+                            : lit     ? LIT_BYTES
+                                      : 48) +
+                           (hasSurfaceMapProfile ? 16U : 0U) + (hasAuthoredProfile ? AUTHORED_PARAMETER_BYTES : 0U);
+    rhi::RasterBinding expected[]{
         {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, byteSize},
         {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
         {2, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
@@ -1611,14 +1639,22 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
         {7,
          hasSurfaceMapProfile ? rhi::RasterBindingKind::Texture2D : rhi::RasterBindingKind::Sampler,
          rhi::RasterVisibility::Fragment,
-         0}};
+         0},
+        {8, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+        {9, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
+        {10, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0}};
     for (usize i = 0; i < bindingCount; ++i)
     {
         bool found = false;
-        for (const auto& binding : fragment.Bindings)
+        rhi::RasterBinding& required = expected[i];
+        if (hasAuthoredProfile && i >= bindingCount - 3)
         {
-            found |= binding.Binding == expected[i].Binding && binding.Kind == expected[i].Kind &&
-                     binding.Visibility == expected[i].Visibility && binding.MinSize == expected[i].MinSize;
+            required.Kind = i == bindingCount - 2 ? rhi::RasterBindingKind::Sampler : rhi::RasterBindingKind::Texture2D;
+        }
+        for (const rhi::RasterBinding& binding : fragment.Bindings)
+        {
+            found |= binding.Binding == required.Binding && binding.Kind == required.Kind &&
+                     binding.Visibility == required.Visibility && binding.MinSize == required.MinSize;
         }
         if (!found)
         {
@@ -1670,6 +1706,25 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
         if (hasSurfaceMap == false)
         {
             return Status::InvalidDescription;
+        }
+    }
+    if (hasAuthoredProfile == true)
+    {
+        const usize authoredOffset = (clustered ? CLUSTER_BYTES : LIT_BYTES) + 16;
+        for (usize index = 0; index < 2; ++index)
+        {
+            bool found = false;
+            for (const rhi::RasterUniformMember& member : fragment.UniformMembers)
+            {
+                found = found || (member.Binding == 0 && member.Name == (index == 0 ? "Authored" : "IrradianceSh") &&
+                                  member.Offset == authoredOffset + index * 16 &&
+                                  member.Shape == (index == 0 ? rhi::RasterUniformShape::Float4
+                                                              : rhi::RasterUniformShape::Float4Array));
+            }
+            if (found == false)
+            {
+                return Status::InvalidDescription;
+            }
         }
     }
     if (lit)
@@ -1728,6 +1783,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     p.Lit = lit;
     p.Clustered = clustered;
     p.HasSurfaceMapProfile = hasSurfaceMapProfile;
+    p.HasAuthoredProfile = hasAuthoredProfile;
     p.Hdr = lit && s.Hdr;
     p.VariantCount = lit && !p.Hdr ? 3U : 6U;
     status = rhi::CreateRasterShader(s.Device, vertex, p.Vertex);
@@ -1817,22 +1873,28 @@ Status Renderer::GetStatus(MaterialProgram handle) noexcept
     // driver creation a prewarm obligation. We reuse R2's field-comparing cache;
     // no persisted driver blob or unbounded permutation cache is introduced.
     const rhi::RasterVertexStream streams[]{{sizeof(Vertex), false}, {sizeof(Instance), true}};
-    const rhi::RasterVertexAttribute attributes[]{{0, 0, 0, rhi::RasterVertexFormat::Float3},
-                                                  {1, 1, 0, rhi::RasterVertexFormat::Float4},
-                                                  {2, 1, 16, rhi::RasterVertexFormat::Float4},
-                                                  {3, 1, 32, rhi::RasterVertexFormat::Float4},
-                                                  {4, 1, 48, rhi::RasterVertexFormat::Float4},
-                                                  {5, 1, 64, rhi::RasterVertexFormat::Float4},
-                                                  {6, 0, 12, rhi::RasterVertexFormat::Float2},
-                                                  {7, 0, 20, rhi::RasterVertexFormat::Float3},
-                                                  {8, 1, 80, rhi::RasterVertexFormat::Float4},
-                                                  {9, 1, 96, rhi::RasterVertexFormat::Float4},
-                                                  {10, 1, 112, rhi::RasterVertexFormat::Float4},
-                                                  {11, 1, 128, rhi::RasterVertexFormat::Float4},
-                                                  {12, 1, 144, rhi::RasterVertexFormat::Float4},
-                                                  {13, 1, 160, rhi::RasterVertexFormat::Float4},
-                                                  {14, 1, 176, rhi::RasterVertexFormat::Float4},
-                                                  {15, 0, 32, rhi::RasterVertexFormat::Float2}};
+    rhi::RasterVertexAttribute attributes[]{{0, 0, 0, rhi::RasterVertexFormat::Float3},
+                                            {1, 1, 0, rhi::RasterVertexFormat::Float4},
+                                            {2, 1, 16, rhi::RasterVertexFormat::Float4},
+                                            {3, 1, 32, rhi::RasterVertexFormat::Float4},
+                                            {4, 1, 48, rhi::RasterVertexFormat::Float4},
+                                            {5, 1, 64, rhi::RasterVertexFormat::Float4},
+                                            {6, 0, 12, rhi::RasterVertexFormat::Float2},
+                                            {7, 0, 20, rhi::RasterVertexFormat::Float3},
+                                            {8, 1, 80, rhi::RasterVertexFormat::Float4},
+                                            {9, 1, 96, rhi::RasterVertexFormat::Float4},
+                                            {10, 1, 112, rhi::RasterVertexFormat::Float4},
+                                            {11, 1, 128, rhi::RasterVertexFormat::Float4},
+                                            {12, 1, 144, rhi::RasterVertexFormat::Float4},
+                                            {13, 1, 160, rhi::RasterVertexFormat::Float4},
+                                            {14, 1, 176, rhi::RasterVertexFormat::Float4},
+                                            {15, 0, 32, rhi::RasterVertexFormat::Float2}};
+    if (p->HasAuthoredProfile == true)
+    {
+        attributes[11] = {11, 0, LUDUS_AUTHORED_TANGENT_OFFSET, rhi::RasterVertexFormat::Float4};
+        attributes[12] = {12, 0, LUDUS_AUTHORED_COLOR_OFFSET, rhi::RasterVertexFormat::Float4};
+        attributes[13] = {13, 0, LUDUS_AUTHORED_UV1_OFFSET, rhi::RasterVertexFormat::Float2};
+    }
     const auto total = p->VariantCount + (p->Lit ? 1U : 0U);
     while (p->Phase <= total)
     {
@@ -2005,6 +2067,8 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     m.ParameterSize = size;
     if (lighting != nullptr)
     {
+        m.EnvironmentOrNull = Access::GetEnvironment(lighting->EnvironmentOrNull);
+        internal::RetainEnvironment(m.EnvironmentOrNull);
         m.Bake = lighting->Bake;
         m.HasBake = !rhi::IsNull(lighting->Bake.Texture);
         if (Access::Owner(lighting->Shadows) != 0)
@@ -2042,6 +2106,20 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
         const rhi::TextureHandle mapSource =
             rhi::IsNull(lighting->SurfaceMap) ? s.Programs[m.ProgramSlot].White : lighting->SurfaceMap;
         status = rhi::CreateTextureView(s.Device, mapSource, m.SurfaceTexture);
+    }
+    if (Accepted(status) && lighting != nullptr && s.Programs[m.ProgramSlot].HasAuthoredProfile)
+    {
+        status = rhi::CreateTextureView(s.Device,
+                                        m.EnvironmentOrNull != nullptr ? m.EnvironmentOrNull->Texture
+                                                                       : s.Programs[m.ProgramSlot].White,
+                                        m.EnvironmentTexture);
+        if (Accepted(status))
+        {
+            status = rhi::CreateTextureView(s.Device,
+                                            rhi::IsNull(lighting->EmissionMap) ? s.Programs[m.ProgramSlot].White
+                                                                               : lighting->EmissionMap,
+                                            m.EmissionTexture);
+        }
     }
     if (Accepted(status) && clusters != nullptr)
     {
@@ -2132,6 +2210,19 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
             return ready;
         }
     }
+    if (s.Programs[m->ProgramSlot].HasAuthoredProfile == true)
+    {
+        const Status ready = rhi::GetStatus(s.Device, m->EnvironmentTexture);
+        if (ready != Status::Ready)
+        {
+            return ready;
+        }
+        const Status emissionReady = rhi::GetStatus(s.Device, m->EmissionTexture);
+        if (emissionReady != Status::Ready)
+        {
+            return emissionReady;
+        }
+    }
     if (m->Clustered)
     {
         const auto texture = rhi::GetStatus(s.Device, m->ClusterTexture);
@@ -2165,26 +2256,40 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
     if (!m->BindingCreated)
     {
         const bool hasSurfaceMapProfile = s.Programs[m->ProgramSlot].HasSurfaceMapProfile;
-        const rhi::RasterBindingResource values[]{{0, m->Parameters, 0, m->ParameterSize, {}, {}},
-                                                  {1, {}, 0, 0, m->Texture, {}},
-                                                  {2, {}, 0, 0, {}, m->Sampler},
-                                                  {3, {}, 0, 0, m->BakeTexture, {}},
-                                                  {4, {}, 0, 0, m->ShadowTexture, {}},
-                                                  {5, {}, 0, 0, {}, m->ShadowSampler},
-                                                  {6, {}, 0, 0, m->Clustered ? m->ClusterView : m->SurfaceTexture, {}},
-                                                  {7,
-                                                   {},
-                                                   0,
-                                                   0,
-                                                   hasSurfaceMapProfile ? m->SurfaceTexture : rhi::TextureViewHandle{},
-                                                   hasSurfaceMapProfile ? rhi::SamplerHandle{} : m->ShadowSampler}};
-        const auto created = rhi::CreateBindingSet(s.Device,
-                                                   s.Programs[m->ProgramSlot].Layout,
-                                                   {values,
-                                                    m->Clustered ? 8U
-                                                    : m->Lit     ? (hasSurfaceMapProfile ? 7U : 6U)
-                                                                 : 3U},
-                                                   m->Bindings);
+        rhi::RasterBindingResource values[]{{0, m->Parameters, 0, m->ParameterSize, {}, {}},
+                                            {1, {}, 0, 0, m->Texture, {}},
+                                            {2, {}, 0, 0, {}, m->Sampler},
+                                            {3, {}, 0, 0, m->BakeTexture, {}},
+                                            {4, {}, 0, 0, m->ShadowTexture, {}},
+                                            {5, {}, 0, 0, {}, m->ShadowSampler},
+                                            {6, {}, 0, 0, m->Clustered ? m->ClusterView : m->SurfaceTexture, {}},
+                                            {7,
+                                             {},
+                                             0,
+                                             0,
+                                             hasSurfaceMapProfile ? m->SurfaceTexture : rhi::TextureViewHandle{},
+                                             hasSurfaceMapProfile ? rhi::SamplerHandle{} : m->ShadowSampler},
+                                            {8, {}, 0, 0, {}, {}},
+                                            {9, {}, 0, 0, {}, {}},
+                                            {10, {}, 0, 0, {}, {}}};
+        const bool hasAuthoredProfile = s.Programs[m->ProgramSlot].HasAuthoredProfile;
+        const usize bindingCount = (m->Clustered ? 8U
+                                    : m->Lit     ? (hasSurfaceMapProfile ? 7U : 6U)
+                                                 : 3U) +
+                                   (hasAuthoredProfile ? 3U : 0U);
+        if (hasAuthoredProfile == true)
+        {
+            values[bindingCount - 3] = {static_cast<uint32>(bindingCount - 3), {}, 0, 0, m->EnvironmentTexture, {}};
+            values[bindingCount - 2] = {static_cast<uint32>(bindingCount - 2),
+                                        {},
+                                        0,
+                                        0,
+                                        {},
+                                        m->EnvironmentOrNull != nullptr ? m->EnvironmentOrNull->Sampler : m->Sampler};
+            values[bindingCount - 1] = {static_cast<uint32>(bindingCount - 1), {}, 0, 0, m->EmissionTexture, {}};
+        }
+        const Status created =
+            rhi::CreateBindingSet(s.Device, s.Programs[m->ProgramSlot].Layout, {values, bindingCount}, m->Bindings);
         if (!Accepted(created))
         {
             return m->Setup = created;
@@ -2264,6 +2369,49 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
     {
         return Status::InvalidDescription;
     }
+    if (input.Tangents.IsValid() == false || input.Colors.IsValid() == false ||
+        input.MaterialTexcoords1.IsValid() == false ||
+        (input.Tangents.IsEmpty() == false && input.Tangents.GetSize() != input.VertexCount) ||
+        (input.Colors.IsEmpty() == false && input.Colors.GetSize() != input.VertexCount) ||
+        (input.MaterialTexcoords1.IsEmpty() == false && input.MaterialTexcoords1.GetSize() != input.VertexCount))
+    {
+        return Status::InvalidDescription;
+    }
+    if (input.Tangents.IsEmpty() == false && input.Normals == nullptr)
+    {
+        return Status::InvalidDescription;
+    }
+    for (usize i = 0; i < input.VertexCount; ++i)
+    {
+        if (input.MaterialTexcoords1.IsEmpty() == false && math::IsFinite(input.MaterialTexcoords1[i]) == false)
+        {
+            return Status::InvalidDescription;
+        }
+        if (input.Colors.IsEmpty() == false)
+        {
+            const math::Vector4 color = input.Colors[i];
+            if (math::IsFinite(color) == false || color.X < 0 || color.Y < 0 || color.Z < 0 || color.W < 0 ||
+                color.X > 1 || color.Y > 1 || color.Z > 1 || color.W > 1)
+            {
+                return Status::InvalidDescription;
+            }
+        }
+        if (input.Tangents.IsEmpty() == false)
+        {
+            const math::Vector4 tangent = input.Tangents[i];
+            math::Vector3 normal;
+            if (math::IsFinite(tangent) == false || (tangent.W != 0 && tangent.W != 1 && tangent.W != -1) ||
+                math::TryNormalize(input.Normals[i], normal) != math::MathStatus::Success)
+            {
+                return Status::InvalidDescription;
+            }
+            const math::Vector3 axis{tangent.X, tangent.Y, tangent.Z};
+            if (tangent.W != 0 && math::Length(axis - normal * math::Dot(normal, axis)) <= 1e-8F)
+            {
+                return Status::InvalidDescription;
+            }
+        }
+    }
     auto bounds = math::EmptyAabb3();
     for (usize i = 0; i < input.VertexCount; ++i)
     {
@@ -2303,7 +2451,28 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
         {
             static_cast<void>(math::TryNormalize(input.Normals[i], normal));
         }
-        vertices[i] = {input.Positions[i], uv, normal, input.BakeTexcoords != nullptr ? input.BakeTexcoords[i] : uv};
+        math::Vector4 tangent{};
+        if (input.Tangents.IsEmpty() == false)
+        {
+            const math::Vector4 source = input.Tangents[i];
+            math::Vector3 axis{source.X, source.Y, source.Z};
+            if (source.W != 0)
+            {
+                static_cast<void>(math::TryNormalize(axis - normal * math::Dot(normal, axis), axis));
+            }
+            else
+            {
+                axis = {};
+            }
+            tangent = {axis.X, axis.Y, axis.Z, source.W};
+        }
+        vertices[i] = {input.Positions[i],
+                       uv,
+                       normal,
+                       input.BakeTexcoords != nullptr ? input.BakeTexcoords[i] : uv,
+                       tangent,
+                       input.Colors.IsEmpty() == false ? input.Colors[i] : math::Vector4{1, 1, 1, 1},
+                       input.MaterialTexcoords1.IsEmpty() == false ? input.MaterialTexcoords1[i] : uv};
     }
     core::UniquePtr<internal::ReferenceMeshData> referenceMesh;
     if (mState->Reference)
@@ -3256,6 +3425,53 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         return Status::InvalidDescription;
     }
+    if (description.MaterialUvSet > 1 ||
+        (description.MaterialUvSet != 0 && description.AreAuthoredInputsEnabled == false) ||
+        (description.AreAuthoredInputsEnabled == true && p->HasAuthoredProfile == false) ||
+        (description.EnvironmentOrNull != nullptr && p->HasAuthoredProfile == false))
+    {
+        return Status::Unsupported;
+    }
+    if (description.EnvironmentOrNull != nullptr)
+    {
+        const internal::EnvironmentData* environmentOrNull = Access::GetEnvironment(description.EnvironmentOrNull);
+        if (environmentOrNull == nullptr ||
+            rhi::GetStatus(s.Device, environmentOrNull->Texture) == Status::InvalidHandle)
+        {
+            return Status::InvalidDescription;
+        }
+        const Status ready = description.EnvironmentOrNull->GetStatus();
+        if (ready != Status::Ready)
+        {
+            return ready == Status::Pending ? Status::NotReady : ready;
+        }
+    }
+    if (rhi::IsNull(description.EmissionMap) == false)
+    {
+        if (p->HasAuthoredProfile == false)
+        {
+            return Status::Unsupported;
+        }
+        rhi::TextureDescription texture;
+        const Status ready = rhi::GetTextureDescription(s.Device, description.EmissionMap, texture);
+        if (ready != Status::Ready)
+        {
+            return ready;
+        }
+        if (texture.Format != rhi::RasterFormat::Rgba8Unorm && texture.Format != rhi::RasterFormat::Rgba8Srgb)
+        {
+            return Status::Unsupported;
+        }
+        if (texture.Attachment == true || texture.Dimension != rhi::TextureDimension::D2)
+        {
+            return Status::InvalidDescription;
+        }
+        const Status upload = rhi::GetStatus(s.Device, description.EmissionMap);
+        if (upload != Status::Ready)
+        {
+            return upload == Status::Pending ? Status::NotReady : upload;
+        }
+    }
     if (rhi::IsNull(description.SurfaceMap) == false)
     {
         if (p->HasSurfaceMapProfile == false)
@@ -3396,8 +3612,10 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
         math::Vector4 GridMinimum{};
         math::Vector4 GridScale{};
         math::Vector4 SurfaceMap{};
+        math::Vector4 Authored{};
+        math::Vector4 IrradianceSh[internal::ENVIRONMENT_SH_COUNT]{};
     };
-    static_assert(sizeof(Parameters) == CLUSTER_BYTES + 16);
+    static_assert(sizeof(Parameters) == CLUSTER_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES);
     Parameters parameters{};
     parameters.Tint = description.Surface.Tint;
     parameters.UvTransform = description.Surface.UvTransform;
@@ -3420,7 +3638,23 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                                       0};
     parameters.BakeScale = {bake.Scale.X, bake.Scale.Y, bake.Scale.Z, 0};
     parameters.BakeUv = bake.UvTransform;
-    parameters.SurfaceMap = {description.NormalScale, rhi::IsNull(description.SurfaceMap) ? 0.0F : 1.0F, 0, 0};
+    parameters.SurfaceMap = {description.NormalScale,
+                             rhi::IsNull(description.SurfaceMap) ? 0.0F : 1.0F,
+                             rhi::IsNull(description.EmissionMap) ? 0.0F : 1.0F,
+                             0};
+    parameters.Authored = {description.AreAuthoredInputsEnabled ? 1.0F : 0.0F,
+                           static_cast<float32>(description.MaterialUvSet),
+                           description.EnvironmentOrNull != nullptr ? 1.0F : 0.0F,
+                           0};
+    if (description.EnvironmentOrNull != nullptr)
+    {
+        const internal::EnvironmentData& environment = *Access::GetEnvironment(description.EnvironmentOrNull);
+        parameters.Authored.W = static_cast<float32>(environment.MipLevels - 1);
+        for (usize coefficient = 0; coefficient < internal::ENVIRONMENT_SH_COUNT; ++coefficient)
+        {
+            parameters.IrradianceSh[coefficient] = environment.Irradiance[coefficient];
+        }
+    }
     for (usize i = 0; i < selected.Count; ++i)
     {
         const auto& light = selected.Lights[i];
@@ -3456,7 +3690,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
             parameters.ShadowData[i * 6 + 5] = {region.Bias, static_cast<float32>(index), 1 / w, 1 / h};
         }
     }
-    uint8 legacy[LIT_BYTES + 16]{};
+    uint8 legacy[LIT_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES]{};
     if (clustered)
     {
         const auto& grid = *description.Clusters;
@@ -3473,12 +3707,13 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         std::memcpy(legacy, &parameters, 656);
         std::memcpy(legacy + 656, parameters.ShadowData, sizeof(parameters.ShadowData));
-        std::memcpy(legacy + LIT_BYTES, &parameters.SurfaceMap, 16);
+        std::memcpy(legacy + LIT_BYTES, &parameters.SurfaceMap, sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES);
     }
     status = CreateMaterialData(program,
                                 description.Surface,
                                 clustered ? reinterpret_cast<const uint8*>(&parameters) : legacy,
-                                (clustered ? CLUSTER_BYTES : LIT_BYTES) + (p->HasSurfaceMapProfile ? 16U : 0U),
+                                (clustered ? CLUSTER_BYTES : LIT_BYTES) + (p->HasSurfaceMapProfile ? 16U : 0U) +
+                                    (p->HasAuthoredProfile ? AUTHORED_PARAMETER_BYTES : 0U),
                                 &description,
                                 output,
                                 clustered ? clusters : nullptr);

@@ -328,3 +328,79 @@ base-color textures; this renderer change does not reinterpret source PBRT mater
 or add map fields to the interchange format. Captures produced now use reference
 profile version 2. Historical evidence above retains its recorded version;
 acceptance compares captures from the same profile and current binary.
+
+## Full static Sponza and SunTemple acceptance
+
+The authored/HDR renderer acceptance uses the supplied main Sponza glTF and
+SunTemple FBX under `references/resources`. Its optional fixture adapter is
+**test tooling**, independent of the installed scene importer. It never downloads
+assets or executes supplied `.pyscene` files. Fixtures, manifests and images stay
+in ignored `out/`; the original supplied resources are read-only.
+
+Prepare fixtures with NumPy, Pillow and Assimp 6 installed on the acceptance host:
+
+```bash
+python modules/graphics/renderer/tests/prepare_resource_scenes.py \
+  --resources /absolute/path/to/references/resources \
+  --output out/resource-acceptance \
+  --assimp /absolute/path/to/assimp \
+  --assimp-library /absolute/path/to/libassimp
+```
+
+Assimp exports SunTemple's geometry/material bindings to a private glTF fixture;
+its C API supplies the authored FBX camera and 13 lights omitted by that export.
+The adapter preserves their transforms and RGB intensities, interpreted under
+Ludus's lux/candela and bounded attenuation profile. Point/spot range is explicitly
+one million meters for this FBX acceptance profile. It applies the source
+`SunTemple.pyscene`'s documented 1000× emissive factor adjustment without running
+the script. DDS DirectX normal Y is converted; roughness and metallic come from
+the source ORM G/B channels. The supplied FBX contains no tangent/bitangent layers,
+so it uses the declared UV-derived fallback. Static base transforms are captured;
+its animation is outside this acceptance.
+
+Sponza retains its authored tangents, colors and UV sets. One degenerate tangent
+vertex is recorded in the manifest and explicitly marked unavailable; no vertex
+or triangle is dropped. Its 24 glTF punctual lights have authored zero intensity;
+acceptance retains those zeros. Its supplied HDR environment supplies illumination.
+The camera is an explicit interior acceptance rig because this glTF supplies no
+camera. Both scenes retain every primitive, material and mesh instance, with
+texture dimensions explicitly capped at 512 for this bounded acceptance profile.
+Source AO is not applied to reference transport; this test does not establish
+physical transmission, layered-material fidelity or shadow/GI agreement with the
+original authoring renderer.
+
+Build `ludus_renderer_render_tests` with the normal prepared native toolchain.
+Run the hidden, private-resource test once per fixture:
+
+```bash
+LUDUS_RESOURCE_SCENE_FIXTURE=out/resource-acceptance/sponza.rscn \
+LUDUS_RESOURCE_SCENE_OUTPUT=out/resource-acceptance/sponza.ppm \
+  /absolute/path/to/ludus_renderer_render_tests '[.resources]'
+LUDUS_RESOURCE_SCENE_FIXTURE=out/resource-acceptance/suntemple.rscn \
+LUDUS_RESOURCE_SCENE_OUTPUT=out/resource-acceptance/suntemple.ppm \
+  /absolute/path/to/ludus_renderer_render_tests '[.resources]'
+```
+
+The fixture is a private little-endian test format, not an engine interchange
+format. At 256×256, acceptance compares ordinary culling/batching/clustered-light
+execution with source-order, unculled, direct-light-list execution. It requires
+all submitted items to be accounted for, no dropped admitted lights, nonblack
+output, no magenta error pixels, and no pixel differences greater than one byte.
+The output manifest reports actual geometry counts, source/fixture hashes,
+attribute coverage, HDR dimensions/range and conversion limits. Image metrics
+include renderer/RHI requested or known peak bytes and setup/frame-plus-readback
+wall time; these timings are diagnostics, not steady-state frame-rate claims.
+
+| Full static input | Primitives / instances | Materials | Stored vertices | Instanced triangles |
+| --- | ---: | ---: | ---: | ---: |
+| Main Sponza | 405 / 405 | 28 | 2,049,137 | 3,747,018 |
+| SunTemple | 1,056 / 1,056 | 48 | 550,165 | 606,376 |
+
+SunTemple's triangle count also agrees with independent Assimp FBX inspection.
+Both supplied environments are 4096×2048; Sponza's maximum source radiance is
+125,952 and SunTemple's is 2,880. The renderer's scaled binary16 storage preserves
+these source ranges for lighting; reference transport retains the original HDR.
+Regular CI exercises small authored-input/HDR fixtures and CPU/GPU reference
+convergence without depending on these separately supplied assets. Full-scene
+acceptance here is **raster acceptance**; it does not qualify large-scene native
+ray-query parity or GPU path-tracer capacity.

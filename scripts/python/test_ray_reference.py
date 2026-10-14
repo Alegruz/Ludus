@@ -49,10 +49,13 @@ class ReferenceExportTests(unittest.TestCase):
         self.assertEqual(pixels[0],(1,2,3,4))
 
     def test_surface_profile_version_is_preserved(self):
-        data = self.capture()
-        struct.pack_into('<I', data, 12, 2)
-        metadata, _ = hdr.decode(data)
-        self.assertEqual(metadata['profile'], 2)
+        for profile in (1, 2, 3):
+            with self.subTest(profile=profile):
+                data = self.capture()
+                struct.pack_into('<I', data, 12, profile)
+                metadata, pixels = hdr.decode(data)
+                self.assertEqual(metadata['profile'], profile)
+                self.assertEqual(pixels[0], (1, 2, 3, 4))
 
     def test_complete_short_nonfinite_and_unknown_profile_reject(self):
         data = self.capture()
@@ -62,7 +65,7 @@ class ReferenceExportTests(unittest.TestCase):
         struct.pack_into('<f',data,256,float('nan'))
         with self.assertRaises(ValueError): hdr.decode(data)
         data = self.capture()
-        struct.pack_into('<I',data,12,3)
+        struct.pack_into('<I',data,12,4)
         with self.assertRaises(ValueError): hdr.decode(data)
         with self.assertRaises(ValueError): hdr.decode(self.capture()[:-1])
 

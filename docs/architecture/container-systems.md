@@ -428,3 +428,21 @@ values can move between positions. Use the existing `StableSort` with separate
 initialized scratch storage when equal keys must retain their input order.
 The Perfetto exporter uses that stable operation and returns failure if scratch
 allocation fails.
+
+## Borrowed contiguous views
+
+`FoundationContainers` exports `BorrowedView<T>` in
+`ludus/foundation/containers/borrowed_view.hpp`. It carries an address and element
+count, allocates nothing, and neither owns storage nor extends its lifetime.
+Built-in arrays preserve their extent on construction. For dynamic storage,
+construct with `{array.GetData(), array.GetSize()}`. `BorrowedView<const T>`
+prevents element writes through that view.
+
+An empty view means absence. A null pointer with a nonzero count is invalid;
+consumers check `IsValid()` and their required extent before indexing. This
+validation cannot prove that the caller's declared storage is alive or large
+enough. Indexing asserts validity and bounds. Renderer authored mesh channels
+use this contract and copy the data before `CreateMesh` returns; callers may
+release their storage after that call. Ownership-transfer APIs instead use a
+Ludus-owned owner. Shared/weak pointer facilities remain unimplemented and are
+not required for these synchronous borrowed inputs.

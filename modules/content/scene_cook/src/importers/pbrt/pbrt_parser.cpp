@@ -536,7 +536,7 @@ Status SceneReader::readFile(ByteSource& inoutSource, uint32 fileIndex) noexcept
     while (tokens.GetCurrent().Kind != TokenKind::End)
     {
         if (mCancelOrNull != nullptr && mCancelOrNull->Requested != nullptr &&
-            mCancelOrNull->Requested(mCancelOrNull->Context) == true)
+            mCancelOrNull->Requested(mCancelOrNull->ContextOrNull) == true)
         {
             result = Status::Cancelled;
             break;

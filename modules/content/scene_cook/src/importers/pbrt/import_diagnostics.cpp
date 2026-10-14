@@ -19,16 +19,16 @@ bool DiagnosticLog::Add(DiagnosticSeverity severity,
         mHasErrors = true;
     }
     usize sameCode = 0;
-    Diagnostic* firstOfCode = nullptr;
+    Diagnostic* firstOfCodeOrNull = nullptr;
     for (Diagnostic& entry : mEntries)
     {
         if (entry.Code.GetView() != code)
         {
             continue;
         }
-        if (firstOfCode == nullptr)
+        if (firstOfCodeOrNull == nullptr)
         {
-            firstOfCode = &entry;
+            firstOfCodeOrNull = &entry;
         }
         ++sameCode;
         if (entry.Message.GetView() == message)
@@ -37,9 +37,9 @@ bool DiagnosticLog::Add(DiagnosticSeverity severity,
             return true;
         }
     }
-    if (firstOfCode != nullptr && sameCode >= MAX_ENTRIES_PER_CODE)
+    if (firstOfCodeOrNull != nullptr && sameCode >= MAX_ENTRIES_PER_CODE)
     {
-        ++firstOfCode->Count;
+        ++firstOfCodeOrNull->Count;
         return true;
     }
     Diagnostic entry;

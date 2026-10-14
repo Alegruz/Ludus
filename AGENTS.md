@@ -143,15 +143,18 @@ engine code. Discuss such cases in the PR before adding them.
 - **Private member functions are camelCase**; public member functions and free
   functions are PascalCase (`void beginValue()` under `private:`, `void WriteKey()`
   under `public:`).
-- **Nullable pointer parameters end in `OrNull`** (`const Cancellation*
-  cancelOrNull = nullptr`). A pointer parameter without the suffix must not be
-  null.
-- **Non-const reference parameters carry their intent as a prefix**: `out` when
+- **All nullable pointer variables end in `OrNull`** (`const Cancellation*
+  cancelOrNull = nullptr`), including members, locals and parameters. Without
+  the suffix, a pointer has a nonnull contract; validate or assert that contract
+  at its boundary. Explicit null initialization is nullable, even before setup.
+- **Non-const lvalue reference parameters carry their intent as a prefix**: `out` when
   the function only writes the argument (`CookResult& outResult`), `inout` when it
   reads and updates it (`Failure& inoutErrors`, `Scene& inoutScene`). The rule
   applies to function (and lambda) parameters only: local reference variables,
   range-`for` bindings and reference members are named normally. Const
-  references and values take no prefix.
+  references and values take no prefix. Rvalue reference parameters must not
+  carry `out`/`inout`; use `other` for a move source. Forwarding references do
+  not by themselves imply an ownership transfer.
 - **No magic sizes in template arguments.** Spell a bounded capacity through a
   named constant or a shared alias (`MessageText`, `ResourcePath`,
   `MAX_MESSAGE_BYTES`) rather than a literal such as `Text<255>`; reuse the shared
@@ -177,9 +180,10 @@ when created. Adopted today: `modules/content/scene_cook`,
 | --- | --- |
 | Private/protected methods camelCase; public methods, free functions, types PascalCase; private members `m` + PascalCase; parameters and locals camelCase; constants UPPER_CASE | clang-tidy `readability-identifier-naming` (per-directory `.clang-tidy`) |
 | `condition == false` instead of `!condition` | `tools/check_naming.py` rule N1 (`./scripts/check --format`) for adopted modules; `source_policy.py` for changed C++ lines |
-| `out`/`inout` prefix on non-const reference parameters | `check_naming.py` N2 (presence of a prefix; `out` vs `inout` choice is review-only) |
+| `out`/`inout` prefix on non-const lvalue reference parameters | `check_naming.py` N2 (presence of a prefix; `out` vs `inout` choice is review-only) |
 | Boolean names read as questions | `check_naming.py` N3 (declarations spelled `bool`) |
-| `OrNull` on nullable pointer parameters | `check_naming.py` N4 (parameters defaulted to `nullptr`); other nullable pointers are review-only |
+| `OrNull` on nullable pointer variables | Shared N4 scans explicit null initializers in adopted scopes and changed C++ lines; inferred nullability remains review-only |
+| No `out`/`inout` on rvalue reference parameters | Shared N2 checks ordinary declarations in adopted scopes and changed C++ lines |
 | `condition == true` instead of a bare boolean operand | Review-only (needs type information) |
 | Spelled-out names, verb-first functions, no literal template sizes, reuse engine types | Review-only |
 
@@ -195,6 +199,10 @@ rejects the explicit `== true`/`== false` style.
   declarator lists, including members and loop initializers. Expression commas
   (arguments, aggregate values, loop increments) remain valid. The changed-source
   gate checks ordinary declarations; unusual declarators still require review.
+- Reuse an existing mathematical constant from its owner, including FoundationMath's
+  shader `PI`. Changed Slang rejects recognizable duplicated pi literals outside
+  that owner. Other constants still need semantic review; give tolerances units
+  and purpose rather than mechanically naming every zero or one.
 - Name representation tags, versions, strides and serialized record widths in
   their owner. Share host/shader layout constants rather than repeating literals;
   derive serialized widths from their explicit field schema, never host padding.
@@ -519,6 +527,11 @@ headers. Separate the groups with a blank line.
 
 ### Memory and error handling
 
+- Express new borrowed contiguous inputs with Ludus-owned bounded views; validate
+  extents before reading, and document who keeps storage alive. Use Ludus-owned
+  smart owners for ownership transfer, never a borrowed raw pointer as an owner.
+  A view does not establish storage lifetime. Shared/weak ownership needs a
+  separately implemented Foundation facility; do not substitute STL smart pointers.
 - Prefer zero-allocation on hot paths; reserve/reuse buffers where practical.
 - Never let a failure in infrastructure (e.g. logging) propagate into or crash
   engine code. Degrade gracefully.

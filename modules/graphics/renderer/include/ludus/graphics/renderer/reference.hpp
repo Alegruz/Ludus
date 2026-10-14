@@ -114,6 +114,10 @@ struct ReferenceCaptureDescription final
     /// Constant linear environment radiance in [0,10000], independently sampled
     /// with uniform sphere density. No baked lighting, AO or prefiltered IBL is added.
     ludus::foundation::math::Vector3 Environment{};
+    /// Optional ready HDR map, retained at Begin/Update; replaces Environment.
+    /// Reference transport samples raw source radiance and its solid-angle CDF,
+    /// never raster prefiltered mips or diffuse SH. Same device is required.
+    const EnvironmentMap* EnvironmentTextureOrNull = nullptr;
     /// Borrowed analytic directional/point/spot lights, validated and copied during
     /// Begin/Update. Existing L4 range/spot windows are part of this declared profile.
     const DirectLight* Lights = nullptr;
@@ -121,7 +125,9 @@ struct ReferenceCaptureDescription final
     ludus::foundation::usize LightCount = 0;
     /// Fixed integer texture mip for both CPU shading and native opacity acceptance.
     /// Overrides per-material LOD selection, mip interpolation and LOD clamps.
-    /// Every sampled color texture must have this initialized, retained CPU mip.
+    /// Every sampled color/surface/emission texture must retain this CPU mip.
+    /// NativeQueries rejects authored masked materials until native opacity can
+    /// evaluate routed UVs and vertex alpha; CpuOracle/GPU preview support them.
     ludus::foundation::uint32 TextureMip = 0;
     /// Reproducible Philox capture seed; sampling is addressed by pixel/sample/dimension.
     ludus::foundation::uint64 Seed = 0;
@@ -162,7 +168,7 @@ struct ReferenceCaptureInfo final
     ReferenceTraversal Traversal = ReferenceTraversal::NativeQueries;
     /// RGB surface/integrator schema: version 2 adds packed surface maps and
     /// matches raster squared spot-cone falloff and bounded near-light attenuation.
-    ludus::foundation::uint32 ProfileVersion = 2;
+    ludus::foundation::uint32 ProfileVersion = 3;
     /// Frozen Philox address and dimension convention version.
     ludus::foundation::uint32 SamplerVersion = 1;
     /// Original capture seed.

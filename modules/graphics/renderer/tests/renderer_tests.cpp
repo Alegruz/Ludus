@@ -2052,3 +2052,81 @@ TEST_CASE("Pending viewport replacements retain the drawable view through failur
     REQUIRE(session.Renderer.Release(original) == rhi::RasterStatus::Ready);
     REQUIRE(session.Renderer.Release(other) == rhi::RasterStatus::Ready);
 }
+
+TEST_CASE("HDR environment preparation rejects invalid input and preserves empty ownership", "[renderer][authored]")
+{
+    Session session;
+    rr::EnvironmentMap environment;
+    rr::EnvironmentDescription description;
+    const math::Vector4 pixels[]{{125952, 4, 1, 0}, {0, 2, 0, 1}, {1, 0, 0, 1}, {0, 0, 0, 1}};
+    description.PixelsOrNull = pixels;
+    description.Width = 2;
+    description.Height = 2;
+    description.FilterWidth = 16;
+    description.FilterSamples = 16;
+    CHECK(environment.Initialize(session.Device, description) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(environment.GetStatus() == rhi::RasterStatus::InvalidHandle);
+    description.CpuByteBudget = usize{1024} * 1024;
+    description.FilterWidth = 17;
+    CHECK(environment.Initialize(session.Device, description) == rhi::RasterStatus::InvalidDescription);
+    description.FilterWidth = 16;
+    REQUIRE(environment.Initialize(session.Device, description) == rhi::RasterStatus::Ready);
+    CHECK(environment.Initialize(session.Device, description) == rhi::RasterStatus::InvalidState);
+    rr::EnvironmentMap moved(core::Move(environment));
+    CHECK(environment.GetStatus() == rhi::RasterStatus::InvalidHandle);
+    CHECK(moved.GetStatus() == rhi::RasterStatus::Ready);
+    moved.Reset();
+    CHECK(moved.GetStatus() == rhi::RasterStatus::InvalidHandle);
+}
+
+TEST_CASE("Authored tangent frame overrides the UV fallback and preserves mirrored handedness", "[renderer][authored]")
+{
+    namespace reference = rr::internal;
+    reference::ReferenceTriangle triangle;
+    triangle.Positions[0] = {0, 0, 0};
+    triangle.Positions[1] = {1, 0, 0};
+    triangle.Positions[2] = {0, 1, 0};
+    triangle.Uvs[0] = {0, 0};
+    triangle.Uvs[1] = {1, 0};
+    triangle.Uvs[2] = {0, 1};
+    for (math::Vector4& tangent : triangle.Tangents)
+    {
+        tangent = {0, 1, 0, -1};
+    }
+    reference::ReferenceSurfaceData surface;
+    surface.AreAuthoredInputsEnabled = true;
+    const math::Vector3 normalWorld{0, 0, 1};
+    CHECK(reference::ApplyReferenceNormal(triangle, surface, normalWorld, {1, 0, 0}, .2F, .3F) ==
+          math::Vector3{0, 1, 0});
+    CHECK(reference::ApplyReferenceNormal(triangle, surface, normalWorld, {0, 1, 0}, .2F, .3F) ==
+          math::Vector3{1, 0, 0});
+    surface.AreAuthoredInputsEnabled = false;
+    CHECK(reference::ApplyReferenceNormal(triangle, surface, normalWorld, {1, 0, 0}, .2F, .3F) ==
+          math::Vector3{1, 0, 0});
+}
+
+TEST_CASE("HDR importance sampling uses exact solid angles and leaves dark cells unselected", "[renderer][authored]")
+{
+    rr::internal::EnvironmentData environment;
+    environment.Width = 4;
+    environment.Height = 2;
+    REQUIRE(environment.Pixels.TryResize(8));
+    REQUIRE(environment.Distribution.TryResize(8));
+    environment.Pixels[3] = {8, 8, 8, 1};
+    environment.Weight = 8 * math::kPi / 2;
+    for (usize pixel = 0; pixel < 8; ++pixel)
+    {
+        environment.Distribution[pixel] = pixel < 3 ? 0 : environment.Weight;
+    }
+    for (uint32 sample = 0; sample < 128; ++sample)
+    {
+        const rr::internal::EnvironmentSample result =
+            rr::internal::SampleEnvironment(environment, (static_cast<float32>(sample) + .5F) / 128, .37F);
+        CHECK(math::Length(result.DirectionWorld) == Catch::Approx(1).margin(1e-6));
+        CHECK(result.Radiance == math::Vector3{8, 8, 8});
+        CHECK(result.Pdf == Catch::Approx(2 / math::kPi).margin(1e-6));
+        CHECK(rr::internal::EvaluateEnvironmentPdf(environment, result.DirectionWorld) ==
+              Catch::Approx(result.Pdf).margin(1e-6));
+        CHECK(rr::internal::EvaluateEnvironment(environment, result.DirectionWorld) == result.Radiance);
+    }
+}

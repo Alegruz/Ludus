@@ -10,6 +10,8 @@
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/graphics/renderer/reference.hpp>
 
+#include "environment_data.h"
+
 namespace ludus::graphics::renderer::internal
 {
 namespace math = foundation::math;
@@ -19,6 +21,9 @@ struct ReferenceMeshData final
     rhi::DeviceHandle Device;
     Array<math::Vector3> Positions, Normals;
     Array<math::Vector2> Uvs;
+    Array<math::Vector2> MaterialUvs1;
+    Array<math::Vector4> Tangents;
+    Array<math::Vector4> Colors;
     Array<uint32> Indices;
     rhi::RayGeometryHandle Geometry{};
     rhi::RasterStatus NativeStatus = rhi::RasterStatus::NotReady;
@@ -38,12 +43,17 @@ struct ReferenceSurfaceData final
     float32 AlphaCutoff = 0.5F;
     bool HasTexture = false;
     bool HasSurfaceMap = false;
+    bool HasEmissionMap = false;
     float32 NormalScale = 1;
+    bool AreAuthoredInputsEnabled = false;
+    uint32 MaterialUvSet = 0;
 };
 struct ReferenceTriangle final
 {
     math::Vector3 Positions[3], Normals[3];
     math::Vector2 Uvs[3];
+    math::Vector4 Tangents[3];
+    math::Vector4 Colors[3];
     math::Vector3 GeometricNormal{}, Error{};
     float32 Area = 0;
     uint32 Instance = 0, Primitive = 0;
@@ -53,6 +63,7 @@ struct ReferenceInstance final
     const ReferenceSurfaceData* Surface = nullptr;
     rhi::TextureCpuContent Texture;
     rhi::TextureCpuContent SurfaceMap;
+    rhi::TextureCpuContent EmissionMap;
     usize FirstTriangle = 0, TriangleCount = 0;
     uint64 SourceId = 0;
 };
@@ -115,6 +126,7 @@ struct ReferenceJob final
     rhi::DeviceHandle Device;
     ReferenceCaptureDescription Description;
     DirectLight Lights[128];
+    EnvironmentData* EnvironmentOrNull = nullptr;
     math::Matrix4 ClipToWorld;
     math::RandomKey Key;
     ReferenceSceneData Scene;
@@ -128,6 +140,7 @@ struct ReferenceJob final
     usize FirstPixel = 0, PathCount = 0, QueryCount = 0;
     ~ReferenceJob() noexcept
     {
+        ReleaseEnvironment(EnvironmentOrNull);
         static_cast<void>(rhi::Destroy(Device, Batch));
         static_cast<void>(rhi::Destroy(Device, Scene.Native));
     }
@@ -203,10 +216,15 @@ ReferenceRay(math::Vector3 origin, math::Vector3 direction, float32 distance) no
 [[nodiscard]] rhi::RasterStatus
 TraceReferenceOracle(const ReferenceSceneData&, const rhi::RayInput&, rhi::RayResult&) noexcept;
 [[nodiscard]] math::Vector4 SampleReferenceTexture(const ReferenceInstance&, math::Vector2) noexcept;
+[[nodiscard]] math::Vector3 SampleReferenceEmission(const ReferenceInstance&, math::Vector2) noexcept;
 [[nodiscard]] math::Vector4 SampleReferenceSurfaceMap(const ReferenceInstance&, math::Vector2) noexcept;
-[[nodiscard]] math::Vector3
-ApplyReferenceNormal(const ReferenceTriangle&, const ReferenceSurfaceData&, math::Vector3, math::Vector3) noexcept;
-[[nodiscard]] bool ReferenceOpacity(const ReferenceInstance&, math::Vector2) noexcept;
+[[nodiscard]] math::Vector3 ApplyReferenceNormal(const ReferenceTriangle&,
+                                                 const ReferenceSurfaceData&,
+                                                 math::Vector3,
+                                                 math::Vector3,
+                                                 float32 = 0,
+                                                 float32 = 0) noexcept;
+[[nodiscard]] bool ReferenceOpacity(const ReferenceInstance&, math::Vector2, float32 = 1) noexcept;
 [[nodiscard]] rhi::RasterStatus PrepareReferenceCamera(ReferenceJob&) noexcept;
 [[nodiscard]] rhi::RasterStatus GenerateReferencePrimary(const ReferenceJob&, ReferencePath&, rhi::RayInput&) noexcept;
 [[nodiscard]] rhi::RasterStatus PrepareReferenceVertex(ReferenceJob&, ReferencePath&, const rhi::RayResult&) noexcept;

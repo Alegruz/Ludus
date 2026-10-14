@@ -321,7 +321,7 @@ struct CookedMesh final
         for (const uint32 placementIndex : planned.Placements)
         {
             if (cancelOrNull != nullptr && cancelOrNull->Requested != nullptr &&
-                cancelOrNull->Requested(cancelOrNull->Context) == true)
+                cancelOrNull->Requested(cancelOrNull->ContextOrNull) == true)
             {
                 return Status::Cancelled;
             }
@@ -548,7 +548,7 @@ struct ReportFacts final
     std::string_view EntryName;
     bool IsDryRun = false;
     bool IsCameraFramed = false;
-    const IrCamera* Camera = nullptr;
+    const IrCamera* CameraOrNull = nullptr;
     const Array<CookedTexture>* TexturesOrNull = nullptr;
     const Array<CookedMesh>* MeshesOrNull = nullptr;
 };
@@ -625,7 +625,8 @@ void WriteReport(const SceneIr& scene,
     json.WriteKey("source");
     json.WriteString(facts.IsCameraFramed == true ? "framed" : "scene");
     json.WriteKey("vertical_fov_degrees");
-    json.WriteFloat(static_cast<float64>(static_cast<float32>(math::RadiansToDegrees(facts.Camera->VerticalFov))));
+    json.WriteFloat(
+        static_cast<float64>(static_cast<float32>(math::RadiansToDegrees(facts.CameraOrNull->VerticalFov))));
     json.EndObject();
 
     json.WriteKey("environment");
@@ -956,7 +957,7 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
     facts.EntryName = slash == std::string_view::npos ? path : path.substr(slash + 1);
     facts.IsDryRun = options.IsDryRun;
     facts.IsCameraFramed = isFramed;
-    facts.Camera = &camera;
+    facts.CameraOrNull = &camera;
     facts.TexturesOrNull = options.IsDryRun == true ? nullptr : &textures;
     facts.MeshesOrNull = &meshes;
     if (status != Status::NotFound && status != Status::IoError)

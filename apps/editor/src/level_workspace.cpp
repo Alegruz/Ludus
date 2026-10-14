@@ -554,7 +554,7 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
     Operate_ = QThread::create(
         [this, kind, hasExpected, level, root, relative, from, entry, expectedSource, digest, catalog]() {
             EditorSceneProgress progress;
-            progress.Context = this;
+            progress.ContextOrNull = this;
             progress.Report = [](void* context, std::string_view stage) noexcept {
                 LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
                 const QString text = DescribeStage(stage);
@@ -573,7 +573,7 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
             };
             Cancellation cancel;
             cancel.Requested = &IsCancelRequested;
-            cancel.Context = &CancelRequested_;
+            cancel.ContextOrNull = &CancelRequested_;
             AssetOptions options;
             options.CancelOrNull = &cancel;
             options.SourceEntry = ToView(entry);

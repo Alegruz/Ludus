@@ -18,6 +18,7 @@ target_sources(
         BASE_DIRS
             include
         FILES
+            include/ludus/foundation/containers/borrowed_view.hpp
             include/ludus/foundation/containers/static_array.hpp
             include/ludus/foundation/containers/stable_sort.hpp
             include/ludus/foundation/containers/sort.hpp
@@ -52,6 +53,7 @@ if(LUDUS_BUILD_TESTS)
     target_sources(
         ludus_foundation_containers_tests
         PRIVATE
+            tests/borrowed_view_tests.cpp
             tests/static_array_tests.cpp
             tests/stable_sort_tests.cpp
             tests/sort_tests.cpp

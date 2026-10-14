@@ -129,8 +129,9 @@ private:
 
 [[nodiscard]] bool IsCancelled(const AssetOptions& options) noexcept
 {
-    const Cancellation* cancel = options.CancelOrNull;
-    return cancel != nullptr && cancel->Requested != nullptr && cancel->Requested(cancel->Context) == true;
+    const Cancellation* cancelOrNull = options.CancelOrNull;
+    return cancelOrNull != nullptr && cancelOrNull->Requested != nullptr &&
+           cancelOrNull->Requested(cancelOrNull->ContextOrNull) == true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1787,7 +1788,7 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
 {
     if (options.UuidsOrNull != nullptr && options.UuidsOrNull->Generate != nullptr)
     {
-        options.UuidsOrNull->Generate(options.UuidsOrNull->Context, outValue.Bytes);
+        options.UuidsOrNull->Generate(options.UuidsOrNull->ContextOrNull, outValue.Bytes);
         return true;
     }
     return MakeRandomUuid(outValue) == true
@@ -3016,12 +3017,12 @@ private:
     Array<uint8> catalogData;
     Array<uint8> levelData;
     String catalogPath;
-    const Digest* published = prepared.HasPublishedCatalog == true ? &prepared.PublishedCatalog : nullptr;
+    const Digest* publishedOrNull = prepared.HasPublishedCatalog == true ? &prepared.PublishedCatalog : nullptr;
     if (writer.Enter(root, LockMode::Exclusive, inoutFailure) == false ||
         ValidateImport(root,
                        prepared.Level,
                        prepared.Catalog,
-                       published,
+                       publishedOrNull,
                        source,
                        commitOptions,
                        catalogData,
@@ -3352,14 +3353,15 @@ bool ImportScene(std::string_view root,
     Failure failure(outError);
     Document document;
     PreparedImport prepared;
-    const Digest* published = nullptr;
+    const Digest* publishedOrNull = nullptr;
     if (ParseInput(level, document, failure) == false ||
         PrepareImportDocuments(root, source, document, options, prepared, failure) == false)
     {
         return false;
     }
-    published = prepared.HasPublishedCatalog == true ? &prepared.PublishedCatalog : nullptr;
-    return CommitImportDocuments(root, prepared.Level, prepared.Catalog, published, source, options, failure) == true &&
+    publishedOrNull = prepared.HasPublishedCatalog == true ? &prepared.PublishedCatalog : nullptr;
+    return CommitImportDocuments(root, prepared.Level, prepared.Catalog, publishedOrNull, source, options, failure) ==
+               true &&
            WriteCanonical(prepared.Level.Tree, prepared.Level.Root, outLevel, failure) == true;
 }
 
@@ -3455,10 +3457,10 @@ namespace
 {
 void ReportStage(const EditorSceneRequest& request, std::string_view stage) noexcept
 {
-    const EditorSceneProgress* progress = request.ProgressOrNull;
-    if (progress != nullptr && progress->Report != nullptr)
+    const EditorSceneProgress* progressOrNull = request.ProgressOrNull;
+    if (progressOrNull != nullptr && progressOrNull->Report != nullptr)
     {
-        progress->Report(progress->Context, stage);
+        progressOrNull->Report(progressOrNull->ContextOrNull, stage);
     }
 }
 

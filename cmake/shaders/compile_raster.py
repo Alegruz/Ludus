@@ -10,6 +10,7 @@ import struct
 # Reflect each target independently. No cross-target CPU packing is inferred.
 # Raster rejects storage; compute accepts bounded structured buffers. Both reject
 # resource arrays, extra groups and unsupported inputs.
+# Must match rhi::RASTER_BINDING_COUNT in profile.h; regression-checked.
 RASTER_BINDING_COUNT = 16
 
 def uniform_shape(value):

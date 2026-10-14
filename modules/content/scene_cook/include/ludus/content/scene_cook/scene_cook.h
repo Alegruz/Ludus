@@ -26,7 +26,7 @@ struct Cancellation final
     /// Returns true when the cook should stop; must be thread-safe for the caller.
     bool (*Requested)(void* context) noexcept = nullptr;
     /// Opaque pointer passed back to Requested.
-    void* Context = nullptr;
+    void* ContextOrNull = nullptr;
 };
 
 /// @brief Failure description with the reference converter's message text.

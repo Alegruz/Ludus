@@ -62,17 +62,17 @@ uint Choose(uint p, uint s, uint d, uint count)
 }
 float3 PositionWorld(uint t, float2 uv)
 {
-    uint b = t * 10;
+    uint b = t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS;
     return SceneValue(b).xyz * (1 - uv.x - uv.y) + SceneValue(b + 1).xyz * uv.x + SceneValue(b + 2).xyz * uv.y;
 }
 float2 TexcoordUv(uint t, float2 uv)
 {
-    uint b = t * 10;
+    uint b = t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS;
     return SceneValue(b + 6).xy * (1 - uv.x - uv.y) + SceneValue(b + 6).zw * uv.x + SceneValue(b + 7).xy * uv.y;
 }
 float4 Surface(uint t, uint field)
 {
-    uint i = asuint(SceneValue(t * 10).w);
+    uint i = asuint(SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS).w);
     return SceneValue(Offsets.w + i * SurfaceLayout.x + field);
 }
 int Address(int i, int extent, bool repeat)
@@ -82,10 +82,10 @@ int Address(int i, int extent, bool repeat)
     int v = i % extent;
     return v < 0 ? v + extent : v;
 }
-float4 Texel(uint t, int x, int y, bool isSurfaceMap)
+float4 Texel(uint t, int x, int y, uint map)
 {
-    uint4 layout = asuint(Surface(t, isSurfaceMap ? 7 : 5));
-    uint2 size = isSurfaceMap ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
+    uint4 layout = asuint(Surface(t, map == 2 ? 8 : map == 1 ? 7 : 5));
+    uint2 size = map == 2 ? asuint(Surface(t, 8).zw) : map == 1 ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
     uint flags = layout.y;
     x = Address(x, int(size.x), (flags & 2) != 0);
     y = Address(y, int(size.y), (flags & 4) != 0);
@@ -96,24 +96,24 @@ float4 Texel(uint t, int x, int y, bool isSurfaceMap)
         c.xyz = select(c.xyz > .04045, pow((c.xyz + .055) / 1.055, 2.4), c.xyz / 12.92);
     return c;
 }
-float4 Texture(uint t, float2 uv, bool isSurfaceMap = false)
+float4 Texture(uint t, float2 uv, uint map = 0)
 {
-    if (asuint(Surface(t, isSurfaceMap ? 6 : 4).w) == 0)
+    if ((map == 2 ? asuint(Surface(t, 8).z) : asuint(Surface(t, map == 1 ? 6 : 4).w)) == 0)
         return float4(1);
     float4 transform = Surface(t, 3);
     uv = uv * transform.xy + transform.zw;
-    uint flags = asuint(Surface(t, isSurfaceMap ? 7 : 5).y);
-    uint2 size = isSurfaceMap ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
+    uint flags = asuint(Surface(t, map == 2 ? 8 : map == 1 ? 7 : 5).y);
+    uint2 size = map == 2 ? asuint(Surface(t, 8).zw) : map == 1 ? asuint(Surface(t, 6).yz) : asuint(Surface(t, 1).zw);
     uv.x = (flags & 2) != 0 ? frac(uv.x) : saturate(uv.x);
     uv.y = (flags & 4) != 0 ? frac(uv.y) : saturate(uv.y);
     float2 p = uv * float2(size);
     if ((flags & 1) == 0)
-        return Texel(t, int(floor(p.x)), int(floor(p.y)), isSurfaceMap);
+        return Texel(t, int(floor(p.x)), int(floor(p.y)), map);
     p -= .5;
     int2 cell = int2(floor(p));
     float2 f = frac(p);
-    return lerp(lerp(Texel(t, cell.x, cell.y, isSurfaceMap), Texel(t, cell.x + 1, cell.y, isSurfaceMap), f.x),
-                lerp(Texel(t, cell.x, cell.y + 1, isSurfaceMap), Texel(t, cell.x + 1, cell.y + 1, isSurfaceMap), f.x),
+    return lerp(lerp(Texel(t, cell.x, cell.y, map), Texel(t, cell.x + 1, cell.y, map), f.x),
+                lerp(Texel(t, cell.x, cell.y + 1, map), Texel(t, cell.x + 1, cell.y + 1, map), f.x),
                 f.y);
 }
 struct Hit
@@ -146,6 +146,7 @@ bool Box(float3 originWorld, float3 directionWorld, float nearDistanceWorld, flo
     }
     return true;
 }
+float4 InterpolateTriangle(uint triangle, uint first, in float2 barycentric);
 bool Intersect(uint t,
                float3 originWorld,
                float3 directionWorld,
@@ -167,9 +168,9 @@ bool Intersect(uint t,
         x = y;
         y = swap;
     }
-    float3 a = SceneValue(t * 10).xyz - originWorld;
-    float3 b = SceneValue(t * 10 + 1).xyz - originWorld;
-    float3 c = SceneValue(t * 10 + 2).xyz - originWorld;
+    float3 a = SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS).xyz - originWorld;
+    float3 b = SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 1).xyz - originWorld;
+    float3 c = SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 2).xyz - originWorld;
     float sx = directionWorld[x] / directionWorld[z];
     float sy = directionWorld[y] / directionWorld[z];
     float sz = 1 / directionWorld[z];
@@ -191,7 +192,9 @@ bool Intersect(uint t,
     outBarycentric = float2(e1, e2) / determinant;
     if (outDistanceWorld < nearDistanceWorld || outDistanceWorld > farDistanceWorld)
         return false;
-    if (asuint(Surface(t, 5).z) != 0 && Texture(t, TexcoordUv(t, outBarycentric)).w * Surface(t, 2).w < Surface(t, 1).y)
+    if (asuint(Surface(t, 5).z) != 0 &&
+        Texture(t, TexcoordUv(t, outBarycentric)).w * Surface(t, 2).w * InterpolateTriangle(t, 13, outBarycentric).w <
+            Surface(t, 1).y)
         return false;
     return true;
 }
@@ -253,8 +256,8 @@ Hit Trace(float3 originWorld,
 // representable-neighbor offset convention from FoundationMath, not RTX bounds.
 float3 OffsetPositionWorld(float3 positionWorld, uint t, float3 directionWorld)
 {
-    float3 normalWorld = SceneValue(t * 10 + 8).xyz;
-    float3 positionErrorWorld = SceneValue(t * 10 + 9).xyz;
+    float3 normalWorld = SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 8).xyz;
+    float3 positionErrorWorld = SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 9).xyz;
     float3 offsetWorld =
         normalWorld * dot(abs(normalWorld), positionErrorWorld) * (dot(normalWorld, directionWorld) < 0 ? -1 : 1);
     float3 offsetPositionWorld = positionWorld + offsetWorld;
@@ -286,8 +289,10 @@ float AreaPdf(uint t, float3 fromPositionWorld, float3 toPositionWorld, uint lig
     if (lightCount == 0)
         return 0;
     float3 offsetWorld = toPositionWorld - fromPositionWorld;
-    float cosine = abs(dot(SceneValue(t * 10 + 8).xyz, -NormalizeOrZero(offsetWorld)));
-    return cosine > 0 ? dot(offsetWorld, offsetWorld) / (float(lightCount) * SceneValue(t * 10 + 1).w * cosine) : 0;
+    float cosine = abs(dot(SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 8).xyz, -NormalizeOrZero(offsetWorld)));
+    return cosine > 0 ? dot(offsetWorld, offsetWorld) /
+                            (float(lightCount) * SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 1).w * cosine)
+                      : 0;
 }
 void Evaluate(float3 color,
               float metallic,
@@ -352,6 +357,74 @@ float3 SampleBsdf(float3 normalWorld, float3 viewDirectionWorld, float roughness
     }
     return NormalizeOrZero(x * local.x + y * local.y + normalWorld * local.z);
 }
+float4 InterpolateTriangle(uint triangle, uint first, in float2 barycentric)
+{
+    return SceneValue(triangle * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + first) * (1 - barycentric.x - barycentric.y) +
+           SceneValue(triangle * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + first + 1) * barycentric.x +
+           SceneValue(triangle * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + first + 2) * barycentric.y;
+}
+float2 ComputeEnvironmentCoordinates(in float3 directionWorld)
+{
+    float longitude = atan2(directionWorld.z, directionWorld.x) / (2 * PI);
+    return float2(longitude - floor(longitude), atan2(length(directionWorld.xz), directionWorld.y) / PI);
+}
+float ComputeEnvironmentSolidAngle(uint row, uint width, uint height)
+{
+    // Subtractive cosine loses FP32 precision near poles; use the sine identity.
+    return (2 * PI / float(width)) * 2 * sin(PI * (float(row) + .5) / float(height)) * sin(PI / (2 * float(height)));
+}
+float4 EvaluateEnvironmentWorld(in float3 directionWorld)
+{
+    if (SurfaceLayout.w == 0)
+        return float4(Environment.xyz, 1 / (4 * PI));
+    uint width = asuint(SceneValue(SurfaceLayout.w - 1).x);
+    uint height = asuint(SceneValue(SurfaceLayout.w - 1).y);
+    uint2 cell =
+        min(uint2(ComputeEnvironmentCoordinates(directionWorld) * float2(width, height)), uint2(width - 1, height - 1));
+    uint pixel = cell.y * width + cell.x;
+    float4 value = SceneValue(SurfaceLayout.w + pixel);
+    float previous = pixel == 0 ? 0 : SceneValue(SurfaceLayout.w + pixel - 1).w;
+    value.w = (value.w - previous) / ComputeEnvironmentSolidAngle(cell.y, width, height);
+    return value;
+}
+void SampleEnvironmentWorld(float selector,
+                            float latitude,
+                            out float3 outDirectionWorld,
+                            out float3 outRadiance,
+                            out float outPdf)
+{
+    if (SurfaceLayout.w == 0)
+    {
+        float cosine = 1 - 2 * selector;
+        float radius = sqrt(max(0, 1 - cosine * cosine));
+        outDirectionWorld = float3(radius * cos(2 * PI * latitude), radius * sin(2 * PI * latitude), cosine);
+        outRadiance = Environment.xyz;
+        outPdf = 1 / (4 * PI);
+        return;
+    }
+    uint width = asuint(SceneValue(SurfaceLayout.w - 1).x);
+    uint height = asuint(SceneValue(SurfaceLayout.w - 1).y);
+    uint low = 0;
+    uint high = width * height - 1;
+    while (low < high)
+    {
+        uint middle = low + (high - low) / 2;
+        if (SceneValue(SurfaceLayout.w + middle).w <= selector)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    float4 value = SceneValue(SurfaceLayout.w + low);
+    float previous = low == 0 ? 0 : SceneValue(SurfaceLayout.w + low - 1).w;
+    float probability = value.w - previous;
+    float longitude = (float(low % width) + (selector - previous) / probability) * (2 * PI / float(width));
+    float row = float(low / width);
+    float cosine = lerp(cos(PI * row / float(height)), cos(PI * (row + 1) / float(height)), latitude);
+    float radius = sqrt(max(0, 1 - cosine * cosine));
+    outDirectionWorld = float3(radius * cos(longitude), cosine, radius * sin(longitude));
+    outRadiance = value.xyz;
+    outPdf = probability / ComputeEnvironmentSolidAngle(low / width, width, height);
+}
 float3 Integrate(uint pixel, uint sample)
 {
     if (SurfaceLayout.x != LUDUS_GPU_PREVIEW_SURFACE_WORDS || SurfaceLayout.z != LUDUS_GPU_PREVIEW_KERNEL_VERSION)
@@ -386,7 +459,7 @@ float3 Integrate(uint pixel, uint sample)
     float3 throughput = 1;
     float3 previousPositionWorld = 0;
     float previousPdf = 0;
-    uint lights = Counts.w + Counts.z + (HasPositiveComponent(Environment.xyz) ? 1u : 0u);
+    uint lights = Counts.w + Counts.z + ((SurfaceLayout.w != 0 || HasPositiveComponent(Environment.xyz)) ? 1u : 0u);
     for (uint depth = 0; depth <= Dimensions.z; ++depth)
     {
         Hit hit = Trace(originWorld, directionWorld, minimum, maximum);
@@ -394,41 +467,62 @@ float3 Integrate(uint pixel, uint sample)
             return float3(-1);
         if (hit.Triangle == 0xffffffff)
         {
-            float w = depth == 0 ? 1 : PowerWeight(previousPdf, lights > 0 ? 1 / (float(lights) * 4 * PI) : 0);
-            radiance += throughput * Environment.xyz * w;
+            float4 environment = EvaluateEnvironmentWorld(directionWorld);
+            float w = depth == 0 ? 1 : PowerWeight(previousPdf, lights > 0 ? environment.w / float(lights) : 0);
+            radiance += throughput * environment.xyz * w;
             break;
         }
         uint t = hit.Triangle;
         float3 positionWorld = PositionWorld(t, hit.Barycentric);
-        float3 geometricNormalWorld = SceneValue(t * 10 + 8).xyz;
+        float3 geometricNormalWorld = SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 8).xyz;
         float3 viewDirectionWorld = -directionWorld;
-        float3 emission = Surface(t, 4).xyz;
+        float3 emission = Surface(t, 4).xyz * Texture(t, TexcoordUv(t, hit.Barycentric), 2).xyz;
         radiance +=
             throughput * emission *
             (depth == 0 ? 1 : PowerWeight(previousPdf, AreaPdf(t, previousPositionWorld, positionWorld, lights)));
         if (depth >= Dimensions.z || dot(geometricNormalWorld, viewDirectionWorld) <= 0)
             break;
-        float3 normalWorld = NormalizeOrZero(SceneValue(t * 10 + 3).xyz * (1 - hit.Barycentric.x - hit.Barycentric.y) +
-                                             SceneValue(t * 10 + 4).xyz * hit.Barycentric.x +
-                                             SceneValue(t * 10 + 5).xyz * hit.Barycentric.y);
+        float3 normalWorld = NormalizeOrZero(
+            SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 3).xyz * (1 - hit.Barycentric.x - hit.Barycentric.y) +
+            SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 4).xyz * hit.Barycentric.x +
+            SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 5).xyz * hit.Barycentric.y);
         float3 color = saturate(Surface(t, 0).xyz * Texture(t, TexcoordUv(t, hit.Barycentric)).xyz);
+        if (asuint(Surface(t, 7).z) != 0)
+            color *= InterpolateTriangle(t, 13, hit.Barycentric).xyz;
         float metallic = Surface(t, 0).w;
         float roughness = Surface(t, 1).x;
         if (asuint(Surface(t, 6).w) != 0)
         {
-            SurfaceParameters parameters = DecodeSurfaceParameters(Texture(t, TexcoordUv(t, hit.Barycentric), true),
+            SurfaceParameters parameters = DecodeSurfaceParameters(Texture(t, TexcoordUv(t, hit.Barycentric), 1),
                                                                    metallic,
                                                                    roughness,
                                                                    Surface(t, 6).x);
             metallic = parameters.Metallic;
             roughness = parameters.Roughness;
             float2 uvScale = Surface(t, 3).xy;
-            normalWorld = ApplyNormalWorld(normalWorld,
-                                           parameters.NormalTangent,
-                                           SceneValue(t * 10 + 1).xyz - SceneValue(t * 10).xyz,
-                                           SceneValue(t * 10 + 2).xyz - SceneValue(t * 10).xyz,
-                                           (SceneValue(t * 10 + 6).zw - SceneValue(t * 10 + 6).xy) * uvScale,
-                                           (SceneValue(t * 10 + 7).xy - SceneValue(t * 10 + 6).xy) * uvScale);
+            float4 authoredTangentWorld = InterpolateTriangle(t, 10, hit.Barycentric);
+            if (asuint(Surface(t, 7).z) != 0 && abs(authoredTangentWorld.w) > .5)
+            {
+                float3 tangentWorld = NormalizeOrZero(authoredTangentWorld.xyz -
+                                                      normalWorld * dot(normalWorld, authoredTangentWorld.xyz));
+                normalWorld = NormalizeOrZero(tangentWorld * parameters.NormalTangent.x +
+                                              cross(normalWorld, tangentWorld) * (authoredTangentWorld.w < 0 ? -1 : 1) *
+                                                  parameters.NormalTangent.y +
+                                              normalWorld * parameters.NormalTangent.z);
+            }
+            else
+                normalWorld = ApplyNormalWorld(normalWorld,
+                                               parameters.NormalTangent,
+                                               SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 1).xyz -
+                                                   SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS).xyz,
+                                               SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 2).xyz -
+                                                   SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS).xyz,
+                                               (SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 6).zw -
+                                                SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 6).xy) *
+                                                   uvScale,
+                                               (SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 7).xy -
+                                                SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 6).xy) *
+                                                   uvScale);
         }
         uint dimension = 2 + depth * 8;
         if (lights > 0)
@@ -488,19 +582,20 @@ float3 Integrate(uint pixel, uint sample)
                 range = length(offsetWorld);
                 lightDirectionWorld = NormalizeOrZero(offsetWorld);
                 pdf = AreaPdf(emitter, positionWorld, lightPositionWorld, lights);
-                if (range <= Options.x &&
-                    (asuint(Surface(emitter, 5).z) == 0 ||
-                     Texture(emitter, TexcoordUv(emitter, uv)).w * Surface(emitter, 2).w >= Surface(emitter, 1).y))
-                    lightColor = Surface(emitter, 4).xyz;
+                if (range <= Options.x && (asuint(Surface(emitter, 5).z) == 0 ||
+                                           Texture(emitter, TexcoordUv(emitter, uv)).w * Surface(emitter, 2).w *
+                                                   InterpolateTriangle(emitter, 13, uv).w >=
+                                               Surface(emitter, 1).y))
+                    lightColor = Surface(emitter, 4).xyz * Texture(emitter, TexcoordUv(emitter, uv), 2).xyz;
             }
             else
             {
-                float z = 1 - 2 * Random01(pixel, sample, dimension + 1);
-                float r = sqrt(max(0, 1 - z * z));
-                float a = 2 * PI * Random01(pixel, sample, dimension + 2);
-                lightDirectionWorld = float3(r * cos(a), r * sin(a), z);
-                pdf = 1 / (float(lights) * 4 * PI);
-                lightColor = Environment.xyz;
+                SampleEnvironmentWorld(Random01(pixel, sample, dimension + 1),
+                                       Random01(pixel, sample, dimension + 2),
+                                       lightDirectionWorld,
+                                       lightColor,
+                                       pdf);
+                pdf /= float(lights);
             }
             float3 value;
             float bsdfPdf;

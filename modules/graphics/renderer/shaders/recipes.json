@@ -77,5 +77,25 @@
   "renderer_gpu_preview": {
     "source": "renderer_gpu_preview.slang",
     "compute": "ComputeMain"
+  },
+  "renderer_authored": {
+    "source": "renderer_authored.slang",
+    "vertex": "VertexMain",
+    "fragment": "FragmentMain"
+  },
+  "renderer_authored_shadow": {
+    "source": "renderer_authored.slang",
+    "vertex": "VertexMain",
+    "fragment": "ShadowMain"
+  },
+  "renderer_clustered_authored": {
+    "source": "renderer_clustered_authored.slang",
+    "vertex": "VertexMain",
+    "fragment": "FragmentMain"
+  },
+  "renderer_clustered_authored_shadow": {
+    "source": "renderer_clustered_authored.slang",
+    "vertex": "VertexMain",
+    "fragment": "ShadowMain"
   }
 }

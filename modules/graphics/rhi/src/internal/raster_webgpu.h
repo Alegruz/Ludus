@@ -211,7 +211,7 @@ RasterCapabilities RasterLimits() noexcept
     WGPULimits limits = WGPU_LIMITS_INIT;
     if (gDevice == nullptr || wgpuDeviceGetLimits(gDevice, &limits) != WGPUStatus_Success ||
         limits.maxVertexBuffers < 2 || limits.maxVertexAttributes < 8 || limits.maxVertexBufferArrayStride < 256 ||
-        limits.maxBindingsPerBindGroup < 8 || limits.maxUniformBuffersPerShaderStage < 8 ||
+        limits.maxBindingsPerBindGroup < internal::RASTER_BINDINGS || limits.maxUniformBuffersPerShaderStage < 8 ||
         limits.maxSampledTexturesPerShaderStage < 8 || limits.maxSamplersPerShaderStage < 8)
     {
         return {};

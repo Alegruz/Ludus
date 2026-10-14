@@ -1991,3 +1991,123 @@ targets or buffer capacities without the supported workload and measured budget.
 Thanks to these authors and organizations. Future implementation must cite the
 specific consulted algorithm/section beside the code, preserve notices and explain
 departures; this architecture's bibliography does not replace code attribution.
+
+## Authored material inputs and HDR environments
+
+The authored material recipes (`renderer_authored` and
+`renderer_clustered_authored`, with matching shadow recipes) add mesh tangent
+frames, linear vertex RGBA, a second material UV channel, textured emission and
+HDR image-based lighting. Select `LitMaterialDescription::AreAuthoredInputsEnabled`
+explicitly; older recipes reject the requested extension. `MaterialUvSet` selects
+UV0 or UV1 for the base, packed surface and emission maps. These maps share their
+UV scale/offset, sampler and LOD; independently transformed inputs require an
+explicit cook/rebake. Bake UVs remain separate. Vertex color multiplies base RGBA,
+including alpha-test coverage, but does not multiply emission.
+
+`MeshDescription::Tangents` contains XYZ and handedness W. Creation orthogonalizes
+and normalizes finite authored XYZ against the supplied normal. W must be +1 or
+-1; W=0 explicitly declares an unavailable vertex tangent. Mirrored object
+transforms adjust handedness. Missing/unavailable tangents use the existing
+UV-derived fallback; Ludus does not regenerate or claim MikkTSpace tangents.
+The authored recipes derive the inverse-transpose normal direction from the
+world matrix, using a positive common rescaling before cofactors. This frees
+three attribute locations for tangent, color and UV1 while preserving the
+16-attribute interface. The common copied vertex record is now 80 bytes; legacy
+recipes keep their original attribute offsets and semantics. Account for this
+larger record when sizing mesh buffers.
+
+The portable RHI binding address space now has 16 slots, shared by its public
+metadata/dynamic-offset arrays, runtime and offline shader tooling. Physical
+stage/descriptor limits remain separate admission constraints. Authored forward
+uses ten bindings; clustered uses eleven, including independent environment
+texture/sampler and emission texture. Baked lighting, shadow atlases and clustered
+light lists coexist with HDR lighting. Rebuild SDK consumers after this public
+metadata layout change.
+
+`EnvironmentMap` is a move-only owner initialized from borrowed, tightly packed
+linear HDR `Vector4` pixels. +Y is the north pole, longitude zero is +X and
+increasing longitude turns toward +Z. RGB is finite radiance in [0,1e12]; alpha
+is ignored. Width/height are bounded at 4096 each. Initialization copies the
+source, builds a luminance/solid-angle CDF, integrates nine diffuse SH coefficients
+with binary64 accumulation, and creates a deterministic GGX-filtered RGBA16F
+latitude/longitude mip chain. Default filtering uses width 128 and 128 samples;
+quality and a positive CPU byte budget are caller inputs. Preparation is cold
+setup work, never part of a draw. Unsupported HDR devices reject explicitly.
+
+The raster texture stores radiance divided by a recorded scale when the source
+exceeds binary16's range, and restores that scale during sampling. This is storage
+normalization, not exposure or clipping of the original source. Diffuse uses
+cosine-convolved SH; specular uses roughness-selected prefiltered mips and the
+analytic DFG approximation documented by Filament. These are finite-resolution,
+single-scattering approximations, without local-probe visibility or energy
+compensation. Environment lighting replaces the constant environment terms;
+a valid bake still supplies diffuse irradiance. Background/sky composition is a
+separate caller task.
+
+```cpp
+EnvironmentMap environment;
+EnvironmentDescription source;
+source.Pixels = hdrPixels;
+source.Width = hdrWidth;
+source.Height = hdrHeight;
+source.CpuByteBudget = environmentPreparationBudget;
+// Initialize returns Ready/Pending with ownership; other statuses preserve empty.
+const rhi::RasterStatus status = environment.Initialize(device, source);
+// Poll GetStatus until Ready before creating a material/capture.
+LitMaterialDescription material;
+material.AreAuthoredInputsEnabled = true;
+material.Environment = &environment;
+material.EmissionMap = emissionTexture;
+```
+
+All map operations use the device owner thread. Initialize, Reset, moves and
+destruction require a closed frame. Accepted materials retain the immutable map
+and sampled resources after its public owner resets; keep the device alive until
+all retained uses finish. The map's source/CDF CPU storage has its own explicit
+budget, separate from renderer/reference job budgets.
+
+Reference captures select `ReferenceCaptureDescription::EnvironmentTexture`
+explicitly. They evaluate the original source radiance and its importance PDF,
+including miss and next-event MIS terms; raster SH/prefiltered mips are never added
+to transport. CPU sampling uses exact row solid angles and a binary64 CDF;
+GPU packing stores the normalized CDF in binary32 and evaluates the corresponding
+quantized density. Both use piecewise-constant source radiance. Black maps have a
+valid zero-radiance distribution. Tangents, vertex color, routed UVs and emission
+maps are copied/fingerprinted with the integral. Reference profile and compute
+kernel ABI are version **3**; existing LUHDR container/sampler versions stay one.
+Historical evidence retains its original profile identity.
+
+CPU oracle and compute preview implement authored masked coverage. Native query
+capture returns `Unsupported` for authored masked materials because the current
+native opacity interface cannot evaluate routed UVs and vertex alpha. Other
+native reflection inputs use the retained authored geometry. Dense-scene native
+query numerical qualification remains a separate open item.
+
+The implementation adapts Romain Guy and Mathias Agopian's *Physically Based
+Rendering in Filament*, sections [5.3](https://google.github.io/filament/main/filament.html#lighting/imagebasedlights)
+and [9.6](https://google.github.io/filament/main/filament.html#annex/sphericalharmonics),
+including its documented Lazarov DFG approximation, and Matt Pharr, Wenzel Jakob
+and Greg Humphreys's *Physically Based Rendering*, fourth edition,
+[Infinite Area Lights](https://pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights).
+The adopted departures are latitude/longitude prefilter storage, exact row solid
+angles, a flat CDF and the explicit finite RGB profile above. See
+[full static resource acceptance](../examples/reference-scene.md#full-static-sponza-and-suntemple-acceptance)
+for assets, commands and limitations.
+
+### Authored input view and naming contract
+
+`MeshDescription::Tangents`, `Colors` and `MaterialTexcoords1` use Foundation's
+[`BorrowedView<const T>`](container-systems.md#borrowed-contiguous-views).
+Each channel is empty (the documented fallback) or has exactly `VertexCount`
+elements. `CreateMesh` rejects invalid or mismatched views before reading and
+copies accepted data; the views do not extend caller storage lifetime. For an
+array use `geometry.Colors = colors`; for dynamic storage use
+`geometry.Colors = {colors.GetData(), colors.GetSize()}`.
+
+Optional environment owner pointers are named `EnvironmentOrNull` for lit
+materials and `EnvironmentTextureOrNull` for reference captures. Environment
+source pixels are `PixelsOrNull`; successful initialization still requires a
+nonnull pointer with the declared width/height extent. Move parameters are
+named `other`, because they transfer ownership rather than output through an
+lvalue reference. Shared/weak smart pointers are not currently a Foundation
+facility; synchronous mesh borrowing does not require shared ownership.

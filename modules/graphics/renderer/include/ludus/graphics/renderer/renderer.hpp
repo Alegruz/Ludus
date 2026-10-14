@@ -3,6 +3,7 @@
 #include <ludus/foundation/base/types.h>
 
 #include <ludus/foundation/base/pointer.hpp>
+#include <ludus/foundation/containers/borrowed_view.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
@@ -83,6 +84,8 @@ struct FlatMaterial final
     ludus::foundation::math::Vector4 Color{1, 0, 1, 1};
 };
 /// Borrowed static position/optional-UV triangle-list geometry, copied by CreateMesh.
+/// Authored views must be empty or contain exactly VertexCount elements; creation validates
+/// their extents before reading and copies them without retaining the caller's storage.
 struct MeshDescription final
 {
     /// Finite mesh-local XYZ positions, tightly packed Vector3 records.
@@ -100,6 +103,23 @@ struct MeshDescription final
     const ludus::foundation::math::Vector3* Normals = nullptr;
     /// Optional finite bake-chart UVs, exactly VertexCount records; null uses Texcoords.
     const ludus::foundation::math::Vector2* BakeTexcoords = nullptr;
+    /// Optional authored tangent XYZ and handedness W (+1/-1), one per vertex.
+    /// Requires normals; finite nonzero XYZ is normalized/orthogonalized on copy.
+    /// W=0 explicitly marks an unavailable vertex tangent and selects UV fallback.
+    /// An empty view keeps the UV-derived frame. Mirrored object transforms adjust handedness.
+    // Explicit default preserves partial aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    ludus::foundation::BorrowedView<const ludus::foundation::math::Vector4> Tangents{};
+    /// Optional linear RGBA multiplier [0,1], one per vertex; an empty view supplies white.
+    /// Used by authored material programs, including alpha acceptance.
+    // Explicit default preserves partial aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    ludus::foundation::BorrowedView<const ludus::foundation::math::Vector4> Colors{};
+    /// Optional second material UV set, one per vertex; an empty view copies Texcoords.
+    /// Independent of BakeTexcoords; authored material programs select UV0 or UV1.
+    // Explicit default preserves partial aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    ludus::foundation::BorrowedView<const ludus::foundation::math::Vector2> MaterialTexcoords1{};
 };
 /// Ordinary scene values; renderer has no ECS, gameplay camera or UI dependency.
 struct SceneItem final
@@ -325,7 +345,7 @@ public:
     /// overlay items are excluded. No
     /// baked/atlas lighting, transmission or deformation. Target <=4096, depth <=8,
     /// pixel count <=2^24; negotiated storage limits can be tighter.
-    /// Emissive triangles and constant environment only; analytic lights reject.
+    /// RGB emissive triangles, up to 128 analytic lights and constant/HDR environment.
     /// Ready/Pending publish ownership into a null output; rejection preserves it. All caller
     /// owners may detach after success. Changing camera/content/exposure creates a
     /// new job and restarts accumulation. Setup can allocate/upload; never shades.

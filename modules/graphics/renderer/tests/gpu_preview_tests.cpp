@@ -1,4 +1,6 @@
 #include "l6_scene.h"
+#include "renderer_authored.h"
+#include "renderer_authored_shadow.h"
 #include "renderer_clustered_surface.h"
 #include "renderer_clustered_surface_shadow.h"
 #include "renderer_composite.h"
@@ -544,4 +546,154 @@ TEST_CASE("Surface maps and authored punctual lights agree across raster and GPU
     REQUIRE(renderer.Release(clusteredProgram) == S::Ready);
     REQUIRE(renderer.Release(program) == S::Ready);
     renderer.Reset();
+}
+
+TEST_CASE("CPU and GPU reference transport retained HDR source radiance and authored vertex color",
+          "[renderer][gpu][authored]")
+{
+    rhi::Shutdown();
+    struct Guard final
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    description.Required.Compute = true;
+    REQUIRE(rhi::CreateDevice({},
+                              {
+                                  .Width = 8,
+                                  .Height = 8,
+                              },
+                              description,
+                              device,
+                              surface) == rhi::DeviceStatus::Ready);
+    rr::Renderer renderer;
+    REQUIRE(renderer.Initialize(device, shaders::renderer_flat::Vertex(), shaders::renderer_flat::Fragment()) ==
+            S::Ready);
+    REQUIRE(renderer.EnableGpuPreview(shaders::renderer_gpu_preview::Compute(),
+                                      shaders::renderer_gpu_preview_image::Vertex(),
+                                      shaders::renderer_gpu_preview_image::Fragment(),
+                                      {usize{64} * 1024 * 1024, usize{64} * 1024 * 1024, 1}) == S::Ready);
+    REQUIRE(renderer.InitializeViews(shaders::renderer_composite::Vertex(), shaders::renderer_composite::Fragment()) ==
+            S::Ready);
+    REQUIRE(renderer.InitializeLighting(shaders::renderer_output::Vertex(),
+                                        shaders::renderer_output::Fragment(),
+                                        shaders::renderer_shadow::Fragment()) == S::Ready);
+    rr::MaterialProgram program;
+    S status = renderer.PrewarmLitProgram(shaders::renderer_authored::Vertex(),
+                                          shaders::renderer_authored::Fragment(),
+                                          shaders::renderer_authored_shadow::Fragment(),
+                                          program);
+    const uint64 setupStart = time::NowTicks();
+    while (status == S::Pending && time::NowTicks() - setupStart < 10 * time::NANOSECONDS_PER_SECOND)
+    {
+        status = renderer.GetStatus(program);
+    }
+    REQUIRE(status == S::Ready);
+    const math::Vector3 positions[]{{-1, -1, .5F}, {1, -1, .5F}, {1, 1, .5F}, {-1, 1, .5F}};
+    const math::Vector3 normals[]{{0, 0, 1}, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    const math::Vector4 colors[]{{.25F, 1, .5F, 1}, {.25F, 1, .5F, 1}, {.25F, 1, .5F, 1}, {.25F, 1, .5F, 1}};
+    const uint32 indices[]{0, 1, 2, 0, 2, 3};
+    rr::MeshDescription geometry{positions, 4, indices, 6};
+    geometry.Normals = normals;
+    geometry.Colors = colors;
+    rr::Mesh mesh;
+    REQUIRE(renderer.CreateMesh(geometry, mesh) == S::Ready);
+    rr::LitMaterialDescription material;
+    material.AreAuthoredInputsEnabled = true;
+    material.Roughness = 1;
+    rr::MaterialVersion version;
+    rr::LightSelection selected;
+    REQUIRE(renderer.CreateLitMaterial(program, material, version, selected) == S::Ready);
+    rr::SceneItem item;
+    item.Geometry = mesh;
+    item.Surface = version;
+    item.SourceId = 1;
+    rr::Snapshot snapshot;
+    REQUIRE(renderer.CreateSnapshot(&item, 1, snapshot) == S::Ready);
+    constexpr usize ENVIRONMENT_PIXELS = usize{32} * 16;
+    math::Vector4 pixels[ENVIRONMENT_PIXELS];
+    for (math::Vector4& pixel : pixels)
+    {
+        pixel = {.02F, .02F, .02F, 1};
+    }
+    pixels[4 * 32 + 9] = {64, 8, 2, 1};
+    rr::EnvironmentMap environment;
+    rr::EnvironmentDescription hdr;
+    hdr.PixelsOrNull = pixels;
+    hdr.Width = 32;
+    hdr.Height = 16;
+    hdr.FilterWidth = 16;
+    hdr.FilterSamples = 16;
+    hdr.CpuByteBudget = usize{1024} * 1024;
+    status = environment.Initialize(device, hdr);
+    const uint64 environmentStart = time::NowTicks();
+    while (status == S::Pending && time::NowTicks() - environmentStart < 10 * time::NANOSECONDS_PER_SECOND)
+    {
+        status = environment.GetStatus();
+    }
+    REQUIRE(status == S::Ready);
+    rr::ReferenceCaptureDescription capture;
+    capture.OrthographicCamera = true;
+    capture.Width = capture.Height = 8;
+    capture.TargetSamples = 1024;
+    capture.MaxDepth = 1;
+    capture.CenterRays = true;
+    capture.WorldToClip.Columns[2].Z = -1;
+    capture.WorldToClip.Columns[3].Z = 1;
+    capture.EnvironmentTextureOrNull = &environment;
+    rr::ReferenceCapture oracle;
+    REQUIRE(renderer.BeginReferenceCapture(snapshot, capture, oracle) == S::Ready);
+    rr::GpuPreview preview;
+    REQUIRE(renderer.BeginGpuPreview(snapshot, capture, preview) == S::Ready);
+    environment.Reset(); // Accepted captures own the source, not the public wrapper.
+    const uint64 oracleStart = time::NowTicks();
+    status = S::Pending;
+    while (status == S::Pending && time::NowTicks() - oracleStart < 20 * time::NANOSECONDS_PER_SECOND)
+    {
+        status = renderer.AdvanceReferenceCapture(oracle);
+    }
+    REQUIRE(status == S::Ready);
+    constexpr usize CAPTURE_PIXELS = usize{8} * 8;
+    rr::ReferencePixel reference[CAPTURE_PIXELS];
+    REQUIRE(renderer.CopyReferencePixels(oracle, reference, CAPTURE_PIXELS) == S::Ready);
+    rr::ReferenceCaptureInfo information;
+    REQUIRE(renderer.GetReferenceCaptureInfo(oracle, information) == S::Ready);
+    CHECK(information.ProfileVersion == 3);
+    CHECK(information.InvalidContributions == 0);
+    rhi::SubmissionToken completion;
+    for (uint32 sample = 1; sample <= capture.TargetSamples; ++sample)
+    {
+        completion = {};
+        REQUIRE(renderer.AdvanceGpuPreview(preview, surface, completion) == S::Ready);
+        WaitPreview(renderer, preview, sample);
+    }
+    rr::GpuPreviewFrame frame;
+    rr::GpuPreviewImage image;
+    REQUIRE(renderer.AcquireGpuPreviewFrame(preview, frame, image) == S::Ready);
+    uint8 result[CAPTURE_PIXELS * 4]{};
+    ReadImage(device, image, result, sizeof(result));
+    int32 totalError = 0;
+    for (usize pixel = 0; pixel < CAPTURE_PIXELS; ++pixel)
+    {
+        CHECK(reference[pixel].Direct.X > .01F);
+        const uint8 expected[]{Display(reference[pixel].Direct.X),
+                               Display(reference[pixel].Direct.Y),
+                               Display(reference[pixel].Direct.Z)};
+        for (usize channel = 0; channel < 3; ++channel)
+        {
+            const int32 difference = static_cast<int32>(result[pixel * 4 + channel]) - expected[channel];
+            totalError += difference < 0 ? -difference : difference;
+        }
+        CHECK(result[pixel * 4 + 3] == 255);
+    }
+    // Independent importance distributions differ in FP32 CDF quantization; compare
+    // aggregate convergence, not a byte-identical random trajectory.
+    CHECK(totalError < static_cast<int32>(CAPTURE_PIXELS * 3 * 3));
+    REQUIRE(renderer.Release(frame) == S::Ready);
 }

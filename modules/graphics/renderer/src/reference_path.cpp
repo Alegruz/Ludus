@@ -47,7 +47,7 @@ void AddTransport(ReferencePath& path, math::Vector3 contribution, uint32 depth,
 usize LightCount(const ReferenceJob& job) noexcept
 {
     return job.Description.LightCount + job.Scene.Emitters.GetSize() +
-           (Positive(job.Description.Environment) ? 1U : 0U);
+           ((job.EnvironmentOrNull != nullptr || Positive(job.Description.Environment)) ? 1U : 0U);
 }
 math::Vector3 Position(const ReferenceTriangle& triangle, float32 u, float32 v) noexcept
 {
@@ -166,10 +166,25 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
         result.FiniteEndpoint = true;
         result.Pdf = AreaPdf(triangle, point, result.Point, count);
         const auto& instance = job.Scene.Instances[triangle.Instance];
-        if (result.Distance <= job.Description.SecondaryDistance && ReferenceOpacity(instance, Uv(triangle, u, v)))
+        if (result.Distance <= job.Description.SecondaryDistance &&
+            ReferenceOpacity(instance,
+                             Uv(triangle, u, v),
+                             triangle.Colors[0].W * (1 - u - v) + triangle.Colors[1].W * u + triangle.Colors[2].W * v))
         {
-            result.Radiance = instance.Surface->Emission;
+            result.Radiance = SampleReferenceEmission(instance, Uv(triangle, u, v));
         }
+        return result;
+    }
+    if (job.EnvironmentOrNull != nullptr)
+    {
+        const EnvironmentSample sample =
+            SampleEnvironment(*job.EnvironmentOrNull,
+                              ReferenceRandom(job, path, static_cast<uint16>(dimension + 1)),
+                              ReferenceRandom(job, path, static_cast<uint16>(dimension + 2)));
+        result.Direction = sample.DirectionWorld;
+        result.Radiance = sample.Radiance;
+        result.Pdf = sample.Pdf / static_cast<float32>(count);
+        result.Distance = job.Description.SecondaryDistance;
         return result;
     }
     const auto z = 1 - 2 * ReferenceRandom(job, path, static_cast<uint16>(dimension + 1));
@@ -189,9 +204,20 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     const auto lights = LightCount(job);
     if (hit.Hit == 0)
     {
-        const auto lightPdf = lights == 0 ? 0 : 1 / (float32(lights) * 4 * math::kPiF);
+        const float32 environmentPdf =
+            job.EnvironmentOrNull != nullptr
+                ? EvaluateEnvironmentPdf(*job.EnvironmentOrNull, ReferenceDirection(path.Ray))
+                : 1 / (4 * math::kPiF);
+        const float32 lightPdf = lights == 0 ? 0 : environmentPdf / static_cast<float32>(lights);
         const auto weight = path.Depth == 0 ? 1 : ReferencePowerWeight(path.PreviousPdf, lightPdf);
-        AddTransport(path, math::Hadamard(path.Throughput, job.Description.Environment) * weight, path.Depth, true);
+        AddTransport(path,
+                     math::Hadamard(path.Throughput,
+                                    job.EnvironmentOrNull != nullptr
+                                        ? EvaluateEnvironment(*job.EnvironmentOrNull, ReferenceDirection(path.Ray))
+                                        : job.Description.Environment) *
+                         weight,
+                     path.Depth,
+                     true);
         return ValidContribution(path.Emission) && ValidContribution(path.Direct) && ValidContribution(path.Indirect)
                    ? rhi::RasterStatus::Ready
                    : Invalid(job, path);
@@ -219,7 +245,11 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
             return Invalid(job, path);
         }
         const auto weight = path.Depth == 0 ? 1 : ReferencePowerWeight(path.PreviousPdf, pdf);
-        AddTransport(path, math::Hadamard(path.Throughput, surface.Emission) * weight, path.Depth, true);
+        AddTransport(path,
+                     math::Hadamard(path.Throughput, SampleReferenceEmission(instance, Uv(triangle, hit.U, hit.V))) *
+                         weight,
+                     path.Depth,
+                     true);
     }
     if (path.Depth >= job.Description.MaxDepth || math::Dot(triangle.GeometricNormal, view) <= 0)
     {
@@ -229,7 +259,13 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     }
     math::Vector3 normal = ReferenceNormalize(triangle.Normals[0] * (1 - hit.U - hit.V) + triangle.Normals[1] * hit.U +
                                               triangle.Normals[2] * hit.V);
-    const auto texel = SampleReferenceTexture(instance, Uv(triangle, hit.U, hit.V));
+    math::Vector4 texel = SampleReferenceTexture(instance, Uv(triangle, hit.U, hit.V));
+    if (surface.AreAuthoredInputsEnabled == true)
+    {
+        const math::Vector4 color =
+            triangle.Colors[0] * (1 - hit.U - hit.V) + triangle.Colors[1] * hit.U + triangle.Colors[2] * hit.V;
+        texel = math::Hadamard(texel, color);
+    }
     ReferenceBsdf bsdf = surface.Bsdf;
     bsdf.BaseColor = math::Hadamard({texel.X, texel.Y, texel.Z}, bsdf.BaseColor);
     if (surface.HasSurfaceMap)
@@ -245,7 +281,7 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
         }
         bsdf.Metallic = parameters.Metallic;
         bsdf.Roughness = parameters.Roughness;
-        normal = ApplyReferenceNormal(triangle, surface, normal, parameters.NormalTangent);
+        normal = ApplyReferenceNormal(triangle, surface, normal, parameters.NormalTangent, hit.U, hit.V);
     }
     const auto proposal = SampleLight(job, path, point);
     if (!math::IsFinite(proposal.Pdf) || proposal.Pdf < 0 || !ValidContribution(proposal.Radiance))
