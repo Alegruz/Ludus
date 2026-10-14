@@ -7,6 +7,8 @@
 #include "uuid.h"
 
 #include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/containers/borrowed_view.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/strings/string.hpp>
 
@@ -49,6 +51,8 @@ constexpr usize MAX_LOCK_IDENTITY_BYTES = 4096;
 constexpr usize HEX_DIGEST_BYTES = 64;
 constexpr usize MATERIAL_RECORD_BYTES = 24;
 constexpr usize MATERIAL_RECORD_V2_BYTES = 28;
+constexpr usize MATERIAL_RECORD_V3_BYTES = sizeof(format::MaterialRecordV3);
+constexpr std::string_view LIGHTING_BUILD_TARGET = "portable-rgba8-f32-le-v3";
 constexpr float64 MAX_AUTHORED_MAGNITUDE = 1e12;
 constexpr float64 MAX_WORLD_MAGNITUDE = 3e38;
 constexpr float64 MIN_DIRECTION_SQUARED = 1e-12;
@@ -828,7 +832,7 @@ private:
 
 [[nodiscard]] bool IsArtifactKind(const JsonTree& tree, JsonIndex node) noexcept
 {
-    for (const std::string_view kind : {"mesh", "material", "texture", "scene", "license"})
+    for (const std::string_view kind : {"mesh", "material", "texture", "scene", "license", "lighting"})
     {
         if (tree.IsString(node, kind) == true)
         {
@@ -1177,6 +1181,141 @@ private:
     usize mOffset = 0;
 };
 
+constexpr usize SOURCE_ID_WORDS = 2;
+constexpr usize RGB_COMPONENTS = 3;
+
+[[nodiscard]] bool ReadSourceId(const JsonTree& tree, JsonIndex node, uint64& outId) noexcept
+{
+    if (node == NO_JSON_NODE || tree.GetKind(node) != JsonKind::Array || tree.GetCount(node) != SOURCE_ID_WORDS)
+    {
+        return false;
+    }
+    foundation::StaticArray<uint32, SOURCE_ID_WORDS> words{};
+    for (usize i = 0; i < words.GetSize(); ++i)
+    {
+        const JsonNode& value = tree.GetNode(tree.GetItem(node, i));
+        if (value.Kind != JsonKind::Integer || value.Integer < 0 || static_cast<uint64>(value.Integer) > ~uint32{0})
+        {
+            return false;
+        }
+        words[i] = static_cast<uint32>(value.Integer);
+    }
+    outId = uint64{words[0]} | (uint64{words[1]} << 32);
+    return true;
+}
+
+[[nodiscard]] JsonIndex AddSourceId(JsonTree& inoutTree, uint64 id) noexcept
+{
+    const JsonIndex result = inoutTree.AddArray();
+    inoutTree.Append(result, inoutTree.AddInteger(static_cast<uint32>(id)));
+    inoutTree.Append(result, inoutTree.AddInteger(static_cast<uint32>(id >> 32)));
+    return result;
+}
+
+void AppendSourceId(ByteWriter& inoutWriter, uint64 id) noexcept
+{
+    inoutWriter.AppendUint32(static_cast<uint32>(id));
+    inoutWriter.AppendUint32(static_cast<uint32>(id >> 32));
+}
+
+[[nodiscard]] bool MakeScopedSourceId(std::string_view scope, uint64 source, uint64& outId) noexcept
+{
+    Array<uint8> bytes;
+    ByteWriter writer(bytes);
+    writer.Append(scope);
+    AppendSourceId(writer, source);
+    if (writer.IsOk() == false)
+    {
+        return false;
+    }
+    const Digest digest = Hash(GetSpan(bytes));
+    outId = uint64{DecodeUint32(digest.Data)} | (uint64{DecodeUint32(digest.Data + sizeof(uint32))} << 32);
+    // Zero is reserved. Assembly separately rejects any collision in the complete lists.
+    if (outId == 0)
+    {
+        outId = 1;
+    }
+    return true;
+}
+
+[[nodiscard]] bool ValidateLightingPayload(std::span<const uint8> bytes, Failure& inoutFailure) noexcept
+{
+    BundleReader reader(bytes);
+    constexpr usize HEADER_INTEGERS = 4;
+    constexpr usize LIGHT_INTEGERS = 4;
+    constexpr usize LIGHT_FLOATS = 12;
+    foundation::StaticArray<uint32, HEADER_INTEGERS> header{};
+    foundation::StaticArray<float64, RGB_COMPONENTS> environment{};
+    if (reader.ReadIntegers({header.GetData(), header.GetSize()}, inoutFailure) == false ||
+        reader.ReadFloats({environment.GetData(), environment.GetSize()}, inoutFailure) == false ||
+        header[0] != format::LIGHTING_PROFILE_REC709_PHOTOMETRIC || header[1] > format::MAX_LIGHTS ||
+        header[2] > format::MAX_ENVIRONMENT_DIMENSION || header[3] > format::MAX_ENVIRONMENT_DIMENSION ||
+        ((header[2] == 0) != (header[3] == 0)))
+    {
+        return inoutFailure.FailInvalid("Invalid authored lighting profile or dimensions");
+    }
+    const usize pixels = usize{header[2]} * header[3];
+    if (reader.GetOffset() + usize{header[1]} * sizeof(format::LightRecord) +
+            pixels * format::ENVIRONMENT_TEXEL_BYTES !=
+        bytes.size())
+    {
+        return inoutFailure.FailInvalid("Invalid authored lighting payload length");
+    }
+    for (const float64 value : environment)
+    {
+        if (value < 0 || value > static_cast<float64>(format::MAX_EMISSION))
+        {
+            return inoutFailure.FailInvalid("Invalid authored environment energy");
+        }
+    }
+    foundation::StaticArray<uint64, format::MAX_LIGHTS> ids{};
+    for (usize i = 0; i < header[1]; ++i)
+    {
+        foundation::StaticArray<uint32, LIGHT_INTEGERS> integers{};
+        foundation::StaticArray<float64, LIGHT_FLOATS> values{};
+        if (reader.ReadIntegers({integers.GetData(), integers.GetSize()}, inoutFailure) == false ||
+            reader.ReadFloats({values.GetData(), values.GetSize()}, inoutFailure) == false)
+        {
+            return false;
+        }
+        const uint64 id = uint64{integers[0]} | (uint64{integers[1]} << 32);
+        if (id == 0 || integers[2] > format::LIGHT_SPOT || (integers[3] & ~format::LIGHT_ENABLED) != 0 ||
+            values[0] < 0 || values[1] < 0 || values[2] < 0 ||
+            values[0] > static_cast<float64>(format::MAX_LIGHT_INTENSITY) ||
+            values[1] > static_cast<float64>(format::MAX_LIGHT_INTENSITY) ||
+            values[2] > static_cast<float64>(format::MAX_LIGHT_INTENSITY) ||
+            (values[6] == 0 && values[7] == 0 && values[8] == 0) || values[9] < .01 || values[9] > 1000000 ||
+            values[10] < -1 || values[10] > 1 || values[11] < -1 || values[11] > values[10])
+        {
+            return inoutFailure.FailInvalid("Invalid authored analytic light");
+        }
+        for (usize j = 0; j < i; ++j)
+        {
+            if (ids[j] == id)
+            {
+                return inoutFailure.FailInvalid("Duplicate authored light identity");
+            }
+        }
+        ids[i] = id;
+    }
+    for (usize i = 0; i < pixels; ++i)
+    {
+        foundation::StaticArray<float64, RGB_COMPONENTS> pixel{};
+        if (reader.ReadFloats({pixel.GetData(), pixel.GetSize()}, inoutFailure) == false)
+        {
+            return false;
+        }
+        for (const float64 value : pixel)
+        {
+            if (value < 0 || value > static_cast<float64>(format::MAX_EMISSION))
+            {
+                return inoutFailure.FailInvalid("Invalid HDR environment texel");
+            }
+        }
+    }
+    return true;
+}
+
 struct BundleMaterial final
 {
     std::span<const uint8> Bytes;
@@ -1188,10 +1327,13 @@ struct BundleObject final
     uint32 Mesh = 0;
     uint32 Material = 0;
     float64 Transform[format::OBJECT_TRANSFORM_COMPONENTS]{};
+    uint64 SourceId = 0;
 };
 
 struct BundleParts final
 {
+    uint32 Version = format::VERSION_1;
+    foundation::BorrowedView<const uint8> Lighting;
     Array<std::span<const uint8>> Textures;
     Array<BundleMaterial> Materials;
     Array<std::span<const uint8>> Meshes;
@@ -1258,7 +1400,7 @@ struct BundleParts final
         uint32 address[1] = {(0 < texture[0] && texture[0] < textureCount) ? format::ADDRESS_REPEAT
                                                                            : format::ADDRESS_CLAMP};
         float64 values[5]{};
-        if ((version == format::VERSION_2 && inoutReader.ReadIntegers(address, inoutFailure) == false) ||
+        if ((version != format::VERSION_1 && inoutReader.ReadIntegers(address, inoutFailure) == false) ||
             inoutReader.ReadFloats(values, inoutFailure) == false)
         {
             return false;
@@ -1279,6 +1421,25 @@ struct BundleParts final
         {
             return inoutFailure.FailInvalid("Invalid cooked material");
         }
+        if (version == format::VERSION_3)
+        {
+            std::span<const uint8> extra;
+            if (inoutReader.Take(MATERIAL_RECORD_V3_BYTES - MATERIAL_RECORD_V2_BYTES, extra, inoutFailure) == false)
+            {
+                return false;
+            }
+            const uint32 flags = DecodeUint32(extra.data());
+            const uint64 sourceId =
+                uint64{DecodeUint32(extra.data() + 4)} | (uint64{DecodeUint32(extra.data() + 8)} << 32);
+            const float64 power = DecodeFloat(extra.data() + 12);
+            if ((flags & ~format::EMISSION_FLAGS) != 0 || DecodeUint32(extra.data() + 16) != 0 ||
+                math::IsFinite(power) == false || power < 0 ||
+                power > static_cast<float64>(format::MAX_LIGHT_INTENSITY) ||
+                ((flags & format::EMISSION_HAS_POWER) == 0 && power != 0) || (emissionMaximum > 0 && sourceId == 0))
+            {
+                return inoutFailure.FailInvalid("Invalid authored emitter flags, identity or power");
+            }
+        }
         BundleMaterial material;
         material.Bytes = data.subspan(start, inoutReader.GetOffset() - start);
         material.Texture = texture[0];
@@ -1296,7 +1457,9 @@ struct BundleParts final
                               BundleParts& outParts,
                               Failure& inoutFailure) noexcept
 {
-    constexpr usize VERTEX_BYTES = format::VERTEX_COMPONENTS * 4;
+    const uint32 version = outParts.Version;
+    const usize vertexBytes =
+        version == format::VERSION_3 ? sizeof(format::VertexRecordV3) : sizeof(format::VertexRecord);
     usize vertices = 0;
     for (uint32 i = 0; i < meshCount; ++i)
     {
@@ -1315,13 +1478,13 @@ struct BundleParts final
             return inoutFailure.FailInvalid("Cooked geometry budget");
         }
         std::span<const uint8> vertexData;
-        if (inoutReader.Take(usize{vertexCount} * VERTEX_BYTES, vertexData, inoutFailure) == false)
+        if (inoutReader.Take(usize{vertexCount} * vertexBytes, vertexData, inoutFailure) == false)
         {
             return false;
         }
         for (uint32 vertex = 0; vertex < vertexCount; ++vertex)
         {
-            const uint8* base = vertexData.data() + usize{vertex} * VERTEX_BYTES;
+            const uint8* base = vertexData.data() + usize{vertex} * vertexBytes;
             bool isValid = true;
             PythonSum length;
             for (usize component = 0; component < format::VERTEX_COMPONENTS; ++component)
@@ -1332,6 +1495,13 @@ struct BundleParts final
                 {
                     length.Add(MakeNumber(value * value));
                 }
+            }
+            if (version == format::VERSION_3)
+            {
+                const float64 u = DecodeFloat(base + sizeof(format::VertexRecord));
+                const float64 v = DecodeFloat(base + sizeof(format::VertexRecord) + sizeof(float32));
+                isValid = isValid == true && math::IsFinite(u) == true && math::IsFinite(v) == true && u >= 0 &&
+                          u <= 1 && v >= 0 && v <= 1;
             }
             if (isValid == false || length.GetResult().Float <= MIN_DIRECTION_SQUARED)
             {
@@ -1381,12 +1551,13 @@ struct BundleParts final
         return false;
     }
     const uint32 version = header[0];
+    outParts.Version = version;
     const uint32 meshCount = header[1];
     const uint32 materialCount = header[2];
     const uint32 textureCount = header[3];
     const uint32 objectCount = header[4];
-    if ((version != format::VERSION_1 && version != format::VERSION_2) || meshCount < 1 ||
-        meshCount > format::MAX_MESHES || materialCount < 1 || materialCount > format::MAX_MATERIALS ||
+    if ((version != format::VERSION_1 && version != format::VERSION_2 && version != format::VERSION_3) ||
+        meshCount < 1 || meshCount > format::MAX_MESHES || materialCount < 1 || materialCount > format::MAX_MATERIALS ||
         textureCount > format::MAX_TEXTURES || objectCount < 1 || objectCount > format::MAX_OBJECTS)
     {
         return inoutFailure.FailInvalid("Cooked scene exceeds resident reference profile");
@@ -1411,6 +1582,27 @@ struct BundleParts final
         {
             return false;
         }
+        if (version == format::VERSION_3)
+        {
+            std::span<const uint8> source;
+            if (reader.Take(sizeof(uint64), source, inoutFailure) == false ||
+                (DecodeUint32(source.data()) == 0 && DecodeUint32(source.data() + 4) == 0))
+            {
+                return inoutFailure.FailInvalid("Invalid placed source identity");
+            }
+        }
+        if (version == format::VERSION_3)
+        {
+            const uint8* identity = data.data() + reader.GetOffset() - sizeof(uint64);
+            object.SourceId = uint64{DecodeUint32(identity)} | (uint64{DecodeUint32(identity + sizeof(uint32))} << 32);
+            for (const BundleObject& previous : outParts.Objects)
+            {
+                if (previous.SourceId == object.SourceId)
+                {
+                    return inoutFailure.FailInvalid("Duplicate placed source identity");
+                }
+            }
+        }
         object.Mesh = bindings[0];
         object.Material = bindings[1];
         if (object.Mesh >= meshCount || object.Material >= materialCount)
@@ -1420,6 +1612,21 @@ struct BundleParts final
         if (outParts.Objects.TryAdd(object) == false)
         {
             return inoutFailure.FailOutOfMemory();
+        }
+    }
+    if (version == format::VERSION_3)
+    {
+        const usize start = reader.GetOffset();
+        const std::span<const uint8> lighting = data.subspan(start);
+        if (ValidateLightingPayload(lighting, inoutFailure) == false)
+        {
+            return false;
+        }
+        outParts.Lighting = {lighting.data(), lighting.size()};
+        std::span<const uint8> consumed;
+        if (reader.Take(lighting.size(), consumed, inoutFailure) == false)
+        {
+            return false;
         }
     }
     if (reader.GetOffset() != data.size())
@@ -1532,9 +1739,44 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
     const JsonTree& tree = description.Tree;
     const JsonIndex root = description.Root;
     static constexpr std::string_view KEYS[] = {"texture", "metallic", "roughness", "emission", "address"};
-    if (tree.HasExactKeys(root, KEYS) == false)
+    static constexpr std::string_view LIGHTING_KEYS[] = {"texture",
+                                                         "metallic",
+                                                         "roughness",
+                                                         "emission",
+                                                         "address",
+                                                         "emission_flags",
+                                                         "area_source_id",
+                                                         "emission_power"};
+    const bool hasLighting = tree.GetMember(root, "emission_flags") != NO_JSON_NODE;
+    if ((hasLighting == true ? tree.HasExactKeys(root, LIGHTING_KEYS) : tree.HasExactKeys(root, KEYS)) == false)
     {
         return inoutFailure.FailInvalid("Invalid cooked material fields");
+    }
+    if (hasLighting == true)
+    {
+        uint64 sourceId = 0;
+        const JsonNode& flags = tree.GetNode(tree.GetMember(root, "emission_flags"));
+        PythonNumber power;
+        if (flags.Kind != JsonKind::Integer || flags.Integer < 0 ||
+            (static_cast<uint64>(flags.Integer) & ~uint64{format::EMISSION_FLAGS}) != 0 ||
+            ReadSourceId(tree, tree.GetMember(root, "area_source_id"), sourceId) == false ||
+            IsAuthoredNumber(tree, tree.GetMember(root, "emission_power"), power) == false || power.ToFloat() < 0 ||
+            power.ToFloat() > static_cast<float64>(format::MAX_LIGHT_INTENSITY) ||
+            ((flags.Integer & format::EMISSION_HAS_POWER) == 0 && power.ToFloat() != 0))
+        {
+            return inoutFailure.FailInvalid("Invalid material emitter metadata");
+        }
+        const JsonIndex emissionValues = tree.GetMember(root, "emission");
+        if (AreAuthoredNumbers(tree, emissionValues, RGB_COMPONENTS) == true && sourceId == 0)
+        {
+            for (usize channel = 0; channel < RGB_COMPONENTS; ++channel)
+            {
+                if (GetNumberItem(tree, emissionValues, channel).ToFloat() > 0)
+                {
+                    return inoutFailure.FailInvalid("Missing emitter source identity");
+                }
+            }
+        }
     }
     const JsonIndex address = tree.GetMember(root, "address");
     if (tree.IsString(address, "clamp") == false && tree.IsString(address, "repeat") == false)
@@ -1596,6 +1838,190 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
     return ResolveInside(root, closure.Tree.GetText(closure.Tree.GetMember(record, "path")), path, inoutFailure) ==
                true &&
            ReadBytes(path.GetView(), maximum, outData, inoutFailure) == true;
+}
+
+struct LightingPart final
+{
+    Array<uint8> Bytes;
+    std::string_view Identity;
+};
+
+[[nodiscard]] bool IsLightingBuild(const Document& closure, std::string_view identity) noexcept
+{
+    const JsonIndex record = closure.Tree.GetMember(closure.Root, identity);
+    const JsonIndex build = closure.Tree.GetMember(record, "build");
+    return build != NO_JSON_NODE &&
+           closure.Tree.IsString(closure.Tree.GetMember(build, "target"), LIGHTING_BUILD_TARGET) == true;
+}
+
+// Scope equivalence groups by the owning imported scene, not by material index:
+// multiple materials can belong to one authored area emitter.
+[[nodiscard]] std::string_view GetMaterialScope(const Document& closure, std::string_view material) noexcept
+{
+    const JsonTree& tree = closure.Tree;
+    for (usize i = 0; i < tree.GetCount(closure.Root); ++i)
+    {
+        const JsonIndex record = tree.GetValue(closure.Root, i);
+        if (tree.IsString(tree.GetMember(record, "kind"), "scene") == true)
+        {
+            const JsonIndex dependencies = tree.GetMember(record, "dependencies");
+            for (usize j = 0; j < tree.GetCount(dependencies); ++j)
+            {
+                if (tree.IsString(tree.GetItem(dependencies, j), material) == true)
+                {
+                    return tree.GetKey(closure.Root, i);
+                }
+            }
+        }
+    }
+    return material;
+}
+
+[[nodiscard]] bool
+AssembleLighting(std::string_view root, const Document& closure, Array<uint8>& outBytes, Failure& inoutFailure) noexcept
+{
+    Array<LightingPart> parts;
+    uint32 lightCount = 0;
+    uint32 width = 0;
+    uint32 height = 0;
+    for (usize i = 0; i < closure.Tree.GetCount(closure.Root); ++i)
+    {
+        const JsonIndex record = closure.Tree.GetValue(closure.Root, i);
+        if (closure.Tree.IsString(closure.Tree.GetMember(record, "kind"), "lighting") == false)
+        {
+            continue;
+        }
+        LightingPart part;
+        part.Identity = closure.Tree.GetKey(closure.Root, i);
+        if (ReadArtifact(root, closure, part.Identity, MAX_ASSET_BYTES, part.Bytes, inoutFailure) == false ||
+            ValidateLightingPayload(GetSpan(part.Bytes), inoutFailure) == false)
+        {
+            return false;
+        }
+        const uint8* bytes = part.Bytes.GetData();
+        const uint32 count = DecodeUint32(bytes + sizeof(uint32));
+        if (count > format::MAX_LIGHTS - lightCount)
+        {
+            return inoutFailure.FailInvalid("Combined authored analytic light capacity exceeded");
+        }
+        lightCount += count;
+        const uint32 partWidth = DecodeUint32(bytes + SOURCE_ID_WORDS * sizeof(uint32));
+        const uint32 partHeight = DecodeUint32(bytes + RGB_COMPONENTS * sizeof(uint32));
+        if (partWidth != 0)
+        {
+            if (width != 0 && (width != partWidth || height != partHeight))
+            {
+                return inoutFailure.FailInvalid(
+                    "Authored environment maps require matching dimensions for exact summation");
+            }
+            width = partWidth;
+            height = partHeight;
+        }
+        if (parts.TryAdd(static_cast<LightingPart&&>(part)) == false)
+        {
+            return inoutFailure.FailOutOfMemory();
+        }
+    }
+    if (parts.IsEmpty() == true)
+    {
+        return true;
+    }
+    const usize pixels = usize{width} * height;
+    const usize total = sizeof(format::LightingRecord) + usize{lightCount} * sizeof(format::LightRecord) +
+                        pixels * format::ENVIRONMENT_TEXEL_BYTES;
+    if (total > MAX_ASSET_BYTES)
+    {
+        return inoutFailure.FailInvalid("Combined authored lighting byte capacity exceeded");
+    }
+    if (outBytes.TryEnsureCapacity(total) == false)
+    {
+        return inoutFailure.FailOutOfMemory();
+    }
+    foundation::StaticArray<float64, RGB_COMPONENTS> constant{};
+    for (const LightingPart& part : parts)
+    {
+        for (usize channel = 0; channel < RGB_COMPONENTS; ++channel)
+        {
+            constant[channel] += DecodeFloat(part.Bytes.GetData() + sizeof(uint32) * 4 + channel * sizeof(float32));
+            if (constant[channel] > static_cast<float64>(format::MAX_EMISSION))
+            {
+                return inoutFailure.FailInvalid("Combined authored environment energy exceeded");
+            }
+        }
+    }
+    ByteWriter writer(outBytes);
+    writer.AppendUint32(format::LIGHTING_PROFILE_REC709_PHOTOMETRIC);
+    writer.AppendUint32(lightCount);
+    writer.AppendUint32(width);
+    writer.AppendUint32(height);
+    for (const float64 value : constant)
+    {
+        writer.AppendFloat32(value);
+    }
+    foundation::StaticArray<uint64, format::MAX_LIGHTS> ids{};
+    usize idCount = 0;
+    for (const LightingPart& part : parts)
+    {
+        const uint32 count = DecodeUint32(part.Bytes.GetData() + sizeof(uint32));
+        for (usize i = 0; i < count; ++i)
+        {
+            const uint8* light =
+                part.Bytes.GetData() + sizeof(format::LightingRecord) + i * sizeof(format::LightRecord);
+            const uint64 source = uint64{DecodeUint32(light)} | (uint64{DecodeUint32(light + sizeof(uint32))} << 32);
+            uint64 scoped = 0;
+            if (MakeScopedSourceId(part.Identity, source, scoped) == false)
+            {
+                return inoutFailure.FailOutOfMemory();
+            }
+            for (usize j = 0; j < idCount; ++j)
+            {
+                if (ids[j] == scoped)
+                {
+                    return inoutFailure.FailInvalid("Scoped authored light identity collision");
+                }
+            }
+            ids[idCount++] = scoped;
+            AppendSourceId(writer, scoped);
+            writer.AppendBytes({light + sizeof(uint64), sizeof(format::LightRecord) - sizeof(uint64)});
+        }
+    }
+    if (parts.GetSize() == 1)
+    {
+        const LightingPart& part = parts[0];
+        const usize offset = sizeof(format::LightingRecord) + usize{lightCount} * sizeof(format::LightRecord);
+        writer.AppendBytes(GetSpan(part.Bytes).subspan(offset));
+        return writer.IsOk() == true ? true : inoutFailure.FailOutOfMemory();
+    }
+    for (usize pixel = 0; pixel < pixels; ++pixel)
+    {
+        for (usize channel = 0; channel < RGB_COMPONENTS; ++channel)
+        {
+            float64 sum = 0;
+            for (const LightingPart& part : parts)
+            {
+                const uint8* bytes = part.Bytes.GetData();
+                const float64 scale = DecodeFloat(bytes + sizeof(uint32) * 4 + channel * sizeof(float32));
+                if (DecodeUint32(bytes + SOURCE_ID_WORDS * sizeof(uint32)) == 0)
+                {
+                    sum += scale;
+                }
+                else
+                {
+                    const usize offset = sizeof(format::LightingRecord) +
+                                         usize{DecodeUint32(bytes + sizeof(uint32))} * sizeof(format::LightRecord) +
+                                         pixel * format::ENVIRONMENT_TEXEL_BYTES + channel * sizeof(float32);
+                    sum += scale * DecodeFloat(bytes + offset);
+                }
+            }
+            const float64 normalized = constant[channel] == 0 ? 0 : sum / constant[channel];
+            if (math::IsFinite(normalized) == false || normalized > static_cast<float64>(format::MAX_EMISSION))
+            {
+                return inoutFailure.FailInvalid("Combined authored HDR environment energy exceeded");
+            }
+            writer.AppendFloat32(normalized);
+        }
+    }
+    return writer.IsOk() == true ? true : inoutFailure.FailOutOfMemory();
 }
 
 /// assemble(root, level, current).
@@ -1669,9 +2095,62 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
         return inoutFailure.FailInvalid(
             "Scene exceeds six meshes/eight materials/eight textures; no partial viewport publication");
     }
+    Array<uint8> lighting;
+    if (AssembleLighting(root, closure, lighting, inoutFailure) == false)
+    {
+        return false;
+    }
+    bool isVersion3 = lighting.IsEmpty() == false;
+    for (const std::string_view identity : meshes)
+    {
+        isVersion3 = isVersion3 == true || IsLightingBuild(closure, identity) == true;
+    }
+    for (const Document& description : descriptions)
+    {
+        isVersion3 =
+            isVersion3 == true || description.Tree.GetMember(description.Root, "emission_flags") != NO_JSON_NODE;
+    }
+    uint64 bundleBytes =
+        sizeof(format::Header) +
+        materials.GetSize() *
+            (isVersion3 == true ? sizeof(format::MaterialRecordV3) : sizeof(format::MaterialRecordV2)) +
+        objectCount * (isVersion3 == true ? sizeof(format::ObjectRecordV3) : sizeof(format::ObjectRecord)) +
+        lighting.GetSize();
+    if (isVersion3 == true && lighting.IsEmpty() == true)
+    {
+        bundleBytes += sizeof(format::LightingRecord);
+    }
+    for (const std::string_view identity : textures)
+    {
+        const JsonIndex record = closure.Tree.GetMember(closure.Root, identity);
+        bundleBytes += static_cast<uint64>(GetNumberMember(closure.Tree, record, "bytes").ToFloat());
+    }
+    for (const std::string_view identity : meshes)
+    {
+        const JsonIndex record = closure.Tree.GetMember(closure.Root, identity);
+        bundleBytes += static_cast<uint64>(GetNumberMember(closure.Tree, record, "bytes").ToFloat());
+        if (isVersion3 == true && IsLightingBuild(closure, identity) == false)
+        {
+            Array<uint8> data;
+            if (ReadArtifact(root, closure, identity, MAX_ASSET_BYTES, data, inoutFailure) == false)
+            {
+                return false;
+            }
+            const uint32 vertices = data.GetSize() >= sizeof(format::MeshRecord) ? DecodeUint32(data.GetData()) : 0;
+            if (vertices == 0 || vertices > format::MAX_VERTICES)
+            {
+                return inoutFailure.FailInvalid("Invalid legacy mesh conversion vertex count");
+            }
+            bundleBytes += uint64{vertices} * (sizeof(format::VertexRecordV3) - sizeof(format::VertexRecord));
+        }
+    }
+    if (bundleBytes > format::MAX_BUNDLE_BYTES)
+    {
+        return inoutFailure.FailInvalid("Assembled scene byte capacity exceeded");
+    }
     ByteWriter writer(outBundle);
     writer.Append(format::MAGIC);
-    writer.AppendUint32(format::VERSION_2);
+    writer.AppendUint32(isVersion3 == true ? format::VERSION_3 : format::VERSION_2);
     writer.AppendUint32(static_cast<uint32>(meshes.GetSize()));
     writer.AppendUint32(static_cast<uint32>(materials.GetSize()));
     writer.AppendUint32(static_cast<uint32>(textures.GetSize()));
@@ -1695,8 +2174,9 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
         }
         writer.AppendBytes(GetSpan(data));
     }
-    for (const Document& description : descriptions)
+    for (usize materialIndex = 0; materialIndex < descriptions.GetSize(); ++materialIndex)
     {
+        const Document& description = descriptions[materialIndex];
         const JsonTree& tree = description.Tree;
         const std::string_view texture = tree.GetText(tree.GetMember(description.Root, "texture"));
         const bool isRepeat = tree.IsString(tree.GetMember(description.Root, "address"), "repeat");
@@ -1709,6 +2189,39 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
         {
             writer.AppendFloat32(GetNumberItem(tree, emission, channel).ToFloat());
         }
+        if (isVersion3 == true)
+        {
+            const bool hasLighting = tree.GetMember(description.Root, "emission_flags") != NO_JSON_NODE;
+            uint64 sourceId = 0;
+            uint32 flags = format::EMISSION_TWO_SIDED;
+            float64 power = 0;
+            if (hasLighting == true)
+            {
+                flags = static_cast<uint32>(tree.GetNode(tree.GetMember(description.Root, "emission_flags")).Integer);
+                power = GetNumberMember(tree, description.Root, "emission_power").ToFloat();
+                if (ReadSourceId(tree, tree.GetMember(description.Root, "area_source_id"), sourceId) == false)
+                {
+                    return inoutFailure.FailInvalid("Invalid emitter identity");
+                }
+            }
+            bool isEmissive = sourceId != 0;
+            for (usize channel = 0; channel < RGB_COMPONENTS; ++channel)
+            {
+                isEmissive = isEmissive == true || GetNumberItem(tree, emission, channel).ToFloat() > 0;
+            }
+            if (isEmissive == true &&
+                MakeScopedSourceId(hasLighting == true ? GetMaterialScope(closure, materials[materialIndex])
+                                                       : materials[materialIndex],
+                                   sourceId,
+                                   sourceId) == false)
+            {
+                return inoutFailure.FailOutOfMemory();
+            }
+            writer.AppendUint32(flags);
+            AppendSourceId(writer, sourceId);
+            writer.AppendFloat32(power);
+            writer.AppendUint32(0);
+        }
     }
     for (const std::string_view identity : meshes)
     {
@@ -1717,8 +2230,36 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
         {
             return false;
         }
-        writer.AppendBytes(GetSpan(data));
+        const bool isMeshV3 = IsLightingBuild(closure, identity);
+        if (isVersion3 == true && isMeshV3 == false)
+        {
+            const uint32 vertexCount = data.GetSize() >= sizeof(format::MeshRecord) ? DecodeUint32(data.GetData()) : 0;
+            const uint32 indexCount =
+                data.GetSize() >= sizeof(format::MeshRecord) ? DecodeUint32(data.GetData() + sizeof(uint32)) : 0;
+            const usize expected = sizeof(format::MeshRecord) + usize{vertexCount} * sizeof(format::VertexRecord) +
+                                   usize{indexCount} * sizeof(uint32);
+            if (data.GetSize() != expected || vertexCount > format::MAX_VERTICES)
+            {
+                return inoutFailure.FailInvalid("Invalid legacy mesh conversion length");
+            }
+            writer.AppendBytes({data.GetData(), sizeof(format::MeshRecord)});
+            for (usize vertex = 0; vertex < vertexCount; ++vertex)
+            {
+                writer.AppendBytes({data.GetData() + sizeof(format::MeshRecord) + vertex * sizeof(format::VertexRecord),
+                                    sizeof(format::VertexRecord)});
+                writer.AppendFloat32(0);
+                writer.AppendFloat32(0);
+            }
+            writer.AppendBytes(
+                {data.GetData() + sizeof(format::MeshRecord) + usize{vertexCount} * sizeof(format::VertexRecord),
+                 usize{indexCount} * sizeof(uint32)});
+        }
+        else
+        {
+            writer.AppendBytes(GetSpan(data));
+        }
     }
+    foundation::StaticArray<uint64, format::MAX_OBJECTS> objectIds{};
     for (usize i = 0; i < objectCount; ++i)
     {
         const JsonIndex item = levelTree.GetItem(objects, i);
@@ -1737,6 +2278,41 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
         for (const PythonNumber& value : world.Values)
         {
             writer.AppendFloat32(value.ToFloat());
+        }
+        if (isVersion3 == true)
+        {
+            uint64 sourceId = 0;
+            if (MakeScopedSourceId(levelTree.GetText(levelTree.GetMember(item, "id")), 0, sourceId) == false)
+            {
+                return inoutFailure.FailOutOfMemory();
+            }
+            for (usize j = 0; j < i; ++j)
+            {
+                if (objectIds[j] == sourceId)
+                {
+                    return inoutFailure.FailInvalid("Placed source identity collision");
+                }
+            }
+            objectIds[i] = sourceId;
+            AppendSourceId(writer, sourceId);
+        }
+    }
+    if (isVersion3 == true)
+    {
+        if (lighting.IsEmpty() == true)
+        {
+            writer.AppendUint32(format::LIGHTING_PROFILE_REC709_PHOTOMETRIC);
+            writer.AppendUint32(0);
+            writer.AppendUint32(0);
+            writer.AppendUint32(0);
+            for (usize channel = 0; channel < RGB_COMPONENTS; ++channel)
+            {
+                writer.AppendFloat32(0);
+            }
+        }
+        else
+        {
+            writer.AppendBytes(GetSpan(lighting));
         }
     }
     if (writer.HasOverflowed() == true)
@@ -2118,7 +2694,8 @@ struct PreparedImport final
 {
     // Version 1 records (24 bytes) imply the sampler address; version 2 records
     // (pbrt-best-effort-v1) carry it explicitly after the texture index.
-    const bool isVersion2 = material.Bytes.size() == MATERIAL_RECORD_V2_BYTES;
+    const bool isVersion3 = material.Bytes.size() == MATERIAL_RECORD_V3_BYTES;
+    const bool isVersion2 = material.Bytes.size() == MATERIAL_RECORD_V2_BYTES || isVersion3 == true;
     if (material.Bytes.size() != MATERIAL_RECORD_BYTES && isVersion2 == false)
     {
         return inoutFailure.Fail(AssetErrorCode::UnsupportedScene, "unpack requires a buffer of 24 bytes");
@@ -2140,6 +2717,15 @@ struct PreparedImport final
     }
     tree.SetMember(root, "emission", emission);
     tree.SetMember(root, "address", tree.AddString(isRepeat == true ? "repeat" : "clamp"));
+    if (isVersion3 == true)
+    {
+        const uint8* extra = material.Bytes.data() + MATERIAL_RECORD_V2_BYTES;
+        tree.SetMember(root, "emission_flags", tree.AddInteger(DecodeUint32(extra)));
+        const uint64 sourceId = uint64{DecodeUint32(extra + sizeof(uint32))} |
+                                (uint64{DecodeUint32(extra + SOURCE_ID_WORDS * sizeof(uint32))} << 32);
+        tree.SetMember(root, "area_source_id", AddSourceId(tree, sourceId));
+        tree.SetMember(root, "emission_power", tree.AddFloat(DecodeFloat(extra + sizeof(uint32) + sizeof(uint64))));
+    }
     return WriteCanonical(tree, root, outBytes, inoutFailure);
 }
 
@@ -2151,6 +2737,7 @@ struct StoredParts final
     Array<String> Meshes;
     String License;
     String Scene;
+    String Lighting;
 };
 
 [[nodiscard]] bool StoreParts(std::string_view root,
@@ -2257,8 +2844,26 @@ struct StoredParts final
     {
         return false;
     }
-    // Optional provenance; never read on reopen.
+    if (parts.Version == format::VERSION_3)
+    {
+        if (MakeLogicalId(space, "lighting", 0, outStored.Lighting) == false)
+        {
+            return inoutFailure.FailOutOfMemory();
+        }
+        if (StoreArtifact(root,
+                          inoutCatalog,
+                          "lighting",
+                          {parts.Lighting.GetDataOrNull(), parts.Lighting.GetSize()},
+                          {},
+                          build,
+                          outStored.Lighting.GetView(),
+                          inoutFailure) == false)
+        {
+            return false;
+        }
+    }
     JsonTree& manifest = inoutManifest.Tree;
+    // Optional source provenance; geometry and lighting reopen from the closure.
     manifest.SetMember(inoutManifest.Root, "source_origin", manifest.AddString(origin));
     const JsonIndex templateRoot = manifest.AddObject();
     const JsonIndex templateObjects = manifest.AddArray();
@@ -2273,6 +2878,10 @@ struct StoredParts final
     manifest.SetMember(templateRoot, "objects", templateObjects);
     manifest.SetMember(templateRoot, "camera", AddCamera(manifest, parts.Camera));
     manifest.SetMember(inoutManifest.Root, "template", templateRoot);
+    if (parts.Version == format::VERSION_3)
+    {
+        manifest.SetMember(inoutManifest.Root, "lighting", manifest.AddString(outStored.Lighting.GetView()));
+    }
     Array<uint8> manifestBytes;
     if (WriteCanonical(manifest, inoutManifest.Root, manifestBytes, inoutFailure) == false)
     {
@@ -2281,6 +2890,10 @@ struct StoredParts final
     // sorted(set(meshes + materials + [license_id])).
     Array<std::string_view> sceneDependencies;
     bool isOk = AddSortedUnique(sceneDependencies, outStored.License.GetView());
+    if (parts.Version == format::VERSION_3)
+    {
+        isOk = isOk == true && AddSortedUnique(sceneDependencies, outStored.Lighting.GetView()) == true;
+    }
     for (const String& identity : outStored.Meshes)
     {
         isOk = isOk && AddSortedUnique(sceneDependencies, identity.GetView());
@@ -2588,7 +3201,9 @@ ComputeSourceDigest(const JsonTree& manifest, JsonIndex root, HexDigest& outHex,
     buildTree.SetMember(settings, "profile", buildTree.AddString(LEVEL_PROFILE));
     buildTree.SetMember(build.Root, "settings", settings);
     buildTree.SetMember(build.Root, "schema", buildTree.AddInteger(1));
-    buildTree.SetMember(build.Root, "target", buildTree.AddString(BUILD_TARGET));
+    buildTree.SetMember(build.Root,
+                        "target",
+                        buildTree.AddString(parts.Version == format::VERSION_3 ? LIGHTING_BUILD_TARGET : BUILD_TARGET));
     if (buildTree.IsOk() == false)
     {
         return inoutFailure.FailOutOfMemory();
