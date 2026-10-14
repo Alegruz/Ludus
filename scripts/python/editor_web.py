@@ -15,7 +15,7 @@ import tarfile
 import urllib.request
 import venv
 
-from web_package import SDK_NOTICES, PORT_NOTICES, validate_wasm
+from web_package import EDITOR_MAXIMUM_MEMORY_PAGES, SDK_NOTICES, PORT_NOTICES, validate_wasm
 
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD = ("index.html", "editor.css", "editor.js", "ludus-icon.png", "ludus_editor.js", "ludus_editor.wasm", "qtloader.js")
@@ -100,7 +100,7 @@ def validate_package(site: Path):
             raise ValueError("Missing or symlinked editor asset: " + name)
         if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["sha256"].get(name):
             raise ValueError("Editor asset checksum mismatch: " + name)
-    validate_wasm((site / "ludus_editor.wasm").read_bytes())
+    validate_wasm((site / "ludus_editor.wasm").read_bytes(), EDITOR_MAXIMUM_MEMORY_PAGES)
     for sample in PLAYERS:
         validate_wasm((site / "players" / sample / "game.wasm").read_bytes())
         if "game.wasm" not in (site / "players" / sample / "game.js").read_text():

@@ -2,12 +2,16 @@
 
 #include <ludus/foundation/base/byte_order.hpp>
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/math/scalar.hpp>
 
 #include <QDir>
 #include <QFileInfo>
 #include <QSaveFile>
 
+#include <QVector>
+
 #include <span>
+#include <utility>
 
 extern "C" int stbi_zlib_decode_noheader_buffer(char* obuffer, int olen, const char* ibuffer, int ilen);
 
@@ -107,12 +111,22 @@ template <typename ValueType>
     }
     return file.commit();
 }
-} // namespace
-
-bool ExpandSceneArchive(const QByteArray& archive, const QString& directory, QString& outError)
+struct ArchiveEntry final
 {
-    const std::span<const uint8> bytes(reinterpret_cast<const uint8*>(archive.constData()),
-                                       static_cast<usize>(archive.size()));
+    QString Name;
+    usize DataOffset = 0;
+    uint32 CompressedSize = 0;
+    uint32 ExpandedSize = 0;
+    uint16 Method = METHOD_STORED;
+};
+
+/// Read and validate the central directory without decompressing anything.
+[[nodiscard]] bool readDirectory(std::span<const uint8> bytes,
+                                 uint64 maximumExpandedBytes,
+                                 QVector<ArchiveEntry>& outEntries,
+                                 uint64& outExpandedBytes,
+                                 QString& outError)
+{
     usize endOffset = 0;
     if (findEndOfDirectory(bytes, endOffset) == false)
     {
@@ -128,6 +142,7 @@ bool ExpandSceneArchive(const QByteArray& archive, const QString& directory, QSt
         outError = QStringLiteral("The .zip archive directory is unsupported (ZIP64 or too many entries).");
         return false;
     }
+    QVector<ArchiveEntry> entries;
     uint64 expandedTotal = 0;
     usize cursor = directoryOffset;
     for (uint16 index = 0; index < entryCount; ++index)
@@ -168,15 +183,16 @@ bool ExpandSceneArchive(const QByteArray& archive, const QString& directory, QSt
             return false;
         }
         if ((flags & FLAG_ENCRYPTED) != 0 || (method != METHOD_STORED && method != METHOD_DEFLATED) ||
-            compressedSize == ZIP64_MARKER || expandedSize == ZIP64_MARKER || localOffset == ZIP64_MARKER)
+            compressedSize == ZIP64_MARKER || expandedSize == ZIP64_MARKER || localOffset == ZIP64_MARKER ||
+            (method == METHOD_STORED && compressedSize != expandedSize))
         {
             outError = QStringLiteral("The .zip entry %1 uses an unsupported method, encryption or ZIP64.").arg(name);
             return false;
         }
         expandedTotal += expandedSize;
-        if (expandedTotal > MAX_EXPANDED_BYTES)
+        if (expandedTotal > maximumExpandedBytes)
         {
-            outError = QStringLiteral("The .zip archive expands beyond the browser limit of 1 GiB.");
+            outError = QStringLiteral("Import refused: the .zip archive expands beyond the session import limit.");
             return false;
         }
         uint32 localSignature = 0;
@@ -196,36 +212,57 @@ bool ExpandSceneArchive(const QByteArray& archive, const QString& directory, QSt
             outError = QStringLiteral("The .zip entry %1 is truncated.").arg(name);
             return false;
         }
-        const char* data = archive.constData() + dataOffset;
+        entries.push_back({name, dataOffset, compressedSize, expandedSize, method});
+    }
+    outEntries = std::move(entries);
+    outExpandedBytes = expandedTotal;
+    return true;
+}
+} // namespace
+
+bool ExpandSceneArchive(const QByteArray& archive,
+                        const QString& directory,
+                        uint64 maximumExpandedBytes,
+                        uint64& outExpandedBytes,
+                        QString& outError)
+{
+    const std::span<const uint8> bytes(reinterpret_cast<const uint8*>(archive.constData()),
+                                       static_cast<usize>(archive.size()));
+    QVector<ArchiveEntry> entries;
+    uint64 expandedTotal = 0;
+    if (readDirectory(bytes, math::Min(maximumExpandedBytes, MAX_EXPANDED_BYTES), entries, expandedTotal, outError) ==
+        false)
+    {
+        return false;
+    }
+    for (const ArchiveEntry& entry : entries)
+    {
+        const char* data = archive.constData() + entry.DataOffset;
         QByteArray contents;
-        if (method == METHOD_STORED)
+        if (entry.Method == METHOD_STORED)
         {
-            if (compressedSize != expandedSize)
-            {
-                outError = QStringLiteral("The .zip entry %1 is damaged.").arg(name);
-                return false;
-            }
-            contents = QByteArray(data, static_cast<qsizetype>(compressedSize));
+            contents = QByteArray(data, static_cast<qsizetype>(entry.CompressedSize));
         }
         else
         {
-            contents.resize(static_cast<qsizetype>(expandedSize));
+            contents.resize(static_cast<qsizetype>(entry.ExpandedSize));
             const int written = stbi_zlib_decode_noheader_buffer(contents.data(),
-                                                                 static_cast<int>(expandedSize),
+                                                                 static_cast<int>(entry.ExpandedSize),
                                                                  data,
-                                                                 static_cast<int>(compressedSize));
-            if (written < 0 || static_cast<uint32>(written) != expandedSize)
+                                                                 static_cast<int>(entry.CompressedSize));
+            if (written < 0 || static_cast<uint32>(written) != entry.ExpandedSize)
             {
-                outError = QStringLiteral("The .zip entry %1 could not be decompressed.").arg(name);
+                outError = QStringLiteral("The .zip entry %1 could not be decompressed.").arg(entry.Name);
                 return false;
             }
         }
-        if (writeEntry(QDir(directory).filePath(name), contents) == false)
+        if (writeEntry(QDir(directory).filePath(entry.Name), contents) == false)
         {
-            outError = QStringLiteral("Could not write %1 from the .zip archive.").arg(name);
+            outError = QStringLiteral("Could not write %1 from the .zip archive.").arg(entry.Name);
             return false;
         }
     }
+    outExpandedBytes = expandedTotal;
     return true;
 }
 } // namespace ludus::editor

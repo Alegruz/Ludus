@@ -478,13 +478,23 @@ void OpenBrowserSceneImport(QWidget* owner, bool isFolder, const std::function<v
                 if (state->Name.endsWith(QStringLiteral(".zip"), Qt::CaseInsensitive) == true && state->Folder == false)
                 {
                     // Expand the archive into MEMFS beside the other session imports.
+                    // Charge the declared expanded size, not the compressed file, against the
+                    // session budget before decompressing (the archive bytes are released after).
                     QString error;
-                    if (ExpandSceneArchive(bytes, state->Directory, error) == false)
+                    const foundation::int64 available = MAX_IMPORT_BYTES - (ImportedBytes - state->ChargedBytes);
+                    foundation::uint64 expanded = 0;
+                    if (ExpandSceneArchive(bytes,
+                                           state->Directory,
+                                           static_cast<foundation::uint64>(available),
+                                           expanded,
+                                           error) == false)
                     {
                         Report(state->Owner, error);
                         finish();
                         return;
                     }
+                    ImportedBytes += static_cast<foundation::int64>(expanded) - state->ChargedBytes;
+                    state->ChargedBytes = static_cast<foundation::int64>(expanded);
                     QString entry;
                     QDirIterator files(state->Directory,
                                        QStringList{QStringLiteral("*.pbrt")},

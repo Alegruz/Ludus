@@ -14,8 +14,6 @@ namespace ludus::editor
 using namespace foundation;
 namespace
 {
-/// Clip-space w below which a vertex is behind the near plane.
-constexpr float32 NEAR_CLIP_W = 1.0e-4F;
 /// Ambient term of the editor preview shading, matching the native Solid mode's spirit.
 constexpr float32 AMBIENT_SHADING = .3F;
 /// Diffuse weight of the fixed preview light.
@@ -24,8 +22,12 @@ constexpr float32 DIFFUSE_SHADING = .7F;
 constexpr QRgb BACKGROUND_COLOUR = qRgba(9, 12, 15, 255);
 /// Largest 8-bit channel value.
 constexpr float32 CHANNEL_MAXIMUM = 255.0F;
-/// Maximum vertices after clipping a triangle against one plane.
-constexpr usize MAX_CLIPPED_VERTICES = 4;
+/// Maximum vertices after clipping a triangle against the near and far planes.
+constexpr usize MAX_CLIPPED_VERTICES = 5;
+/// Depth-buffer clear value; reverse-Z stores 1 at the near plane and 0 at the far plane.
+constexpr float32 DEPTH_CLEAR = -1.0F;
+/// Neutral grey for the Solid preview mode.
+constexpr float32 SOLID_GREY = .8F;
 /// Direction towards the editor preview light (same as the native Solid preview light, negated).
 constexpr math::Vector3 PREVIEW_LIGHT_DIRECTION{-.4F, .8F, .5F};
 
@@ -39,6 +41,8 @@ struct ScreenVertex final
     float32 X = 0;
     float32 Y = 0;
     float32 InverseW = 0;
+    /// Reverse-Z normalized depth Z/W, linear in screen space.
+    float32 Depth = 0;
     math::Vector2 UvOverW{};
 };
 struct SurfaceColour final
@@ -90,22 +94,33 @@ struct Target final
 {
     return static_cast<uint8>(std::lround(static_cast<float64>(math::Clamp(value, 0.0F, 1.0F) * CHANNEL_MAXIMUM)));
 }
-[[nodiscard]] usize ClipNear(const ClipVertex (&input)[3], ClipVertex (&outVertices)[MAX_CLIPPED_VERTICES]) noexcept
+/// Signed distance to a clip plane of the reverse-Z volume 0 <= Z <= W; nonnegative is inside.
+[[nodiscard]] float32 GetPlaneDistance(const ClipVertex& vertex, bool isNearPlane) noexcept
+{
+    return isNearPlane == true ? vertex.PositionClip.W - vertex.PositionClip.Z : vertex.PositionClip.Z;
+}
+/// Clip a polygon against one plane (Sutherland-Hodgman); returns the new vertex count.
+[[nodiscard]] usize ClipPlane(const ClipVertex (&input)[MAX_CLIPPED_VERTICES],
+                              usize inputCount,
+                              bool isNearPlane,
+                              ClipVertex (&outVertices)[MAX_CLIPPED_VERTICES]) noexcept
 {
     usize count = 0;
-    for (usize i = 0; i < 3; ++i)
+    for (usize i = 0; i < inputCount; ++i)
     {
         const ClipVertex& current = input[i];
-        const ClipVertex& next = input[(i + 1) % 3];
-        const bool isCurrentInside = current.PositionClip.W > NEAR_CLIP_W;
-        const bool isNextInside = next.PositionClip.W > NEAR_CLIP_W;
-        if (isCurrentInside == true)
+        const ClipVertex& next = input[(i + 1) % inputCount];
+        const float32 currentDistance = GetPlaneDistance(current, isNearPlane);
+        const float32 nextDistance = GetPlaneDistance(next, isNearPlane);
+        const bool isCurrentInside = currentDistance >= 0;
+        const bool isNextInside = nextDistance >= 0;
+        if (isCurrentInside == true && count < MAX_CLIPPED_VERTICES)
         {
             outVertices[count++] = current;
         }
         if (isCurrentInside != isNextInside && count < MAX_CLIPPED_VERTICES)
         {
-            const float32 t = (NEAR_CLIP_W - current.PositionClip.W) / (next.PositionClip.W - current.PositionClip.W);
+            const float32 t = currentDistance / (currentDistance - nextDistance);
             outVertices[count++] =
             {
                 .PositionClip = current.PositionClip + (next.PositionClip - current.PositionClip) * t,
@@ -115,6 +130,18 @@ struct Target final
     }
     return count;
 }
+/// Clip a triangle to the near and far planes of the reverse-Z clip volume.
+[[nodiscard]] usize ClipDepth(const ClipVertex (&triangle)[3], ClipVertex (&outVertices)[MAX_CLIPPED_VERTICES]) noexcept
+{
+    ClipVertex input[MAX_CLIPPED_VERTICES]{triangle[0], triangle[1], triangle[2]};
+    ClipVertex nearClipped[MAX_CLIPPED_VERTICES];
+    const usize nearCount = ClipPlane(input, 3, true, nearClipped);
+    if (nearCount < 3)
+    {
+        return 0;
+    }
+    return ClipPlane(nearClipped, nearCount, false, outVertices);
+}
 [[nodiscard]] ScreenVertex ProjectVertex(const ClipVertex& vertex, int32 width, int32 height) noexcept
 {
     const float32 inverseW = 1.0F / vertex.PositionClip.W;
@@ -123,6 +150,7 @@ struct Target final
         .X = (vertex.PositionClip.X * inverseW * .5F + .5F) * static_cast<float32>(width),
         .Y = (.5F - vertex.PositionClip.Y * inverseW * .5F) * static_cast<float32>(height),
         .InverseW = inverseW,
+        .Depth = vertex.PositionClip.Z * inverseW,
         .UvOverW = vertex.Uv * inverseW,
     };
 }
@@ -157,14 +185,15 @@ void DrawTriangle(Target& inoutTarget,
             {
                 continue;
             }
-            // Larger 1/w is closer for any perspective depth convention.
-            const float32 inverseW = weightA * a.InverseW + weightB * b.InverseW + weightC * c.InverseW;
+            // Reverse-Z: larger Z/W is closer, for perspective and orthographic cameras alike.
+            const float32 fragmentDepth = weightA * a.Depth + weightB * b.Depth + weightC * c.Depth;
             float32& depth = (*inoutTarget.DepthOrNull)[y * inoutTarget.Width + x];
-            if (inverseW <= depth)
+            if (fragmentDepth <= depth)
             {
                 continue;
             }
-            depth = inverseW;
+            depth = fragmentDepth;
+            const float32 inverseW = weightA * a.InverseW + weightB * b.InverseW + weightC * c.InverseW;
             const math::Vector2 uv = (a.UvOverW * weightA + b.UvOverW * weightB + c.UvOverW * weightC) / inverseW;
             const math::Vector4 texel = SampleTexture(surface, uv);
             const math::Vector3 colour{
@@ -202,7 +231,8 @@ void DrawTriangle(Target& inoutTarget,
 QImage RenderSoftwareView(const RenderScene& scene,
                           const graphics::renderer::ViewDescription& view,
                           uint32 width,
-                          uint32 height)
+                          uint32 height,
+                          PreviewShading mode)
 {
     if (width == 0 || height == 0)
     {
@@ -214,7 +244,7 @@ QImage RenderSoftwareView(const RenderScene& scene,
         return {};
     }
     image.fill(QColor::fromRgba(BACKGROUND_COLOUR));
-    QVector<float32> depth(static_cast<qsizetype>(width) * static_cast<qsizetype>(height), 0.0F);
+    QVector<float32> depth(static_cast<qsizetype>(width) * static_cast<qsizetype>(height), DEPTH_CLEAR);
     Target target
     {
         .ImageOrNull = &image,
@@ -231,7 +261,15 @@ QImage RenderSoftwareView(const RenderScene& scene,
             continue;
         }
         const PreviewMesh& mesh = scene.Meshes[object.Mesh];
-        const SurfaceColour surface = DescribeSurface(scene, object);
+        SurfaceColour surface = DescribeSurface(scene, object);
+        if (mode == PreviewShading::Solid)
+        {
+            surface = { .Tint = {SOLID_GREY, SOLID_GREY, SOLID_GREY, 1} };
+        }
+        else if (mode == PreviewShading::Albedo)
+        {
+            surface.Emission = {};
+        }
         for (qsizetype i = 0; i + 2 < mesh.Indices.size(); i += 3)
         {
             ClipVertex triangle[3];
@@ -259,9 +297,9 @@ QImage RenderSoftwareView(const RenderScene& scene,
                 math::TryNormalize(math::Cross(world[1] - world[0], world[2] - world[0]), 0.0F, normal) ==
                 math::MathStatus::Success;
             const float32 diffuse = hasNormal == true ? math::Abs(math::Dot(normal, light)) : 1.0F;
-            const float32 shading = AMBIENT_SHADING + DIFFUSE_SHADING * diffuse;
+            const float32 shading = mode == PreviewShading::Albedo ? 1.0F : AMBIENT_SHADING + DIFFUSE_SHADING * diffuse;
             ClipVertex clipped[MAX_CLIPPED_VERTICES];
-            const usize count = ClipNear(triangle, clipped);
+            const usize count = ClipDepth(triangle, clipped);
             if (count < 3)
             {
                 continue;

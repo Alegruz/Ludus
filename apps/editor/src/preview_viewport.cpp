@@ -112,9 +112,16 @@ struct PreviewViewport::State final
         {
             return;
         }
-        const float64 ratio = Widget->devicePixelRatioF();
-        const float32 width = static_cast<float32>(math::Max(1.0, Widget->width() * ratio));
-        const float32 height = static_cast<float32>(math::Max(1.0, Widget->height() * ratio));
+        // Size the render from the canvas that displays it, so the aspect matches after layout.
+        Message->hide();
+        if (SoftwareCanvasOrNull->isHidden() == true)
+        {
+            SoftwareCanvasOrNull->show();
+            Layout->activate();
+        }
+        const float64 ratio = SoftwareCanvasOrNull->devicePixelRatioF();
+        const float32 width = static_cast<float32>(math::Max(1.0, SoftwareCanvasOrNull->width() * ratio));
+        const float32 height = static_cast<float32>(math::Max(1.0, SoftwareCanvasOrNull->height() * ratio));
         const float32 scale = math::Min(1.0F, SOFTWARE_MAXIMUM_SIDE / math::Max(width, height));
         const uint32 renderWidth = math::Max(uint32{1}, static_cast<uint32>(width * scale));
         const uint32 renderHeight = math::Max(uint32{1}, static_cast<uint32>(height * scale));
@@ -122,12 +129,13 @@ struct PreviewViewport::State final
         QString error;
         if (Preview->DescribeView(renderWidth, renderHeight, view, error) == false)
         {
+            SoftwareCanvasOrNull->hide();
             Message->setText(error);
+            Message->show();
             return;
         }
-        SoftwareCanvasOrNull->SetImage(RenderSoftwareView(Preview->Scene(), view, renderWidth, renderHeight));
-        Message->hide();
-        SoftwareCanvasOrNull->show();
+        SoftwareCanvasOrNull->SetImage(
+            RenderSoftwareView(Preview->Scene(), view, renderWidth, renderHeight, Preview->GetShading()));
         ++Presented;
     }
 #endif
