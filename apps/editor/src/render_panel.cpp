@@ -4,6 +4,8 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -171,11 +173,26 @@ void RenderPanel::SetWorld(const QString& root, const WorldDocument* world)
     UpdateTintAction();
     const bool loaded = world != nullptr && world->Loaded();
     Open_->setEnabled(loaded);
-    if (loaded && world->SceneLevel().isEmpty())
+    // A World without an imported scene renders through the project render bindings. Projects
+    // created for scene import have none, so say what to do instead of reporting a missing asset.
+    const bool hasRenderBindings =
+        root.isEmpty() == false &&
+        QFileInfo(QDir(root).filePath(QStringLiteral("authoring/render.preview.json"))).isFile();
+    const bool isAwaitingScene = loaded == true && world->SceneLevel().isEmpty() == true && hasRenderBindings == false;
+    if (isAwaitingScene == true)
+    {
+        Viewport_->ClearFrame(QStringLiteral("This World has no scene yet. Use Import scene… to render one here."));
+    }
+    else if (loaded == true && world->SceneLevel().isEmpty() == true)
     {
         (void)Refresh(true);
     }
     Refresh_->setEnabled(loaded);
+    if (isAwaitingScene == true)
+    {
+        Status_->setText(QStringLiteral("No scene imported yet. Import scene… cooks a scene into this World."));
+        return;
+    }
     Status_->setText(
         loaded ? QStringLiteral("Valid fields update the viewport; Apply commits them. Games own runtime binding.")
                : QStringLiteral("Open a World with project render bindings to preview 3D."));

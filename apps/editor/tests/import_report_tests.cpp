@@ -248,3 +248,22 @@ TEST_CASE("A failed World import keeps the previous World view", "[editor][impor
     CHECK(viewport->isHidden() == true);
     CHECK(status->text().isEmpty() == false);
 }
+
+TEST_CASE("An empty World in a scene-import project asks for an import, not render bindings", "[editor][import][world]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid() == true);
+    const QString root = QFileInfo(directory.path()).canonicalFilePath();
+    REQUIRE(QDir().mkpath(QDir(root).filePath(QStringLiteral("assets"))) == true);
+    WorldWorkspace workspace(MakeSceneTools(), nullptr);
+    workspace.SetProject(root, 1);
+    REQUIRE(workspace.Create(QDir(root).filePath(QStringLiteral("assets/staircase2.world.json"))) == true);
+    QTest::qWait(200);
+    bool hasImportHint = false;
+    for (const QLabel* label : workspace.findChildren<QLabel*>())
+    {
+        CHECK(label->text().contains(QStringLiteral("Asset must be a regular file")) == false);
+        hasImportHint = hasImportHint == true || label->text().contains(QStringLiteral("Use Import scene")) == true;
+    }
+    CHECK(hasImportHint == true);
+}

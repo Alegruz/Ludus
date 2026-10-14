@@ -6,6 +6,7 @@
 #include "lifetime_type.hpp"
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -888,21 +889,23 @@ TEST_CASE("TryAddRange grows geometrically so repeated small appends stay linear
     // Regression: exact-fit growth made byte writers quadratic (editor scene cook hung on macOS).
     Array<uint8> bytes;
     constexpr usize APPEND_COUNT = 1U << 20U;
-    const uint8 word[4] = {1, 2, 3, 4};
+    constexpr usize WORD_BYTES = 4;
+    const ludus::foundation::StaticArray<uint8, WORD_BYTES> word{1, 2, 3, 4};
     usize reallocations = 0;
-    const uint8* previous = bytes.GetData();
+    const uint8* previousOrNull = bytes.GetData();
     bool isAppended = true;
     for (usize index = 0; index < APPEND_COUNT; ++index)
     {
-        isAppended = bytes.TryAddRange(std::span<const uint8>(word)) == true && isAppended == true;
-        if (bytes.GetData() != previous)
+        isAppended =
+            bytes.TryAddRange(std::span<const uint8>(word.GetData(), word.GetSize())) == true && isAppended == true;
+        if (bytes.GetData() != previousOrNull)
         {
             ++reallocations;
-            previous = bytes.GetData();
+            previousOrNull = bytes.GetData();
         }
     }
     REQUIRE(isAppended == true);
-    CHECK(bytes.GetSize() == APPEND_COUNT * 4);
+    CHECK(bytes.GetSize() == APPEND_COUNT * WORD_BYTES);
     CHECK(bytes.GetCapacity() >= bytes.GetSize());
     // Doubling reaches 4 MiB in about 22 steps; exact-fit growth would reallocate a million times.
     CHECK(reallocations < 64);
