@@ -1,4 +1,5 @@
 #include "internal/render_scene.h"
+#include "internal/qt_numeric_stream.h"
 
 #include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/containers/borrowed_view.hpp>
@@ -949,13 +950,16 @@ bool RenderScene::Merge(const RenderScene& authored,
                << material.Emission.X << material.Emission.Y << material.Emission.Z;
         const uint32 flags = (material.IsEmissionTwoSided == true ? format::EMISSION_TWO_SIDED : 0U) |
                              (material.HasEmissionPower == true ? format::EMISSION_HAS_POWER : 0U);
-        stream << flags << material.AreaSourceId << material.EmissionPower << uint32{0};
+        stream << flags;
+        WriteLittleEndianUint64(stream, material.AreaSourceId);
+        stream << material.EmissionPower << uint32{0};
     }
     for (int32 i = 0; i < authored.Objects.size(); ++i)
     {
         stream << static_cast<uint32>(imported.Textures.GetSize() + static_cast<usize>(i)) << uint32{0} << float32{0}
-               << float32{.5F} << float32{0} << float32{0} << float32{0} << uint32{0} << uint64{0} << float32{0}
-               << uint32{0};
+               << float32{.5F} << float32{0} << float32{0} << float32{0} << uint32{0};
+        WriteLittleEndianUint64(stream, 0);
+        stream << float32{0} << uint32{0};
     }
     usize expandedVertices = 0;
     for (const resources::SceneMesh& mesh : imported.Meshes)
@@ -994,8 +998,8 @@ bool RenderScene::Merge(const RenderScene& authored,
         {
             stream << column.X << column.Y << column.Z;
         }
-        stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z
-               << object.SourceId;
+        stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z;
+        WriteLittleEndianUint64(stream, object.SourceId);
     }
     QJsonObject mergedLevel = level;
     QJsonArray objects = level.value(QStringLiteral("objects")).toArray();
@@ -1008,8 +1012,8 @@ bool RenderScene::Merge(const RenderScene& authored,
         {
             stream << column.X << column.Y << column.Z;
         }
-        stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z
-               << ComputeSourceId(object.Id);
+        stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z;
+        WriteLittleEndianUint64(stream, ComputeSourceId(object.Id));
         objects.append(
             QJsonObject{{QStringLiteral("id"), object.Id},
                         {QStringLiteral("name"), object.Name},
@@ -1026,17 +1030,18 @@ bool RenderScene::Merge(const RenderScene& authored,
            << imported.Environment.Rgb.Y << imported.Environment.Rgb.Z;
     for (const resources::SceneLight& light : imported.Lights)
     {
-        stream << light.SourceId << static_cast<uint32>(light.Kind)
-               << uint32{light.IsEnabled == true ? format::LIGHT_ENABLED : 0} << light.IntensityRgb.X
-               << light.IntensityRgb.Y << light.IntensityRgb.Z << light.PositionWorld.X << light.PositionWorld.Y
-               << light.PositionWorld.Z << light.DirectionWorld.X << light.DirectionWorld.Y << light.DirectionWorld.Z
-               << light.Range << light.InnerCos << light.OuterCos;
+        WriteLittleEndianUint64(stream, light.SourceId);
+        stream << static_cast<uint32>(light.Kind) << uint32{light.IsEnabled == true ? format::LIGHT_ENABLED : 0}
+               << light.IntensityRgb.X << light.IntensityRgb.Y << light.IntensityRgb.Z << light.PositionWorld.X
+               << light.PositionWorld.Y << light.PositionWorld.Z << light.DirectionWorld.X << light.DirectionWorld.Y
+               << light.DirectionWorld.Z << light.Range << light.InnerCos << light.OuterCos;
     }
     for (usize i = 0; i < authored.AuthoredLights.Count; ++i)
     {
         const rr::DirectLight& light = authored.AuthoredLights.Lights[i];
         const math::Vector3 rgb = light.Color * light.Intensity;
-        stream << light.SourceId << static_cast<uint32>(light.Kind) << format::LIGHT_ENABLED << rgb.X << rgb.Y << rgb.Z
+        WriteLittleEndianUint64(stream, light.SourceId);
+        stream << static_cast<uint32>(light.Kind) << format::LIGHT_ENABLED << rgb.X << rgb.Y << rgb.Z
                << light.Position.X << light.Position.Y << light.Position.Z << light.Direction.X << light.Direction.Y
                << light.Direction.Z << light.Range << light.InnerCos << light.OuterCos;
     }

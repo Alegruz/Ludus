@@ -2,6 +2,7 @@
 #include "internal/main_window.h"
 #include "internal/preview_area_lights.h"
 #include "internal/preview_viewport.h"
+#include "internal/qt_numeric_stream.h"
 #include "internal/render_panel.h"
 #include "internal/render_scene.h"
 #include "internal/static_lighting_job.h"
@@ -1005,4 +1006,16 @@ TEST_CASE("Static lighting worker owns surface overrides until completed chart t
     CHECK(chart.SceneRevision == 11);
     CHECK(chart.DependencyRevision == 22);
     CHECK(chart.Transform == scene.Definition->Objects[0].Transform);
+}
+
+TEST_CASE("Qt numeric stream preserves full-width light identity bytes across native integer ABIs",
+          "[editor][render-authoring][lighting]")
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    WriteLittleEndianUint64(stream, uint64{0x0123456789abcdefULL});
+    WriteLittleEndianUint64(stream, ~uint64{0});
+    CHECK(stream.status() == QDataStream::Ok);
+    CHECK(bytes.toHex() == QByteArrayLiteral("efcdab8967452301ffffffffffffffff"));
 }

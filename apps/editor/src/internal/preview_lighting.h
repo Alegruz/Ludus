@@ -12,6 +12,7 @@
 #include <ludus/graphics/renderer/static_lighting.hpp>
 
 #include "internal/preview_area_lights.h"
+#include "internal/qt_numeric_stream.h"
 #include "internal/render_scene.h"
 
 #include <QByteArrayView>
@@ -73,16 +74,17 @@ inline QByteArray MakeKey(const RenderScene& scene)
     {
         for (const resources::SceneMaterial& material : scene.Definition->Materials)
         {
-            stream << material.AreaSourceId << material.EmissionPower << material.HasEmissionPower
-                   << material.IsEmissionTwoSided;
+            WriteLittleEndianUint64(stream, material.AreaSourceId);
+            stream << material.EmissionPower << material.HasEmissionPower << material.IsEmissionTwoSided;
         }
         for (const resources::SceneObject& object : scene.Definition->Objects)
         {
-            stream << object.SourceId;
+            WriteLittleEndianUint64(stream, object.SourceId);
         }
         for (const resources::SceneLight& light : scene.Definition->Lights)
         {
-            stream << light.SourceId << static_cast<uint32>(light.Kind) << light.IsEnabled;
+            WriteLittleEndianUint64(stream, light.SourceId);
+            stream << static_cast<uint32>(light.Kind) << light.IsEnabled;
             stream << light.IntensityRgb.X << light.IntensityRgb.Y << light.IntensityRgb.Z;
             stream << light.PositionWorld.X << light.PositionWorld.Y << light.PositionWorld.Z;
             stream << light.DirectionWorld.X << light.DirectionWorld.Y << light.DirectionWorld.Z;
@@ -100,17 +102,20 @@ inline QByteArray MakeKey(const RenderScene& scene)
     static_assert(sizeof(math::Vector2) == sizeof(float32) * 2);
     if (scene.Definition.isNull() == false)
     {
-        stream << static_cast<uint64>(scene.Definition->Meshes.GetSize())
-               << static_cast<uint64>(scene.Definition->Textures.GetSize());
+        WriteLittleEndianUint64(stream, static_cast<uint64>(scene.Definition->Meshes.GetSize()));
+        WriteLittleEndianUint64(stream, static_cast<uint64>(scene.Definition->Textures.GetSize()));
         for (const resources::SceneMesh& mesh : scene.Definition->Meshes)
         {
-            stream << static_cast<uint64>(mesh.Positions.GetSize()) << static_cast<uint64>(mesh.Normals.GetSize())
-                   << static_cast<uint64>(mesh.Texcoords.GetSize()) << static_cast<uint64>(mesh.BakeTexcoords.GetSize())
-                   << static_cast<uint64>(mesh.Indices.GetSize());
+            WriteLittleEndianUint64(stream, static_cast<uint64>(mesh.Positions.GetSize()));
+            WriteLittleEndianUint64(stream, static_cast<uint64>(mesh.Normals.GetSize()));
+            WriteLittleEndianUint64(stream, static_cast<uint64>(mesh.Texcoords.GetSize()));
+            WriteLittleEndianUint64(stream, static_cast<uint64>(mesh.BakeTexcoords.GetSize()));
+            WriteLittleEndianUint64(stream, static_cast<uint64>(mesh.Indices.GetSize()));
         }
         for (const resources::SceneTexture& texture : scene.Definition->Textures)
         {
-            stream << texture.Width << texture.Height << static_cast<uint64>(texture.Pixels.GetSize());
+            stream << texture.Width << texture.Height;
+            WriteLittleEndianUint64(stream, static_cast<uint64>(texture.Pixels.GetSize()));
         }
     }
     QCryptographicHash hash(QCryptographicHash::Sha256);

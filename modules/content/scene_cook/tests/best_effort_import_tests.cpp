@@ -828,7 +828,10 @@ TEST_CASE("Authored lighting rejects power and cone terms that cannot round-trip
          {std::string("AreaLightSource \"diffuse\" \"float power\" 2000000\n"),
           std::string("LightSource \"spot\" \"float coneangle\" 0.001 \"float conedeltaangle\" 0.0001\n")})
     {
-        WriteFile(scratch.Path / "bounds.pbrt", "WorldBegin\n" + light + geometry);
+        std::string scene = "WorldBegin\n";
+        scene += light;
+        scene += geometry;
+        WriteFile(scratch.Path / "bounds.pbrt", scene);
         BestEffortResult result;
         CookError error;
         CHECK(ImportPbrtBestEffort((scratch.Path / "bounds.pbrt").string(), {}, result, error) == false);

@@ -1385,7 +1385,8 @@ void RenderPreview::serviceStaticLighting()
 rhi::RasterStatus RenderPreview::pollViewport()
 {
     const rhi::RasterStatus status = mResources->Viewport.Poll();
-    if (Accepted(status) == true || status == rhi::RasterStatus::DeviceLost || mResources->HasBakeSnapshot == false ||
+    if (status == rhi::RasterStatus::Ready || status == rhi::RasterStatus::Pending ||
+        status == rhi::RasterStatus::DeviceLost || mResources->HasBakeSnapshot == false ||
         mResources->IsBakePublished == true || mResources->HasBakeFailed == true)
     {
         return status;
