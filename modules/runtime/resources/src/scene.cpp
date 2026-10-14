@@ -124,11 +124,12 @@ Status ReadLighting(Reader& inoutReader, SceneDefinition& inoutScene) noexcept
             kind > format::LIGHT_SPOT || inoutReader.Read(flags) == false || (flags & ~format::LIGHT_ENABLED) != 0 ||
             inoutReader.Read(light.IntensityRgb) == false ||
             IsNonnegative(light.IntensityRgb, format::MAX_LIGHT_INTENSITY) == false ||
-            inoutReader.Read(light.PositionWorld) == false || inoutReader.Read(light.DirectionWorld) == false ||
-            IsNonzero(light.DirectionWorld) == false || inoutReader.Read(light.Range) == false || light.Range < .01F ||
-            light.Range > format::MAX_LIGHT_INTENSITY || inoutReader.Read(light.InnerCos) == false ||
-            inoutReader.Read(light.OuterCos) == false || light.InnerCos < -1 || light.InnerCos > 1 ||
-            light.OuterCos < -1 || light.OuterCos > light.InnerCos)
+            inoutReader.Read(light.PositionWorld) == false || math::Abs(light.PositionWorld.X) > 1000000 ||
+            math::Abs(light.PositionWorld.Y) > 1000000 || math::Abs(light.PositionWorld.Z) > 1000000 ||
+            inoutReader.Read(light.DirectionWorld) == false || IsNonzero(light.DirectionWorld) == false ||
+            inoutReader.Read(light.Range) == false || light.Range < .01F || light.Range > format::MAX_LIGHT_INTENSITY ||
+            inoutReader.Read(light.InnerCos) == false || inoutReader.Read(light.OuterCos) == false ||
+            light.InnerCos <= -1 || light.InnerCos > 1 || light.OuterCos <= -1 || light.OuterCos >= light.InnerCos)
         {
             return Status::Failed;
         }

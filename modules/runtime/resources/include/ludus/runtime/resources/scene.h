@@ -64,8 +64,8 @@ struct SceneLight final
     foundation::math::Vector3 PositionWorld{};   ///< Metres.
     foundation::math::Vector3 DirectionWorld{0, -1, 0}; ///< Nonzero outgoing direction; not necessarily normalized.
     float32 Range = 100;                                ///< Positive transport/shadow range in metres, at most 1e6.
-    float32 InnerCos = .9F;                             ///< Full-intensity cone cosine in [-1,1].
-    float32 OuterCos = .8F;                             ///< Zero-intensity cone cosine in [-1,InnerCos].
+    float32 InnerCos = .9F;                             ///< Full-intensity cone cosine in (-1,1].
+    float32 OuterCos = .8F;                             ///< Zero-intensity cone cosine in (-1,InnerCos).
 };
 /// Retained linear HDR source; workers decode without Qt, GPU calls or tone mapping.
 struct SceneEnvironment final

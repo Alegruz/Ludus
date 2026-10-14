@@ -207,18 +207,18 @@ struct LightingRecord final
 };
 /// Version 3 analytic light. Scene world distances are metres.
 /// RGB values are a fixed Rec.709 luminance-normalized proxy, rather than PBRT
-/// spectral power. Spot inner cosine is greater than or equal to outer cosine.
+/// spectral power. Spot inner cosine is strictly greater than outer cosine.
 struct LightRecord final
 {
     uint64 SourceId;           ///< Stable nonzero identity unique among analytic lights.
     uint32 Kind;               ///< LIGHT_DIRECTIONAL, LIGHT_POINT or LIGHT_SPOT.
     uint32 Flags;              ///< Zero or LIGHT_ENABLED; unknown bits are invalid.
     float32 IntensityRgb[3];   ///< Nonnegative lux (directional) or candela (point/spot).
-    float32 PositionWorld[3];  ///< Position in metres, irrelevant for directional.
+    float32 PositionWorld[3];  ///< Position in metres, components [-1e6,1e6]; irrelevant for directional.
     float32 DirectionWorld[3]; ///< Nonzero outgoing direction; normalized by adapter.
-    float32 Range;             ///< Positive attenuation/shadow range in metres, at most 1e6.
-    float32 InnerCos;          ///< [-1,1], inner full-intensity cone cosine.
-    float32 OuterCos;          ///< [-1,InnerCos], outer zero-intensity cone cosine.
+    float32 Range;             ///< Attenuation/shadow range in metres, [.01,1e6].
+    float32 InnerCos;          ///< (-1,1], inner full-intensity cone cosine.
+    float32 OuterCos;          ///< (-1,InnerCos), outer zero-intensity cone cosine.
 };
 /// Number of float32 components in ObjectRecord::Linear plus Translation.
 inline constexpr usize OBJECT_TRANSFORM_COMPONENTS = 12;

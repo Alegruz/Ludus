@@ -167,7 +167,7 @@ Status PackGpuScene(const ReferenceJob& job,
         out[5] = {GpuBits(static_cast<uint32>(textures[i * LUDUS_GPU_PREVIEW_TEXTURES_PER_SURFACE])),
                   GpuBits(flags),
                   GpuBits(s.Alpha == MaterialAlpha::Masked ? 1U : 0U),
-                  0};
+                  GpuBits(s.IsEmissionTwoSided == true ? 1U : 0U)};
         out[6] = {s.NormalScale,
                   GpuBits(instance.SurfaceMap.Width),
                   GpuBits(instance.SurfaceMap.Height),

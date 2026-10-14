@@ -9,6 +9,16 @@
 
 namespace ludus::editor
 {
+/// How the viewport shows engine frames in this process.
+enum class ViewportPresentation : foundation::uint8
+{
+    /// Qt Quick imports the engine texture from Qt's own GPU device (Metal, or Vulkan with Qt 6.6+).
+    SharedDevice,
+    /// The engine owns a headless Vulkan device and the viewport paints double-buffered CPU copies.
+    OffscreenReadback,
+    /// Neither path exists on this platform; the viewport only explains why.
+    Unavailable,
+};
 // One embedded presentation surface for both World bindings and cooked scenes.
 class PreviewViewport final : public QWidget
 {
@@ -18,7 +28,11 @@ public:
     void ShowFrame();
     void ClearFrame(const QString& text);
     [[nodiscard]] foundation::uint64 PresentedFrames() const noexcept;
+    /// True when either the shared-device or the offscreen readback path can show frames.
     [[nodiscard]] static bool CanPresent() noexcept;
+    /// Select the presentation path from the Qt version and platform plugin. Setting the
+    /// environment variable LUDUS_EDITOR_VIEWPORT=offscreen forces the readback path on Linux.
+    [[nodiscard]] static ViewportPresentation GetPresentation() noexcept;
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

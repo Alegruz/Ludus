@@ -2,6 +2,7 @@
 
 #include "internal/import_report.h"
 #include "internal/level_workspace.h"
+#include "internal/preview_viewport.h"
 #include "internal/world_workspace.h"
 
 #include <QDir>
@@ -192,7 +193,20 @@ TEST_CASE("World shows the import preview, imports on confirmation and shows the
     QWidget* viewport = workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport"));
     REQUIRE(viewport != nullptr);
     CHECK(viewport->isHidden() == false);
-    // Without native GPU sharing (offscreen) the viewport explains itself instead of the placeholder.
+    if (PreviewViewport::GetPresentation() == ViewportPresentation::OffscreenReadback)
+    {
+        // The engine-owned device renders offscreen and the copied frame replaces the placeholder.
+        const auto getPresentedFrames = [viewport]() {
+            const PreviewViewport* presenter = dynamic_cast<const PreviewViewport*>(viewport);
+            return presenter != nullptr ? presenter->PresentedFrames() : 0;
+        };
+        REQUIRE(WaitUntil([&getPresentedFrames]() { return getPresentedFrames() > 0; }) == true);
+        const QWidget* canvas = viewport->findChild<QWidget*>(QStringLiteral("LudusOffscreenViewport"));
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->isHidden() == false);
+        return;
+    }
+    // Without any presentation path (offscreen Qt) the viewport explains itself instead of the placeholder.
     bool hasExplanation = false;
     for (const QLabel* label : viewport->findChildren<QLabel*>())
     {

@@ -982,7 +982,7 @@ TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and 
                 const auto waitNs = ns(waitStart);
                 if (benchmark && frame >= 8)
                 {
-                    const usize knownBytes = 160 + 24 + 8800 + 16384 + static_cast<usize>(scene.Report.Visible) * 192 +
+                    const usize knownBytes = 160 + 24 + 16096 + 16384 + static_cast<usize>(scene.Report.Visible) * 192 +
                                              static_cast<usize>(width) * height * 4;
                     std::printf("L5,%u,%u,%u,%llu,%llu,%llu,%llu,%u,%u,%u,%u,%u,%u,%zu\n",
                                 scenario,

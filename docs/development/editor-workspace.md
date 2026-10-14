@@ -758,10 +758,26 @@ existing project-local preferences. The native child surface follows Qt window
 container stacking rules; widgets cannot overlay it arbitrarily.
 
 Metal sharing requires Qt 6.4+ with Qt Quick and the Cocoa display plugin. Vulkan
-sharing requires Qt 6.6+ with Qt Quick and an X11/Wayland display; older Qt builds
-or offscreen plugins keep document editing and asset validation available without
-claiming a GPU preview or falling back to CPU readback. Lightweight builds can
-still disable native preview explicitly. Browser scene import and a game's
+sharing requires Qt 6.6+ with Qt Quick and an X11/Wayland display, because older Qt
+cannot report which graphics queue its Vulkan device uses.
+
+On Linux with Qt 6.4 or 6.5 (for example Ubuntu 24.04's packages) the viewport uses
+an offscreen fallback instead. The engine creates its own headless Vulkan device,
+renders the same raster viewport into its two display images, and copies the
+latest completed image back to the CPU in bands that each fit one RHI transfer
+slice. A plain widget paints that `QImage`. The renderer keeps drawing into the
+other image while one is being copied, and the GUI thread only polls, so no call
+waits for the GPU. Orbit, pan, zoom and double-click framing work as in the shared
+path; resizing recreates the offscreen targets. The copy costs some latency and
+bandwidth, and the frame is capped at 1024 pixels on its long side, the same as
+the shared path. Set `LUDUS_EDITOR_VIEWPORT=offscreen` to force this path on any
+Linux build (useful for testing it on newer Qt). Qt 6.6+ keeps the shared path
+unchanged.
+
+Offscreen Qt plugins without that variable, or machines with no Vulkan driver,
+keep document editing and asset validation available, and the viewport explains
+why it cannot show a frame. Lightweight builds can still disable native preview
+explicitly. Browser scene import and a game's
 automatic Play/load integration are outside this initial profile.
 
 Keep `assets/` and `.world.json` documents with the project. Retain legacy
