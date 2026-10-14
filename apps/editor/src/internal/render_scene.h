@@ -5,6 +5,7 @@
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/gameplay/camera/evaluation.hpp>
+#include <ludus/graphics/renderer/lighting.hpp>
 #include <ludus/graphics/renderer/views.hpp>
 #include <ludus/runtime/resources/scene.h>
 
@@ -74,6 +75,7 @@ struct RenderScene final
     QSharedPointer<resources::SceneDefinition> Definition;
     QString LogicalId;
     bool Lit = false;
+    graphics::renderer::LightSelection AuthoredLights{};
     // Worker decode; no source importer, engine code execution or device access.
     [[nodiscard]] static bool LoadCooked(const QByteArray& bytes,
                                          const QJsonObject& level,

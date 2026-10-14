@@ -2,7 +2,7 @@ add_library(ludus_scene_cook STATIC
     src/scene_cook.cpp src/scene_assets.cpp src/python_compat.cpp src/python_json.cpp src/native_files.cpp src/uuid.cpp
     src/importers/pbrt/import_diagnostics.cpp src/importers/pbrt/pbrt_tokenizer.cpp src/importers/pbrt/ply_reader.cpp
     src/importers/pbrt/pbrt_parser.cpp src/importers/pbrt/shape_tessellation.cpp src/importers/pbrt/spectrum_tables.cpp
-    src/importers/pbrt/transform_utilities.cpp src/importers/budget_planner.cpp src/importers/best_effort_import.cpp
+    src/importers/pbrt/transform_utilities.cpp src/importers/budget_planner.cpp src/importers/best_effort_import.cpp src/importers/authored_lighting.cpp
     src/importers/image/image_reader.cpp)
 add_library(Ludus::SceneCook ALIAS ludus_scene_cook)
 set_target_properties(ludus_scene_cook PROPERTIES EXPORT_NAME SceneCook)

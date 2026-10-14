@@ -29,6 +29,12 @@ struct PlannedMaterial final
     float64 Roughness = 1.0;
     float64 Emission[3] = {0.0, 0.0, 0.0};
     bool IsEmissive = false;
+    bool IsEmissionTwoSided = false;
+    bool HasEmissionPower = false;
+    /// Sum of requested lumens after scale when all merged placements are power-authored.
+    float64 EmissionPowerLumens = 0.0;
+    /// Original shape indices retained for emitter provenance.
+    Array<uint32> EmitterSources;
     /// World-space area of the surfaces in this slot.
     float64 Area = 0.0;
     /// Placements (indices into CookPlan::Placements) baked into this slot's mesh.
@@ -41,6 +47,7 @@ struct PlannedMaterial final
 struct Placement final
 {
     uint32 Shape = IR_NONE;
+    uint32 EmitterGroup = IR_NONE;
     math::Matrix4d Transform = math::Matrix4d::Identity();
     float64 Area = 0.0;
     bool IsInstanced = false;

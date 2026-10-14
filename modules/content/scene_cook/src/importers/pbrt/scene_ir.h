@@ -99,6 +99,14 @@ struct IrShape final
     uint32 Material = IR_NONE;
     /// Linear RGB radiance from an enclosing AreaLightSource; zero otherwise.
     float64 Emission[3] = {0.0, 0.0, 0.0};
+    /// Source area-light identity; IR_NONE means no enclosing area light.
+    uint32 AreaLight = IR_NONE;
+    /// PBRT diffuse emitters default to front-side emission only.
+    bool IsEmissionTwoSided = false;
+    /// Optional source photometric power in lumens; normalized after surface area is known.
+    bool HasEmissionPower = false;
+    float64 EmissionPowerLumens = 0.0;
+    float64 EmissionScale = 1.0;
     /// Object-to-world (or object-to-instance inside ObjectBegin).
     math::Matrix4d Transform = math::Matrix4d::Identity();
     /// ReverseOrientation was active; the bake combines it with the handedness of
@@ -141,11 +149,42 @@ struct IrEnvironment final
     bool IsPresent = false;
     /// Mean linear RGB radiance (L x scale; image maps are averaged when decodable).
     float64 Radiance[3] = {0.0, 0.0, 0.0};
+    float64 Scale = 1.0;
+    bool HasIlluminance = false;
+    float64 IlluminanceLux = 0.0;
+    math::Matrix4d LightToWorld = math::Matrix4d::Identity();
     /// Root-relative path of the environment image, empty for constant L.
     String File;
 };
 
-/// Light sources that have no LUSCN representation, counted by kind.
+/// Source analytic model, independent of renderer/runtime ownership.
+enum class IrLightKind : uint8
+{
+    Directional,
+    Point,
+    Spot,
+};
+/// Authored light terms retained before the frozen RGB/photometric cook conversion.
+struct IrAnalyticLight final
+{
+    IrLightKind Kind = IrLightKind::Point;
+    /// Point/spot RGB radiant intensity or directional RGB irradiance, multiplied by scale.
+    math::Vector3d Strength{1.0, 1.0, 1.0};
+    /// Retained separately because photometric spectrum normalization cancels RGB magnitude.
+    float64 Scale = 1.0;
+    /// World-space origin in source meters; direction points from the light into the scene.
+    math::Vector3d PositionWorld{};
+    math::Vector3d DirectionWorld{0.0, 0.0, 1.0};
+    float64 InnerAngleDegrees = 25.0;
+    float64 OuterAngleDegrees = 30.0;
+    /// Optional source photometric normalization: lumens for point/spot, lux for directional.
+    bool HasPhotometricNormalization = false;
+    float64 PhotometricNormalization = 0.0;
+    uint32 SourceFile = IR_NONE;
+    uint32 Line = 0;
+};
+
+/// Source directives counted by kind, independent of whether cooking retains them.
 struct IrLightCounts final
 {
     uint32 Area = 0;
@@ -178,6 +217,7 @@ struct SceneIr final
     IrCamera Camera;
     IrEnvironment Environment;
     IrLightCounts Lights;
+    Array<IrAnalyticLight> AnalyticLights;
     /// Film resolution when declared; zero otherwise.
     uint32 FilmWidth = 0;
     uint32 FilmHeight = 0;

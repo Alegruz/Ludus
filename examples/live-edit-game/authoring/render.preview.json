@@ -48,5 +48,19 @@
       "id": "texture.ludus",
       "path": "authoring/ludus.png"
     }
-  ]
+  ],
+  "light": {
+    "component": "light",
+    "properties": {
+      "kind": "kind",
+      "enabled": "enabled",
+      "r": "r",
+      "g": "g",
+      "b": "b",
+      "intensity": "intensity",
+      "range": "range",
+      "innerAngle": "innerAngle",
+      "outerAngle": "outerAngle"
+    }
+  }
 }

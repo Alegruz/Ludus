@@ -1,6 +1,8 @@
 #include "internal/render_scene.h"
+#include "internal/qt_numeric_stream.h"
 
 #include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/containers/borrowed_view.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/scalar.hpp>
@@ -34,6 +36,75 @@ bool Fail(QString& error, const QString& text)
 {
     error = text;
     return false;
+}
+uint64 ComputeSourceId(const QString& id)
+{
+    const QByteArray hash = QCryptographicHash::hash(id.toUtf8(), QCryptographicHash::Sha256);
+    uint64 value = 0;
+    for (usize i = 0; i < sizeof(value); ++i)
+    {
+        value |= static_cast<uint64>(static_cast<uint8>(hash[static_cast<int32>(i)])) << (i * 8);
+    }
+    return value == 0 ? 1 : value;
+}
+bool WriteChartedMesh(QDataStream& inoutStream,
+                      foundation::BorrowedView<const math::Vector3> positions,
+                      foundation::BorrowedView<const math::Vector3> normals,
+                      foundation::BorrowedView<const math::Vector2> texcoords,
+                      foundation::BorrowedView<const uint32> indices,
+                      usize& inoutVertexCount,
+                      QString& outError)
+{
+    format::BakeChartLayout layout;
+    if (positions.IsValid() == false || normals.IsValid() == false || texcoords.IsValid() == false ||
+        indices.IsValid() == false || positions.IsEmpty() == true || indices.GetSize() % 3 != 0 ||
+        texcoords.GetSize() != positions.GetSize() ||
+        (normals.IsEmpty() == false && normals.GetSize() != positions.GetSize()) ||
+        indices.GetSize() > format::MAX_VERTICES - inoutVertexCount ||
+        format::TryMakeBakeChartLayout(static_cast<uint32>(indices.GetSize() / 3), layout) == false)
+    {
+        return Fail(outError, QStringLiteral("World geometry exceeds the separate triangle-chart profile."));
+    }
+    inoutVertexCount += indices.GetSize();
+    inoutStream << static_cast<uint32>(indices.GetSize()) << static_cast<uint32>(indices.GetSize());
+    for (usize triangle = 0; triangle < indices.GetSize() / 3; ++triangle)
+    {
+        for (usize corner = 0; corner < 3; ++corner)
+        {
+            if (indices[triangle * 3 + corner] >= positions.GetSize())
+            {
+                return Fail(outError, QStringLiteral("Invalid World mesh index."));
+            }
+        }
+        math::Vector3 faceNormal;
+        if (normals.IsEmpty() == true &&
+            math::TryNormalize(math::Cross(positions[indices[triangle * 3 + 1]] - positions[indices[triangle * 3]],
+                                           positions[indices[triangle * 3 + 2]] - positions[indices[triangle * 3]]),
+                               faceNormal) != math::MathStatus::Success)
+        {
+            return Fail(outError, QStringLiteral("Schema mesh has a degenerate shading normal."));
+        }
+        for (uint32 corner = 0; corner < 3; ++corner)
+        {
+            const uint32 index = indices[triangle * 3 + corner];
+            const math::Vector3 position = positions[index];
+            const math::Vector3 normal = normals.IsEmpty() == true ? faceNormal : normals[index];
+            const math::Vector2 uv = texcoords[index];
+            float32 u = 0;
+            float32 v = 0;
+            if (format::TryGetBakeChartUv(layout, static_cast<uint32>(triangle), corner, u, v) == false)
+            {
+                return Fail(outError, QStringLiteral("Invalid triangle bake chart."));
+            }
+            inoutStream << position.X << position.Y << position.Z << normal.X << normal.Y << normal.Z << uv.X << uv.Y
+                        << u << v;
+        }
+    }
+    for (usize i = 0; i < indices.GetSize(); ++i)
+    {
+        inoutStream << static_cast<uint32>(i);
+    }
+    return true;
 }
 bool Read(const QString& root, const QString& relative, QByteArray& bytes, QString& error, int64 limit = 1048576)
 {
@@ -327,14 +398,16 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
                     error.isEmpty() ? QStringLiteral("Open a world in a project with authoring/render.preview.json.")
                                     : error);
     }
-    if (!Fields(descriptor,
-                {QStringLiteral("version"),
-                 QStringLiteral("schema"),
-                 QStringLiteral("transform"),
-                 QStringLiteral("renderable"),
-                 QStringLiteral("camera"),
-                 QStringLiteral("meshes"),
-                 QStringLiteral("textures")}) ||
+    QJsonObject requiredDescriptor = descriptor;
+    requiredDescriptor.remove(QStringLiteral("light"));
+    if (Fields(requiredDescriptor,
+               {QStringLiteral("version"),
+                QStringLiteral("schema"),
+                QStringLiteral("transform"),
+                QStringLiteral("renderable"),
+                QStringLiteral("camera"),
+                QStringLiteral("meshes"),
+                QStringLiteral("textures")}) == false ||
         descriptor.value(QStringLiteral("version")) != QJsonValue(1) ||
         descriptor.value(QStringLiteral("schema")) != world.Schema().value(QStringLiteral("id")) ||
         !descriptor.value(QStringLiteral("meshes")).isArray() ||
@@ -343,7 +416,10 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
         return Fail(error,
                     QStringLiteral("Preview descriptor must use v1, this world schema and explicit bindings/assets."));
     }
-    QJsonObject transform, renderable, cameraBinding;
+    QJsonObject transform;
+    QJsonObject renderable;
+    QJsonObject cameraBinding;
+    QJsonObject lightBinding;
     const QString number = QStringLiteral("number");
     if (!Binding(world,
                  descriptor,
@@ -385,6 +461,27 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
                   {QStringLiteral("enum"), number, number, number, number, QStringLiteral("entity")},
                   cameraBinding,
                   error)))
+    {
+        return false;
+    }
+    if (descriptor.contains(QStringLiteral("light")) == true &&
+        descriptor.value(QStringLiteral("light")).isNull() == false &&
+        Binding(
+            world,
+            descriptor,
+            QStringLiteral("light"),
+            {QStringLiteral("kind"),
+             QStringLiteral("enabled"),
+             QStringLiteral("r"),
+             QStringLiteral("g"),
+             QStringLiteral("b"),
+             QStringLiteral("intensity"),
+             QStringLiteral("range"),
+             QStringLiteral("innerAngle"),
+             QStringLiteral("outerAngle")},
+            {QStringLiteral("enum"), QStringLiteral("boolean"), number, number, number, number, number, number, number},
+            lightBinding,
+            error) == false)
     {
         return false;
     }
@@ -458,6 +555,7 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
         }
     }
     bool bounds = false;
+    bool hasAuthoredLighting = false;
     math::Vector3 low{}, high{};
     for (const auto value : world.Draft().value(QStringLiteral("entities")).toArray())
     {
@@ -466,7 +564,8 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
         {
             continue;
         }
-        if (!Attached(entity, renderable) && !Attached(entity, cameraBinding))
+        if (Attached(entity, renderable) == false && Attached(entity, cameraBinding) == false &&
+            Attached(entity, lightBinding) == false)
         {
             continue;
         }
@@ -476,6 +575,48 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
         if (!Attached(entity, transform) || !Transform(Values(entity, transform), trs, error))
         {
             return Fail(error, name + QStringLiteral(": missing or invalid transform. ") + error);
+        }
+        if (Attached(entity, lightBinding) == true)
+        {
+            hasAuthoredLighting = true;
+            const QJsonObject values = Values(entity, lightBinding);
+            if (values.value(QStringLiteral("enabled")).toBool() == true)
+            {
+                rr::DirectLight light;
+                const QString kind = values.value(QStringLiteral("kind")).toString();
+                light.Kind = kind == QStringLiteral("directional") ? rr::LightKind::Directional
+                             : kind == QStringLiteral("point")     ? rr::LightKind::Point
+                                                                   : rr::LightKind::Spot;
+                float32 innerDegrees = 0;
+                float32 outerDegrees = 0;
+                if ((kind != QStringLiteral("directional") && kind != QStringLiteral("point") &&
+                     kind != QStringLiteral("spot")) ||
+                    Number(values.value(QStringLiteral("r")), light.Color.X) == false ||
+                    Number(values.value(QStringLiteral("g")), light.Color.Y) == false ||
+                    Number(values.value(QStringLiteral("b")), light.Color.Z) == false ||
+                    Number(values.value(QStringLiteral("intensity")), light.Intensity) == false ||
+                    Number(values.value(QStringLiteral("range")), light.Range) == false ||
+                    Number(values.value(QStringLiteral("innerAngle")), innerDegrees) == false ||
+                    Number(values.value(QStringLiteral("outerAngle")), outerDegrees) == false || innerDegrees < 0 ||
+                    innerDegrees >= outerDegrees || outerDegrees >= 90 || trs.Scale != math::Vector3{1, 1, 1})
+                {
+                    return Fail(error, name + QStringLiteral(": invalid light terms, cone or non-unit scale."));
+                }
+                light.Position = trs.Translation;
+                light.Direction = math::Rotate(trs.Rotation, {0, 0, -1});
+                light.InnerCos = math::Cos(math::DegreesToRadians(innerDegrees));
+                light.OuterCos = math::Cos(math::DegreesToRadians(outerDegrees));
+                light.SourceId = ComputeSourceId(id);
+                if (candidate.AuthoredLights.Count >= sizeof(candidate.AuthoredLights.Lights) / sizeof(rr::DirectLight))
+                {
+                    return Fail(error, QStringLiteral("World exceeds the authored-light capacity."));
+                }
+                candidate.AuthoredLights.Lights[candidate.AuthoredLights.Count++] = light;
+                assetsIdentity += QJsonDocument(QJsonObject{{QStringLiteral("id"), id},
+                                                            {QStringLiteral("light"), values},
+                                                            {QStringLiteral("transform"), Values(entity, transform)}})
+                                      .toJson(QJsonDocument::Compact);
+            }
         }
         if (Attached(entity, renderable))
         {
@@ -597,10 +738,34 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
             candidate.Cameras.append(rig);
         }
     }
+    rr::LightSelection normalized;
+    if (rr::NormalizeDirectLights(candidate.AuthoredLights.Lights, candidate.AuthoredLights.Count, normalized) !=
+        graphics::rhi::RasterStatus::Ready)
+    {
+        return Fail(error, QStringLiteral("Invalid light color/intensity/range or conflicting source identity."));
+    }
+    candidate.AuthoredLights = normalized;
     candidate.Center = (low + high) * 0.5F;
     candidate.Radius = bounds ? math::Max(0.001F, math::Length(high - low) * 0.5F) : 1.0F;
     candidate.AssetsIdentity = QCryptographicHash::hash(assetsIdentity, QCryptographicHash::Sha256);
     candidate.Identity = QCryptographicHash::hash(identity + candidate.AssetsIdentity, QCryptographicHash::Sha256);
+    if (hasAuthoredLighting == true && candidate.Objects.isEmpty() == false)
+    {
+        const math::Vector3 eye = candidate.Center + math::Vector3{0, 0, candidate.Radius * 3};
+        const QJsonObject camera{
+            {QStringLiteral("eye"),
+             QJsonArray{static_cast<float64>(eye.X), static_cast<float64>(eye.Y), static_cast<float64>(eye.Z)}},
+            {QStringLiteral("target"),
+             QJsonArray{static_cast<float64>(candidate.Center.X),
+                        static_cast<float64>(candidate.Center.Y),
+                        static_cast<float64>(candidate.Center.Z)}},
+            {QStringLiteral("up"), QJsonArray{0, 1, 0}},
+            {QStringLiteral("fov"), 1.0}};
+        const QJsonObject level{{QStringLiteral("id"), QStringLiteral("schema-preview")},
+                                {QStringLiteral("objects"), QJsonArray{}},
+                                {QStringLiteral("camera"), camera}};
+        return Merge(candidate, {}, level, output, error, {});
+    }
     output = candidate;
     error.clear();
     return true;
@@ -692,7 +857,7 @@ bool RenderScene::Merge(const RenderScene& authored,
                         QString& error,
                         const QJsonObject& revisions)
 {
-    if (authored.Objects.isEmpty())
+    if (authored.Objects.isEmpty() == true && authored.AuthoredLights.Count == 0)
     {
         if (!cooked.isEmpty())
         {
@@ -709,10 +874,11 @@ bool RenderScene::Merge(const RenderScene& authored,
     {
         return Fail(error, QStringLiteral("Invalid imported scene during World composition."));
     }
-    const auto meshCount = imported.Meshes.GetSize() + static_cast<usize>(authored.Meshes.size());
-    const auto materialCount = imported.Materials.GetSize() + static_cast<usize>(authored.Objects.size());
-    const auto textureCount = imported.Textures.GetSize() + static_cast<usize>(authored.Objects.size());
-    const auto objectCount = imported.Objects.GetSize() + static_cast<usize>(authored.Objects.size());
+    const usize meshCount = imported.Meshes.GetSize() +
+                            (authored.Objects.isEmpty() == true ? 0 : static_cast<usize>(authored.Meshes.size()));
+    const usize materialCount = imported.Materials.GetSize() + static_cast<usize>(authored.Objects.size());
+    const usize textureCount = imported.Textures.GetSize() + static_cast<usize>(authored.Objects.size());
+    const usize objectCount = imported.Objects.GetSize() + static_cast<usize>(authored.Objects.size());
     if (meshCount > format::MAX_MESHES || materialCount > format::MAX_MATERIALS ||
         textureCount > format::MAX_TEXTURES || objectCount > format::MAX_OBJECTS)
     {
@@ -725,7 +891,7 @@ bool RenderScene::Merge(const RenderScene& authored,
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
     stream.writeRawData(format::MAGIC.data(), static_cast<int32>(format::MAGIC.size()));
-    stream << format::VERSION_2 << static_cast<uint32>(meshCount) << static_cast<uint32>(materialCount)
+    stream << format::VERSION_3 << static_cast<uint32>(meshCount) << static_cast<uint32>(materialCount)
            << static_cast<uint32>(textureCount) << static_cast<uint32>(objectCount);
     const auto camera = level.value(QStringLiteral("camera")).toObject();
     for (const auto& key : {QStringLiteral("eye"), QStringLiteral("target"), QStringLiteral("up")})
@@ -778,58 +944,54 @@ bool RenderScene::Merge(const RenderScene& authored,
             stream.writeRawData(reinterpret_cast<const char*>(image.constScanLine(y)), rowBytes);
         }
     }
-    for (const auto& material : imported.Materials)
+    for (const resources::SceneMaterial& material : imported.Materials)
     {
         stream << material.Texture << uint32{material.Repeat ? 1U : 0U} << material.Metallic << material.Roughness
                << material.Emission.X << material.Emission.Y << material.Emission.Z;
+        const uint32 flags = (material.IsEmissionTwoSided == true ? format::EMISSION_TWO_SIDED : 0U) |
+                             (material.HasEmissionPower == true ? format::EMISSION_HAS_POWER : 0U);
+        stream << flags;
+        WriteLittleEndianUint64(stream, material.AreaSourceId);
+        stream << material.EmissionPower << uint32{0};
     }
     for (int32 i = 0; i < authored.Objects.size(); ++i)
     {
         stream << static_cast<uint32>(imported.Textures.GetSize() + static_cast<usize>(i)) << uint32{0} << float32{0}
-               << float32{.5F} << float32{0} << float32{0} << float32{0};
+               << float32{.5F} << float32{0} << float32{0} << float32{0} << uint32{0};
+        WriteLittleEndianUint64(stream, 0);
+        stream << float32{0} << uint32{0};
     }
-    for (const auto& mesh : imported.Meshes)
+    usize expandedVertices = 0;
+    for (const resources::SceneMesh& mesh : imported.Meshes)
     {
-        stream << static_cast<uint32>(mesh.Positions.GetSize()) << static_cast<uint32>(mesh.Indices.GetSize());
-        for (usize i = 0; i < mesh.Positions.GetSize(); ++i)
+        if (WriteChartedMesh(stream,
+                             {mesh.Positions.GetData(), mesh.Positions.GetSize()},
+                             {mesh.Normals.GetData(), mesh.Normals.GetSize()},
+                             {mesh.Texcoords.GetData(), mesh.Texcoords.GetSize()},
+                             {mesh.Indices.GetData(), mesh.Indices.GetSize()},
+                             expandedVertices,
+                             error) == false)
         {
-            stream << mesh.Positions[i].X << mesh.Positions[i].Y << mesh.Positions[i].Z << mesh.Normals[i].X
-                   << mesh.Normals[i].Y << mesh.Normals[i].Z << mesh.Texcoords[i].X << mesh.Texcoords[i].Y;
-        }
-        for (const auto index : mesh.Indices)
-        {
-            stream << index;
+            return false;
         }
     }
-    for (const auto& mesh : authored.Meshes)
+    if (authored.Objects.isEmpty() == false)
     {
-        QVector<math::Vector3> normals(mesh.Positions.size());
-        for (int32 i = 0; i < mesh.Indices.size(); i += 3)
+        for (const PreviewMesh& mesh : authored.Meshes)
         {
-            const auto a = mesh.Indices[i], b = mesh.Indices[i + 1], c = mesh.Indices[i + 2];
-            const auto normal =
-                math::Cross(mesh.Positions[b] - mesh.Positions[a], mesh.Positions[c] - mesh.Positions[a]);
-            normals[a] = normals[a] + normal;
-            normals[b] = normals[b] + normal;
-            normals[c] = normals[c] + normal;
-        }
-        stream << static_cast<uint32>(mesh.Positions.size()) << static_cast<uint32>(mesh.Indices.size());
-        for (int32 i = 0; i < mesh.Positions.size(); ++i)
-        {
-            math::Vector3 normal;
-            if (math::TryNormalize(normals[i], normal) != math::MathStatus::Success)
+            if (WriteChartedMesh(stream,
+                                 {mesh.Positions.constData(), static_cast<usize>(mesh.Positions.size())},
+                                 {mesh.Normals.constData(), static_cast<usize>(mesh.Normals.size())},
+                                 {mesh.Uvs.constData(), static_cast<usize>(mesh.Uvs.size())},
+                                 {mesh.Indices.constData(), static_cast<usize>(mesh.Indices.size())},
+                                 expandedVertices,
+                                 error) == false)
             {
-                return Fail(error, QStringLiteral("Schema mesh has a degenerate shading normal."));
+                return false;
             }
-            stream << mesh.Positions[i].X << mesh.Positions[i].Y << mesh.Positions[i].Z << normal.X << normal.Y
-                   << normal.Z << mesh.Uvs[i].X << mesh.Uvs[i].Y;
-        }
-        for (const auto index : mesh.Indices)
-        {
-            stream << index;
         }
     }
-    for (const auto& object : imported.Objects)
+    for (const resources::SceneObject& object : imported.Objects)
     {
         stream << object.Mesh << object.Material;
         for (const auto column : object.Transform.Columns)
@@ -837,31 +999,77 @@ bool RenderScene::Merge(const RenderScene& authored,
             stream << column.X << column.Y << column.Z;
         }
         stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z;
+        WriteLittleEndianUint64(stream, object.SourceId);
     }
-    auto mergedLevel = level;
-    auto objects = level.value(QStringLiteral("objects")).toArray();
+    QJsonObject mergedLevel = level;
+    QJsonArray objects = level.value(QStringLiteral("objects")).toArray();
     for (int32 i = 0; i < authored.Objects.size(); ++i)
     {
-        const auto& object = authored.Objects[i];
+        const PreviewObject& object = authored.Objects[i];
         stream << static_cast<uint32>(imported.Meshes.GetSize() + static_cast<usize>(object.Mesh))
                << static_cast<uint32>(imported.Materials.GetSize() + static_cast<usize>(i));
-        for (const auto column : object.Transform.Columns)
+        for (const math::Vector3 column : object.Transform.Columns)
         {
             stream << column.X << column.Y << column.Z;
         }
         stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z;
+        WriteLittleEndianUint64(stream, ComputeSourceId(object.Id));
         objects.append(
             QJsonObject{{QStringLiteral("id"), object.Id},
                         {QStringLiteral("name"), object.Name},
                         {QStringLiteral("mesh"), QStringLiteral("preview/") + authored.Meshes[object.Mesh].Id},
                         {QStringLiteral("material"), QStringLiteral("preview/") + object.Id}});
     }
+    const usize lightCount = imported.Lights.GetSize() + authored.AuthoredLights.Count;
+    if (lightCount > format::MAX_LIGHTS)
+    {
+        return Fail(error, QStringLiteral("Combined authored lights exceed the scene capacity."));
+    }
+    stream << format::LIGHTING_PROFILE_REC709_PHOTOMETRIC << static_cast<uint32>(lightCount)
+           << imported.Environment.Width << imported.Environment.Height << imported.Environment.Rgb.X
+           << imported.Environment.Rgb.Y << imported.Environment.Rgb.Z;
+    for (const resources::SceneLight& light : imported.Lights)
+    {
+        WriteLittleEndianUint64(stream, light.SourceId);
+        stream << static_cast<uint32>(light.Kind) << uint32{light.IsEnabled == true ? format::LIGHT_ENABLED : 0}
+               << light.IntensityRgb.X << light.IntensityRgb.Y << light.IntensityRgb.Z << light.PositionWorld.X
+               << light.PositionWorld.Y << light.PositionWorld.Z << light.DirectionWorld.X << light.DirectionWorld.Y
+               << light.DirectionWorld.Z << light.Range << light.InnerCos << light.OuterCos;
+    }
+    for (usize i = 0; i < authored.AuthoredLights.Count; ++i)
+    {
+        const rr::DirectLight& light = authored.AuthoredLights.Lights[i];
+        const math::Vector3 rgb = light.Color * light.Intensity;
+        WriteLittleEndianUint64(stream, light.SourceId);
+        stream << static_cast<uint32>(light.Kind) << format::LIGHT_ENABLED << rgb.X << rgb.Y << rgb.Z
+               << light.Position.X << light.Position.Y << light.Position.Z << light.Direction.X << light.Direction.Y
+               << light.Direction.Z << light.Range << light.InnerCos << light.OuterCos;
+    }
+    for (const math::Vector3 pixel : imported.Environment.Pixels)
+    {
+        stream << pixel.X << pixel.Y << pixel.Z;
+    }
     mergedLevel.insert(QStringLiteral("objects"), objects);
     if (stream.status() != QDataStream::Ok || bytes.size() > 67108864)
     {
         return Fail(error, QStringLiteral("Combined World exceeds its cooked byte budget."));
     }
-    return LoadCooked(bytes, mergedLevel, output, error, revisions);
+    RenderScene candidate;
+    if (LoadCooked(bytes, mergedLevel, candidate, error, revisions) == false)
+    {
+        return false;
+    }
+    candidate.AuthoredLights = authored.AuthoredLights;
+    candidate.RenderableBinding = authored.RenderableBinding;
+    if (authored.Cameras.isEmpty() == false)
+    {
+        candidate.Cameras = authored.Cameras;
+    }
+    candidate.AssetsIdentity =
+        QCryptographicHash::hash(candidate.AssetsIdentity + authored.AssetsIdentity, QCryptographicHash::Sha256);
+    candidate.Identity = QCryptographicHash::hash(candidate.Identity + authored.Identity, QCryptographicHash::Sha256);
+    output = candidate;
+    return true;
 }
 bool RenderScene::LoadCooked(const QByteArray& bytes,
                              const QJsonObject& level,

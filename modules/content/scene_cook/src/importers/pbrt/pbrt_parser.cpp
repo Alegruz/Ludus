@@ -164,6 +164,11 @@ struct GraphicsState final
     math::Matrix4d Transform = math::Matrix4d::Identity();
     uint32 Material = IR_NONE;
     bool HasAreaLight = false;
+    uint32 AreaLight = IR_NONE;
+    bool IsEmissionTwoSided = false;
+    bool HasEmissionPower = false;
+    float64 EmissionPowerLumens = 0.0;
+    float64 EmissionScale = 1.0;
     float64 Emission[3] = {0.0, 0.0, 0.0};
     bool IsReversed = false;
 };
@@ -1525,11 +1530,18 @@ Status SceneReader::applyAreaLight(Directive& inoutDirective) noexcept
     (void)findColour(inoutDirective, "L", radiance);
     float64 scale = 1.0;
     (void)findFloat(inoutDirective, "scale", scale);
-    if (findParameter(inoutDirective, "power") != nullptr)
+    mState.EmissionScale = scale;
+    mState.AreaLight = mScene.Lights.Area - 1;
+    mState.IsEmissionTwoSided = false;
+    (void)findBoolean(inoutDirective, "twosided", mState.IsEmissionTwoSided);
+    mState.HasEmissionPower = findFloat(inoutDirective, "power", mState.EmissionPowerLumens);
+    if (scale < 0.0 || (mState.HasEmissionPower == true && mState.EmissionPowerLumens < 0.0))
     {
-        inform(codes::LIGHT_SKIPPED, inoutDirective.Line, "area light power normalisation ignored");
+        warn(codes::LIGHT_SKIPPED, inoutDirective.Line, "negative area-light scale or power rejected");
+        mState.HasAreaLight = false;
+        markAllUsed(inoutDirective);
+        return Status::Ok;
     }
-    (void)findParameter(inoutDirective, "twosided");
     (void)findParameter(inoutDirective, "filename");
     mState.HasAreaLight = true;
     for (usize k = 0; k < 3; ++k)
@@ -1547,12 +1559,27 @@ Status SceneReader::addLight(Directive& inoutDirective) noexcept
     if (type == "infinite")
     {
         ++counts.Infinite;
+        if (counts.Infinite > 1)
+        {
+            warn(codes::LIMIT_EXCEEDED,
+                 inoutDirective.Line,
+                 "multiple infinite sources require separate scene imports");
+            return Status::Invalid;
+        }
         IrEnvironment& environment = mScene.Environment;
         float64 radiance[3] = {1.0, 1.0, 1.0};
         (void)findColour(inoutDirective, "L", radiance);
         float64 scale = 1.0;
         (void)findFloat(inoutDirective, "scale", scale);
-        (void)findParameter(inoutDirective, "illuminance");
+        environment.Scale = scale;
+        environment.LightToWorld = mState.Transform;
+        environment.HasIlluminance = findFloat(inoutDirective, "illuminance", environment.IlluminanceLux);
+        if (scale < 0 || (environment.HasIlluminance == true && environment.IlluminanceLux < 0))
+        {
+            warn(codes::LIGHT_SKIPPED, inoutDirective.Line, "negative environment scale or illuminance");
+            environment.IsPresent = false;
+            return Status::Ok;
+        }
         (void)findParameter(inoutDirective, "portal");
         std::string_view file;
         ResolvedSourcePath resolved;
@@ -1564,34 +1591,95 @@ Status SceneReader::addLight(Directive& inoutDirective) noexcept
         else if (file.empty() == false)
         {
             warn(codes::TEXTURE_UNREADABLE, inoutDirective.Line, "environment map is missing or outside the root");
+            return Status::Invalid;
         }
         environment.IsPresent = true;
         for (usize k = 0; k < 3; ++k)
         {
             environment.Radiance[k] = radiance[k] * scale;
         }
-        warn(codes::ENVIRONMENT_FALLBACK, inoutDirective.Line, "infinite light recorded as a constant environment");
+        warn(codes::ENVIRONMENT_FALLBACK,
+             inoutDirective.Line,
+             "infinite source uses the frozen Rec709 photometric/environment-map conversion");
         return Status::Ok;
     }
+    IrAnalyticLight light;
     if (type == "point")
     {
         ++counts.Point;
+        light.Kind = IrLightKind::Point;
     }
     else if (type == "spot")
     {
         ++counts.Spot;
+        light.Kind = IrLightKind::Spot;
     }
     else if (type == "distant")
     {
         ++counts.Distant;
+        light.Kind = IrLightKind::Directional;
     }
     else
     {
         ++counts.Other;
+        markAllUsed(inoutDirective);
+        warn(codes::LIGHT_SKIPPED, inoutDirective.Line, type);
+        return Status::Ok;
     }
-    markAllUsed(inoutDirective);
-    warn(codes::LIGHT_SKIPPED, inoutDirective.Line, type);
-    return Status::Ok;
+    // Thanks to Matt Pharr, Wenzel Jakob and Greg Humphreys, Physically Based
+    // Rendering, fourth edition, sections 12.2/12.3 (point/spot and distant
+    // lights): preserve source intensity/irradiance and transformed from/to.
+    // https://pbr-book.org/4ed/Light_Sources/Point_Lights
+    // https://pbr-book.org/4ed/Light_Sources/Distant_Lights
+    float64 strength[3] = {1.0, 1.0, 1.0};
+    (void)findColour(inoutDirective, light.Kind == IrLightKind::Directional ? "L" : "I", strength);
+    float64 scale = 1.0;
+    (void)findFloat(inoutDirective, "scale", scale);
+    light.Strength = {strength[0] * scale, strength[1] * scale, strength[2] * scale};
+    light.Scale = scale;
+    math::Vector3d from{};
+    math::Vector3d to{0.0, 0.0, 1.0};
+    const auto readPoint = [this, &inoutDirective](std::string_view name, math::Vector3d& outPoint) noexcept {
+        const Parameter* parameterOrNull = findParameter(inoutDirective, name);
+        if (parameterOrNull != nullptr && parameterOrNull->Value.Numbers.GetSize() == 3)
+        {
+            outPoint = {parameterOrNull->Value.Numbers[0],
+                        parameterOrNull->Value.Numbers[1],
+                        parameterOrNull->Value.Numbers[2]};
+        }
+    };
+    readPoint("from", from);
+    readPoint("to", to);
+    light.PositionWorld = TransformPoint(mState.Transform, from);
+    const math::Vector3d direction = light.Kind == IrLightKind::Point ? math::Vector3d{0.0, 0.0, 1.0}
+                                                                      : TransformDirection(mState.Transform, to - from);
+    const float64 length = math::Length(direction);
+    float64 cone = 30.0;
+    float64 delta = 5.0;
+    if (light.Kind == IrLightKind::Spot)
+    {
+        (void)findFloat(inoutDirective, "coneangle", cone);
+        (void)findFloat(inoutDirective, "conedeltaangle", delta);
+        light.OuterAngleDegrees = cone;
+        light.InnerAngleDegrees = cone - delta;
+    }
+    light.HasPhotometricNormalization = findFloat(inoutDirective,
+                                                  light.Kind == IrLightKind::Directional ? "illuminance" : "power",
+                                                  light.PhotometricNormalization);
+    light.SourceFile = mCurrentFile;
+    light.Line = inoutDirective.Line;
+    if (scale < 0.0 || math::IsFinite(light.Strength.X) == false || math::IsFinite(light.Strength.Y) == false ||
+        math::IsFinite(light.Strength.Z) == false || light.Strength.X < 0.0 || light.Strength.Y < 0.0 ||
+        light.Strength.Z < 0.0 || math::IsFinite(light.PositionWorld.X) == false ||
+        math::IsFinite(light.PositionWorld.Y) == false || math::IsFinite(light.PositionWorld.Z) == false ||
+        math::IsFinite(length) == false || length <= 0.0 || cone <= 0.0 || cone >= 90.0 || delta <= 0.0 ||
+        delta > cone || (light.HasPhotometricNormalization == true && light.PhotometricNormalization < 0.0))
+    {
+        warn(codes::LIGHT_SKIPPED, inoutDirective.Line, "invalid authored analytic light");
+        return Status::Ok;
+    }
+    light.DirectionWorld = direction * (1.0 / length);
+    return mScene.AnalyticLights.TryAdd(light) == true ? Status::Ok : Status::OutOfMemory;
 }
 
 Status SceneReader::applyCamera(Directive& inoutDirective) noexcept
@@ -1780,6 +1868,11 @@ Status SceneReader::addShape(Directive& inoutDirective) noexcept
     shape.Line = inoutDirective.Line;
     if (mState.HasAreaLight == true)
     {
+        shape.AreaLight = mState.AreaLight;
+        shape.IsEmissionTwoSided = mState.IsEmissionTwoSided;
+        shape.HasEmissionPower = mState.HasEmissionPower;
+        shape.EmissionPowerLumens = mState.EmissionPowerLumens;
+        shape.EmissionScale = mState.EmissionScale;
         for (usize k = 0; k < 3; ++k)
         {
             shape.Emission[k] = mState.Emission[k];

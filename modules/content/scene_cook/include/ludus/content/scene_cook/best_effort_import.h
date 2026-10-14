@@ -11,11 +11,12 @@
 /// Best-effort pbrt-v4 scene importer (profile pbrt-best-effort-v1).
 ///
 /// Unlike the frozen pbrt-reference-v1 staircase2 cooker, this importer accepts
-/// general pbrt-v4 scenes and degrades instead of rejecting them: unsupported
+/// general pbrt-v4 scenes with reported approximations: unsupported
 /// features become documented fallbacks, and the scene is fitted to the LUSCN
 /// limits in Ludus::SceneFormat (6 meshes, 8 materials, 8 textures, 500 k
 /// vertices, 128 objects, 64 MiB). Every compromise is recorded in a
-/// deterministic, versioned JSON import report. See
+/// deterministic, versioned JSON import report. Authored lighting that cannot fit
+/// without losing sources or energy rejects explicitly. See
 /// docs/development/best-effort-scene-import.md.
 namespace ludus::content::scene_cook
 {
@@ -70,7 +71,8 @@ struct ImportSummary final
 /// @brief Outputs of ImportPbrtBestEffort.
 struct BestEffortResult final
 {
-    /// LUSCN version 2 bundle (scene.luscn); empty for a dry run.
+    /// LUSCN version 3 bundle with authored photometric lighting and triangle bake coordinates (scene.luscn); empty for
+    /// a dry run.
     foundation::Array<uint8> Bundle;
     /// Import report JSON (import-report.json) including its trailing newline.
     foundation::Array<uint8> Report;
