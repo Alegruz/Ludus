@@ -197,6 +197,11 @@ void RenderPanel::SetWorld(const QString& root, const WorldDocument* world)
         loaded ? QStringLiteral("Valid fields update the viewport; Apply commits them. Games own runtime binding.")
                : QStringLiteral("Open a World with project render bindings to preview 3D."));
 }
+void RenderPanel::ShowSceneFailure(const QString& error)
+{
+    Viewport_->ClearFrame(QStringLiteral("Scene import failed: ") + error);
+    Status_->setText(QStringLiteral("Scene import failed: ") + error);
+}
 bool RenderPanel::Refresh(bool launch)
 {
     if (World_ == nullptr || !World_->Loaded())

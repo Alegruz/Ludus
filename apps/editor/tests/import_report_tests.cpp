@@ -3,6 +3,7 @@
 #include "internal/import_report.h"
 #include "internal/level_workspace.h"
 #include "internal/preview_viewport.h"
+#include "internal/render_panel.h"
 #include "internal/world_workspace.h"
 
 #include <QDir>
@@ -266,4 +267,18 @@ TEST_CASE("An empty World in a scene-import project asks for an import, not rend
         hasImportHint = hasImportHint == true || label->text().contains(QStringLiteral("Use Import scene")) == true;
     }
     CHECK(hasImportHint == true);
+}
+
+TEST_CASE("A failed scene import is shown in the empty World viewport", "[editor][import][world]")
+{
+    RenderPanel panel;
+    panel.SetWorld(QString(), nullptr);
+    const QString error = QStringLiteral("Project catalog exceeds 64 MiB (MAX_CATALOG_BYTES)");
+    panel.ShowSceneFailure(error);
+    bool hasStatus = false;
+    for (const QLabel* label : panel.findChildren<QLabel*>())
+    {
+        hasStatus = hasStatus == true || label->text() == QStringLiteral("Scene import failed: ") + error;
+    }
+    CHECK(hasStatus == true);
 }
