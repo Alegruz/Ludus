@@ -222,9 +222,8 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
         Render_->Stop();
         // The candidate scene commits only after its first rendered frame, and the
         // native surface is created only once its widget is shown. Show the scene
-        // viewport now; Render() restores the previous layout if the import fails.
-        BoundViewport_->hide();
-        Render_->hide();
+        // viewport beside the current World view; Render() hides the old view after
+        // the commit, or hides the candidate again if the import fails.
         Viewport_->show();
         Q_EMIT PreviewStarting();
     });
