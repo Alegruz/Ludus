@@ -4,6 +4,9 @@ outputs:
   native_required:
     description: Whether native engine and host-tooling validation must run.
     value: ${{ steps.classify.outputs.native_required }}
+  validation_tier:
+    description: Whether this run is the fast pull-request tier or the full merge-queue tier.
+    value: ${{ steps.classify.outputs.validation_tier }}
 runs:
   using: composite
   steps:
@@ -18,8 +21,13 @@ runs:
       shell: bash
       env:
         NATIVE_REQUIRED: ${{ steps.classify.outputs.native_required }}
+        VALIDATION_TIER: ${{ steps.classify.outputs.validation_tier }}
       run: |
         case "$NATIVE_REQUIRED" in
           true|false) ;;
           *) echo 'Missing or invalid CI routing output.' >&2; exit 1 ;;
+        esac
+        case "$VALIDATION_TIER" in
+          full|pull-request) ;;
+          *) echo 'Missing or invalid CI validation tier.' >&2; exit 1 ;;
         esac
