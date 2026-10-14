@@ -1,6 +1,8 @@
 #include "internal/level_workspace.h"
+
 #include "internal/import_report.h"
 #include "internal/preview_viewport.h"
+#include <QGuiApplication>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -792,6 +794,11 @@ void LevelWorkspace::Rollback(const QString& error)
     {
         (void)Preview_.Start();
     }
+    if (Preview_.Running() == false)
+    {
+        // Show the refusal in the viewport, not only in the status line.
+        Viewport_->ClearFrame(error);
+    }
     PreviousScene_ = {};
     Busy_ = false;
     Status_->setText(error + QStringLiteral(" Previous scene and level retained."));
@@ -858,6 +865,12 @@ void LevelWorkspace::Publish()
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     if (PreviewViewport::CanPresent() == false)
     {
+        // Commit without a rendered frame, but say why the viewport stays empty
+        // instead of leaving the generic placeholder.
+        Viewport_->ClearFrame(QStringLiteral("Scene ready, but this Editor cannot show the GPU viewport here: native "
+                                             "GPU sharing needs macOS (Metal) or X11/Wayland with Qt 6.6+ (this "
+                                             "build uses Qt %1 on platform '%2').")
+                                  .arg(QStringLiteral(QT_VERSION_STR), QGuiApplication::platformName()));
         if (Operation_ == QStringLiteral("import"))
         {
             CommitImport();
@@ -885,6 +898,8 @@ void LevelWorkspace::Publish()
     {
         CommitCandidate();
     }
+    Viewport_->ClearFrame(QStringLiteral("Scene ready. This Editor build has no native rendered viewport "
+                                         "(configure with LUDUS_EDITOR_RENDER_PREVIEW)."));
     Status_->setText(QStringLiteral("Scene ready. This Editor build has no native rendered viewport."));
 #endif
 }
