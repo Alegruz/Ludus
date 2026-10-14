@@ -3,6 +3,9 @@
 #include <ludus/content/content.h>
 #include <ludus/content/scene_cook/scene_assets.h>
 #include <ludus/content/scene_cook/scene_cook.h>
+#include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/runtime/resources/scene.h>
 
 #include "python_json.h"
 #include "uuid.h"
@@ -786,4 +789,434 @@ TEST_CASE("scene-v4.pbrt keeps pbrt-reference-v1 and falls back only on profile 
 
     std::error_code ignored;
     std::filesystem::remove_all(work, ignored);
+}
+
+namespace
+{
+namespace format = ludus::content::scene_format;
+namespace resources = ludus::resources;
+constexpr usize TRIANGLE_VERTICES = 3;
+constexpr usize AUTHORED_VERTEX_COMPONENTS = 10;
+constexpr uint64 TEST_AREA_SOURCE = 0xf1234567abcdef01ULL;
+constexpr uint64 TEST_LIGHT_SOURCE = 0xfedcba9876543210ULL;
+
+struct LightingFixtureProfile final
+{
+    uint32 Version = format::VERSION_3;
+    uint32 EnvironmentWidth = 2;
+    uint32 LightCount = 1;
+    float64 EnvironmentScale = 2;
+};
+
+bool CookLightingFixture(std::string_view source,
+                         CookResult& outResult,
+                         CookError& outError,
+                         const Cancellation* cancelOrNull,
+                         const LightingFixtureProfile& profile) noexcept
+{
+    if (Cook(source, outResult, outError, cancelOrNull) == false)
+    {
+        return false;
+    }
+    outResult.Bundle.Clear();
+    detail::ByteWriter writer(outResult.Bundle);
+    writer.Append(format::MAGIC);
+    writer.AppendUint32(profile.Version);
+    writer.AppendUint32(1);
+    writer.AppendUint32(1);
+    writer.AppendUint32(0);
+    writer.AppendUint32(1);
+    // Eye, target, up, vertical FOV.
+    constexpr StaticArray<float64, AUTHORED_VERTEX_COMPONENTS> CAMERA{0, 0, 3, 0, 0, 0, 0, 1, 0, 1};
+    for (const float64 value : CAMERA)
+    {
+        writer.AppendFloat32(value);
+    }
+    writer.AppendUint32(format::NO_TEXTURE);
+    writer.AppendUint32(format::ADDRESS_CLAMP);
+    writer.AppendFloat32(0);
+    writer.AppendFloat32(.5);
+    writer.AppendFloat32(1);
+    writer.AppendFloat32(2);
+    writer.AppendFloat32(3);
+    if (profile.Version == format::VERSION_3)
+    {
+        writer.AppendUint32(format::EMISSION_TWO_SIDED | format::EMISSION_HAS_POWER);
+        writer.AppendUint32(static_cast<uint32>(TEST_AREA_SOURCE));
+        writer.AppendUint32(static_cast<uint32>(TEST_AREA_SOURCE >> 32));
+        writer.AppendFloat32(9);
+        writer.AppendUint32(0);
+    }
+    writer.AppendUint32(TRIANGLE_VERTICES);
+    writer.AppendUint32(TRIANGLE_VERTICES);
+    constexpr StaticArray<StaticArray<float64, AUTHORED_VERTEX_COMPONENTS>, TRIANGLE_VERTICES> VERTICES{
+        StaticArray<float64, AUTHORED_VERTEX_COMPONENTS>{0, 0, 0, 0, 0, 1, 0, 0, .25, .25},
+        StaticArray<float64, AUTHORED_VERTEX_COMPONENTS>{1, 0, 0, 0, 0, 1, 1, 0, .5, .25},
+        StaticArray<float64, AUTHORED_VERTEX_COMPONENTS>{0, 1, 0, 0, 0, 1, 0, 1, .25, .5}};
+    for (const StaticArray<float64, AUTHORED_VERTEX_COMPONENTS>& vertex : VERTICES)
+    {
+        const usize components =
+            profile.Version == format::VERSION_3 ? AUTHORED_VERTEX_COMPONENTS : format::VERTEX_COMPONENTS;
+        for (usize i = 0; i < components; ++i)
+        {
+            writer.AppendFloat32(vertex[i]);
+        }
+    }
+    writer.AppendUint32(0);
+    writer.AppendUint32(1);
+    writer.AppendUint32(2);
+    writer.AppendUint32(0);
+    writer.AppendUint32(0);
+    for (usize i = 0; i < format::OBJECT_TRANSFORM_COMPONENTS; ++i)
+    {
+        writer.AppendFloat32(i == 0 || i == 4 || i == 8 ? 1 : 0);
+    }
+    if (profile.Version == format::VERSION_3)
+    {
+        writer.AppendUint32(17);
+        writer.AppendUint32(0xf0000000U);
+        writer.AppendUint32(format::LIGHTING_PROFILE_REC709_PHOTOMETRIC);
+        writer.AppendUint32(profile.LightCount);
+        writer.AppendUint32(profile.EnvironmentWidth);
+        writer.AppendUint32(profile.EnvironmentWidth == 0 ? 0 : 1);
+        for (usize channel = 0; channel < 3; ++channel)
+        {
+            writer.AppendFloat32(profile.EnvironmentScale);
+        }
+        for (usize i = 0; i < profile.LightCount; ++i)
+        {
+            const uint64 sourceId = TEST_LIGHT_SOURCE + i;
+            writer.AppendUint32(static_cast<uint32>(sourceId));
+            writer.AppendUint32(static_cast<uint32>(sourceId >> 32));
+            writer.AppendUint32(format::LIGHT_POINT);
+            writer.AppendUint32(format::LIGHT_ENABLED);
+            constexpr usize LIGHT_FLOATS = 12;
+            constexpr StaticArray<float64, LIGHT_FLOATS> VALUES{3, 4, 5, 1, 2, 3, 0, -1, 0, 10, 1, .5};
+            for (const float64 value : VALUES)
+            {
+                writer.AppendFloat32(value);
+            }
+        }
+        for (usize pixel = 0; pixel < profile.EnvironmentWidth; ++pixel)
+        {
+            for (usize channel = 0; channel < 3; ++channel)
+            {
+                writer.AppendFloat32(static_cast<float64>(pixel + channel + 1));
+            }
+        }
+    }
+    return writer.IsOk();
+}
+
+bool CookV3(std::string_view source,
+            CookResult& outResult,
+            CookError& outError,
+            const Cancellation* cancelOrNull) noexcept
+{
+    return CookLightingFixture(source, outResult, outError, cancelOrNull, {});
+}
+bool CookV2(std::string_view source,
+            CookResult& outResult,
+            CookError& outError,
+            const Cancellation* cancelOrNull) noexcept
+{
+    return CookLightingFixture(source, outResult, outError, cancelOrNull, { .Version = format::VERSION_2 });
+}
+bool CookConstant(std::string_view source,
+                  CookResult& outResult,
+                  CookError& outError,
+                  const Cancellation* cancelOrNull) noexcept
+{
+    return CookLightingFixture(source, outResult, outError, cancelOrNull, { .EnvironmentWidth = 0 });
+}
+bool CookOtherDimensions(std::string_view source,
+                         CookResult& outResult,
+                         CookError& outError,
+                         const Cancellation* cancelOrNull) noexcept
+{
+    return CookLightingFixture(source, outResult, outError, cancelOrNull, { .EnvironmentWidth = 1 });
+}
+bool CookManyLights(std::string_view source,
+                    CookResult& outResult,
+                    CookError& outError,
+                    const Cancellation* cancelOrNull) noexcept
+{
+    return CookLightingFixture(source,
+                               outResult,
+                               outError,
+                               cancelOrNull,
+                               { .EnvironmentWidth = 0, .LightCount = format::MAX_LIGHTS });
+}
+bool CookHighEnvironment(std::string_view source,
+                         CookResult& outResult,
+                         CookError& outError,
+                         const Cancellation* cancelOrNull) noexcept
+{
+    return CookLightingFixture(source,
+                               outResult,
+                               outError,
+                               cancelOrNull,
+                               { .EnvironmentWidth = 0, .LightCount = 0, .EnvironmentScale = 6000 });
+}
+
+resources::SceneDefinition DecodeAssembled(const std::string& root, const Array<uint8>& level)
+{
+    Array<uint8> bytes;
+    AssetError error;
+    INFO(Describe(error));
+    REQUIRE(AssembleLevel(root, ToSpan(level), {}, bytes, error));
+    resources::SceneDefinition scene;
+    REQUIRE(resources::SceneDefinition::Decode(bytes.GetData(), bytes.GetSize(), scene) == resources::Status::Ok);
+    return scene;
+}
+} // namespace
+
+TEST_CASE("V3 lighting artifacts survive save reopen publish and relocation", "[scene_assets][lighting]")
+{
+    GoldenProject golden;
+    const std::string root = golden.Project.string();
+    AssetOptions options = golden.Options;
+    options.CookOrNull = CookV3;
+    options.SourceOrigin = "/lighting/first";
+    Array<uint8> empty;
+    AssetError error;
+    REQUIRE(CreateLevel("Lighting", options, empty, error));
+    Array<uint8> level;
+    INFO(Describe(error));
+    REQUIRE(ImportScene(root, golden.Source, ToSpan(empty), options, level, error));
+    const resources::SceneDefinition scene = DecodeAssembled(root, level);
+    REQUIRE(scene.Lights.GetSize() == 1);
+    CHECK(scene.Lights[0].SourceId != 0);
+    CHECK(scene.Lights[0].IntensityRgb.Y == 4);
+    CHECK(scene.Lights[0].PositionWorld.Z == 3);
+    CHECK(scene.Environment.Width == 2);
+    CHECK(scene.Environment.Pixels[0].X * scene.Environment.Rgb.X == 2);
+    CHECK(scene.Environment.Pixels[1].Z * scene.Environment.Rgb.Z == 8);
+    CHECK(scene.Materials[0].AreaSourceId != 0);
+    CHECK(scene.Materials[0].IsEmissionTwoSided == true);
+    CHECK(scene.Materials[0].HasEmissionPower == true);
+    CHECK(scene.Materials[0].EmissionPower == 9);
+    CHECK(scene.Meshes[0].BakeTexcoords[1].X == .5F);
+    CHECK(scene.Objects[0].SourceId != 0);
+    Array<uint8> saved;
+    REQUIRE(SaveLevel(root, "scenes/lighting.lulevel", ToSpan(level), nullptr, saved, error));
+    Array<uint8> reopened;
+    REQUIRE(OpenLevel(root, "scenes/lighting.lulevel", reopened, error));
+    Array<uint8> before;
+    Array<uint8> after;
+    REQUIRE(AssembleLevel(root, ToSpan(level), {}, before, error));
+    REQUIRE(AssembleLevel(root, ToSpan(reopened), {}, after, error));
+    CHECK(ToText(before) == ToText(after));
+    const std::filesystem::path relocated = golden.Work / "relocated";
+    std::filesystem::copy(golden.Project, relocated, std::filesystem::copy_options::recursive);
+    REQUIRE(AssembleLevel(relocated.string(), ToSpan(reopened), {}, after, error));
+    CHECK(ToText(before) == ToText(after));
+    Array<uint8> published;
+    REQUIRE(PublishLevel(root,
+                         ToSpan(level),
+                         (golden.Work / "lighting-release").string(),
+                         DumpLayout::Canonical,
+                         published,
+                         error));
+    CHECK(ReadTree(golden.Work / "lighting-release").empty() == false);
+    CHECK(ToText(before) == ReadWhole(golden.Work / "lighting-release/scene.luscn"));
+    Array<uint8> catalog;
+    REQUIRE(ReadCatalog(root, catalog, error));
+    CHECK(ToText(catalog).find("lighting/") != std::string::npos);
+    CHECK(ToText(catalog).find("portable-rgba8-f32-le-v3") != std::string::npos);
+    const std::string exactEmitter = "\"area_source_id\":[" + std::to_string(static_cast<uint32>(TEST_AREA_SOURCE)) +
+                                     "," + std::to_string(static_cast<uint32>(TEST_AREA_SOURCE >> 32)) + "]";
+    bool hasExactEmitter = false;
+    for (const std::pair<const std::string, std::string>& artifact : ReadTree(golden.Project / "assets/objects"))
+    {
+        hasExactEmitter = hasExactEmitter == true || artifact.second.find(exactEmitter) != std::string::npos;
+    }
+    CHECK(hasExactEmitter == true);
+    Array<uint8> reimported;
+    REQUIRE(ImportScene(root, golden.Source, ToSpan(level), options, reimported, error));
+    const resources::SceneDefinition repeated = DecodeAssembled(root, reimported);
+    CHECK(repeated.Lights.GetSize() == 1);
+    CHECK(repeated.Lights[0].SourceId == scene.Lights[0].SourceId);
+    CHECK(repeated.Objects.GetSize() == 2);
+    CHECK(repeated.Objects[0].SourceId == scene.Objects[0].SourceId);
+    CHECK(repeated.Objects[0].SourceId != repeated.Objects[1].SourceId);
+    CHECK(repeated.Materials[0].AreaSourceId == scene.Materials[0].AreaSourceId);
+}
+
+TEST_CASE("Multiple lighting imports scope IDs sum environments and upgrade legacy meshes", "[scene_assets][lighting]")
+{
+    GoldenProject golden;
+    const std::string root = golden.Project.string();
+    AssetOptions options = golden.Options;
+    options.CookOrNull = CookV3;
+    options.SourceOrigin = "/lighting/a";
+    AssetError error;
+    Array<uint8> empty;
+    Array<uint8> first;
+    Array<uint8> second;
+    REQUIRE(CreateLevel("Mixed", options, empty, error));
+    REQUIRE(ImportScene(root, golden.Source, ToSpan(empty), options, first, error));
+    options.SourceOrigin = "/lighting/b";
+    REQUIRE(ImportScene(root, golden.Source, ToSpan(first), options, second, error));
+    const resources::SceneDefinition pair = DecodeAssembled(root, second);
+    REQUIRE(pair.Lights.GetSize() == 2);
+    CHECK(pair.Lights[0].SourceId != pair.Lights[1].SourceId);
+    CHECK(pair.Materials[0].AreaSourceId != pair.Materials[1].AreaSourceId);
+    CHECK(pair.Objects[0].SourceId != pair.Objects[1].SourceId);
+    CHECK(pair.Environment.Pixels[0].X * pair.Environment.Rgb.X == 4);
+    options.SourceOrigin = "/lighting/c";
+    options.CookOrNull = CookConstant;
+    Array<uint8> third;
+    REQUIRE(ImportScene(root, golden.Source, ToSpan(second), options, third, error));
+    const resources::SceneDefinition mixedEnvironment = DecodeAssembled(root, third);
+    CHECK(mixedEnvironment.Environment.Pixels[0].X * mixedEnvironment.Environment.Rgb.X == 6);
+    options.SourceOrigin = "/lighting/legacy";
+    options.CookOrNull = CookV2;
+    Array<uint8> mixed;
+    REQUIRE(ImportScene(root, golden.Source, ToSpan(third), options, mixed, error));
+    const resources::SceneDefinition upgraded = DecodeAssembled(root, mixed);
+    CHECK(upgraded.Lights.GetSize() == 3);
+    CHECK(upgraded.Objects.GetSize() == 4);
+    for (const resources::SceneMesh& mesh : upgraded.Meshes)
+    {
+        CHECK(mesh.BakeTexcoords.GetSize() == TRIANGLE_VERTICES);
+    }
+    Array<uint8> catalogBefore;
+    REQUIRE(ReadCatalog(root, catalogBefore, error));
+    options.CookOrNull = CookOtherDimensions;
+    options.SourceOrigin = "/lighting/incompatible";
+    CHECK_FALSE(ImportScene(root, golden.Source, ToSpan(first), options, mixed, error));
+    Array<uint8> catalogAfter;
+    REQUIRE(ReadCatalog(root, catalogAfter, error));
+    CHECK(ToText(catalogBefore) == ToText(catalogAfter));
+}
+
+TEST_CASE("Combined authored light and environment overflow rejects catalog publication", "[scene_assets][lighting]")
+{
+    GoldenProject golden;
+    AssetOptions options = golden.Options;
+    AssetError error;
+    Array<uint8> empty;
+    REQUIRE(CreateLevel("Capacity", options, empty, error));
+    for (const bool useLights : {false, true})
+    {
+        options.CookOrNull = useLights == true ? CookManyLights : CookHighEnvironment;
+        options.SourceOrigin = useLights == true ? "/many/a" : "/energy/a";
+        Array<uint8> first;
+        REQUIRE(ImportScene(golden.Project.string(), golden.Source, ToSpan(empty), options, first, error));
+        Array<uint8> catalogBefore;
+        REQUIRE(ReadCatalog(golden.Project.string(), catalogBefore, error));
+        options.SourceOrigin = useLights == true ? "/many/b" : "/energy/b";
+        Array<uint8> rejected;
+        CHECK_FALSE(ImportScene(golden.Project.string(), golden.Source, ToSpan(first), options, rejected, error));
+        Array<uint8> catalogAfter;
+        REQUIRE(ReadCatalog(golden.Project.string(), catalogAfter, error));
+        CHECK(ToText(catalogBefore) == ToText(catalogAfter));
+    }
+}
+
+namespace
+{
+enum class LightingCorruption : uint8
+{
+    ReservedMaterial,
+    BakeCoordinates,
+    NonfiniteLight,
+    EqualCone,
+    InnerBoundary,
+    OuterBoundary,
+    Dimensions,
+    Truncated,
+};
+
+template <LightingCorruption Corruption>
+bool CookCorruptLighting(std::string_view source,
+                         CookResult& outResult,
+                         CookError& outError,
+                         const Cancellation* cancelOrNull) noexcept
+{
+    if (CookV3(source, outResult, outError, cancelOrNull) == false)
+    {
+        return false;
+    }
+    constexpr usize MESH_OFFSET = sizeof(format::Header) + sizeof(format::MaterialRecordV3);
+    constexpr usize OBJECT_OFFSET = MESH_OFFSET + sizeof(format::MeshRecord) +
+                                    TRIANGLE_VERTICES * sizeof(format::VertexRecordV3) +
+                                    TRIANGLE_VERTICES * sizeof(uint32);
+    constexpr usize LIGHTING_OFFSET = OBJECT_OFFSET + sizeof(format::ObjectRecordV3);
+    usize offset = 0;
+    uint32 word = 0;
+    if constexpr (Corruption == LightingCorruption::ReservedMaterial)
+    {
+        offset = sizeof(format::Header) + sizeof(format::MaterialRecordV3) - sizeof(uint32);
+        word = 1;
+    }
+    else if constexpr (Corruption == LightingCorruption::BakeCoordinates)
+    {
+        offset = MESH_OFFSET + sizeof(format::MeshRecord) + sizeof(format::VertexRecord);
+        word = 0x40000000U; // Bake U = 2 is outside the normalized chart.
+    }
+    else if constexpr (Corruption == LightingCorruption::NonfiniteLight)
+    {
+        offset = LIGHTING_OFFSET + sizeof(format::LightingRecord) + sizeof(uint64) + 2 * sizeof(uint32);
+        word = 0x7fc00000U;
+    }
+    else if constexpr (Corruption == LightingCorruption::EqualCone || Corruption == LightingCorruption::OuterBoundary)
+    {
+        offset = LIGHTING_OFFSET + sizeof(format::LightingRecord) + sizeof(format::LightRecord) - sizeof(float32);
+        word = Corruption == LightingCorruption::EqualCone ? 0x3f800000U : 0xbf800000U;
+    }
+    else if constexpr (Corruption == LightingCorruption::InnerBoundary)
+    {
+        offset = LIGHTING_OFFSET + sizeof(format::LightingRecord) + sizeof(format::LightRecord) - 2 * sizeof(float32);
+        word = 0xbf800000U;
+    }
+    else if constexpr (Corruption == LightingCorruption::Dimensions)
+    {
+        offset = LIGHTING_OFFSET + 3 * sizeof(uint32);
+    }
+    else
+    {
+        return outResult.Bundle.TryResize(outResult.Bundle.GetSize() - 1);
+    }
+    for (usize byte = 0; byte < sizeof(uint32); ++byte)
+    {
+        outResult.Bundle[offset + byte] = static_cast<uint8>(word >> (byte * 8));
+    }
+    return true;
+}
+} // namespace
+
+TEST_CASE("Malformed v3 source fields never publish a candidate catalog", "[scene_assets][lighting]")
+{
+    GoldenProject golden;
+    const std::string root = golden.Project.string();
+    AssetOptions options = golden.Options;
+    using FixtureCook = decltype(options.CookOrNull);
+    constexpr usize CORRUPTION_CASES = 8;
+    constexpr StaticArray<FixtureCook, CORRUPTION_CASES> COOKERS{
+        CookCorruptLighting<LightingCorruption::ReservedMaterial>,
+        CookCorruptLighting<LightingCorruption::BakeCoordinates>,
+        CookCorruptLighting<LightingCorruption::NonfiniteLight>,
+        CookCorruptLighting<LightingCorruption::EqualCone>,
+        CookCorruptLighting<LightingCorruption::InnerBoundary>,
+        CookCorruptLighting<LightingCorruption::OuterBoundary>,
+        CookCorruptLighting<LightingCorruption::Dimensions>,
+        CookCorruptLighting<LightingCorruption::Truncated>};
+    AssetError error;
+    Array<uint8> before;
+    REQUIRE(ReadCatalog(root, before, error));
+    Array<uint8> empty;
+    REQUIRE(CreateLevel("Reject", options, empty, error));
+    for (const FixtureCook cook : COOKERS)
+    {
+        options.CookOrNull = cook;
+        options.SourceOrigin = "/lighting/corrupt";
+        Array<uint8> rejected;
+        CHECK_FALSE(ImportScene(root, golden.Source, ToSpan(empty), options, rejected, error));
+        CHECK(error.Code == AssetErrorCode::InvalidScene);
+        Array<uint8> after;
+        REQUIRE(ReadCatalog(root, after, error));
+        CHECK(ToText(before) == ToText(after));
+    }
 }
