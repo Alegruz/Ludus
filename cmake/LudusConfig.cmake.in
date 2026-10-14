@@ -135,6 +135,8 @@ if(@LUDUS_BUILD_BEHAVIOR@)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/LudusShaders.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/LudusRendererShaders.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/LudusRenderGraph.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/LudusReflection.cmake")
 
 # Gameplay project helper (project-live-reload). Only present when the installed

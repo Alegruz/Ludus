@@ -1,0 +1,73 @@
+include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/LudusDependencies.cmake")
+
+# Shared RG1 builder and RG2 lowering, also installed for relocated SDK consumers.
+# Dependencies stay within ROOT; generated package/build output must be outside it.
+function(ludus_compile_render_graph)
+    cmake_parse_arguments(PARSE_ARGV 0 GRAPH "" "TARGET;NAME;MANIFEST;ROOT;CONFIGURATION" "")
+    if(GRAPH_UNPARSED_ARGUMENTS OR NOT TARGET "${GRAPH_TARGET}" OR
+       NOT GRAPH_NAME MATCHES "^[A-Za-z][A-Za-z0-9_]*$" OR NOT GRAPH_MANIFEST)
+        message(FATAL_ERROR "ludus_compile_render_graph requires TARGET NAME MANIFEST; optional ROOT CONFIGURATION")
+    endif()
+    get_filename_component(manifest "${GRAPH_MANIFEST}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(NOT GRAPH_ROOT)
+        get_filename_component(GRAPH_ROOT "${manifest}" DIRECTORY)
+    endif()
+    get_filename_component(root "${GRAPH_ROOT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(NOT GRAPH_CONFIGURATION)
+        set(GRAPH_CONFIGURATION Default)
+    endif()
+    ludus_require_file("${manifest}" "Render graph compilation" "Restore the authored build manifest.")
+    ludus_require_python("Render graph compilation")
+    ludus_require_tool(LUDUS_SLANG_COMPILER "Render graph compilation" "Run ./scripts/shader-probe bootstrap" -version)
+    set(driver "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/render_graph/build.py")
+    set(package "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/render_graph")
+    set(helper "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders")
+    if(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../scripts/python/ludus_tools/render_graph_build.py")
+        set(package "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../scripts/python")
+        # Build dependencies read only installed/tool/source files. Writable staging belongs to this target.
+        set(helper "${CMAKE_CURRENT_BINARY_DIR}/ludus-graphs/${GRAPH_TARGET}/${GRAPH_NAME}/helper")
+        file(MAKE_DIRECTORY "${helper}")
+        foreach(source compile_shader.py compile_raster.py compile_graph_stage.py)
+            configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders/${source}" "${helper}/${source}" COPYONLY)
+        endforeach()
+        foreach(lock shader_toolchain.json spirv_cross_toolchain.json)
+            configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/${lock}" "${helper}/${lock}" COPYONLY)
+        endforeach()
+    endif()
+    set(arguments)
+    set(tools "${LUDUS_SLANG_COMPILER}")
+    if(LUDUS_SPIRV_VALIDATOR)
+        list(APPEND arguments --validator "${LUDUS_SPIRV_VALIDATOR}")
+        list(APPEND tools "${LUDUS_SPIRV_VALIDATOR}")
+    endif()
+    if(LUDUS_SPIRV_CROSS)
+        list(APPEND arguments --spirv-cross "${LUDUS_SPIRV_CROSS}")
+        list(APPEND tools "${LUDUS_SPIRV_CROSS}" "${LUDUS_SPIRV_CROSS}.build.json")
+    endif()
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-graphs/${GRAPH_TARGET}/${GRAPH_NAME}")
+    cmake_path(IS_PREFIX root "${output}" NORMALIZE is_output_inside_root)
+    if(is_output_inside_root)
+        message(FATAL_ERROR "Render graph ROOT must be a dedicated source directory outside generated output")
+    endif()
+    get_property(registered TARGET "${GRAPH_TARGET}" PROPERTY LUDUS_RENDER_GRAPH_NAMES)
+    if(GRAPH_NAME IN_LIST registered)
+        message(FATAL_ERROR "Duplicate render graph ${GRAPH_NAME} for ${GRAPH_TARGET}")
+    endif()
+    set_property(TARGET "${GRAPH_TARGET}" APPEND PROPERTY LUDUS_RENDER_GRAPH_NAMES "${GRAPH_NAME}")
+    file(GLOB_RECURSE inputs CONFIGURE_DEPENDS LIST_DIRECTORIES false "${root}/*")
+    file(GLOB modules "${package}/ludus_tools/render_graph*.py")
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-graphs/${GRAPH_TARGET}/${GRAPH_NAME}")
+    add_custom_command(OUTPUT "${output}/${GRAPH_NAME}.h"
+        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${package}" "${Python3_EXECUTABLE}" "${driver}"
+            --manifest "${manifest}" --root "${root}" --output "${output}/package"
+            --header "${output}/${GRAPH_NAME}.h" --name "${GRAPH_NAME}" --configuration "${GRAPH_CONFIGURATION}"
+            --helper "${helper}" --compiler "${LUDUS_SLANG_COMPILER}" ${arguments}
+        DEPENDS ${inputs} ${modules} ${tools} "${driver}"
+            "${package}/ludus_tools/buildlock.py" "${package}/ludus_tools/errors.py"
+            "${helper}/compile_shader.py" "${helper}/compile_raster.py" "${helper}/compile_graph_stage.py"
+            "${helper}/shader_toolchain.json" "${helper}/spirv_cross_toolchain.json"
+        VERBATIM)
+    target_sources(${GRAPH_TARGET} PRIVATE "${output}/${GRAPH_NAME}.h")
+    target_include_directories(${GRAPH_TARGET} PRIVATE "${output}")
+endfunction()

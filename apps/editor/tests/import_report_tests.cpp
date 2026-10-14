@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLabel>
 #include <QPlainTextEdit>
 #include <QTemporaryDir>
 #include <QTest>
@@ -187,4 +188,41 @@ TEST_CASE("World shows the import preview, imports on confirmation and shows the
     REQUIRE(WaitUntil([report]() { return report->isHidden() == false; }) == true);
     CHECK(report->toPlainText().contains(QStringLiteral("Cooked:")) == true);
     CHECK(workspace.ConfirmImportPreview() == false); // The preview is consumed.
+    // The imported scene is shown in the World viewport, not left behind the empty World panel.
+    QWidget* viewport = workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport"));
+    REQUIRE(viewport != nullptr);
+    CHECK(viewport->isHidden() == false);
+}
+
+TEST_CASE("World import without an open World explains why nothing happened", "[editor][import][world]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid() == true);
+    const QString root = QFileInfo(directory.path()).canonicalFilePath();
+    WorldWorkspace workspace(MakeSceneTools(), nullptr);
+    workspace.SetProject(root, 1);
+    QLabel* status = workspace.findChild<QLabel*>(QStringLiteral("worldStatus"));
+    REQUIRE(status != nullptr);
+    CHECK(workspace.PreviewImportScene(QDir(root).filePath(QStringLiteral("room.pbrt"))) == false);
+    CHECK(status->text().contains(QStringLiteral("open a World")) == true);
+    CHECK(workspace.ConfirmImportPreview() == false);
+    CHECK(status->text().contains(QStringLiteral("choose Import scene")) == true);
+}
+
+TEST_CASE("A failed World import keeps the previous World view", "[editor][import][world]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid() == true);
+    const QString root = QFileInfo(directory.path()).canonicalFilePath();
+    WorldWorkspace workspace(MakeSceneTools(), nullptr);
+    workspace.SetProject(root, 1);
+    REQUIRE(workspace.Create(QDir(root).filePath(QStringLiteral("main.world.json"))) == true);
+    QWidget* viewport = workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport"));
+    QLabel* status = workspace.findChild<QLabel*>(QStringLiteral("worldStatus"));
+    REQUIRE(viewport != nullptr);
+    REQUIRE(status != nullptr);
+    REQUIRE(workspace.ImportScene(QDir(root).filePath(QStringLiteral("missing.pbrt"))) == true);
+    REQUIRE(WaitUntil([status]() { return status->text().startsWith(QStringLiteral("Importing")) == false; }) == true);
+    CHECK(viewport->isHidden() == true);
+    CHECK(status->text().isEmpty() == false);
 }

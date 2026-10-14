@@ -1,7 +1,7 @@
 # Render graph authoring, shader builds and pipeline management
 
-Status: RG0 contracts and RG1 bounded offline shader builds implemented,
-October 12, 2026; RG2-RG4 remain proposed. This defines the renderer
+Status: RG0 contracts, RG1 bounded offline shader builds and RG2 static opaque
+Renderer execution implemented, October 13, 2026; RG3-RG4 remain proposed. This defines the renderer
 authoring/compiler contract; it does not claim a graph editor, unrestricted
 shader composition or new RHI capability.
 Baseline design: `5c44d19`. See [usage and source formats](../development/render-graph-authoring.md).
@@ -542,8 +542,8 @@ roots; no implicit shader configuration arises from an unused Color output.
 All closure interfaces are checked; resource initialization and camera routes
 require a selected closed root. The plan reports ShaderBuild, DeviceCapabilities,
 SceneCoverage and GpuExecution pending. ShaderBuild is discharged by the bounded RG1 package build; the other checks are RG2 integration gates,
-not checks that an offline contract validator can establish. Current RHI's private
-depth attachments are not represented as already executable exported depth images.
+not checks that an offline contract validator can establish. RG2 now maps logical
+depth to RHI private depth allocations and qualifies completion-gated depth exports.
 
 RG1 is delivered in `ludus_tools.render_graph_build`, the installed CLI and the
 existing SDK shader-helper boundary. It generates scalar/vector shared schemas,
@@ -555,6 +555,50 @@ source/tool snapshots, cancellation and failed jobs preserve prior publication.
 See [source format, admitted profile and acceptance](../development/render-graph-authoring.md#build-explicit-shader-packages-rg1).
 This initial profile rejects unqualified matrix/array/resource/stage extensions;
 shader packages do not establish device pipeline readiness or GPU execution.
+
+RG2 is delivered in Renderer’s `RenderGraph`, the neutral `RenderGraphFormat`
+records and the shared `render_graph_execution` lowering service. It admits one
+bounded static opaque configuration, prewarms the existing Renderer contexts,
+scans every intended item/material slot per camera/role before visibility culling,
+and serially encodes Ready views. Reports distinguish covered, unsupported,
+conflicting and explicitly excluded items. The editor policy can use existing
+prewarmed magenta overlay geometry or explicit bounds proxies; these remain
+unsupported and never establish depth coverage. The shipping policy rejects
+incomplete coverage while preserving the prior drawable extraction.
+
+This first execution profile uses RGBA8, Depth32, one sample, conventional Less
+with depth writes, no shader bindings and the Renderer’s six-location static
+instance interface. ColorAndDepth and DepthOnly share the exact geometry stage;
+opaque depth fixtures qualify the authored void coverage function. Masking,
+transparency, deformation, arbitrary material layouts, reverse-Z, imported images
+and history remain explicit admission failures. Thus an exported depth graph is
+not automatically a compatible pre-Z for an arbitrary subsequent shading pass.
+No error shader or output-driven permutation is synthesized. The installed CMake
+helper and CLI emit identical typed plans with static shader storage, without a
+runtime JSON parser or shader compiler.
+
+Scene/camera replacements publish only when their retained resources are Ready.
+Candidate reports and the last drawable revision are distinct, including when a
+newer rejection arrives while an older candidate is pending. A new extent needs
+a separately initialized graph; caller-reported physical extent is checked before
+acquisition and actual extent is checked again afterward. History/import modes
+are rejected instead of retaining stale resources. RG2 bounds three retained
+scene candidates (current, pending, preparation), plus RHI retirement of actual
+GPU uses. It conservatively completion-gates reuse of export allocations; export
+consumers must complete before another render/reset.
+
+Current RHI private depth is physically paired with color: depth-only offscreen
+allocates a compatibility RGBA8 image alongside depth. Renderer contexts also
+prewarm their existing finite surface/offscreen, overlay, reverse-Z and composite
+states; package recipe counts describe authored recipes, not those additional
+physical Renderer PSOs. Export consumers can be prewarmed against allocation/aspect without claiming
+valid pixels. Encode contributes to the caller’s existing frame; that caller
+confirms the actual submission after composing the consumer. Whole-frame Render
+uses existing RHI surface acquisition/clear/presentation rules. Distinct logical
+depth images cannot share one physical depth, and a plan has one surface owner.
+No aliasing, pooling, async scheduling, reduced allocation
+or performance improvement is claimed. See
+[RG2 usage, qualified scope and evidence](../development/render-graph-authoring.md#execute-cooked-static-graphs-rg2).
 
 Run representative native and browser raster fixtures under pinned tools, SDK
 consumer checks, warning/format/tidy gates and sanitizers for implementation.

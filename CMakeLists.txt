@@ -32,6 +32,7 @@ include(EngineSanitizers)
 include(EngineTargets)
 include(EnginePch)
 include(LudusShaders)
+include(LudusRenderGraph)
 include(LudusReflection)
 include(EngineSdkIdentity)
 
@@ -180,6 +181,7 @@ endif()
 add_subdirectory(modules/content)
 # LUSCN cooked scene format contract shared by SceneCook, the Editor and Resources.
 add_subdirectory(modules/content/scene_format)
+add_subdirectory(modules/content/render_graph_format)
 # Scene cooker (pbrt-reference-v1). The library builds for every target; its
 # file I/O reports Unsupported where Ludus::Content has no native file access,
 # and the ludus-cook CLI plus golden tests are native-host only.
@@ -322,7 +324,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
+    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
@@ -428,7 +430,12 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}/dependencies"
 )
 
-install(FILES cmake/LudusDependencies.cmake cmake/LudusShaders.cmake cmake/LudusRendererShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+install(FILES cmake/LudusDependencies.cmake cmake/LudusShaders.cmake cmake/LudusRendererShaders.cmake cmake/LudusRenderGraph.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+install(FILES cmake/render_graph/build.py DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/render_graph")
+install(FILES scripts/python/ludus_tools/__init__.py scripts/python/ludus_tools/errors.py
+    scripts/python/ludus_tools/buildlock.py scripts/python/ludus_tools/render_graph.py
+    scripts/python/ludus_tools/render_graph_build.py scripts/python/ludus_tools/render_graph_execution.py
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/render_graph/ludus_tools")
 # Gameplay project helper + host/shipping main templates (project-live-reload).
 if(NOT EMSCRIPTEN)
     install(FILES

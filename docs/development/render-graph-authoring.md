@@ -7,14 +7,15 @@ is available to future editor jobs; no Qt or engine checkout is required after
 installation. See [host tools](host-tools.md) for installation and the
 [architecture](../architecture/render-graph-authoring.md) for ownership and later
 stages. RG1 adds explicit offline shader/schema builds and immutable packages,
-using the same CLI/backend. Renderer admission remains RG2.
+using the same CLI/backend. RG2 adds bounded static opaque Renderer admission and
+execution through cooked headers. Editor authoring and atomic graph reload are RG3.
 
 **RG0 plans are contract diagnostics, not executable renderer packages.** They
 do not compile shaders, evaluate scene draw-item coverage, negotiate device
 capabilities or render pixels. Those checks are reported as pending. RG1 builds shader packages; RG2 owns
-Renderer/RHI integration. `DefaultOpaque` and
-`RendererStatic` name the first planned raster contract, not verified arbitrary
-mesh/material compatibility or a newly delivered depth-only GPU pipeline.
+Renderer/RHI integration. `DefaultOpaque` and `RendererStatic` identify the
+qualified static override profile described below; arbitrary mesh/material
+compatibility is never inferred from those labels.
 
 ## Create a saved graph and import it
 
@@ -412,3 +413,153 @@ CI includes installed macOS Metal/WGSL and Linux SPIR-V/WGSL/GLSL acceptance.
 Linux SPIR-V/GLSL evidence must pass that job; it is not inferred from macOS.
 DeviceCapabilities, SceneCoverage, PipelineReadiness and GpuExecution remain
 explicitly pending even after successful RG1 publication.
+
+
+## Execute cooked static graphs (RG2)
+
+Use an explicitly authored Renderer instance interface when creating build sources:
+
+```bash
+ludus render-graph new render-graphs --output offscreen
+ludus render-graph new-build render-graphs/main.lurender.json --renderer-static --profiles metal wgsl
+ludus render-graph build render-graphs/main.lushader.json out/raster-package \
+  --helper /path/to/sdk/lib/cmake/Ludus/shaders --compiler /path/to/pinned/slangc
+ludus render-graph emit-runtime out/raster-package out/RasterGraph.h --name RasterGraph
+```
+
+For a depth export, use `new ... --output depth`: the saved graph selects the
+already declared DepthOnly technique. Neither disconnecting color nor
+`emit-runtime` invents shader programs. Both declared techniques still enter the
+bounded offline build; the generated execution header includes only selected
+stages. A nonvoid depth function rejects at shader compilation instead of silently
+discarding its return value. Scalar/vector RG1 layouts remain available through
+ordinary `new-build`; they require their own runtime binding integration and are
+rejected by this initial static executor.
+
+The source and installed SDK expose the same build helper:
+
+```cmake
+find_package(Ludus REQUIRED COMPONENTS GraphicsRenderer RenderGraphFormat)
+add_executable(my_viewer main.cpp)
+target_link_libraries(my_viewer PRIVATE Ludus::GraphicsRenderer)
+ludus_compile_renderer_shaders(TARGET my_viewer SHADERS renderer_composite)
+ludus_compile_render_graph(TARGET my_viewer NAME RasterGraph
+    MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/render-graphs/main.lushader.json")
+```
+
+`LUDUS_SLANG_COMPILER`, and for declared SPIR-V/GLSL profiles
+`LUDUS_SPIRV_VALIDATOR`/`LUDUS_SPIRV_CROSS`, identify prepared pinned host tools.
+No configure/build step downloads tools. `ROOT` defaults to the manifest's
+directory; use a dedicated source directory outside generated output. Nested
+graph/shader paths are package relative; `new-build --root` preserves this owner.
+`CONFIGURATION` defaults to Default. Target-local build outputs contain immutable
+RG1 generations, a stage cache and the generated `RasterGraph.h`. Source and
+installed helpers reuse the exact Python services; the SDK includes their stdlib
+modules, so CMake generation requires Python but no installed wheel or checkout.
+
+At setup, include `RasterGraph.h` and `renderer_composite.h`, call
+`RasterGraph::MakePlan()` and `RasterGraph::MakePrograms()` in namespace
+`ludus::render_graph_packages`. Pass the installed
+`ludus::shaders::renderer_composite::Vertex()` and `Fragment()` descriptions to
+`MakePrograms`; built-in recipe paths/entry points stay with Renderer. Initialize
+`ludus::graphics::renderer::RenderGraph` with those values and the owned RHI
+device. Ready permits Update; Pending requires Poll between frames. Generated
+shader strings/reflection arrays have static storage. Pipeline/device/capability
+failure never becomes a request to compile at draw time.
+
+The World/extraction adapter supplies borrowed tables of `RenderGraphMesh`,
+`RenderGraphItem` and generation-local `ViewDescription`, then a nonzero revision
+and explicit coverage policy to Update. Emit one item for each intended
+submesh/material slot, with a unique stable source identity; do not filter
+incompatible items out beforehand. Static geometry and runtime transform/color
+values are copied before Update returns. Camera input order and required target
+indices are emitted into the plan. Each active camera must reach its designated
+surface color or exported image, independently of another camera’s route.
+View matrices must use the authored conventional [0,1] depth convention.
+
+`RejectIncomplete` is the shipping policy. `DiagnosticColor` can admit an editor
+marker route for unsupported material/layout inputs. Known static positions use
+magenta overlay geometry; an unknown vertex layout requires explicit finite
+mesh bounds and uses a bounds proxy without reading unknown vertex data.
+Diagnostic overlay draws never write required depth, and the coverage record
+stays Unsupported. Transparent, masked and deformation contracts remain
+unsupported even when invisible or rendered diagnostically. Explicit exclusions
+are reported separately. Duplicate source identities or unapproved repeated
+camera/role coverage remain conflicting under either policy.
+
+`GetReport()` describes the latest candidate; `GetDrawableSceneRevision()`
+identifies the last Ready extraction. `GetOutputSceneRevision()` identifies a
+valid completed producer’s pixels; it returns zero while that producer is pending
+or invalid and never relabels old pixels after a new scene becomes Ready. Actual
+platform presentation/external consumer completion remain the caller’s ownership.
+Pending or failed replacements preserve
+that extraction. A rejected newer report remains rejected if an older pending
+candidate becomes drawable. Coverage records belong to the graph until the next
+Update/Reset. Mesh streaming and camera changes cause a fresh scan/preparation;
+there is no coverage cache that can hide changed inputs.
+
+For an export-only graph, prewarm its consumers with GetExportAllocation after
+initialization. This borrows the allocation/aspect without claiming valid pixels.
+Begin one caller-owned RHI frame, call Encode, then draw the prepared consumer
+(e.g. Renderer composition) in that same frame. Encode does not acquire or present
+a surface. End that frame with an actual submission token and pass it to
+ConfirmSubmission whenever HasUnconfirmedEncoding is true, including after a
+partial encoding failure. A missing/failed submission invalidates output; a
+foreign token rejects. The actual token must belong to the encoded frame.
+Update/Poll/Render cannot replace that unconfirmed encoding. Completion and
+GetOutputSceneRevision/GetExport remain separate from submission admission.
+This path lets offscreen rendering and presentation share one submission.
+
+Render is a whole-frame convenience that acquires, clears and ends the carrier
+surface under existing RHI rules, including for export-only roots; use Encode
+when the caller owns frame composition. Call Render between frames with the
+surface owner’s current drawable pixel width
+and height and an empty completion token. It submits retained Ready views in
+authored serial order and creates no shaders or pipelines. Resize preflight,
+pending producer or device failure preserves the drawable extraction. The
+acquired dimensions are rechecked; if a resize races acquisition, ending that
+frame may clear/present the surface. Failed partial encoding returns actual
+completion when available and invalidates export correctness; it does not roll
+back accepted GPU work or promise unchanged surface pixels.
+
+After producer completion, GetExport returns the graph-owned texture allocation
+and Color/Depth aspect. Create the matching sampled RHI view; finish every
+consumer before another Render or Reset. Export ownership is borrowed, not
+transferred. Reuse is conservatively completion gated. Distinct logical depth images cannot
+share one private color/depth allocation, and one plan has at most one acquired
+surface owner; such topology is rejected before GPU setup. Depth is the allocation’s
+private depth aspect; a depth-only graph currently pays for a compatibility RGBA8
+allocation as well. Resize, foreign image import and history need another
+qualified profile/generation; they reject here instead of silently changing
+allocation identity. Reset before destroying the device.
+
+The first profile is bounded to 16 passes, 32 logical resources, 8 cameras,
+128 draw items and 32 meshes. It qualifies RGBA8/Depth32, single-sample static
+opaque default-material override, TriangleList, no culling, counter-clockwise
+front, conventional Less/depth-write, no bound uniforms. A depth export does not
+establish pre-Z equivalence for later shading with another comparison, alpha,
+custom depth or deformation path. Arbitrary programs with those semantics require
+explicit author qualification and parity fixtures. Renderer prewarms additional
+finite built-in state combinations; these physical PSOs are separate from RG1’s
+authored recipe budget. RG2 makes no scheduling/memory/performance improvement
+claim. Interactive editor adoption, graph editing and reload are RG3.
+
+`test_render_graph_execution` checks lowering, rejection, deterministic header
+publication, profile bounds and the RG1 nested-root/packer-name regressions.
+Renderer’s deterministic tests cover mixed material slots, visibility-independent
+coverage, missing/conflicting routes, streaming readiness/failure and preserved
+revisions, resize preflight and export initialization/completion. Native GPU tests
+compile the actual graph package via the shared CMake helper, render changing
+camera/instance inputs, compare direct/offscreen color byte for byte within one caller-owned frame and sample
+DepthOnly output at independently expected geometry/background depths. The
+installed `verify_render_graph_execution.py` fixture checks relocated CLI/CMake
+header equivalence and rejects a nonvoid depth function with real Slang.
+
+Local qualification uses warning-clean Clang 18 production code, pinned Slang
+Metal/WGSL and Metal pixel regressions. CI additionally compiles/renders the
+SPIR-V/Vulkan profile and qualifies installed SPIR-V/WGSL/GLSL headers. Browser
+runtime graph execution is not established by WGSL stage admission; it remains
+a platform qualification gate before editor/browser adoption. The RG2 Renderer unit suite also passes UBSan locally; ASan still stalls before
+main in an empty control executable on this host. RG2 WGSL stages pass pinned
+Chromium software-adapter admission; that check does not execute the C++ graph
+runtime in a browser.
