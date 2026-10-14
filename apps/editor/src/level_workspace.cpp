@@ -10,7 +10,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
