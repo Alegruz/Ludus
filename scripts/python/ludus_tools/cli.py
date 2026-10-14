@@ -366,10 +366,14 @@ def cmd_install_butler(args) -> int:
 def cmd_render_graph(args) -> int:
     from . import render_graph
 
-    if args.graph_action in ("new-build", "build", "verify-package"):
+    if args.graph_action in ("new-build", "build", "verify-package", "emit-runtime"):
         from . import render_graph_build
-        if args.graph_action == "new-build":
-            created = render_graph_build.new_build_sources(Path(args.graph), profiles=args.profiles)
+        if args.graph_action == "emit-runtime":
+            from . import render_graph_execution
+            payload = {"execution": render_graph_execution.emit_runtime(Path(args.package), Path(args.output),
+                        configuration=args.configuration, name=args.name)}
+        elif args.graph_action == "new-build":
+            created = render_graph_build.new_build_sources(Path(args.graph), profiles=args.profiles, root=args.root, renderer_static=args.renderer_static)
             payload = {"created": str(created), "stage": "RG1"}
         elif args.graph_action == "verify-package":
             payload = {"package": render_graph_build.verify_package(Path(args.package))}
@@ -420,6 +424,8 @@ def build_parser() -> argparse.ArgumentParser:
     new_build = graphs.add_parser("new-build", help="save explicit RG1 build sources next to a root graph")
     new_build.add_argument("graph")
     new_build.add_argument("--profiles", nargs="+", choices=("spirv", "wgsl", "metal", "glsl"), required=True)
+    new_build.add_argument("--root", help="containing graph/source package root")
+    new_build.add_argument("--renderer-static", action="store_true", help="author the six-location Renderer static/instance profile")
     new_build.set_defaults(func=cmd_render_graph)
     build_graph = graphs.add_parser("build", help="compile declared schemas/stages/recipes and publish an offline package")
     build_graph.add_argument("manifest", help=".lushader.json manifest; sibling .lurender.json root")
@@ -433,6 +439,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify_graph = graphs.add_parser("verify-package", help="verify complete generation inventory without shader tools")
     verify_graph.add_argument("package")
     verify_graph.set_defaults(func=cmd_render_graph)
+    emit_graph = graphs.add_parser("emit-runtime", help="emit a numeric Renderer header from a verified static package")
+    emit_graph.add_argument("package", help="immutable generation or build tree with current.json")
+    emit_graph.add_argument("output", help="generated .h destination")
+    emit_graph.add_argument("--configuration", default="Default")
+    emit_graph.add_argument("--name", default="DefaultGraph")
+    emit_graph.set_defaults(func=cmd_render_graph)
     tools = sub.add_parser("tools", help="explicitly acquire optional host tools").add_subparsers(dest="cmd", required=True)
     butler = tools.add_parser("install-butler", help="download the pinned host butler executable; never logs in or uploads")
     butler.add_argument("destination", help="directory for butler; an existing executable is never replaced")
