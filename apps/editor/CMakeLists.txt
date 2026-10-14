@@ -58,13 +58,12 @@ endif()
 set(editor_viewport_sources src/preview_viewport.cpp)
 if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
+    # The readback fallback is selected only on Linux, but the shared viewport code references it.
+    list(APPEND editor_viewport_sources src/internal/offscreen_frame_reader.h src/offscreen_frame_reader.cpp)
     if(APPLE)
         list(APPEND editor_viewport_sources src/qt_viewport_device_metal.mm)
     else()
-        list(APPEND editor_viewport_sources
-            src/qt_viewport_device_vulkan.cpp
-            src/internal/offscreen_frame_reader.h
-            src/offscreen_frame_reader.cpp)
+        list(APPEND editor_viewport_sources src/qt_viewport_device_vulkan.cpp)
     endif()
 endif()
 
