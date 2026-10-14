@@ -2,6 +2,7 @@
 #include "internal/import_report.h"
 
 #include "internal/controller.h"
+#include "internal/editor_files.h"
 #include "internal/level_workspace.h"
 #include "internal/render_panel.h"
 #include "internal/world_demo_adapter.h"
@@ -26,6 +27,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QLockFile>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -118,6 +120,22 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
         DemoPreview_.Stop();
         Scene_->CancelOperation();
     });
+#if defined(Q_OS_WASM)
+    // Browser: copy the chosen scene into MEMFS first; the session copy is then cooked in process.
+    QMenu* importChoices = new QMenu(Import_);
+    const auto importBrowserScene = [this](bool isFolder) {
+        OpenBrowserSceneImport(this, isFolder, [this](const QString& source) { (void)PreviewImportScene(source); });
+    };
+    connect(importChoices->addAction(QStringLiteral("Scene folder…")),
+            &QAction::triggered,
+            this,
+            [importBrowserScene]() { importBrowserScene(true); });
+    connect(importChoices->addAction(QStringLiteral("Scene files or .zip…")),
+            &QAction::triggered,
+            this,
+            [importBrowserScene]() { importBrowserScene(false); });
+    Import_->setMenu(importChoices);
+#else
     connect(Import_, &QPushButton::clicked, this, [this]() {
         const QString source = QFileDialog::getOpenFileName(this,
                                                             QStringLiteral("Import PBRT scene"),
@@ -128,6 +146,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
             (void)PreviewImportScene(source);
         }
     });
+#endif
     PreviewButton_ = new QPushButton(QStringLiteral("Open rendered preview"), this);
     PreviewButton_->setObjectName(QStringLiteral("worldPreview"));
     PlayButton_ = new QPushButton(QStringLiteral("Play saved World"), this);
@@ -376,10 +395,9 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
         }
     });
 #if defined(Q_OS_WASM)
-    create->setEnabled(false);
-    open->setEnabled(false);
-    help->setText(QStringLiteral("World authoring currently requires the native editor. Browser file import/export and "
-                                 "runtime binding are not available for this document type."));
+    help->setText(QStringLiteral("Browser Worlds live in this session's in-memory project; export the project to keep "
+                                 "them. Import scene… copies a scene folder, .zip or .pbrt with its files into the "
+                                 "session and cooks it here. Play and runtime binding require the native editor."));
 #endif
     DraftTimer_.setSingleShot(true);
     DraftTimer_.setInterval(180);

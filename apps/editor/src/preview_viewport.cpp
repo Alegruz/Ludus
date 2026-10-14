@@ -11,6 +11,12 @@
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+#    include "internal/software_viewport.h"
+#    include <QPainter>
+#    include <QTimer>
+#    include <ludus/foundation/math/scalar.hpp>
+#endif
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
 #    include "internal/offscreen_frame_reader.h"
 #    include "internal/qt_viewport_device.h"
@@ -25,20 +31,19 @@
 namespace ludus::editor
 {
 using namespace foundation;
+namespace math = foundation::math;
 namespace renderer = graphics::renderer;
 namespace rhi = graphics::rhi;
-#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT) || defined(LUDUS_EDITOR_NATIVE_PREVIEW)
 namespace
 {
-/// Service period for frame polling, about one 60 Hz display refresh.
-constexpr int32 SERVICE_INTERVAL_MILLISECONDS = 16;
-/// Plain widget that paints the last complete offscreen frame, scaled to its rectangle.
+/// Plain widget that paints the last complete CPU or offscreen frame, scaled to its rectangle.
 class FrameCanvas final : public QWidget
 {
 public:
-    explicit FrameCanvas(QWidget* parent) : QWidget(parent)
+    FrameCanvas(QWidget* parent, const QString& name) : QWidget(parent)
     {
-        setObjectName(QStringLiteral("LudusOffscreenViewport"));
+        setObjectName(name);
         setAttribute(Qt::WA_OpaquePaintEvent);
         // The owning PreviewViewport keeps handling orbit, pan, zoom and framing.
         setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -68,6 +73,14 @@ protected:
 private:
     QImage mImage;
 };
+#    if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+/// Service period for frame polling, about one 60 Hz display refresh.
+constexpr int32 SERVICE_INTERVAL_MILLISECONDS = 16;
+#    endif
+#    if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+/// Longest rendered side in pixels; the CPU preview is scaled up to the widget.
+constexpr float32 SOFTWARE_MAXIMUM_SIDE = 640;
+#    endif
 } // namespace
 #endif
 struct PreviewViewport::State final
@@ -79,6 +92,53 @@ struct PreviewViewport::State final
     uint64 Presented = 0;
     bool IsAutomatic = true;
     bool CanShowFrames = true;
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+    FrameCanvas* SoftwareCanvasOrNull = nullptr;
+    bool IsRenderQueued = false;
+    void queueSoftwareRender()
+    {
+        if (IsRenderQueued == true)
+        {
+            return;
+        }
+        IsRenderQueued = true;
+        // Coalesce bursts of navigation events into one render on the next event-loop turn.
+        QTimer::singleShot(0, Widget, [this]() { renderSoftware(); });
+    }
+    void renderSoftware()
+    {
+        IsRenderQueued = false;
+        if (Preview.isNull() == true || CanShowFrames == false || Preview->Scene().Objects.isEmpty() == true)
+        {
+            return;
+        }
+        // Size the render from the canvas that displays it, so the aspect matches after layout.
+        Message->hide();
+        if (SoftwareCanvasOrNull->isHidden() == true)
+        {
+            SoftwareCanvasOrNull->show();
+            Layout->activate();
+        }
+        const float64 ratio = SoftwareCanvasOrNull->devicePixelRatioF();
+        const float32 width = static_cast<float32>(math::Max(1.0, SoftwareCanvasOrNull->width() * ratio));
+        const float32 height = static_cast<float32>(math::Max(1.0, SoftwareCanvasOrNull->height() * ratio));
+        const float32 scale = math::Min(1.0F, SOFTWARE_MAXIMUM_SIDE / math::Max(width, height));
+        const uint32 renderWidth = math::Max(uint32{1}, static_cast<uint32>(width * scale));
+        const uint32 renderHeight = math::Max(uint32{1}, static_cast<uint32>(height * scale));
+        graphics::renderer::ViewDescription view;
+        QString error;
+        if (Preview->DescribeView(renderWidth, renderHeight, view, error) == false)
+        {
+            SoftwareCanvasOrNull->hide();
+            Message->setText(error);
+            Message->show();
+            return;
+        }
+        SoftwareCanvasOrNull->SetImage(
+            RenderSoftwareView(Preview->Scene(), view, renderWidth, renderHeight, Preview->GetShading()));
+        ++Presented;
+    }
+#endif
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     // Thanks to The Qt Company: QQuickWindow frame stages and Native Interfaces
     // define wrapping and submission order. We use its basic owner-thread loop,
@@ -192,7 +252,7 @@ private:
     }
     void createCanvas()
     {
-        CanvasOrNull = new FrameCanvas(Widget);
+        CanvasOrNull = new FrameCanvas(Widget, QStringLiteral("LudusOffscreenViewport"));
         Layout->addWidget(CanvasOrNull);
         Message->hide();
         CanvasOrNull->show();
@@ -551,6 +611,12 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     mState->Message->setAlignment(Qt::AlignCenter);
     mState->Message->setWordWrap(true);
     mState->Layout->addWidget(mState->Message);
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+    mState->SoftwareCanvasOrNull = new FrameCanvas(this, QStringLiteral("LudusSoftwareViewport"));
+    mState->SoftwareCanvasOrNull->hide();
+    mState->Layout->addWidget(mState->SoftwareCanvasOrNull, 1);
+    connect(preview, &RenderPreview::NavigationChanged, this, [this]() { mState->queueSoftwareRender(); });
+#endif
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     connect(preview, &RenderPreview::DeviceRequested, this, [this]() { mState->createWindow(); });
     connect(preview, &RenderPreview::ResettingFrames, this, [this]() { mState->clearFrames(); });
@@ -595,6 +661,10 @@ PreviewViewport::~PreviewViewport()
 }
 void PreviewViewport::ShowFrame()
 {
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+    mState->CanShowFrames = true;
+    mState->queueSoftwareRender();
+#endif
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     // A manually gated import may present only after its catalog is committed.
     // Once admitted, also retry frames that arrived while both slots were leased.
@@ -604,6 +674,12 @@ void PreviewViewport::ShowFrame()
 }
 void PreviewViewport::ClearFrame(const QString& text)
 {
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+    mState->CanShowFrames = mState->IsAutomatic;
+    mState->SoftwareCanvasOrNull->SetImage({});
+    mState->SoftwareCanvasOrNull->hide();
+    mState->Message->show();
+#endif
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     mState->clearFrames();
 #endif
@@ -637,6 +713,12 @@ bool PreviewViewport::eventFilter(QObject* watched, QEvent* event)
 }
 void PreviewViewport::resizeSurface()
 {
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+    if (mState->SoftwareCanvasOrNull != nullptr && mState->SoftwareCanvasOrNull->isHidden() == false)
+    {
+        mState->queueSoftwareRender();
+    }
+#endif
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     if (mState->CanvasOrNull != nullptr)
     {

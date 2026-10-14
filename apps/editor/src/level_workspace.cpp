@@ -20,11 +20,10 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
-#if !defined(Q_OS_WASM)
-#    include <ludus/content/scene_cook/scene_assets.h>
-#endif
+#include <ludus/content/scene_cook/scene_assets.h>
 
 #include <span>
 #include <string_view>
@@ -325,11 +324,7 @@ bool LevelWorkspace::ImportPreviewed(const QString& source)
 }
 bool LevelWorkspace::PreviewImport(const QString& source)
 {
-#if defined(Q_OS_WASM)
-    (void)source;
-    return false;
-#else
-    if (Busy_ == true || Root_.isEmpty() == true || Operate_ != nullptr)
+    if (Busy_ == true || Root_.isEmpty() == true || isOperationActive() == true)
     {
         return false;
     }
@@ -349,7 +344,6 @@ bool LevelWorkspace::PreviewImport(const QString& source)
     Status_->setText(QStringLiteral("Planning the import (dry run)… Previous viewport remains available."));
     Render();
     return true;
-#endif
 }
 QWidget* LevelWorkspace::TakeViewport(QWidget* parent)
 {
@@ -423,14 +417,7 @@ bool LevelWorkspace::Save()
 }
 bool LevelWorkspace::Start(const QString& operation, const QString& path, const QString& source)
 {
-#if defined(Q_OS_WASM)
-    (void)operation;
-    (void)path;
-    (void)source;
-    Status_->setText(QStringLiteral("Reference scene import requires the native Editor and installed host tools."));
-    return false;
-#else
-    if (Busy_ || Root_.isEmpty() || Operate_ != nullptr)
+    if (Busy_ == true || Root_.isEmpty() == true || isOperationActive() == true)
     {
         return false;
     }
@@ -455,9 +442,7 @@ bool LevelWorkspace::Start(const QString& operation, const QString& path, const 
     Status_->setText(QStringLiteral("Validating scene assets… Previous viewport remains available."));
     Render();
     return true;
-#endif
 }
-#if !defined(Q_OS_WASM)
 namespace
 {
 std::span<const foundation::uint8> ToSpan(const QByteArray& bytes) noexcept
@@ -501,13 +486,8 @@ QString DescribeStage(std::string_view stage)
     return {};
 }
 } // namespace
-#endif
 bool LevelWorkspace::Run(const SceneOperationRequest& request)
 {
-#if defined(Q_OS_WASM)
-    (void)request;
-    return false;
-#else
     const QString& operation = request.Operation;
     const QString& path = request.Path;
     const QString& source = request.Source;
@@ -561,71 +541,82 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
         CandidateCatalog_.clear();
     }
     CancelRequested_.store(false);
-    Operate_ = QThread::create(
-        [this, kind, hasExpected, level, root, relative, from, entry, expectedSource, digest, catalog]() {
-            EditorSceneProgress progress;
-            progress.ContextOrNull = this;
-            progress.Report = [](void* context, std::string_view stage) noexcept {
-                LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
-                const QString text = DescribeStage(stage);
-                if (text.isEmpty() == false)
-                {
-                    QMetaObject::invokeMethod(
-                        self,
-                        [self, text]() {
-                            if (self->Busy_ == true && self->Cancelling_ == false)
-                            {
-                                self->Status_->setText(text);
-                            }
-                        },
-                        Qt::QueuedConnection);
-                }
-            };
-            Cancellation cancel;
-            cancel.Requested = &IsCancelRequested;
-            cancel.ContextOrNull = &CancelRequested_;
-            AssetOptions options;
-            options.CancelOrNull = &cancel;
-            options.SourceEntry = ToView(entry);
-            options.ExpectedSourceDigest = ToView(expectedSource);
-            EditorSceneRequest request;
-            request.Operation = kind;
-            request.Root = ToView(root);
-            request.Path = ToView(relative);
-            request.Source = ToView(from);
-            request.Level = kind == EditorSceneOperation::Open ? std::span<const foundation::uint8>() : ToSpan(level);
-            request.Catalog = ToSpan(catalog);
-            request.HasExpected = hasExpected;
-            request.Expected = ToView(digest);
-            request.ProgressOrNull = &progress;
-            EditorSceneResult result;
-            AssetError error;
-            if (OperateEditorScene(request, options, result, error))
+    const auto work = [this, kind, hasExpected, level, root, relative, from, entry, expectedSource, digest, catalog]() {
+        EditorSceneProgress progress;
+        progress.ContextOrNull = this;
+        progress.Report = [](void* context, std::string_view stage) noexcept {
+            LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
+            const QString text = DescribeStage(stage);
+            if (text.isEmpty() == false)
             {
-                Response_ = QByteArray(reinterpret_cast<const char*>(result.Response.GetData()),
-                                       static_cast<qsizetype>(result.Response.GetSize()));
-                SceneBytes_ = QByteArray(reinterpret_cast<const char*>(result.Scene.GetData()),
-                                         static_cast<qsizetype>(result.Scene.GetSize()));
-                if (kind == EditorSceneOperation::Import)
-                {
-                    CandidateCatalog_ = QByteArray(reinterpret_cast<const char*>(result.Catalog.GetData()),
-                                                   static_cast<qsizetype>(result.Catalog.GetSize()));
-                }
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, text]() {
+                        if (self->Busy_ == true && self->Cancelling_ == false)
+                        {
+                            self->Status_->setText(text);
+                        }
+                    },
+                    Qt::QueuedConnection);
             }
-            else
+        };
+        Cancellation cancel;
+        cancel.Requested = &IsCancelRequested;
+        cancel.ContextOrNull = &CancelRequested_;
+        AssetOptions options;
+        options.CancelOrNull = &cancel;
+        options.SourceEntry = ToView(entry);
+        options.ExpectedSourceDigest = ToView(expectedSource);
+        EditorSceneRequest request;
+        request.Operation = kind;
+        request.Root = ToView(root);
+        request.Path = ToView(relative);
+        request.Source = ToView(from);
+        request.Level = kind == EditorSceneOperation::Open ? std::span<const foundation::uint8>() : ToSpan(level);
+        request.Catalog = ToSpan(catalog);
+        request.HasExpected = hasExpected;
+        request.Expected = ToView(digest);
+        request.ProgressOrNull = &progress;
+        EditorSceneResult result;
+        AssetError error;
+        if (OperateEditorScene(request, options, result, error))
+        {
+            Response_ = QByteArray(reinterpret_cast<const char*>(result.Response.GetData()),
+                                   static_cast<qsizetype>(result.Response.GetSize()));
+            SceneBytes_ = QByteArray(reinterpret_cast<const char*>(result.Scene.GetData()),
+                                     static_cast<qsizetype>(result.Scene.GetSize()));
+            if (kind == EditorSceneOperation::Import)
             {
-                const std::string_view message = error.Message.View();
-                OperationError_ = QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size()));
+                CandidateCatalog_ = QByteArray(reinterpret_cast<const char*>(result.Catalog.GetData()),
+                                               static_cast<qsizetype>(result.Catalog.GetSize()));
             }
-        });
+        }
+        else
+        {
+            const std::string_view message = error.Message.View();
+            OperationError_ = QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size()));
+        }
+    };
+#if defined(Q_OS_WASM)
+    // The browser Editor is single-threaded: run the cook in-process on the GUI thread after
+    // the status text paints. Progress text from the cook is applied when the operation ends.
+    constexpr int BROWSER_PAINT_DELAY_MILLISECONDS = 50;
+    mIsOperationQueued = true;
+    QTimer::singleShot(BROWSER_PAINT_DELAY_MILLISECONDS, this, [this, work]() {
+        work();
+        mIsOperationQueued = false;
+        Completed();
+    });
+#else
+    Operate_ = QThread::create(work);
     connect(Operate_, &QThread::finished, this, [this]() {
         Operate_->deleteLater();
         Operate_ = nullptr;
         Completed();
     });
     Operate_->start();
-    return true;
 #endif
+    return true;
 }
 void LevelWorkspace::WaitForOperation()
 {
@@ -639,7 +630,6 @@ void LevelWorkspace::WaitForOperation()
 }
 void LevelWorkspace::Completed()
 {
-#if !defined(Q_OS_WASM)
     const QJsonObject result = QJsonDocument::fromJson(Response_).object();
     const bool succeeded = OperationError_.isEmpty() && result.value(QStringLiteral("ok")).toBool();
     if (Operation_ == QStringLiteral("preview-import"))
@@ -706,46 +696,55 @@ void LevelWorkspace::Completed()
     {
         CandidateDisk_ = result.value(QStringLiteral("disk")).toString();
     }
+#if defined(Q_OS_WASM)
+    QTimer::singleShot(0, this, [this]() {
+        decodeCandidate();
+        Publish();
+    });
+#else
     auto* worker = new QObject;
     worker->moveToThread(&Decode_);
     connect(&Decode_, &QThread::started, worker, [this]() {
-        if (SceneBytes_.size() > foundation::int64{64} * 1024 * 1024)
-        {
-            Error_ = QStringLiteral("Cooked scene exceeds 64 MiB.");
-        }
-        else
-        {
-            const QByteArray& bytes = SceneBytes_;
-            Success_ = bytes.isEmpty() && Candidate_.value(QStringLiteral("objects")).toArray().isEmpty();
-            if (!Success_)
-            {
-                Success_ = RenderScene::LoadCooked(bytes, Candidate_, Scene_, Error_, CandidateRevisions_);
-            }
-            auto authoredWorld = WorldSnapshot_;
-            if (Success_ && !VerificationOnly_ && authoredWorld.Loaded() &&
-                (Operation_ == QStringLiteral("import") || Operation_ == QStringLiteral("open")))
-            {
-                // Validate the complete entity/component transaction before any
-                // candidate viewport or catalog can be published.
-                Success_ = authoredWorld.ImportScene(Candidate_, Error_);
-            }
-            if (Success_ && !VerificationOnly_ && authoredWorld.Loaded() &&
-                QFileInfo::exists(QDir(Root_).filePath(QStringLiteral("authoring/render.preview.json"))))
-            {
-                RenderScene authored;
-                Success_ = RenderScene::Load(Root_, authoredWorld, authored, Error_) &&
-                           RenderScene::Merge(authored, bytes, Candidate_, Scene_, Error_, CandidateRevisions_);
-            }
-        }
+        decodeCandidate();
         Decode_.quit();
     });
     connect(&Decode_, &QThread::finished, worker, &QObject::deleteLater);
     Decode_.start();
 #endif
 }
+void LevelWorkspace::decodeCandidate()
+{
+    if (SceneBytes_.size() > foundation::int64{64} * 1024 * 1024)
+    {
+        Error_ = QStringLiteral("Cooked scene exceeds 64 MiB.");
+    }
+    else
+    {
+        const QByteArray& bytes = SceneBytes_;
+        Success_ = bytes.isEmpty() && Candidate_.value(QStringLiteral("objects")).toArray().isEmpty();
+        if (Success_ == false)
+        {
+            Success_ = RenderScene::LoadCooked(bytes, Candidate_, Scene_, Error_, CandidateRevisions_);
+        }
+        WorldDocument authoredWorld = WorldSnapshot_;
+        if (Success_ == true && VerificationOnly_ == false && authoredWorld.Loaded() == true &&
+            (Operation_ == QStringLiteral("import") || Operation_ == QStringLiteral("open")))
+        {
+            // Validate the complete entity/component transaction before any
+            // candidate viewport or catalog can be published.
+            Success_ = authoredWorld.ImportScene(Candidate_, Error_);
+        }
+        if (Success_ == true && VerificationOnly_ == false && authoredWorld.Loaded() == true &&
+            QFileInfo::exists(QDir(Root_).filePath(QStringLiteral("authoring/render.preview.json"))))
+        {
+            RenderScene authored;
+            Success_ = RenderScene::Load(Root_, authoredWorld, authored, Error_) &&
+                       RenderScene::Merge(authored, bytes, Candidate_, Scene_, Error_, CandidateRevisions_);
+        }
+    }
+}
 void LevelWorkspace::CommitImport()
 {
-#if !defined(Q_OS_WASM)
     PublishingCatalog_ = true;
     if (Run({QStringLiteral("commit-import"), {}, Source_, CatalogExpected_}) == false)
     {
@@ -754,9 +753,6 @@ void LevelWorkspace::CommitImport()
         return;
     }
     Status_->setText(QStringLiteral("Committing prepared scene assets…"));
-#else
-    Rollback(QStringLiteral("Native host tools are required."));
-#endif
 }
 void LevelWorkspace::CommitCandidate()
 {
@@ -891,6 +887,19 @@ void LevelWorkspace::Publish()
     Status_->setText(
         QStringLiteral("Preparing candidate viewport; the current level stays active until its first rendered frame."));
 #else
+#    if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+    // The browser viewport rasterizes the decoded scene on the CPU once the candidate is committed.
+    Status_->setText(QStringLiteral("Scene ready. The browser Editor shows a CPU preview (orbit, pan, zoom)."));
+    if (Operation_ == QStringLiteral("import"))
+    {
+        CommitImport(); // Publication calls ShowFrame after the catalog commits.
+    }
+    else
+    {
+        CommitCandidate();
+        Viewport_->ShowFrame();
+    }
+#    else
     if (Operation_ == QStringLiteral("import"))
     {
         CommitImport();
@@ -902,6 +911,7 @@ void LevelWorkspace::Publish()
     Viewport_->ClearFrame(QStringLiteral("Scene ready. This Editor build has no native rendered viewport "
                                          "(configure with LUDUS_EDITOR_RENDER_PREVIEW)."));
     Status_->setText(QStringLiteral("Scene ready. This Editor build has no native rendered viewport."));
+#    endif
 #endif
 }
 void LevelWorkspace::ApplyPendingProject()

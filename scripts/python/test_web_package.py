@@ -5,12 +5,14 @@ import tempfile
 import unittest
 import zipfile
 
-from web_package import (collect, digest, package, PORT_NOTICES, RUNTIME,
+from web_package import (EDITOR_MAXIMUM_MEMORY_PAGES, collect, digest, package, PORT_NOTICES, RUNTIME,
                          SDK_NOTICES, validate_payload, validate_wasm, verify_archive,
                          write_archive)
 
 # One unshared memory, 512 initial / 4096 maximum 64KiB pages.
 WASM = b"\0asm\x01\0\0\0\x05\x06\x01\x01\x80\x04\x80\x20"
+# The browser editor: 512 initial / 32768 maximum pages (2 GiB).
+EDITOR_WASM = b"\0asm\x01\0\0\0\x05\x07\x01\x01\x80\x04\x80\x80\x02"
 
 
 class PackageTests(unittest.TestCase):
@@ -97,6 +99,14 @@ class PackageTests(unittest.TestCase):
             validate_wasm(WASM[:-1] + b'\x10')  # wrong maximum memory
         with self.assertRaises(ValueError):
             validate_wasm(WASM[:-1])
+
+    def test_memory_limit_is_per_artifact(self):
+        validate_wasm(WASM)
+        validate_wasm(EDITOR_WASM, EDITOR_MAXIMUM_MEMORY_PAGES)
+        with self.assertRaisesRegex(ValueError, "memory policy"):
+            validate_wasm(EDITOR_WASM)  # a player or smoke build must not carry the editor limit
+        with self.assertRaisesRegex(ValueError, "memory policy"):
+            validate_wasm(WASM, EDITOR_MAXIMUM_MEMORY_PAGES)
 
     def test_archive_tamper_rejected(self):
         path = self.root / "test.zip"

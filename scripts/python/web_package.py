@@ -52,7 +52,13 @@ def read_leb(data: bytes, offset: int) -> tuple[int, int]:
     raise ValueError("Invalid wasm section length")
 
 
-def validate_wasm(data: bytes) -> None:
+# 64 KiB wasm pages: 32 MiB initial; 256 MiB for players/smoke, 2 GiB for the browser editor cook.
+INITIAL_MEMORY_PAGES = 512
+PLAYER_MAXIMUM_MEMORY_PAGES = 4096
+EDITOR_MAXIMUM_MEMORY_PAGES = 32768
+
+
+def validate_wasm(data: bytes, maximum_pages: int = PLAYER_MAXIMUM_MEMORY_PAGES) -> None:
     if data[:8] != b"\0asm\x01\0\0\0":
         raise ValueError("Invalid wasm module")
     offset = 8
@@ -73,7 +79,8 @@ def validate_wasm(data: bytes) -> None:
             flags, position = read_leb(data, position)
             initial, position = read_leb(data, position)
             maximum, position = read_leb(data, position)
-            if count != 1 or flags != 1 or initial != 512 or maximum != 4096 or position != end:
+            if (count != 1 or flags != 1 or initial != INITIAL_MEMORY_PAGES or maximum != maximum_pages or
+                    position != end):
                 raise ValueError("Unexpected wasm memory policy")
             memory_found = True
         offset = end

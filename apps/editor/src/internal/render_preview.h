@@ -61,6 +61,12 @@ public:
     void Pan(foundation::int32 dx, foundation::int32 dy);
     void Zoom(foundation::int32 steps);
     [[nodiscard]] QJsonObject Navigation() const;
+    /// Build the current camera or orbit view for an explicit physical size, without a device.
+    /// Software viewports call this after NavigationChanged. Failure preserves outView.
+    [[nodiscard]] bool DescribeView(foundation::uint32 width,
+                                    foundation::uint32 height,
+                                    graphics::renderer::ViewDescription& outView,
+                                    QString& outError) const;
     void RestoreNavigation(const QJsonObject& state);
     void Tick();
     [[nodiscard]] LUDUS_INLINE bool Running() const noexcept

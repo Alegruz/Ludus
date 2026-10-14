@@ -1,5 +1,7 @@
 #include "internal/editor_files.h"
 
+#include "internal/scene_archive.h"
+
 #include <ludus/foundation/base/types.h>
 
 #include <QDir>
@@ -276,6 +278,271 @@ void OpenEditorDocument(QWidget* owner,
     }
 #endif
 }
+
+#if defined(Q_OS_WASM)
+namespace
+{
+[[nodiscard]] bool ValidateSceneImportPaths(const QStringList& paths, bool folder, QString& outEntry) noexcept
+{
+    if (paths.isEmpty() == true || paths.size() > 4096)
+    {
+        return false;
+    }
+    QSet<QString> unique;
+    QString root;
+    QString entry;
+    for (const QString& path : paths)
+    {
+        const QStringList parts = path.split(QLatin1Char('/'));
+        if (path.toUtf8().size() > 4096 || QDir::isAbsolutePath(path) == true ||
+            path.contains(QLatin1Char('\\')) == true || path.contains(QChar(0)) == true ||
+            unique.contains(path) == true)
+        {
+            return false;
+        }
+        for (const QString& part : parts)
+        {
+            if (part.isEmpty() == true || part == QStringLiteral(".") || part == QStringLiteral(".."))
+            {
+                return false;
+            }
+        }
+        if (folder == true)
+        {
+            if (parts.size() < 2 || (root.isEmpty() == false && parts.first() != root))
+            {
+                return false;
+            }
+            root = parts.first();
+            if (parts.back().endsWith(QStringLiteral(".pbrt"), Qt::CaseInsensitive) == true && entry.isEmpty() == true)
+            {
+                entry = path;
+            }
+        }
+        else if (parts.size() != 1)
+        {
+            return false;
+        }
+        else if (path.endsWith(QStringLiteral(".zip"), Qt::CaseInsensitive) == true)
+        {
+            if (paths.size() != 1)
+            {
+                return false; // An archive carries its own companions.
+            }
+            entry = path;
+        }
+        else if (path.endsWith(QStringLiteral(".pbrt"), Qt::CaseInsensitive) == true && entry.isEmpty() == true)
+        {
+            entry = path;
+        }
+        unique.insert(path);
+    }
+    if (entry.isEmpty() == true)
+    {
+        return false;
+    }
+    outEntry = entry;
+    return true;
+}
+} // namespace
+
+void OpenBrowserSceneImport(QWidget* owner, bool isFolder, const std::function<void(const QString&)>& loaded)
+{
+    if (PendingImport)
+    {
+        return;
+    }
+    QSharedPointer<BrowserImport> state = QSharedPointer<BrowserImport>::create();
+    PendingImport = state;
+    state->Owner = owner;
+    state->Folder = isFolder;
+    state->Completed = loaded;
+    const QWeakPointer<BrowserImport> weak(state);
+    state->Input = emscripten::val::global("document").call<emscripten::val>("createElement", emscripten::val("input"));
+    state->Input.set("type", emscripten::val("file"));
+    state->Input.set("multiple", true);
+    if (isFolder == true)
+    {
+        // A scene folder keeps the relative textures/ and models/ paths that the .pbrt references.
+        state->Input.set("webkitdirectory", true);
+    }
+    else
+    {
+        // One .zip archive, or a .pbrt plus its companion files picked together (flat).
+        state->Input.set("accept", emscripten::val(".pbrt,.zip,application/zip,image/*,.ply,.obj,.spd,.exr"));
+    }
+    state->Input.set("hidden", true);
+    auto finish = [weak]() {
+        const QSharedPointer<BrowserImport> state = weak.toStrongRef();
+        if (state)
+        {
+            state->Input.call<void>("remove");
+            if (state->Admitted == false)
+            {
+                ImportedBytes -= state->ChargedBytes;
+                state->ChargedBytes = 0;
+                if (state->Directory.isEmpty() == false)
+                {
+                    (void)QDir(state->Directory).removeRecursively();
+                }
+            }
+            if (PendingImport == state)
+            {
+                PendingImport.clear();
+            }
+        }
+    };
+    state->Cancel = QSharedPointer<qstdweb::EventCallback>::create(state->Input,
+                                                                   "cancel",
+                                                                   [finish](const emscripten::val&) { finish(); });
+    state->Change =
+        QSharedPointer<qstdweb::EventCallback>::create(state->Input, "change", [weak, finish](const emscripten::val&) {
+            const QSharedPointer<BrowserImport> state = weak.toStrongRef();
+            if (state.isNull() == true || state->Owner.isNull() == true)
+            {
+                finish();
+                return;
+            }
+            const emscripten::val files = state->Input["files"];
+            const foundation::uint32 count = files["length"].as<foundation::uint32>();
+            if (count == 0 || count > 100000)
+            {
+                Report(state->Owner, QStringLiteral("Choose a PBRT scene folder, one .pbrt file, or a .zip archive."));
+                finish();
+                return;
+            }
+            foundation::uint64 total = 0;
+            for (foundation::uint32 index = 0; index < count; ++index)
+            {
+                const qstdweb::File file(files[index]);
+                const QString path = state->Folder
+                                         ? QString::fromStdString(files[index]["webkitRelativePath"].as<std::string>())
+                                         : QFileInfo(QString::fromStdString(file.name())).fileName();
+                if (path.isEmpty() == true)
+                {
+                    continue;
+                }
+                total += file.size();
+                if (file.size() > static_cast<foundation::uint64>(MAX_IMPORT_BYTES) ||
+                    total > static_cast<foundation::uint64>(MAX_IMPORT_BYTES - ImportedBytes))
+                {
+                    Report(state->Owner,
+                           QStringLiteral("Import refused: the 32 MiB session import limit was exceeded."));
+                    finish();
+                    return;
+                }
+                state->Paths.append(path);
+                state->Indices.append(index);
+            }
+            if (ValidateSceneImportPaths(state->Paths, state->Folder, state->Descriptor) == false)
+            {
+                // Fall back to a single-file picker if the directory selection had no .pbrt.
+                Report(state->Owner,
+                       QStringLiteral("Choose a folder containing a .pbrt entry (and its textures/models), "
+                                      "or a single .pbrt / .zip file."));
+                finish();
+                return;
+            }
+            state->ChargedBytes = static_cast<foundation::int64>(total);
+            ImportedBytes += state->ChargedBytes;
+            state->Files = files;
+            state->Directory = QStringLiteral("/browser-imports/") + QString::number(++ImportSerial);
+            state->Size = qstdweb::File(files[state->Indices[0]]).size();
+            state->Name = state->Paths[0];
+            state->Reader = QSharedPointer<qstdweb::FileReader>::create();
+            auto failed = [weak, finish](const emscripten::val&) {
+                const QSharedPointer<BrowserImport> state = weak.toStrongRef();
+                if (state && state->Owner.isNull() == false)
+                {
+                    Report(state->Owner, QStringLiteral("Import failed; the current document was retained."));
+                }
+                finish();
+            };
+            state->Reader->onError(failed);
+            state->Reader->onAbort(failed);
+            state->Reader->onLoad([weak, finish](const emscripten::val&) {
+                const QSharedPointer<BrowserImport> state = weak.toStrongRef();
+                if (state.isNull() == true || state->Owner.isNull() == true)
+                {
+                    finish();
+                    return;
+                }
+                const qstdweb::ArrayBuffer result = state->Reader->result();
+                if (result.byteLength() != state->Size)
+                {
+                    Report(state->Owner, QStringLiteral("Could not read the complete selected document."));
+                    finish();
+                    return;
+                }
+                const QByteArray bytes = qstdweb::Uint8Array(result).copyToQByteArray();
+                if (state->Name.endsWith(QStringLiteral(".zip"), Qt::CaseInsensitive) == true && state->Folder == false)
+                {
+                    // Expand the archive into MEMFS beside the other session imports.
+                    // Charge the declared expanded size, not the compressed file, against the
+                    // session budget before decompressing (the archive bytes are released after).
+                    QString error;
+                    const foundation::int64 available = MAX_IMPORT_BYTES - (ImportedBytes - state->ChargedBytes);
+                    foundation::uint64 expanded = 0;
+                    if (ExpandSceneArchive(bytes,
+                                           state->Directory,
+                                           static_cast<foundation::uint64>(available),
+                                           expanded,
+                                           error) == false)
+                    {
+                        Report(state->Owner, error);
+                        finish();
+                        return;
+                    }
+                    ImportedBytes += static_cast<foundation::int64>(expanded) - state->ChargedBytes;
+                    state->ChargedBytes = static_cast<foundation::int64>(expanded);
+                    QString entry;
+                    QDirIterator files(state->Directory,
+                                       QStringList{QStringLiteral("*.pbrt")},
+                                       QDir::Files,
+                                       QDirIterator::Subdirectories);
+                    if (files.hasNext() == false)
+                    {
+                        Report(state->Owner, QStringLiteral("The .zip archive contains no .pbrt entry."));
+                        finish();
+                        return;
+                    }
+                    entry = files.next();
+                    state->Admitted = true;
+                    finish();
+                    state->Completed(entry);
+                    return;
+                }
+                const QString path = QDir(state->Directory).filePath(state->Name);
+                QSaveFile output(path);
+                output.setDirectWriteFallback(false);
+                if (QDir().mkpath(QFileInfo(path).absolutePath()) == false ||
+                    output.open(QIODevice::WriteOnly) == false || output.write(bytes) != bytes.size() ||
+                    output.commit() == false)
+                {
+                    Report(state->Owner, QStringLiteral("Import failed; the current document was retained."));
+                    finish();
+                    return;
+                }
+                ++state->Index;
+                if (state->Index < static_cast<foundation::uint32>(state->Paths.size()))
+                {
+                    state->Name = state->Paths[state->Index];
+                    const qstdweb::File next(state->Files[state->Indices[state->Index]]);
+                    state->Size = next.size();
+                    state->Reader->readAsArrayBuffer(next.slice(0, state->Size));
+                    return;
+                }
+                state->Admitted = true;
+                const QString descriptor = QDir(state->Directory).filePath(state->Descriptor);
+                finish();
+                state->Completed(descriptor);
+            });
+            state->Reader->readAsArrayBuffer(qstdweb::File(files[state->Indices[0]]).slice(0, state->Size));
+        });
+    emscripten::val::global("document")["body"].call<void>("appendChild", state->Input);
+    state->Input.call<void>("click");
+}
+#endif
 
 bool ValidateEditorImportPaths(const QStringList& paths, bool folder, QString& descriptor)
 {

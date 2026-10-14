@@ -166,7 +166,8 @@ Native `LUDUS_BUILD_EDITOR=ON` supports Linux x64 and macOS arm64/x64.
 Apple silicon is the validated macOS host; native Intel acceptance remains pending.
 Browser editor builds use
 the separate pinned Qt WebAssembly toolchain; ordinary browser engine setup does
-not enable the editor. Unsupported native hosts fail configuration explicitly.
+not enable the editor. Browser scene import, in-process cook and the CPU
+navigation viewport are documented in [browser-editor.md](browser-editor.md). Unsupported native hosts fail configuration explicitly.
 
 On macOS, the launcher defaults to `macos-clang-development`:
 
