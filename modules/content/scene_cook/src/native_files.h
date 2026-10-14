@@ -112,7 +112,7 @@ class FileLock final
 {
 public:
     FileLock() noexcept = default;
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS || LUDUS_TARGET_OS == LUDUS_OS_WEB
     ~FileLock() noexcept;
 #else
     ~FileLock() noexcept = default;
@@ -124,7 +124,7 @@ public:
     [[nodiscard]] Status Acquire(std::string_view path, LockMode mode) noexcept;
 
 private:
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS || LUDUS_TARGET_OS == LUDUS_OS_WEB
     int mDescriptor = -1;
 #endif
 };

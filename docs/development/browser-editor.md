@@ -46,7 +46,8 @@ sample identifier). Arbitrary URLs and unknown identifiers are rejected.
 
 This static Qt build uses no C++ exceptions, one thread and Asyncify for the
 existing modal dialogs. It needs no cross-origin isolation headers. The editor
-starts with 32 MiB of WebAssembly memory and may grow to 256 MiB. Do not silently
+starts with 32 MiB of WebAssembly memory and may grow to 2 GiB (`QT_WASM_MAXIMUM_MEMORY`), enough to cook and
+preview photographic scenes in process. Do not silently
 switch it to shared memory: Pages cannot supply arbitrary response headers.
 
 An existing host Qt installation of the pinned version can be supplied with
@@ -65,6 +66,24 @@ Static analysis still uses Clang 18. `web_build.analysis_commands` enables
 `-frelaxed-template-template-args` for the standard template-matching rule that
 is already the default in the newer SDK compiler; this is required to parse
 Emscripten's `val.h`. The language mode remains C++23 and diagnostics remain errors.
+
+## Scene import and viewport
+
+World authoring works on the session's in-memory (MEMFS) project. **Import
+scene…** offers a scene folder, or one `.zip` (stored or deflated entries, no
+ZIP64) or a `.pbrt` with its companion files. The selection is copied into
+MEMFS, then the linked SceneCook importer cooks it to LUSCN in process, exactly
+as on the desktop; MEMFS has no `flock`, so the cook lock is skipped there
+(one thread owns the file system). The build is single-threaded, so the cook
+runs on the UI thread after the status text has painted; large scenes block
+input until the cook finishes.
+
+The browser has no Qt Quick GPU interop, so the viewport draws a CPU
+navigation preview (`RenderSoftwareView`): depth-tested, textured, tinted and
+emissive triangles with fixed editor shading, at most 640 pixels on the long
+side. It supports the same orbit, pan, zoom and double-click focus as the
+native viewport. It is not the reference path tracer, and a WebGPU/WebGL
+viewport remains future work.
 
 ## Preview the complete website
 

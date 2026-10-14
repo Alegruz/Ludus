@@ -496,6 +496,20 @@ QJsonObject RenderPreview::Navigation() const
             {QStringLiteral("z"), OrbitCenter_.Z},
             {QStringLiteral("radius"), OrbitRadius_}};
 }
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — width then height matches ViewDescription.
+bool RenderPreview::DescribeView(uint32 width, uint32 height, rr::ViewDescription& outView, QString& outError) const
+{
+    PreviewViewOptions options;
+    options.Camera = Camera_;
+    options.OrbitDegrees = {Yaw_, Pitch_};
+    options.Distance = OrbitRadius_ * Zoom_;
+    options.Width = width;
+    options.Height = height;
+    options.Reference = Reference_;
+    options.OrbitCenter = &OrbitCenter_;
+    options.OrbitRadius = OrbitRadius_;
+    return Scene_.View(options, outView, outError);
+}
 void RenderPreview::RestoreNavigation(const QJsonObject& state)
 {
     const auto number = [&state](const QString& key, float32 fallback, float32 low, float32 high) {

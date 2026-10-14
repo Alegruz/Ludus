@@ -5,7 +5,8 @@
 
 #include <atomic>
 
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
+// The browser build uses Emscripten's POSIX layer over its in-memory filesystem (MEMFS).
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS || LUDUS_TARGET_OS == LUDUS_OS_WEB
 #    include <cerrno>
 #    include <climits>
 #    include <cstdio>
@@ -660,7 +661,9 @@ FileLock::~FileLock() noexcept
 {
     if (mDescriptor >= 0)
     {
+#    if LUDUS_TARGET_OS != LUDUS_OS_WEB
         (void)flock(mDescriptor, LOCK_UN);
+#    endif
         (void)close(mDescriptor);
     }
 }
@@ -679,12 +682,16 @@ Status FileLock::Acquire(std::string_view path, LockMode mode) noexcept
     {
         return Status::IoError;
     }
+#    if LUDUS_TARGET_OS != LUDUS_OS_WEB
     if (flock(file, (mode == LockMode::Exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) != 0)
     {
         const bool isBusy = errno == EWOULDBLOCK;
         (void)close(file);
         return isBusy == true ? Status::Conflict : Status::IoError;
     }
+#    endif
+    // The browser editor is one single-threaded process and MEMFS has no other writers,
+    // so it keeps the descriptor without an advisory lock.
     mDescriptor = file;
     return Status::Ok;
 }

@@ -73,7 +73,10 @@ def validate_wasm(data: bytes) -> None:
             flags, position = read_leb(data, position)
             initial, position = read_leb(data, position)
             maximum, position = read_leb(data, position)
-            if count != 1 or flags != 1 or initial != 512 or maximum != 4096 or position != end:
+            # 512 pages = 32 MiB initial. Maximum is either 4096 pages (256 MiB,
+            # sample players / smoke) or 32768 pages (2 GiB, browser editor cook).
+            if (count != 1 or flags != 1 or initial != 512 or maximum not in (4096, 32768) or
+                    position != end):
                 raise ValueError("Unexpected wasm memory policy")
             memory_found = True
         offset = end

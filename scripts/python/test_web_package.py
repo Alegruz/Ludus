@@ -9,7 +9,7 @@ from web_package import (collect, digest, package, PORT_NOTICES, RUNTIME,
                          SDK_NOTICES, validate_payload, validate_wasm, verify_archive,
                          write_archive)
 
-# One unshared memory, 512 initial / 4096 maximum 64KiB pages.
+# One unshared memory, 512 initial / 4096 or 32768 maximum 64KiB pages.
 WASM = b"\0asm\x01\0\0\0\x05\x06\x01\x01\x80\x04\x80\x20"
 
 

@@ -55,7 +55,10 @@ if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     set(editor_scene_preview_source src/scene_preview.cpp)
 endif()
 
-set(editor_viewport_sources src/preview_viewport.cpp)
+set(editor_viewport_sources
+    src/preview_viewport.cpp
+    src/internal/software_viewport.h
+    src/software_viewport.cpp)
 if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
     if(APPLE)
@@ -135,6 +138,8 @@ qt_add_executable(ludus_editor
     src/script_workspace.cpp
     src/configuration_workspace.cpp
     src/editor_files.cpp
+    src/internal/scene_archive.h
+    src/scene_archive.cpp
     src/audio_workspace.cpp
     ${editor_audio_source}
     main.cpp
@@ -199,9 +204,11 @@ target_link_libraries(ludus_editor
 )
 ludus_apply_project_defaults(ludus_editor)
 target_link_libraries(ludus_editor PRIVATE Ludus::Platform)
-if(NOT EMSCRIPTEN)
-    # Scene import, save and assembly run in process (no Python scene backend).
-    target_link_libraries(ludus_editor PRIVATE Ludus::SceneCook)
+# Scene import, save and assembly run in process (no Python scene backend),
+# including the browser Editor's MEMFS copies.
+target_link_libraries(ludus_editor PRIVATE Ludus::SceneCook ludus_stb_image)
+if(EMSCRIPTEN)
+    target_compile_definitions(ludus_editor PRIVATE LUDUS_EDITOR_SOFTWARE_VIEWPORT=1)
 endif()
 if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     target_compile_definitions(ludus_editor PRIVATE LUDUS_EDITOR_NATIVE_PREVIEW=1)
@@ -260,6 +267,9 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/script_workspace.cpp
         src/configuration_workspace.cpp
         src/editor_files.cpp
+        src/internal/scene_archive.h
+        src/scene_archive.cpp
+        tests/browser_import_tests.cpp
         src/audio_workspace.cpp
         ${editor_audio_source}
         tests/main.cpp
@@ -328,7 +338,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
             Catch2::Catch2)
     ludus_apply_project_defaults(ludus_editor_tests)
     target_link_libraries(ludus_editor_tests PRIVATE Ludus::Platform)
-    target_link_libraries(ludus_editor_tests PRIVATE Ludus::SceneCook)
+    target_link_libraries(ludus_editor_tests PRIVATE Ludus::SceneCook ludus_stb_image)
     if(LUDUS_EDITOR_RENDER_PREVIEW)
         target_compile_definitions(ludus_editor_tests PRIVATE LUDUS_EDITOR_NATIVE_PREVIEW=1)
         target_link_libraries(ludus_editor_tests PRIVATE Ludus::GraphicsRhi Qt6::Quick)
@@ -366,7 +376,7 @@ if(EMSCRIPTEN)
     find_package(Qt6 6.10.3 EXACT REQUIRED COMPONENTS GuiPrivate)
     target_link_libraries(ludus_editor PRIVATE Qt6::GuiPrivate)
     set_property(TARGET ludus_editor APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js")
-    set_target_properties(ludus_editor PROPERTIES QT_WASM_INITIAL_MEMORY 33554432 QT_WASM_MAXIMUM_MEMORY 268435456)
+    set_target_properties(ludus_editor PROPERTIES QT_WASM_INITIAL_MEMORY 33554432 QT_WASM_MAXIMUM_MEMORY 2147483648)
     target_link_options(ludus_editor PRIVATE "-sASYNCIFY_STACK_SIZE=131072"
         "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js")
 endif()

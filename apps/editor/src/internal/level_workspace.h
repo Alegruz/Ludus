@@ -166,6 +166,14 @@ private:
     QByteArray Response_, SceneBytes_, CandidateCatalog_;
     QString OperationError_;
     QThread* Operate_ = nullptr;
+    /// Browser builds run scene operations on the GUI thread from a queued timer.
+    bool mIsOperationQueued = false;
+    [[nodiscard]] bool isOperationActive() const noexcept
+    {
+        return Operate_ != nullptr || mIsOperationQueued == true;
+    }
+    /// Decode the cooked candidate and validate it against the World (worker or browser GUI thread).
+    void decodeCandidate();
     std::atomic<bool> CancelRequested_{false};
     QThread Decode_;
     WorldDocument WorldSnapshot_;
