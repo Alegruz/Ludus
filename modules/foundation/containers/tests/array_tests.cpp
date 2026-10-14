@@ -19,6 +19,7 @@
 
 using ludus::foundation::Array;
 using ludus::foundation::int32;
+using ludus::foundation::uint8;
 using ludus::foundation::usize;
 namespace tst = ludus::containers::testing;
 
@@ -880,4 +881,29 @@ TEST_CASE("Array value resize preserves move-only elements and rejects overflow"
         REQUIRE(values.TryResize(0));
     }
     CHECK(ledger.Balanced());
+}
+
+TEST_CASE("TryAddRange grows geometrically so repeated small appends stay linear", "[containers][array]")
+{
+    // Regression: exact-fit growth made byte writers quadratic (editor scene cook hung on macOS).
+    Array<uint8> bytes;
+    constexpr usize APPEND_COUNT = 1U << 20U;
+    const uint8 word[4] = {1, 2, 3, 4};
+    usize reallocations = 0;
+    const uint8* previous = bytes.GetData();
+    bool isAppended = true;
+    for (usize index = 0; index < APPEND_COUNT; ++index)
+    {
+        isAppended = bytes.TryAddRange(std::span<const uint8>(word)) == true && isAppended == true;
+        if (bytes.GetData() != previous)
+        {
+            ++reallocations;
+            previous = bytes.GetData();
+        }
+    }
+    REQUIRE(isAppended == true);
+    CHECK(bytes.GetSize() == APPEND_COUNT * 4);
+    CHECK(bytes.GetCapacity() >= bytes.GetSize());
+    // Doubling reaches 4 MiB in about 22 steps; exact-fit growth would reallocate a million times.
+    CHECK(reallocations < 64);
 }

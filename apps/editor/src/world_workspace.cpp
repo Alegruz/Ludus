@@ -117,6 +117,8 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     connect(CancelScene_, &QPushButton::clicked, this, [this]() {
         DemoPreview_.Stop();
         Scene_->CancelOperation();
+        // The Level status label is hidden inside the World workspace; mirror the cancel state here.
+        Changed(Scene_->StatusText());
     });
     connect(Import_, &QPushButton::clicked, this, [this]() {
         const QString source = QFileDialog::getOpenFileName(this,
