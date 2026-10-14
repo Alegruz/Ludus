@@ -5,6 +5,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/renderer/overlays.hpp>
@@ -1265,6 +1266,77 @@ TEST_CASE("L5 clustered material admits all lights and owns texture bindings", "
     rhi::reference::Next = rhi::RasterStatus::Ready;
     REQUIRE(session.Renderer.GetStatus(material) == rhi::RasterStatus::Ready);
     REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
+}
+
+TEST_CASE("Lighting scratch reuse resets forward and clustered reports", "[renderer][lighting-scratch]")
+{
+    Session session;
+    LitFixture forwardFixture;
+    forwardFixture.Enable(session);
+    const rr::MaterialProgram forwardProgram = forwardFixture.Prewarm(session);
+    LitFixture clusteredFixture(true);
+    const rr::MaterialProgram clusteredProgram = clusteredFixture.Prewarm(session);
+    constexpr usize LIGHT_COUNT = 10;
+    StaticArray<rr::DirectLight, LIGHT_COUNT> lights;
+    for (usize i = 0; i < LIGHT_COUNT; ++i)
+    {
+        lights[i].SourceId = i + 1;
+    }
+    rr::LitMaterialDescription description;
+    description.Lights = lights.GetData();
+    description.LightCount = LIGHT_COUNT;
+    rr::MaterialVersion material;
+    rr::LightSelection report;
+    const usize initialBytes = session.Renderer.GetHostBytes();
+    REQUIRE(session.Renderer.CreateLitMaterial(forwardProgram, description, material, report) ==
+            rhi::RasterStatus::Ready);
+    CHECK(report.Count == 8);
+    CHECK(report.Dropped == 2);
+    CHECK(session.Renderer.GetHostBytes() > initialBytes);
+    REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
+    rr::LightClusterDescription grid;
+    grid.Bounds = {{-2, -2, 0}, {2, 2, 2}};
+    description.Clusters = &grid;
+    REQUIRE(session.Renderer.CreateLitMaterial(clusteredProgram, description, material, report) ==
+            rhi::RasterStatus::Ready);
+    CHECK(report.Count == LIGHT_COUNT);
+    CHECK(report.Dropped == 0);
+    CHECK(report.Assignments > 0);
+    const usize scratchBytes = session.Renderer.GetHostBytes();
+    REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
+    description.Clusters = nullptr;
+    REQUIRE(session.Renderer.CreateLitMaterial(forwardProgram, description, material, report) ==
+            rhi::RasterStatus::Ready);
+    CHECK(report.Count == 8);
+    CHECK(report.Dropped == 2);
+    CHECK(report.OverflowCells == 0);
+    CHECK(report.Assignments == 0);
+    CHECK(session.Renderer.GetHostBytes() == scratchBytes);
+    REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
+}
+
+TEST_CASE("Lighting scratch admission preserves outputs at the host budget", "[renderer][lighting-scratch]")
+{
+    usize reservedBytes = 0;
+    {
+        Session session;
+        reservedBytes = session.Renderer.GetHostBytes();
+    }
+    rr::Limits limits;
+    limits.HostBytes = reservedBytes;
+    Session session(true, limits);
+    LitFixture fixture;
+    fixture.Enable(session);
+    const rr::MaterialProgram program = fixture.Prewarm(session);
+    rr::MaterialVersion material;
+    rr::LightSelection report;
+    report.Count = 17;
+    report.Dropped = 29;
+    CHECK(session.Renderer.CreateLitMaterial(program, {}, material, report) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(session.Renderer.GetStatus(material) == rhi::RasterStatus::InvalidHandle);
+    CHECK(report.Count == 17);
+    CHECK(report.Dropped == 29);
+    CHECK(session.Renderer.GetHostBytes() == reservedBytes);
 }
 
 TEST_CASE("RT1 capture replay, target continuation, resets and retained lifetimes", "[renderer][rt1]")
