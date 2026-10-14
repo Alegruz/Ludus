@@ -2144,6 +2144,13 @@ The 80-region atlas admits thirteen six-face point/area proxies without reducing
 the 128-entry clustered list. The authored clustered fragment uniform is 16272
 bytes, within the 16 KiB portable profile. Use clustered recipes when more than
 eight lights are present; forward selection still reports its dropped count.
+Reflected parameter packing, light-selection reports and shadow-region staging
+use reusable renderer-owned CPU scratch, allocated lazily on the device owner
+thread and charged to `Limits::HostBytes`. They do not place the expanded layouts
+on the browser's default 64 KiB call stack. Insufficient scratch budget returns
+`CapacityExceeded` without publishing a material/atlas or changing its output
+report. Switching between forward and clustered admissions resets report counters;
+retained scratch is reused until renderer shutdown.
 Each region owns a prepared view with conservative light-frustum culling and
 compatible packet grouping; casters remain full-detail and independent of the
 main camera. Configure at least 156 views plus ordinary

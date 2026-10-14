@@ -78,6 +78,39 @@ constexpr usize LIT_BYTES = LIT_SHADOW_OFFSET + SHADOW_DATA_BYTES;
 constexpr usize CLUSTER_GRID_OFFSET = CLUSTER_SHADOW_OFFSET + SHADOW_DATA_BYTES;
 constexpr usize CLUSTER_BYTES = CLUSTER_GRID_OFFSET + 5 * sizeof(math::Vector4);
 constexpr usize AUTHORED_PARAMETER_BYTES = LUDUS_AUTHORED_PARAMETER_WORDS * sizeof(math::Vector4);
+constexpr usize CLUSTER_LIGHT_WORD_COUNT = usize{128} * 4;
+constexpr usize LIGHT_GRID_ROW_COUNT = 3;
+constexpr usize LEGACY_LIGHT_PARAMETER_BYTES = LIT_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES;
+// Owner-thread scratch is charged to Limits::HostBytes. Keeping large reflected
+// layouts here avoids overflowing the browser's default 64 KiB call stack.
+struct LitMaterialParameters final
+{
+    math::Vector4 Tint;
+    math::Vector4 UvTransform;
+    math::Vector4 Options;
+    math::Vector4 Pbr;
+    math::Vector4 Emission;
+    math::Vector4 EnvironmentIrradiance;
+    math::Vector4 EnvironmentRadiance;
+    math::Vector4 BakeScale;
+    math::Vector4 BakeUv;
+    StaticArray<math::Vector4, CLUSTER_LIGHT_WORD_COUNT> Lights{};
+    StaticArray<math::Vector4, SHADOW_DATA_WORDS> ShadowData{};
+    StaticArray<math::Vector4, LIGHT_GRID_ROW_COUNT> GridRows{};
+    math::Vector4 GridMinimum{};
+    math::Vector4 GridScale{};
+    math::Vector4 SurfaceMap{};
+    math::Vector4 Authored{};
+    StaticArray<math::Vector4, internal::ENVIRONMENT_SH_COUNT> IrradianceSh{};
+};
+static_assert(sizeof(LitMaterialParameters) == CLUSTER_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES);
+struct LitMaterialScratch final
+{
+    LitMaterialParameters Parameters{};
+    StaticArray<uint8, LEGACY_LIGHT_PARAMETER_BYTES> Legacy{};
+    LightSelection Selection{};
+};
+using ShadowRegionScratch = StaticArray<ShadowRegion, SHADOW_REGION_CAPACITY>;
 constexpr uint64 LAST_ID = ~uint64{0};
 // An explicit Initialize reserves identity; no resource registration at static initialization.
 std::atomic<uint64> gNextOwner{1};
@@ -442,6 +475,8 @@ struct Renderer::State final
     usize HostBytes = 0;
     Status ReserveStorage(const Limits&) noexcept;
     core::UniquePtr<LightClusters> ClusterScratch;
+    core::UniquePtr<LitMaterialScratch> LitScratch;
+    core::UniquePtr<ShadowRegionScratch> ShadowScratch;
     core::UniquePtr<internal::ReferenceState> Reference;
     core::UniquePtr<internal::GpuPreviewState> GpuPreview;
     void DropGpuPreview(usize) noexcept;
@@ -3507,22 +3542,40 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         return Status::InvalidDescription;
     }
-    if (clustered && !s.ClusterScratch)
+    if (clustered == true && s.ClusterScratch.Get() == nullptr)
     {
         if (sizeof(LightClusters) > s.Capacities.HostBytes - s.HostBytes)
         {
             return Status::CapacityExceeded;
         }
-        auto* workspace = new (std::nothrow) LightClusters;
-        if (workspace == nullptr)
+        LightClusters* workspaceOrNull = new (std::nothrow) LightClusters;
+        if (workspaceOrNull == nullptr)
         {
             return Status::OutOfMemory;
         }
-        s.ClusterScratch.Reset(workspace);
+        s.ClusterScratch.Reset(workspaceOrNull);
         s.HostBytes += sizeof(LightClusters);
     }
     auto* clusters = s.ClusterScratch.Get();
-    LightSelection selected;
+    if (s.LitScratch.Get() == nullptr)
+    {
+        if (sizeof(LitMaterialScratch) > s.Capacities.HostBytes - s.HostBytes)
+        {
+            return Status::CapacityExceeded;
+        }
+        LitMaterialScratch* workspaceOrNull = new (std::nothrow) LitMaterialScratch;
+        if (workspaceOrNull == nullptr)
+        {
+            return Status::OutOfMemory;
+        }
+        s.LitScratch.Reset(workspaceOrNull);
+        s.HostBytes += sizeof(LitMaterialScratch);
+    }
+    LightSelection& selected = s.LitScratch->Selection;
+    selected.Count = 0;
+    selected.Dropped = 0;
+    selected.OverflowCells = 0;
+    selected.Assignments = 0;
     auto status = clustered
                       ? BuildLightClusters(*description.Clusters, description.Lights, description.LightCount, *clusters)
                       : SelectDirectLights(description.Lights, description.LightCount, selected);
@@ -3608,28 +3661,8 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
         }
     }
     // Explicit vec4 packing is independently verified for every cooked target.
-    struct Parameters final
-    {
-        math::Vector4 Tint;
-        math::Vector4 UvTransform;
-        math::Vector4 Options;
-        math::Vector4 Pbr;
-        math::Vector4 Emission;
-        math::Vector4 EnvironmentIrradiance;
-        math::Vector4 EnvironmentRadiance;
-        math::Vector4 BakeScale;
-        math::Vector4 BakeUv;
-        math::Vector4 Lights[512]{};
-        StaticArray<math::Vector4, SHADOW_DATA_WORDS> ShadowData{};
-        math::Vector4 GridRows[3]{};
-        math::Vector4 GridMinimum{};
-        math::Vector4 GridScale{};
-        math::Vector4 SurfaceMap{};
-        math::Vector4 Authored{};
-        math::Vector4 IrradianceSh[internal::ENVIRONMENT_SH_COUNT]{};
-    };
-    static_assert(sizeof(Parameters) == CLUSTER_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES);
-    Parameters parameters{};
+    LitMaterialParameters& parameters = s.LitScratch->Parameters;
+    std::memset(&parameters, 0, sizeof(parameters));
     parameters.Tint = description.Surface.Tint;
     parameters.UvTransform = description.Surface.UvTransform;
     parameters.Options = {description.Surface.AlphaCutoff,
@@ -3713,7 +3746,8 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                                                                   1 / h};
         }
     }
-    uint8 legacy[LIT_BYTES + sizeof(math::Vector4) + AUTHORED_PARAMETER_BYTES]{};
+    uint8* legacy = s.LitScratch->Legacy.GetData();
+    std::memset(legacy, 0, s.LitScratch->Legacy.GetSize());
     if (clustered)
     {
         const auto& grid = *description.Clusters;
@@ -3768,7 +3802,21 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
     {
         return Status::InvalidDescription;
     }
-    StaticArray<ShadowRegion, SHADOW_REGION_CAPACITY> regions;
+    if (s.ShadowScratch.Get() == nullptr)
+    {
+        if (sizeof(ShadowRegionScratch) > s.Capacities.HostBytes - s.HostBytes)
+        {
+            return Status::CapacityExceeded;
+        }
+        ShadowRegionScratch* workspaceOrNull = new (std::nothrow) ShadowRegionScratch;
+        if (workspaceOrNull == nullptr)
+        {
+            return Status::OutOfMemory;
+        }
+        s.ShadowScratch.Reset(workspaceOrNull);
+        s.HostBytes += sizeof(ShadowRegionScratch);
+    }
+    ShadowRegionScratch& regions = *s.ShadowScratch;
     for (usize i = 0; i < description.Count; ++i)
     {
         regions[i] = description.Regions[i];
