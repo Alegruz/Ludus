@@ -8,6 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -39,13 +40,13 @@ jobs:
         run: python -m unittest discover -s scripts/python -p 'test_api*.py' -v
       - name: Build the authored wiki
         run: python -m mkdocs build --strict
-      - name: Reject new API gaps and baseline additions in pull requests
-        if: github.event_name == 'pull_request'
+      - name: Reject new API gaps and baseline additions in pull requests and the merge queue
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          API_BASELINE_REF: ${{ github.event.pull_request.base.sha }}
+          API_BASELINE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: python scripts/build-api --bootstrap --baseline-ref "$API_BASELINE_REF"
       - name: Validate API documentation on main and manual runs
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: python scripts/build-api --bootstrap
 
   editor:

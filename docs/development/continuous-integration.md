@@ -7,13 +7,68 @@ the next tooling, evidence and platform improvements; its
 the Game Programming Gems ideas incorporated after the initial design.
 Q0 failure semantics are implemented below; later phases remain proposals.
 
-Native CI runs on pull requests, pushes to `main`, and manual dispatches.
-Feature branches are validated through their pull requests, avoiding a duplicate
-full run for every branch push. Superseded pull-request runs are cancelled;
-`main` validation is allowed to finish.
+Native CI runs on pull requests, the `main` merge queue, pushes to `main`, and
+manual dispatches. Feature branches are validated through their pull requests,
+avoiding a duplicate full run for every branch push. Superseded pull-request
+runs are cancelled; merge-queue and `main` validation is allowed to finish.
+
+## Landing changes through the merge queue
+
+Changes land on `main` only through GitHub's merge queue. A pull request is
+validated twice:
+
+1. **Pull-request tier** — fast feedback while the author (human or agent)
+   iterates. It runs every native job except the slow ones listed in
+   `MERGE_QUEUE_JOBS` in `scripts/python/ci_scope.py`: the macOS compile,
+   sanitizer and analyzer jobs, Linux ASan/UBSan, the optional editor and the
+   uncached build-time budget.
+2. **Merge-queue tier** — the full set of jobs on the queue's candidate commit,
+   which is the pull request merged on top of `main` and every pull request
+   ahead of it in the queue. Only a passing candidate is pushed to `main`, so two
+   pull requests that pass separately but conflict semantically cannot both land.
+
+When a pull request is ready (checks green, review threads resolved), add it to
+the queue with **Merge when ready** and move on; nobody has to watch it. If the
+queued candidate fails, GitHub removes only that pull request from the queue and
+the others continue. Fix it and enqueue it again.
+
+Add the `ci:full` label to a pull request to run the merge-queue tier on the
+pull request itself, for example when it changes the editor, macOS or sanitizer
+paths and you want that feedback before queueing. Adding the label starts a
+new run.
+
+Pushes to `main` still run the full tier. They warm the dependency and compiler
+caches that pull requests restore, because caches saved by merge-queue runs are
+not visible to other branches.
+
+### Repository settings
+
+The queue is configured in a ruleset that targets the default branch
+(**Settings → Rules → Rulesets**). Merge queues are only available for
+organization-owned repositories.
+
+- **Require merge queue** with the squash merge method, a build concurrency of
+  5, a minimum group size of 1, a maximum group size of 5, and a 5-minute wait
+  for a minimum group size. The status check timeout must exceed the slowest
+  full-tier run; 90 minutes leaves room.
+- **Require status checks to pass**: `Ubuntu Clang`, `Host tooling (ludus_tools)
+  unit tests`, `Public API documentation`, `Build or reuse browser editor`,
+  `Playable web samples (software GPU)` and `Build and check wiki`. Leave
+  "Require branches to be up to date" off; the merge queue provides that
+  guarantee without forcing every open pull request to rerun after each merge.
+- Keep the existing Copilot review, deletion and non-fast-forward rules.
+
+A required check must report on `merge_group` events, or queued pull requests
+wait until the timeout. `ci.yml`, `project-sdk.yml` and `wiki.yml` therefore
+trigger on `merge_group`, and `test_ci_scope.py` checks this. The path-filtered
+browser package and release workflows stay advisory pull-request checks outside
+the queue.
+
+## Change routing
 
 Every run first tests the CI routing policy and compares the complete change.
-Pull requests are compared from the merge base to their head; pushes to `main`
+Pull requests are compared from the merge base to their head; merge-queue runs
+compare the queue's base commit with its candidate; pushes to `main`
 compare the previous and new commit. A documentation-only change skips native
 engine and installed host-tooling validation, while the wiki workflow still
 builds the complete site, generates the API reference, checks documentation
@@ -43,8 +98,10 @@ boundaries, and Python tooling tests run first. Independent jobs then validate:
 
 The final `Ubuntu Clang` check always runs. It requires successful classification
 and every native job to succeed for full validation, or every native job to be
-skipped for documentation-only changes. Failed or cancelled dependencies and
-missing classification outputs fail this gate. The installed host-tooling check
+skipped for documentation-only changes. In the pull-request tier the deferred
+merge-queue jobs must be skipped and every other native job must succeed.
+Failed or cancelled dependencies and missing classification or tier outputs
+fail this gate; malformed pull-request metadata selects the full tier. The installed host-tooling check
 also retains its name and reports success after routing tests for docs-only
 changes, without installing compilers or SDK dependencies.
 

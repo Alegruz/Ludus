@@ -45,6 +45,33 @@ class DocumentationScopeTests(unittest.TestCase):
                 self.assertTrue(ci_scope.classify(event_name, event, Path.cwd())[0])
         with mock.patch("ci_scope.changed_paths", side_effect=subprocess.CalledProcessError(128, "git")):
             self.assertTrue(ci_scope.classify("push", {}, Path.cwd())[0])
+        for event in ({}, {"merge_group": None}, {"merge_group": {"base_sha": "a" * 40}}):
+            with self.subTest(event=event):
+                self.assertTrue(ci_scope.classify("merge_group", event, Path.cwd())[0])
+
+
+class ValidationTierTests(unittest.TestCase):
+    @staticmethod
+    def pull_request(*labels):
+        return {"pull_request": {"labels": [{"name": label} for label in labels]}}
+
+    def test_only_unlabeled_pull_requests_defer_merge_queue_jobs(self):
+        self.assertEqual(ci_scope.validation_tier("pull_request", self.pull_request()), ci_scope.PULL_REQUEST_TIER)
+        self.assertEqual(ci_scope.validation_tier("pull_request", self.pull_request("editor")),
+                         ci_scope.PULL_REQUEST_TIER)
+        self.assertEqual(ci_scope.validation_tier("pull_request", self.pull_request("editor", "ci:full")),
+                         ci_scope.FULL_TIER)
+
+    def test_queue_main_manual_and_unknown_events_run_the_full_tier(self):
+        for event_name in ("merge_group", "push", "workflow_dispatch", "schedule", ""):
+            with self.subTest(event_name=event_name):
+                self.assertEqual(ci_scope.validation_tier(event_name, {}), ci_scope.FULL_TIER)
+
+    def test_malformed_pull_request_metadata_runs_the_full_tier(self):
+        for event in ({}, {"pull_request": None}, {"pull_request": {"labels": [{}]}},
+                      {"pull_request": {"labels": ["ci:full"]}}):
+            with self.subTest(event=event):
+                self.assertEqual(ci_scope.validation_tier("pull_request", event), ci_scope.FULL_TIER)
 
 
 class GitComparisonTests(unittest.TestCase):
@@ -98,6 +125,16 @@ class GitComparisonTests(unittest.TestCase):
         base = self.commit()
         self.assertFalse(ci_scope.classify("pull_request", self.pull_request(head, base), self.root)[0])
 
+    def test_merge_group_compares_the_queued_candidate_with_its_base(self):
+        self.write("docs/index.md", "Updated docs")
+        docs_head = self.commit()
+        group = {"merge_group": {"base_sha": self.base, "head_sha": docs_head}}
+        self.assertFalse(ci_scope.classify("merge_group", group, self.root)[0])
+        self.write("modules/engine.cpp", "Queued engine change")
+        engine_head = self.commit()
+        group = {"merge_group": {"base_sha": self.base, "head_sha": engine_head}}
+        self.assertTrue(ci_scope.classify("merge_group", group, self.root)[0])
+
     def test_engine_rename_into_documentation_is_not_exempt(self):
         self.git("mv", "modules/engine.cpp", "docs/engine.cpp")
         head = self.commit()
@@ -136,8 +173,8 @@ class GitComparisonTests(unittest.TestCase):
             env={**os.environ, "GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event),
                  "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary)},
         )
-        self.assertEqual(output.read_text(), "native_required=false\n")
-        self.assertIn("Native validation required: false", summary.read_text())
+        self.assertEqual(output.read_text(), "native_required=false\nvalidation_tier=pull-request\n")
+        self.assertIn("Native validation required: false. Validation tier: pull-request.", summary.read_text())
 
 
 class RequiredGateTests(unittest.TestCase):
@@ -153,10 +190,30 @@ class RequiredGateTests(unittest.TestCase):
         jobs = set(re.findall(r"^  ([a-z][a-z0-9-]*):$", workflow, re.MULTILINE))
         self.assertTrue(set(ci_scope.NATIVE_JOBS) <= jobs)
 
-    def results(self, native_required=True):
+    def test_workflow_defers_exactly_the_merge_queue_jobs(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+        self.assertTrue(set(ci_scope.MERGE_QUEUE_JOBS) <= set(ci_scope.NATIVE_JOBS))
+        conditions = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n(?:    .*\n)*?    if: (.*)$", workflow, re.MULTILINE))
+        for name in ci_scope.NATIVE_JOBS:
+            with self.subTest(name=name):
+                deferred = "needs.changes.outputs.validation_tier == 'full'" in conditions.get(name, "")
+                self.assertEqual(deferred, name in ci_scope.MERGE_QUEUE_JOBS)
+
+    def test_required_workflows_report_checks_to_the_merge_queue(self):
+        # A required check that never runs for merge_group stalls every queued PR.
+        for name in ("ci.yml", "project-sdk.yml", "wiki.yml"):
+            with self.subTest(workflow=name):
+                workflow = (Path(__file__).resolve().parents[2] / ".github/workflows" / name).read_text()
+                self.assertRegex(workflow, r"(?m)^  merge_group:")
+
+    def results(self, native_required=True, tier=ci_scope.FULL_TIER):
+        def expected(name):
+            deferred = tier == ci_scope.PULL_REQUEST_TIER and name in ci_scope.MERGE_QUEUE_JOBS
+            return "success" if native_required and not deferred else "skipped"
         return {
-            "changes": {"result": "success", "outputs": {"native_required": "true" if native_required else "false"}},
-            **{name: {"result": "success" if native_required else "skipped"} for name in ci_scope.NATIVE_JOBS},
+            "changes": {"result": "success", "outputs": {
+                "native_required": "true" if native_required else "false", "validation_tier": tier}},
+            **{name: {"result": expected(name)} for name in ci_scope.NATIVE_JOBS},
         }
 
     def test_all_native_successes_or_intentional_docs_skips_pass(self):
@@ -170,6 +227,25 @@ class RequiredGateTests(unittest.TestCase):
                     results = self.results()
                     results[name]["result"] = status
                     self.assertTrue(ci_scope.gate_failures(results))
+
+    def test_pull_request_tier_requires_fast_jobs_and_skips_only_deferred_jobs(self):
+        self.assertEqual(ci_scope.gate_failures(self.results(tier=ci_scope.PULL_REQUEST_TIER)), [])
+        self.assertEqual(ci_scope.gate_failures(self.results(False, ci_scope.PULL_REQUEST_TIER)), [])
+        for name in ci_scope.NATIVE_JOBS:
+            statuses = ("failure", "cancelled", "success") if name in ci_scope.MERGE_QUEUE_JOBS else (
+                "failure", "cancelled", "skipped")
+            for status in statuses:
+                with self.subTest(name=name, status=status):
+                    results = self.results(tier=ci_scope.PULL_REQUEST_TIER)
+                    results[name]["result"] = status
+                    self.assertTrue(ci_scope.gate_failures(results))
+
+    def test_missing_or_invalid_tier_cannot_skip_merge_queue_jobs(self):
+        for tier in (None, "", "Full", "fast"):
+            with self.subTest(tier=tier):
+                results = self.results(tier=ci_scope.PULL_REQUEST_TIER)
+                results["changes"]["outputs"]["validation_tier"] = tier
+                self.assertTrue(ci_scope.gate_failures(results))
 
     def test_docs_exemption_does_not_hide_failed_cancelled_or_executed_jobs(self):
         for status in ("failure", "cancelled", "success"):

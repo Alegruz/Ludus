@@ -53,6 +53,10 @@ that violates it.
   agent work into `main` directly. Report the task branch and worktree path so
   the user can locate and review the changes. This policy guides agent behavior;
   it does not automatically move agents that are already using a shared checkout.
+- Pull requests land through the `main` merge queue, never by a direct merge.
+  Pull-request CI runs a fast tier; slow macOS, sanitizer, editor and budget jobs
+  run on the queued candidate. Add the `ci:full` label to run them on the PR
+  first. See `docs/development/continuous-integration.md`.
 
 ## Coding standards
 

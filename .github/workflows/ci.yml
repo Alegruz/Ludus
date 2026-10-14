@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # labeled lets the ci:full label rerun the deferred merge-queue jobs on a PR.
+    types: [opened, synchronize, reopened, labeled]
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -24,6 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       native_required: ${{ steps.scope.outputs.native_required }}
+      validation_tier: ${{ steps.scope.outputs.validation_tier }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,7 +38,7 @@ jobs:
 
   macos-compile:
     needs: changes
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: macOS native backends and diagnostics
     runs-on: macos-14
     steps:
@@ -324,7 +328,7 @@ jobs:
 
   macos-sanitizers:
     needs: changes
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: macOS ASan and UBSan
     runs-on: macos-14
     steps:
@@ -391,7 +395,7 @@ jobs:
 
   macos-analysis:
     needs: changes
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: macOS analyzer baseline
     runs-on: macos-14
     env:
@@ -484,8 +488,8 @@ jobs:
         run: ./scripts/check --format
       - name: Enforce review-derived source rules
         env:
-          SOURCE_POLICY_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/main' }}
-          SOURCE_POLICY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          SOURCE_POLICY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || 'origin/main' }}
+          SOURCE_POLICY_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
           python3 scripts/python/source_policy.py --base "$SOURCE_POLICY_BASE" --head "$SOURCE_POLICY_HEAD" --clang-format clang-format-18
           PYTHONPATH=scripts/python python3 -m unittest test_source_policy test_renderer_shader_recipes -v
@@ -792,7 +796,7 @@ jobs:
 
   sanitizers:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: ASan and UBSan
     runs-on: ubuntu-24.04
     steps:
@@ -1010,7 +1014,7 @@ jobs:
 
   editor:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: Optional editor
     runs-on: ubuntu-24.04
     steps:
@@ -1128,7 +1132,7 @@ jobs:
 
   build-budget:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: Build-time budget
     runs-on: ubuntu-24.04
     steps:
