@@ -363,6 +363,41 @@ bool RenderPreview::AdmitDevice(const rhi::NativeDeviceDescription& native)
     return false;
 #endif
 }
+bool RenderPreview::AdmitOffscreenDevice()
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mIsStarting == false || OwnsDevice_ == true)
+    {
+        return false;
+    }
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    // Headless target: the viewport reads the display image back, so no window surface is needed.
+    const platform::NativeWindowInfo headless{ .Width = 1, .Height = 1 };
+    const rhi::DeviceStatus started = rhi::CreateDevice({ .Name = "Ludus offscreen editor viewport", .Version = 1 },
+                                                        headless,
+                                                        description,
+                                                        Device_,
+                                                        Surface_);
+    if (started != rhi::DeviceStatus::Ready && started != rhi::DeviceStatus::Pending)
+    {
+        Status_ =
+            QStringLiteral("No Vulkan device is available for the offscreen viewport. Editing remains available.");
+        Q_EMIT Changed();
+        Q_EMIT Failed(Status_);
+        return false;
+    }
+    mIsStarting = false;
+    OwnsDevice_ = true;
+    Width_ = Height_ = 0;
+    Frames_ = 0;
+    restartResources();
+    Timer_.start();
+    return true;
+#else
+    return false;
+#endif
+}
 void RenderPreview::Stop() noexcept
 {
     const bool wasRunning = Running();

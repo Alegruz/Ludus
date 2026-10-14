@@ -12,7 +12,9 @@
 #include <QVBoxLayout>
 
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+#    include "internal/offscreen_frame_reader.h"
 #    include "internal/qt_viewport_device.h"
+#    include <QPainter>
 #    include <QQuickItem>
 #    include <QQuickWindow>
 #    include <QSGSimpleTextureNode>
@@ -25,6 +27,49 @@ namespace ludus::editor
 using namespace foundation;
 namespace renderer = graphics::renderer;
 namespace rhi = graphics::rhi;
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+namespace
+{
+/// Service period for frame polling, about one 60 Hz display refresh.
+constexpr int32 SERVICE_INTERVAL_MILLISECONDS = 16;
+/// Plain widget that paints the last complete offscreen frame, scaled to its rectangle.
+class FrameCanvas final : public QWidget
+{
+public:
+    explicit FrameCanvas(QWidget* parent) : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("LudusOffscreenViewport"));
+        setAttribute(Qt::WA_OpaquePaintEvent);
+        // The owning PreviewViewport keeps handling orbit, pan, zoom and framing.
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+    void SetImage(const QImage& image)
+    {
+        mImage = image;
+        update();
+    }
+    [[nodiscard]] const QImage& GetImage() const noexcept
+    {
+        return mImage;
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(9, 12, 15));
+        if (mImage.isNull() == false)
+        {
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawImage(rect(), mImage);
+        }
+    }
+
+private:
+    QImage mImage;
+};
+} // namespace
+#endif
 struct PreviewViewport::State final
 {
     QPointer<RenderPreview> Preview;
@@ -105,6 +150,10 @@ struct PreviewViewport::State final
     };
     QQuickWindow* Window = nullptr;
     QWidget* Container = nullptr;
+    FrameCanvas* CanvasOrNull = nullptr;
+    OffscreenFrameReader Reader;
+    renderer::ViewportFrame ReadLease{};
+    bool HasReadLease = false;
     ImageItem* Item = nullptr;
     UniquePtr<QtViewportDevice> Device;
     rhi::NativeDeviceLease DeviceLease{};
@@ -141,16 +190,91 @@ private:
         Item = new ImageItem(*this, Window->contentItem());
         Item->setSize(QSizeF(Window->size()));
     }
-    void createWindow()
+    void createCanvas()
     {
-        if (Window != nullptr || Preview.isNull() == true)
+        CanvasOrNull = new FrameCanvas(Widget);
+        Layout->addWidget(CanvasOrNull);
+        Message->hide();
+        CanvasOrNull->show();
+        if (Preview->AdmitOffscreenDevice() == false)
+        {
+            const QString status = Preview->Status();
+            Preview->Stop();
+            delete CanvasOrNull;
+            CanvasOrNull = nullptr;
+            Message->setText(status);
+            Message->show();
+            return;
+        }
+        static_cast<PreviewViewport*>(Widget)->resizeSurface();
+        Service.start(SERVICE_INTERVAL_MILLISECONDS);
+    }
+    void releaseReadLease() noexcept
+    {
+        Reader.Cancel();
+        if (HasReadLease == true)
+        {
+            Preview->ReleaseFrame(ReadLease);
+            ReadLease = {};
+            HasReadLease = false;
+        }
+    }
+    // Two display images alternate: the renderer draws into one while this reads the other back.
+    void serviceCanvas()
+    {
+        if (Reader.IsBusy() == true)
+        {
+            const OffscreenReadStatus status = Reader.Poll();
+            if (status == OffscreenReadStatus::Complete)
+            {
+                CanvasOrNull->SetImage(Reader.TakeImage());
+                releaseReadLease();
+                ++Presented;
+            }
+            else if (status == OffscreenReadStatus::Failed)
+            {
+                releaseReadLease();
+                Message->setText(QStringLiteral("Offscreen viewport copy failed. Editing remains available."));
+                Message->show();
+            }
+            return;
+        }
+        if (CanShowFrames == false || Preview->HasPendingFrame() == false)
         {
             return;
         }
-        if (PreviewViewport::CanPresent() == false)
+        renderer::ViewportImage image;
+        if (Preview->TakeFrame(ReadLease, image) == false)
+        {
+            return;
+        }
+        HasReadLease = true;
+        if (Reader.Begin(Preview->GetDevice(), image.Texture, image.Width, image.Height) == false)
+        {
+            releaseReadLease();
+            Message->setText(QStringLiteral("Offscreen viewport copy is unavailable. Editing remains available."));
+            Message->show();
+            return;
+        }
+        static_cast<void>(Reader.Poll());
+    }
+    void createWindow()
+    {
+        if (Window != nullptr || CanvasOrNull != nullptr || Preview.isNull() == true)
+        {
+            return;
+        }
+        const ViewportPresentation presentation = PreviewViewport::GetPresentation();
+        if (presentation == ViewportPresentation::OffscreenReadback)
+        {
+            createCanvas();
+            return;
+        }
+        if (presentation != ViewportPresentation::SharedDevice)
         {
             Preview->Stop();
-            Message->setText(QStringLiteral("Native GPU sharing needs a supported display (Vulkan: Qt 6.6+)."));
+            Message->setText(QStringLiteral("This display cannot show the GPU viewport (needs macOS Metal, or "
+                                            "X11/Wayland with Vulkan)."));
             return;
         }
         // Basic rendering keeps all RHI calls and native queue submissions on
@@ -251,7 +375,7 @@ private:
         Layout->addWidget(Container);
         Message->hide();
         Container->show();
-        Service.start(16);
+        Service.start(SERVICE_INTERVAL_MILLISECONDS);
     }
     void releaseRetired()
     {
@@ -273,6 +397,11 @@ private:
     void clearFrames()
     {
         CanShowFrames = IsAutomatic;
+        if (CanvasOrNull != nullptr)
+        {
+            releaseReadLease();
+            return;
+        }
         bool hasFrames = false;
         for (const Frame& frame : Frames)
         {
@@ -317,6 +446,12 @@ private:
             HasDeviceLease = false;
         }
         LUDUS_REQUIRE(SourcePins == 0);
+        if (CanvasOrNull != nullptr)
+        {
+            LUDUS_REQUIRE(HasReadLease == false);
+            delete CanvasOrNull;
+            CanvasOrNull = nullptr;
+        }
         if (Container != nullptr)
         {
             delete Container;
@@ -338,6 +473,11 @@ private:
     }
     void showFrame()
     {
+        if (CanvasOrNull != nullptr && Preview.isNull() == false)
+        {
+            serviceCanvas();
+            return;
+        }
         if (Preview.isNull() == true || Window == nullptr || Pending >= 0 || Preview->HasPendingFrame() == false)
         {
             return;
@@ -431,7 +571,8 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     });
     connect(&mState->Service, &QTimer::timeout, this, [this]() {
         mState->releaseRetired();
-        if (mState->CanShowFrames == true)
+        // Always finish an in-flight offscreen copy; otherwise only present when admitted.
+        if (mState->CanShowFrames == true || mState->Reader.IsBusy() == true)
         {
             mState->showFrame();
         }
@@ -497,6 +638,14 @@ bool PreviewViewport::eventFilter(QObject* watched, QEvent* event)
 void PreviewViewport::resizeSurface()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mState->CanvasOrNull != nullptr)
+    {
+        // RenderPreview recreates the offscreen targets when the requested size changes.
+        const float64 ratio = mState->CanvasOrNull->devicePixelRatioF();
+        Preview_->Resize(qRound(static_cast<float64>(mState->CanvasOrNull->width()) * ratio),
+                         qRound(static_cast<float64>(mState->CanvasOrNull->height()) * ratio));
+        return;
+    }
     if (mState->Window != nullptr && mState->Item != nullptr)
     {
         const foundation::float64 ratio = mState->Window->devicePixelRatio();
@@ -509,17 +658,33 @@ void PreviewViewport::resizeSurface()
 }
 bool PreviewViewport::CanPresent() noexcept
 {
+    return GetPresentation() != ViewportPresentation::Unavailable;
+}
+ViewportPresentation PreviewViewport::GetPresentation() noexcept
+{
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     const QString platform = QGuiApplication::platformName();
 #    if defined(Q_OS_MACOS)
-    return platform == QStringLiteral("cocoa");
-#    elif QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
-    return platform == QStringLiteral("xcb") || platform.startsWith(QStringLiteral("wayland"));
+    return platform == QStringLiteral("cocoa") ? ViewportPresentation::SharedDevice : ViewportPresentation::Unavailable;
 #    else
-    return false;
+    if (qEnvironmentVariable("LUDUS_EDITOR_VIEWPORT") == QStringLiteral("offscreen"))
+    {
+        return ViewportPresentation::OffscreenReadback;
+    }
+    const bool isDesktopDisplay = platform == QStringLiteral("xcb") || platform.startsWith(QStringLiteral("wayland"));
+    if (isDesktopDisplay == false)
+    {
+        return ViewportPresentation::Unavailable;
+    }
+#        if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+    return ViewportPresentation::SharedDevice;
+#        else
+    // Qt before 6.6 cannot report its Vulkan graphics queue, so the engine owns its device.
+    return ViewportPresentation::OffscreenReadback;
+#        endif
 #    endif
 #else
-    return false;
+    return ViewportPresentation::Unavailable;
 #endif
 }
 uint64 PreviewViewport::PresentedFrames() const noexcept
