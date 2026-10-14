@@ -395,6 +395,20 @@ class BuildTests(unittest.TestCase):
             {'type': vector, 'semanticName': 'COLOR', 'binding': {'kind': 'varyingOutput', 'index': 0}}]}}}
         self.assertEqual(varying_interface(point, 'vertex'), [{'location': 0, 'type': 'Float4'}])
 
+    def test_glsl_depth_fragment_can_drop_unused_varyings(self):
+        import sys
+        sys.path.insert(0, str(ROOT / 'cmake/shaders'))
+        from compile_graph_stage import verify_glsl_links
+        color = {'location': 0, 'type': 'Float4'}
+        self.assertEqual(verify_glsl_links([color], [], 'fragment'), [])
+        self.assertEqual(verify_glsl_links([color], [color], 'vertex'), [color])
+        with self.assertRaisesRegex(RuntimeError, 'stage links differ'):
+            verify_glsl_links([color], [], 'vertex')
+        for emitted in ([{'location': 0, 'type': 'Float3'}],
+                        [{'location': 1, 'type': 'Float4'}], [color, color]):
+            with self.subTest(emitted=emitted), self.assertRaisesRegex(RuntimeError, 'stage links differ'):
+                verify_glsl_links([color], emitted, 'fragment')
+
     def test_cancel_terminates_and_reaps_compiler_process_group(self):
         import sys
         with self.assertRaisesRegex(ToolingError, 'cancelled'):

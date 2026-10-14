@@ -9,3 +9,5 @@ modules/foundation/math/tests/summation_tests.cpp
 apps/editor/src/internal/import_report.h
 apps/editor/src/import_report.cpp
 apps/editor/tests/import_report_tests.cpp
+
+modules/content/render_graph_format

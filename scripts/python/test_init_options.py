@@ -149,6 +149,35 @@ class OptionsTests(unittest.TestCase):
                             "-DLUDUS_BUILD_TESTS=ON"], check=True, capture_output=True)
             self.assertEqual(engine.cmake_cache_value(build / "CMakeCache.txt", "LUDUS_BUILD_TESTS"), "ON")
 
+    def test_scripted_configuration_restores_saved_choices_after_manual_opt_out(self):
+        cmake = shutil.which("cmake")
+        if not cmake:
+            self.skipTest("CMake unavailable")
+        module = Path(__file__).resolve().parents[2] / "cmake/EngineInitOptions.cmake"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = engine.build_dir_for_preset(root, engine.DEFAULT_PRESET)
+            (root / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 3.19)\nproject(Options NONE)\n'
+                'option(LUDUS_BUILD_TESTS "tests" ON)\n'
+                f'include("{module}")\n', encoding="utf-8")
+            (root / "CMakePresets.json").write_text(json.dumps({
+                "version": 3,
+                "configurePresets": [{"name": engine.DEFAULT_PRESET, "binaryDir": str(build)}],
+            }), encoding="utf-8")
+            subprocess.run([cmake, "--preset", engine.DEFAULT_PRESET,
+                            "-DLUDUS_USE_INIT_OPTIONS=OFF", "-DLUDUS_BUILD_TESTS=ON"],
+                           cwd=root, check=True, capture_output=True)
+            for options, expected in (((), "OFF"), (("--with-tests",), "ON"), ((), "OFF")):
+                with self.subTest(options=options):
+                    init_options.save_options(root, (engine.DEFAULT_PRESET,), self.args(*options))
+                    with patch.object(engine, "configure_needs_fresh_cache", return_value=False), \
+                            patch.object(engine, "cmake", return_value=Path(cmake)), \
+                            patch.object(engine, "tool_env", return_value={}):
+                        engine.cmake_configure(root, engine.DEFAULT_PRESET)
+                    self.assertEqual(engine.cmake_cache_value(build / "CMakeCache.txt", "LUDUS_USE_INIT_OPTIONS"), "ON")
+                    self.assertEqual(engine.cmake_cache_value(build / "CMakeCache.txt", "LUDUS_BUILD_TESTS"), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

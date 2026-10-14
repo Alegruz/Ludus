@@ -1267,14 +1267,20 @@ def configure_needs_fresh_cache(root: Path, preset: str) -> bool:
 def cmake_configure(root: Path, preset: str, extra_args: Sequence[str] = ()) -> None:
     from init_options import read_options
     from init_editor import preview_tool_args
-    if read_options(root, preset).get("LUDUS_EDITOR_RENDER_PREVIEW", False):
+    options = read_options(root, preset)
+    if options.get("LUDUS_EDITOR_RENDER_PREVIEW", False):
         extra_args = [*preview_tool_args(root), *extra_args]
     request_codemodel(build_dir_for_preset(root, preset))
     args: list[object] = [cmake(root)]
     if configure_needs_fresh_cache(root, preset):
         print(f"Refreshing stale CMake cache for {preset}.")
         args.append("--fresh")
-    args.extend(["-U", "Catch2_DIR", "--preset", preset, *extra_args])
+    args.extend(["-U", "Catch2_DIR", "--preset", preset])
+    if options:
+        # Scripted builds use the same saved selection as Conan, even after a
+        # direct CMake invocation opted out in the existing cache.
+        args.append("-DLUDUS_USE_INIT_OPTIONS=ON")
+    args.extend(extra_args)
     run(args, cwd=root, env=tool_env(root))
     if preset.startswith("macos-"):
         (build_dir_for_preset(root, preset) / ".ludus-macos-toolchain.json").write_text(

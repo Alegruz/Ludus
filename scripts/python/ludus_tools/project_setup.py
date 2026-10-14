@@ -245,6 +245,23 @@ def setup_for_profile(settings: dict, profile: str) -> dict:
     return settings.get("profiles", {}).get(profile, {})
 
 
+def stale_revision_warning(tooling_root: Path, sdk_revision: str | None, sdk: Path) -> str:
+    """Warn when the selected SDK was installed from a different engine revision than this checkout."""
+    if not sdk_revision:
+        return ""
+    try:
+        head = subprocess.run(["git", "-C", str(tooling_root), "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=False, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if not head or head.startswith(sdk_revision) or sdk_revision.startswith(head):
+        return ""
+    return (f"Warning: the selected engine install ({sdk}) was built from {sdk_revision}, but this checkout is at "
+            f"{head[:7]}. The Editor itself runs from this checkout; games build against the older install. "
+            "Reinstall the SDK (Project > Repair Project Setup, or update .ludus/local.json) to use current engine "
+            "code.\n")
+
+
 def check_project(path: Path, *, tooling_root: Path, profile: str | None = None,
                   runner=run_command, cancel_check=lambda: None):
     """Read metadata and ask CMake to list presets; never configure or write."""
@@ -280,12 +297,15 @@ def check_project(path: Path, *, tooling_root: Path, profile: str | None = None,
     verify_tool_versions(configured, tooling_root, runner, env, resolved.resolution.identity)
     _list(source, configured, records, runner, env)
     identity = resolved.resolution.identity
+    warning = stale_revision_warning(tooling_root, identity.source_revision, sdk).rstrip()
+    warning = "\n" + warning if warning else ""
     return ("Setup checked: selectable presets, SDKs, tools and IDE settings\n"
             f"Selected engine: Ludus {identity.engine_version} · {identity.flavor} · {identity.target_triple}\n"
             f"Engine revision: {identity.source_revision or 'unknown'}\n"
             f"Selection: {resolved.resolution.source}"
             f"{' (local override)' if resolved.resolution.is_override else ''}\n"
-            f"Installation: {sdk}")
+            f"Installation: {sdk}"
+            f"{warning}")
 
 
 def select_repair_sdk(path: Path, *, tooling_root: Path, prepare=None) -> Path:
