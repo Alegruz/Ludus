@@ -257,5 +257,18 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertFalse(destination.exists())
 
 
+class StaleRevisionWarningTests(unittest.TestCase):
+    def test_matching_or_unknown_revision_is_silent(self):
+        root = Path(__file__).resolve().parents[2]
+        head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        self.assertEqual(setup.stale_revision_warning(root, head[:7], root), "")
+        self.assertEqual(setup.stale_revision_warning(root, None, root), "")
+
+    def test_different_revision_warns(self):
+        root = Path(__file__).resolve().parents[2]
+        text = setup.stale_revision_warning(root, "0000000", Path("/sdk"))
+        self.assertIn("built from 0000000", text)
+
+
 if __name__ == "__main__":
     unittest.main()
