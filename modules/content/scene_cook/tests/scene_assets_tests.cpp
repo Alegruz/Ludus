@@ -1122,6 +1122,9 @@ enum class LightingCorruption : uint8
     ReservedMaterial,
     BakeCoordinates,
     NonfiniteLight,
+    EqualCone,
+    InnerBoundary,
+    OuterBoundary,
     Dimensions,
     Truncated,
 };
@@ -1158,6 +1161,16 @@ bool CookCorruptLighting(std::string_view source,
         offset = LIGHTING_OFFSET + sizeof(format::LightingRecord) + sizeof(uint64) + 2 * sizeof(uint32);
         word = 0x7fc00000U;
     }
+    else if constexpr (Corruption == LightingCorruption::EqualCone || Corruption == LightingCorruption::OuterBoundary)
+    {
+        offset = LIGHTING_OFFSET + sizeof(format::LightingRecord) + sizeof(format::LightRecord) - sizeof(float32);
+        word = Corruption == LightingCorruption::EqualCone ? 0x3f800000U : 0xbf800000U;
+    }
+    else if constexpr (Corruption == LightingCorruption::InnerBoundary)
+    {
+        offset = LIGHTING_OFFSET + sizeof(format::LightingRecord) + sizeof(format::LightRecord) - 2 * sizeof(float32);
+        word = 0xbf800000U;
+    }
     else if constexpr (Corruption == LightingCorruption::Dimensions)
     {
         offset = LIGHTING_OFFSET + 3 * sizeof(uint32);
@@ -1180,11 +1193,14 @@ TEST_CASE("Malformed v3 source fields never publish a candidate catalog", "[scen
     const std::string root = golden.Project.string();
     AssetOptions options = golden.Options;
     using FixtureCook = decltype(options.CookOrNull);
-    constexpr usize CORRUPTION_CASES = 5;
+    constexpr usize CORRUPTION_CASES = 8;
     constexpr StaticArray<FixtureCook, CORRUPTION_CASES> COOKERS{
         CookCorruptLighting<LightingCorruption::ReservedMaterial>,
         CookCorruptLighting<LightingCorruption::BakeCoordinates>,
         CookCorruptLighting<LightingCorruption::NonfiniteLight>,
+        CookCorruptLighting<LightingCorruption::EqualCone>,
+        CookCorruptLighting<LightingCorruption::InnerBoundary>,
+        CookCorruptLighting<LightingCorruption::OuterBoundary>,
         CookCorruptLighting<LightingCorruption::Dimensions>,
         CookCorruptLighting<LightingCorruption::Truncated>};
     AssetError error;

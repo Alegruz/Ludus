@@ -1285,7 +1285,7 @@ void AppendSourceId(ByteWriter& inoutWriter, uint64 id) noexcept
             values[1] > static_cast<float64>(format::MAX_LIGHT_INTENSITY) ||
             values[2] > static_cast<float64>(format::MAX_LIGHT_INTENSITY) ||
             (values[6] == 0 && values[7] == 0 && values[8] == 0) || values[9] < .01 || values[9] > 1000000 ||
-            values[10] < -1 || values[10] > 1 || values[11] < -1 || values[11] > values[10])
+            values[10] <= -1 || values[10] > 1 || values[11] <= -1 || values[11] >= values[10])
         {
             return inoutFailure.FailInvalid("Invalid authored analytic light");
         }
