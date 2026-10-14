@@ -7,9 +7,12 @@
 
 #include "../pbrt/pbrt_tokenizer.h"
 
+#include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 
 #include <bit>
+#include <cstring>
 
 extern "C" {
 #include "stb_image.h"
@@ -351,5 +354,140 @@ ImageResult DecodeImage(std::string_view fileName,
     }
     outMessage = "no decoder for this image format in this build";
     return ImageResult::Unsupported;
+}
+ImageResult DecodeLightingImage(std::string_view fileName,
+                                foundation::BorrowedView<const uint8> data,
+                                DecodedLightingImage& outImage,
+                                std::string_view& outMessage) noexcept
+{
+    if (data.IsValid() == false || data.IsEmpty() == true)
+    {
+        outMessage = "invalid lighting image bytes";
+        return ImageResult::Invalid;
+    }
+    DecodedLightingImage candidate;
+    if (HasExtension(fileName, ".pfm") == false)
+    {
+        DecodedImage encoded;
+        const ImageResult status = DecodeImage(fileName, {data.GetDataOrNull(), data.GetSize()}, encoded, outMessage);
+        if (status != ImageResult::Ok)
+        {
+            return status;
+        }
+        candidate.Width = encoded.Width;
+        candidate.Height = encoded.Height;
+        if (candidate.Width > content::scene_format::MAX_ENVIRONMENT_DIMENSION ||
+            candidate.Height > content::scene_format::MAX_ENVIRONMENT_DIMENSION ||
+            usize{candidate.Width} * candidate.Height > content::scene_format::MAX_BUNDLE_BYTES / (3 * sizeof(float32)))
+        {
+            outMessage = "lighting image exceeds the bounded scene profile";
+            return ImageResult::Invalid;
+        }
+        if (candidate.Rgb.TryResize(usize{candidate.Width} * candidate.Height * 3) == false)
+        {
+            return ImageResult::OutOfMemory;
+        }
+        for (usize i = 0; i < candidate.Rgb.GetSize(); ++i)
+        {
+            candidate.Rgb[i] = math::DecodeSrgb(static_cast<float32>(encoded.Texels[i / 3 * 4 + i % 3]) / 255.0F);
+        }
+    }
+    else
+    {
+        // Debevec's PFM layout: signed scale selects endian order, magnitude
+        // scales linear samples; rows run bottom to top. Keep HDR energy intact.
+        // https://www.pauldebevec.com/Research/HDR/PFM/
+        const std::string_view header(reinterpret_cast<const char*>(data.GetDataOrNull()),
+                                      data.GetSize() < 256 ? data.GetSize() : 256);
+        constexpr usize HEADER_WORDS = 4;
+        foundation::StaticArray<std::string_view, HEADER_WORDS> words{};
+        usize at = 0;
+        for (std::string_view& word : words)
+        {
+            while (at < header.size() &&
+                   (header[at] == ' ' || header[at] == '\n' || header[at] == '\r' || header[at] == '\t'))
+            {
+                ++at;
+            }
+            const usize begin = at;
+            while (at < header.size() && header[at] != ' ' && header[at] != '\n' && header[at] != '\r' &&
+                   header[at] != '\t')
+            {
+                ++at;
+            }
+            word = header.substr(begin, at - begin);
+        }
+        if (at >= header.size())
+        {
+            outMessage = "truncated PFM lighting header";
+            return ImageResult::Invalid;
+        }
+        if (header[at] == '\r' && at + 1 < header.size() && header[at + 1] == '\n')
+        {
+            ++at;
+        }
+        ++at;
+        float64 width = 0;
+        float64 height = 0;
+        float64 scale = 0;
+        const bool isColour = words[0] == "PF";
+        if ((isColour == false && words[0] != "Pf") || pbrt::ParseNumber(words[1], width) == false ||
+            pbrt::ParseNumber(words[2], height) == false || pbrt::ParseNumber(words[3], scale) == false || width < 1 ||
+            height < 1 || width > content::scene_format::MAX_ENVIRONMENT_DIMENSION ||
+            height > content::scene_format::MAX_ENVIRONMENT_DIMENSION || math::Floor(width) != width ||
+            math::Floor(height) != height || scale == 0)
+        {
+            outMessage = "invalid PFM lighting dimensions or scale";
+            return ImageResult::Invalid;
+        }
+        candidate.Width = static_cast<uint32>(width);
+        candidate.Height = static_cast<uint32>(height);
+        const usize channels = isColour == true ? 3 : 1;
+        const usize count = usize{candidate.Width} * candidate.Height;
+        if (count > content::scene_format::MAX_BUNDLE_BYTES / (3 * sizeof(float32)))
+        {
+            outMessage = "lighting image exceeds the bounded scene byte budget";
+            return ImageResult::Invalid;
+        }
+        if (at > data.GetSize() || (data.GetSize() - at) / sizeof(float32) / channels < count)
+        {
+            outMessage = "truncated PFM lighting raster";
+            return ImageResult::Invalid;
+        }
+        if (candidate.Rgb.TryResize(count * 3) == false)
+        {
+            return ImageResult::OutOfMemory;
+        }
+        for (uint32 y = 0; y < candidate.Height; ++y)
+        {
+            for (uint32 x = 0; x < candidate.Width; ++x)
+            {
+                for (usize channel = 0; channel < 3; ++channel)
+                {
+                    const usize source =
+                        at +
+                        ((usize{y} * candidate.Width + x) * channels + (channels == 3 ? channel : 0)) * sizeof(float32);
+                    uint32 bits = 0;
+                    for (usize byte = 0; byte < sizeof(float32); ++byte)
+                    {
+                        bits |= static_cast<uint32>(data[source + byte]) << (8 * (scale < 0 ? byte : 3 - byte));
+                    }
+                    float32 sample = 0;
+                    std::memcpy(&sample, &bits, sizeof(sample));
+                    const float64 value = static_cast<float64>(sample) * math::Abs(scale);
+                    if (math::IsFinite(value) == false || value < 0 || value > 10000)
+                    {
+                        outMessage = "PFM lighting contains unsupported negative/nonfinite or over-range energy";
+                        return ImageResult::Invalid;
+                    }
+                    candidate.Rgb[((usize{candidate.Height} - 1 - y) * candidate.Width + x) * 3 + channel] =
+                        static_cast<float32>(value);
+                }
+            }
+        }
+    }
+    outImage = static_cast<DecodedLightingImage&&>(candidate);
+    outMessage = {};
+    return ImageResult::Ok;
 }
 } // namespace ludus::content::scene_cook::importers

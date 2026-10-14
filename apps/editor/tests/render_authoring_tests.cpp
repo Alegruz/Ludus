@@ -1,8 +1,10 @@
 #include "internal/controller.h"
 #include "internal/main_window.h"
+#include "internal/preview_area_lights.h"
 #include "internal/preview_viewport.h"
 #include "internal/render_panel.h"
 #include "internal/render_scene.h"
+#include "internal/static_lighting_job.h"
 #include "internal/workspace_style.h"
 #include "internal/world_workspace.h"
 
@@ -772,4 +774,235 @@ TEST_CASE("Reopening projects restores their own embedded viewport and dock layo
         CHECK(window.findChild<QDockWidget*>(QStringLiteral("liveInspectorDock"))->isHidden());
         close(window);
     }
+}
+
+TEST_CASE("World light bindings preserve authored photometric terms and reject invalid replacements",
+          "[editor][render-authoring][lighting]")
+{
+    Fixture fixture;
+    QJsonObject schema = fixture.World.Schema();
+    QJsonArray components = schema.value(QStringLiteral("components")).toArray();
+    for (int32 i = static_cast<int32>(components.size()) - 1; i >= 0; --i)
+    {
+        if (components[i].toObject().value(QStringLiteral("id")).toString() == QStringLiteral("light"))
+        {
+            components.removeAt(i);
+        }
+    }
+    QJsonArray properties;
+    const QStringList numberNames{QStringLiteral("r"),
+                                  QStringLiteral("g"),
+                                  QStringLiteral("b"),
+                                  QStringLiteral("intensity"),
+                                  QStringLiteral("range"),
+                                  QStringLiteral("innerAngle"),
+                                  QStringLiteral("outerAngle")};
+    for (const QString& name : numberNames)
+    {
+        properties.append(QJsonObject{{QStringLiteral("id"), name},
+                                      {QStringLiteral("label"), name},
+                                      {QStringLiteral("type"), QStringLiteral("number")},
+                                      {QStringLiteral("default"), 1}});
+    }
+    properties.append(
+        QJsonObject{{QStringLiteral("id"), QStringLiteral("kind")},
+                    {QStringLiteral("label"), QStringLiteral("Kind")},
+                    {QStringLiteral("type"), QStringLiteral("enum")},
+                    {QStringLiteral("choices"),
+                     QJsonArray{QStringLiteral("point"), QStringLiteral("spot"), QStringLiteral("directional")}},
+                    {QStringLiteral("default"), QStringLiteral("point")}});
+    properties.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("enabled")},
+                                  {QStringLiteral("label"), QStringLiteral("Enabled")},
+                                  {QStringLiteral("type"), QStringLiteral("boolean")},
+                                  {QStringLiteral("default"), true}});
+    for (int32 i = 0; i < properties.size(); ++i)
+    {
+        QJsonObject property = properties[i].toObject();
+        property.insert(QStringLiteral("help"), QStringLiteral("Authored light field"));
+        property.insert(QStringLiteral("unit"), QString());
+        if (property.value(QStringLiteral("type")) == QJsonValue(QStringLiteral("number")))
+        {
+            property.insert(QStringLiteral("min"), 0);
+            property.insert(QStringLiteral("max"), 1000000);
+        }
+        properties[i] = property;
+    }
+    components.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("light")},
+                                  {QStringLiteral("label"), QStringLiteral("Light")},
+                                  {QStringLiteral("help"), QStringLiteral("Authored photometric lighting")},
+                                  {QStringLiteral("required"), false},
+                                  {QStringLiteral("properties"), properties}});
+    schema.insert(QStringLiteral("components"), components);
+    const QByteArray originalWorld = fixture.World.Encode();
+    fixture.World.Clear();
+    const bool hasSchema = fixture.World.LoadSchema(QJsonDocument(schema).toJson(), fixture.Error);
+    INFO(fixture.Error.toStdString());
+    REQUIRE(hasSchema == true);
+    REQUIRE(fixture.World.Load(originalWorld, fixture.Error));
+    QJsonObject descriptor = fixture.Descriptor();
+    QJsonObject mapping;
+    for (const QJsonValue property : properties)
+    {
+        const QString id = property.toObject().value(QStringLiteral("id")).toString();
+        mapping.insert(id, id);
+    }
+    descriptor.insert(
+        QStringLiteral("light"),
+        QJsonObject{{QStringLiteral("component"), QStringLiteral("light")}, {QStringLiteral("properties"), mapping}});
+    fixture.Descriptor(descriptor);
+    QJsonObject entity = fixture.World.Entity(QStringLiteral("starter.cube"));
+    QJsonObject attached = entity.value(QStringLiteral("components")).toObject();
+    QJsonObject transform = attached.value(QStringLiteral("transform")).toObject();
+    transform.insert(QStringLiteral("rx"), 0);
+    transform.insert(QStringLiteral("ry"), 0);
+    transform.insert(QStringLiteral("rz"), 0);
+    attached.insert(QStringLiteral("transform"), transform);
+    attached.insert(QStringLiteral("light"),
+                    QJsonObject{{QStringLiteral("kind"), QStringLiteral("spot")},
+                                {QStringLiteral("enabled"), true},
+                                {QStringLiteral("r"), 1},
+                                {QStringLiteral("g"), .5},
+                                {QStringLiteral("b"), .25},
+                                {QStringLiteral("intensity"), 200},
+                                {QStringLiteral("range"), 50},
+                                {QStringLiteral("innerAngle"), 20},
+                                {QStringLiteral("outerAngle"), 30}});
+    REQUIRE(fixture.World.Edit(QStringLiteral("starter.cube"), attached, QStringLiteral("Spot lamp"), fixture.Error));
+    REQUIRE(RenderScene::Load(fixture.Root, fixture.World, fixture.Scene, fixture.Error));
+    REQUIRE(fixture.Scene.AuthoredLights.Count == 1);
+    const rr::DirectLight light = fixture.Scene.AuthoredLights.Lights[0];
+    CHECK(light.Kind == rr::LightKind::Spot);
+    CHECK(light.SourceId != 0);
+    CHECK(light.Intensity == 200);
+    CHECK(light.Range == 50);
+    CHECK(light.Color == math::Vector3{1, .5F, .25F});
+    CHECK(light.Direction == math::Vector3{0, 0, -1});
+    CHECK(light.InnerCos > light.OuterCos);
+    const QByteArray identity = fixture.Scene.Identity;
+    REQUIRE(fixture.Edit(QStringLiteral("starter.cube"), {QStringLiteral("light"), QStringLiteral("intensity")}, 300));
+    REQUIRE(RenderScene::Load(fixture.Root, fixture.World, fixture.Scene, fixture.Error));
+    CHECK(fixture.Scene.Identity != identity);
+    CHECK(fixture.Scene.AuthoredLights.Lights[0].SourceId == light.SourceId);
+    CHECK(fixture.Scene.AuthoredLights.Lights[0].Intensity == 300);
+    const QByteArray accepted = fixture.Scene.Identity;
+    REQUIRE(fixture.Edit(QStringLiteral("starter.cube"), {QStringLiteral("light"), QStringLiteral("r")}, 2));
+    CHECK(RenderScene::Load(fixture.Root, fixture.World, fixture.Scene, fixture.Error) == false);
+    CHECK(fixture.Scene.Identity == accepted);
+    REQUIRE(fixture.Edit(QStringLiteral("starter.cube"), {QStringLiteral("light"), QStringLiteral("enabled")}, false));
+    REQUIRE(RenderScene::Load(fixture.Root, fixture.World, fixture.Scene, fixture.Error));
+    CHECK(fixture.Scene.AuthoredLights.Count == 0);
+    CHECK(fixture.Scene.Lit == true);
+    REQUIRE(fixture.Scene.Definition.isNull() == false);
+    CHECK(fixture.Scene.Definition->Lights.IsEmpty() == true);
+}
+
+TEST_CASE("Deindexed emitter meshes split into connected planar area proxies without losing energy",
+          "[editor][render-authoring][lighting]")
+{
+    ludus::resources::SceneMesh mesh;
+    const math::Vector3 positions[] = {
+        {0, 0, 0},
+        {1, 0, 0},
+        {1, 1, 0},
+        {0, 0, 0},
+        {1, 1, 0},
+        {0, 1, 0},
+        {0, 0, 2},
+        {1, 0, 2},
+        {1, 1, 2},
+        {0, 0, 2},
+        {1, 1, 2},
+        {0, 1, 2},
+        {0, 0, 0},
+        {0, 1, 0},
+        {0, 1, 1},
+        {0, 0, 0},
+        {0, 1, 1},
+        {0, 0, 1},
+    };
+    REQUIRE(mesh.Positions.TryAddRange(positions));
+    for (uint32 i = 0; i < mesh.Positions.GetSize(); ++i)
+    {
+        REQUIRE(mesh.Indices.TryAdd(i));
+    }
+    rr::LightSelection lights;
+    uint32 added = 99;
+    REQUIRE(AppendPreviewAreaLights(mesh, {}, {4, 2, 1}, false, 42, 100, lights, added) ==
+            ludus::graphics::rhi::RasterStatus::Ready);
+    REQUIRE(added == 3);
+    REQUIRE(lights.Count == 3);
+    float32 energy = 0;
+    for (uint32 i = 0; i < lights.Count; ++i)
+    {
+        CHECK(lights.Lights[i].Kind == rr::LightKind::AreaOneSided);
+        energy += lights.Lights[i].Intensity;
+    }
+    CHECK(energy == Catch::Approx(12.0F));
+    rr::LightSelection repeat;
+    REQUIRE(AppendPreviewAreaLights(mesh, {}, {4, 2, 1}, false, 42, 100, repeat, added) ==
+            ludus::graphics::rhi::RasterStatus::Ready);
+    for (uint32 i = 0; i < lights.Count; ++i)
+    {
+        CHECK(repeat.Lights[i].SourceId == lights.Lights[i].SourceId);
+    }
+    const rr::LightSelection original = lights;
+    added = 77;
+    CHECK(AppendPreviewAreaLights(mesh, {}, {4, 2, 1}, false, 42, 100, lights, added) ==
+          ludus::graphics::rhi::RasterStatus::InvalidDescription);
+    CHECK(added == 77);
+    CHECK(lights.Count == original.Count);
+    CHECK(lights.Lights[0].SourceId == original.Lights[0].SourceId);
+    // A duplicated face creates a nonmanifold shared edge. It must preserve the
+    // previous list instead of silently overcounting its source power.
+    const uint32 duplicatedFace[] = {mesh.Indices[0], mesh.Indices[1], mesh.Indices[2]};
+    REQUIRE(mesh.Indices.TryAddRange(duplicatedFace));
+    CHECK(AppendPreviewAreaLights(mesh, {}, {4, 2, 1}, false, 90, 100, lights, added) !=
+          ludus::graphics::rhi::RasterStatus::Ready);
+    CHECK(lights.Count == original.Count);
+}
+
+TEST_CASE("Static lighting worker owns surface overrides until completed chart transfer",
+          "[editor][render-authoring][lighting]")
+{
+    Fixture fixture;
+    QJsonObject entity = fixture.World.Entity(QStringLiteral("starter.cube"));
+    QJsonObject components = entity.value(QStringLiteral("components")).toObject();
+    components.insert(QStringLiteral("light"),
+                      QJsonObject{{QStringLiteral("kind"), QStringLiteral("point")},
+                                  {QStringLiteral("enabled"), true},
+                                  {QStringLiteral("r"), 1},
+                                  {QStringLiteral("g"), 1},
+                                  {QStringLiteral("b"), 1},
+                                  {QStringLiteral("intensity"), 100},
+                                  {QStringLiteral("range"), 10},
+                                  {QStringLiteral("innerAngle"), 25},
+                                  {QStringLiteral("outerAngle"), 30}});
+    REQUIRE(fixture.World.Edit(QStringLiteral("starter.cube"), components, QStringLiteral("Lit cube"), fixture.Error));
+    RenderScene scene;
+    REQUIRE(RenderScene::Load(fixture.Root, fixture.World, scene, fixture.Error));
+    REQUIRE(scene.Lit == true);
+    REQUIRE(scene.Definition.isNull() == false);
+    Array<rr::StaticLightingSurfaceDescription> surfaces;
+    REQUIRE(surfaces.TryResize(scene.Definition->Objects.GetSize()));
+    rr::StaticLightingBakeDescription description;
+    description.SamplesPerTriangle = 1;
+    description.MaxDepth = 2;
+    description.SceneRevision = 11;
+    description.DependencyRevision = 22;
+    description.Surfaces = {surfaces.GetData(), surfaces.GetSize()};
+    StaticLightingJob worker(scene, description);
+    // Invalidating caller storage after construction must not change the job.
+    surfaces.Clear();
+    surfaces = {};
+    worker.start();
+    REQUIRE(worker.wait(10000));
+    REQUIRE(worker.GetStatus() == ludus::graphics::rhi::RasterStatus::Ready);
+    UniquePtr<rr::StaticLightingBake> bake = worker.TakeBake();
+    REQUIRE(bake.Get() != nullptr);
+    rr::StaticLightingChart chart;
+    REQUIRE(bake->GetChart(0, chart) == ludus::graphics::rhi::RasterStatus::Ready);
+    CHECK(chart.SourceId == scene.Definition->Objects[0].SourceId);
+    CHECK(chart.SceneRevision == 11);
+    CHECK(chart.DependencyRevision == 22);
+    CHECK(chart.Transform == scene.Definition->Objects[0].Transform);
 }

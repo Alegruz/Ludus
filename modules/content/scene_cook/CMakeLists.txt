@@ -2,7 +2,7 @@ add_library(ludus_scene_cook STATIC
     src/scene_cook.cpp src/scene_assets.cpp src/python_compat.cpp src/python_json.cpp src/native_files.cpp src/uuid.cpp
     src/importers/pbrt/import_diagnostics.cpp src/importers/pbrt/pbrt_tokenizer.cpp src/importers/pbrt/ply_reader.cpp
     src/importers/pbrt/pbrt_parser.cpp src/importers/pbrt/shape_tessellation.cpp src/importers/pbrt/spectrum_tables.cpp
-    src/importers/pbrt/transform_utilities.cpp src/importers/budget_planner.cpp src/importers/best_effort_import.cpp
+    src/importers/pbrt/transform_utilities.cpp src/importers/budget_planner.cpp src/importers/best_effort_import.cpp src/importers/authored_lighting.cpp
     src/importers/image/image_reader.cpp)
 add_library(Ludus::SceneCook ALIAS ludus_scene_cook)
 set_target_properties(ludus_scene_cook PROPERTIES EXPORT_NAME SceneCook)
@@ -47,7 +47,7 @@ if(LUDUS_BUILD_TESTS)
     target_compile_definitions(ludus_scene_assets_tests PRIVATE
         LUDUS_SCENE_GOLDENS_DIR="${PROJECT_SOURCE_DIR}/tests/goldens/scene_pipeline")
     target_link_libraries(ludus_scene_assets_tests PRIVATE
-        Ludus::SceneCook Ludus::FoundationParsingJson Ludus::FoundationStrings Catch2::Catch2WithMain)
+        Ludus::SceneCook Ludus::Resources Ludus::FoundationParsingJson Ludus::FoundationStrings Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_scene_assets_tests)
     ludus_enable_test_exceptions(ludus_scene_assets_tests)
     add_test(NAME ludus_scene_assets_tests COMMAND ludus_scene_assets_tests)

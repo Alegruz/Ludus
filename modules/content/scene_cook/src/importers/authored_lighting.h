@@ -1,0 +1,35 @@
+#pragma once
+
+#include "image/image_reader.h"
+#include "pbrt/import_diagnostics.h"
+#include "pbrt/scene_ir.h"
+
+#include <ludus/content/content.h>
+#include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/containers/static_array.hpp>
+
+namespace ludus::content::scene_cook::importers
+{
+inline constexpr usize LIGHTING_RGB_COMPONENTS = 3;
+struct CookedLighting final
+{
+    Array<scene_format::LightRecord> Lights;
+    foundation::StaticArray<float32, LIGHTING_RGB_COMPONENTS> EnvironmentRgb{};
+    DecodedLightingImage Environment;
+    Digest EnvironmentSourceDigest;
+    bool HasEnvironmentSourceDigest = false;
+};
+struct LightingCookDescription final
+{
+    float64 RangeMetres = 100;
+    usize EnvironmentByteBudget = scene_format::MAX_BUNDLE_BYTES;
+    bool ShouldDecodeEnvironment = true;
+};
+// Preserve authored energy in the frozen Rec709 photometric profile. Scene data
+// and images remain caller-owned; failures preserve outLighting.
+[[nodiscard]] Status CookAuthoredLighting(const SceneIr& scene,
+                                          std::string_view root,
+                                          const LightingCookDescription& description,
+                                          CookedLighting& outLighting,
+                                          DiagnosticLog& inoutLog) noexcept;
+} // namespace ludus::content::scene_cook::importers

@@ -249,8 +249,13 @@ ReadCatalog(std::string_view root, foundation::Array<uint8>& outCatalog, AssetEr
                              foundation::Array<uint8>& outLevel,
                              AssetError& outError) noexcept;
 
-/// assemble: decode a level's closure into one LUSCN v2 bundle (empty when the
-/// level has no objects); the source importer is never called.
+/// Assemble a level's exact closure without invoking its source importer.
+/// Legacy-only resources produce LUSCN v2; authored lighting/mesh records select v3.
+/// V3 retains emitter flags/power, independent bake UVs and instance identities derived
+/// from persistent object UUIDs. Imported analytic IDs are scoped by source artifact;
+/// environments sum without dropping sources. HDR maps must have matching dimensions.
+/// Profile/count/byte or combined environment-scale overflow rejects publication.
+/// A level without objects produces an empty bundle; this does not remove stored lighting.
 /// @param root Project directory.
 /// @param level Level bytes.
 /// @param catalog Candidate catalog bytes, or empty to use the published catalog.

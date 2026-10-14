@@ -5,6 +5,7 @@
 
 #include <ludus/content/scene_cook/best_effort_import.h>
 #include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/math/scalar.hpp>
 #include <ludus/runtime/resources/scene.h>
 
 #include "importers/budget_planner.h"
@@ -370,7 +371,6 @@ TEST_CASE("pbrt reader builds the IR with fallbacks and file:line diagnostics", 
     for (const std::string_view code : {codes::INCLUDE_FAILED,
                                         codes::UNKNOWN_DIRECTIVE,
                                         codes::MEDIUM_SKIPPED,
-                                        codes::LIGHT_SKIPPED,
                                         codes::ENVIRONMENT_FALLBACK,
                                         codes::TRANSMISSION_DROPPED,
                                         codes::MATERIAL_DEFAULTED,
@@ -454,7 +454,7 @@ TEST_CASE("best-effort import cooks a decodable, deterministic bundle and report
         if (material.Emission.X > 0.0F)
         {
             ++emissiveSlots;
-            CHECK(material.Emission.X == 40.0F);
+            CHECK(material.Emission.X == 2.0F); // Frozen RGB/Y photometric proxy; scale is retained.
         }
     }
     CHECK(emissiveSlots == 1);
@@ -612,9 +612,15 @@ TEST_CASE("mirrored instances flip winding through the full placement transform"
     const ludus::resources::SceneDefinition mirrored = cook("Scale -1 1 1");
     REQUIRE(plain.Meshes.GetSize() == 1);
     REQUIRE(mirrored.Meshes.GetSize() == 1);
-    // The mirrored triangle keeps its facing: the second and third indices swap.
-    CHECK(plain.Meshes[0].Indices[1] == mirrored.Meshes[0].Indices[2]);
-    CHECK(plain.Meshes[0].Indices[2] == mirrored.Meshes[0].Indices[1]);
+    // Deindexing gives every triangle its own chart. Check geometric facing,
+    // rather than old source-index equality, after the mirrored corner swap.
+    const ludus::resources::SceneMesh& mesh = mirrored.Meshes[0];
+    const ludus::foundation::math::Vector3 normal =
+        ludus::foundation::math::Cross(mesh.Positions[mesh.Indices[1]] - mesh.Positions[mesh.Indices[0]],
+                                       mesh.Positions[mesh.Indices[2]] - mesh.Positions[mesh.Indices[0]]);
+    CHECK(normal.Z > 0);
+    CHECK(mesh.Positions[mesh.Indices[1]] == plain.Meshes[0].Positions[plain.Meshes[0].Indices[2]]);
+    CHECK(mesh.Positions[mesh.Indices[2]].X == -plain.Meshes[0].Positions[plain.Meshes[0].Indices[1]].X);
 }
 
 TEST_CASE("PLY counts are bounded by the body size before allocating", "[scene_cook][pbrt]")
@@ -635,4 +641,197 @@ TEST_CASE("TGA colour maps with unsupported entry depths are rejected", "[scene_
     DecodedImage image;
     std::string_view message;
     CHECK(DecodeImage("bad.tga", std::span<const uint8>(data, sizeof(data)), image, message) != ImageResult::Ok);
+}
+
+TEST_CASE("Authored analytic positions, cones and emitter sidedness survive PBRT parsing", "[scene-cook][lighting]")
+{
+    const std::string_view text =
+        "WorldBegin\n"
+        "AttributeBegin\nTranslate 2 3 4\n"
+        "LightSource \"point\" \"rgb I\" [ 2 4 6 ] \"float scale\" 2 \"point3 from\" [ 1 0 0 ]\n"
+        "LightSource \"spot\" \"point3 from\" [ 0 0 0 ] \"point3 to\" [ 0 1 0 ] \"float power\" 100 \"float "
+        "coneangle\" 40 \"float conedeltaangle\" 10\n"
+        "LightSource \"distant\" \"point3 from\" [ 0 0 1 ] \"point3 to\" [ 0 0 0 ] \"float illuminance\" 50\n"
+        "AreaLightSource \"diffuse\" \"rgb L\" [ 1 2 3 ] \"bool twosided\" true \"float power\" 200\n"
+        "Shape \"disk\"\nAttributeEnd\n"
+        "AttributeBegin\nAreaLightSource \"diffuse\"\nShape \"disk\"\nAttributeEnd\n";
+    SceneIr scene;
+    DiagnosticLog log;
+    REQUIRE(pbrt::ReadSceneFromMemory({AsBytes(text), {}, "lights.pbrt"}, scene, log) == ludus::content::Status::Ok);
+    REQUIRE(scene.AnalyticLights.GetSize() == 3);
+    const IrAnalyticLight& point = scene.AnalyticLights[0];
+    CHECK(point.Kind == IrLightKind::Point);
+    CHECK(point.PositionWorld.X == 3.0);
+    CHECK(point.PositionWorld.Y == 3.0);
+    CHECK(point.PositionWorld.Z == 4.0);
+    CHECK(point.Strength.X == 4.0);
+    CHECK(point.Strength.Y == 8.0);
+    CHECK(point.Strength.Z == 12.0);
+    const IrAnalyticLight& spot = scene.AnalyticLights[1];
+    CHECK(spot.DirectionWorld.Y == 1.0);
+    CHECK(spot.InnerAngleDegrees == 30.0);
+    CHECK(spot.OuterAngleDegrees == 40.0);
+    CHECK(spot.HasPhotometricNormalization == true);
+    CHECK(spot.PhotometricNormalization == 100.0);
+    const IrAnalyticLight& distant = scene.AnalyticLights[2];
+    CHECK(distant.Kind == IrLightKind::Directional);
+    CHECK(distant.DirectionWorld.Z == -1.0);
+    CHECK(distant.PhotometricNormalization == 50.0);
+    REQUIRE(scene.Shapes.GetSize() == 2);
+    CHECK(scene.Shapes[0].AreaLight == 0);
+    CHECK(scene.Shapes[0].IsEmissionTwoSided == true);
+    CHECK(scene.Shapes[0].HasEmissionPower == true);
+    CHECK(scene.Shapes[0].EmissionPowerLumens == 200.0);
+    CHECK(scene.Shapes[1].AreaLight == 1);
+    CHECK(scene.Shapes[1].IsEmissionTwoSided == false);
+    CHECK(scene.Shapes[1].HasEmissionPower == false);
+}
+
+TEST_CASE("Emitter groups retain unequal power-normalized radiance and source sidedness", "[scene-cook][lighting]")
+{
+    const std::string_view text =
+        "WorldBegin\nAreaLightSource \"diffuse\" \"rgb L\" [ 1 1 1 ] \"float power\" 100 \"float scale\" 2\n"
+        "Shape \"trianglemesh\" \"point3 P\" [ 0 0 0  2 0 0  0 1 0 ] \"integer indices\" [ 0 1 2 ]\n"
+        "Shape \"trianglemesh\" \"point3 P\" [ 0 0 2  1 0 2  0 1 2 ] \"integer indices\" [ 0 1 2 ]\n"
+        "AreaLightSource \"diffuse\" \"rgb L\" [ 1 1 1 ] \"float power\" 100 \"float scale\" 2 \"bool twosided\" true\n"
+        "Shape \"trianglemesh\" \"point3 P\" [ 0 0 4  2 0 4  0 1 4 ] \"integer indices\" [ 0 1 2 ]\n";
+    SceneIr scene;
+    DiagnosticLog log;
+    REQUIRE(pbrt::ReadSceneFromMemory({AsBytes(text), {}, "emitters.pbrt"}, scene, log) == ludus::content::Status::Ok);
+    CookPlan plan;
+    REQUIRE(PlanBudget(scene, log, plan, nullptr) == ludus::content::Status::Ok);
+    REQUIRE(plan.Materials.GetSize() == 3);
+    CHECK(plan.Materials[0].IsEmissionTwoSided == false);
+    CHECK(plan.Materials[1].IsEmissionTwoSided == false);
+    CHECK(plan.Materials[2].IsEmissionTwoSided == true);
+    CHECK(ludus::foundation::math::Abs(plan.Materials[0].Emission[0] - 200.0 / ludus::foundation::math::kPi) < 1e-5);
+    CHECK(ludus::foundation::math::Abs(plan.Materials[1].Emission[0] - 400.0 / ludus::foundation::math::kPi) < 1e-5);
+    CHECK(ludus::foundation::math::Abs(plan.Materials[2].Emission[0] - 100.0 / ludus::foundation::math::kPi) < 1e-5);
+    CHECK(plan.Materials[0].EmissionPowerLumens == 200.0);
+    REQUIRE(plan.Materials[0].EmitterSources.GetSize() == 1);
+    CHECK(plan.Materials[0].EmitterSources[0] == 0);
+}
+TEST_CASE("Emitter capacity rejects unequal radiance instead of keeping only the brightest light",
+          "[scene-cook][lighting]")
+{
+    const std::string_view text = "WorldBegin\n"
+                                  "AreaLightSource \"diffuse\" \"float scale\" 1\nShape \"disk\"\n"
+                                  "AreaLightSource \"diffuse\" \"float scale\" 2\nShape \"disk\"\n"
+                                  "AreaLightSource \"diffuse\" \"float scale\" 3\nShape \"disk\"\n"
+                                  "AreaLightSource \"diffuse\" \"float scale\" 4\nShape \"disk\"\n"
+                                  "AreaLightSource \"diffuse\" \"float scale\" 5\nShape \"disk\"\n"
+                                  "AreaLightSource \"diffuse\" \"float scale\" 6\nShape \"disk\"\n"
+                                  "AreaLightSource \"diffuse\" \"float scale\" 7\nShape \"disk\"\n";
+    SceneIr scene;
+    DiagnosticLog log;
+    REQUIRE(pbrt::ReadSceneFromMemory({AsBytes(text), {}, "too-many-emitters.pbrt"}, scene, log) ==
+            ludus::content::Status::Ok);
+    CookPlan plan;
+    CHECK(PlanBudget(scene, log, plan, nullptr) == ludus::content::Status::Invalid);
+    CHECK(HasCode(log, codes::LIMIT_EXCEEDED) == true);
+}
+
+TEST_CASE("Lighting PFM preserves HDR energy, byte order, scale and row orientation", "[scene-cook][lighting]")
+{
+    const std::string hdr = MakePfm();
+    DecodedLightingImage image;
+    std::string_view message;
+    REQUIRE(DecodeLightingImage("sky.pfm", {reinterpret_cast<const uint8*>(hdr.data()), hdr.size()}, image, message) ==
+            ImageResult::Ok);
+    REQUIRE(image.Rgb.GetSize() == 6);
+    CHECK(image.Rgb[5] == 4.0F);
+    std::string grey = "Pf\n1 2\n2.0\n";
+    AppendFloat(grey, 1.0F, true);
+    AppendFloat(grey, 3.0F, true);
+    REQUIRE(
+        DecodeLightingImage("grey.pfm", {reinterpret_cast<const uint8*>(grey.data()), grey.size()}, image, message) ==
+        ImageResult::Ok);
+    REQUIRE(image.Rgb.GetSize() == 6);
+    CHECK(image.Rgb[0] == 6.0F);
+    CHECK(image.Rgb[3] == 2.0F);
+    grey.resize(grey.size() - 1);
+    CHECK(
+        DecodeLightingImage("broken.pfm", {reinterpret_cast<const uint8*>(grey.data()), grey.size()}, image, message) ==
+        ImageResult::Invalid);
+    CHECK(image.Rgb[0] == 6.0F);
+    CHECK(image.Height == 2);
+}
+
+TEST_CASE("Cooked v3 lighting preserves photometric lights, HDR environment and chart provenance",
+          "[scene-cook][lighting]")
+{
+    ScratchDirectory scratch;
+    std::string hdr = "PF\n2 2\n-1.0\n";
+    for (uint32 i = 0; i < 4; ++i)
+    {
+        AppendFloat(hdr, 4.0F, false);
+        AppendFloat(hdr, 2.0F, false);
+        AppendFloat(hdr, 1.0F, false);
+    }
+    WriteFile(scratch.Path / "sky.pfm", hdr);
+    const std::string text =
+        "WorldBegin\n"
+        "LightSource \"point\" \"float power\" 100 \"float scale\" 2 \"point3 from\" [ 1 2 3 ]\n"
+        "LightSource \"distant\" \"float illuminance\" 50\n"
+        "LightSource \"infinite\" \"string filename\" \"sky.pfm\" \"float scale\" 2\n"
+        "AreaLightSource \"diffuse\" \"float power\" 100 \"bool twosided\" true\n"
+        "Shape \"trianglemesh\" \"point3 P\" [ 0 0 0  2 0 0  0 1 0 ] \"integer indices\" [ 0 1 2 ]\n";
+    WriteFile(scratch.Path / "lighting.pbrt", text);
+    BestEffortResult result;
+    CookError error;
+    REQUIRE(ImportPbrtBestEffort((scratch.Path / "lighting.pbrt").string(), {}, result, error) == true);
+    ludus::resources::SceneDefinition decoded;
+    REQUIRE(DecodesAtRuntime(result, decoded) == true);
+    REQUIRE(decoded.Lights.GetSize() == 2);
+    CHECK(decoded.Lights[0].SourceId != 0);
+    CHECK(decoded.Lights[0].SourceId != decoded.Lights[1].SourceId);
+    CHECK(decoded.Lights[0].PositionWorld == ludus::foundation::math::Vector3{1, 2, 3});
+    CHECK_THAT(decoded.Lights[0].IntensityRgb.X,
+               Catch::Matchers::WithinAbs(200.0 / (4 * ludus::foundation::math::kPi), 1e-5));
+    CHECK(decoded.Lights[1].IntensityRgb.X == 50.0F);
+    REQUIRE(decoded.Environment.Pixels.GetSize() == 8);
+    CHECK(decoded.Environment.Width == 4);
+    CHECK(decoded.Environment.Height == 2);
+    CHECK(decoded.Environment.Pixels[0] == ludus::foundation::math::Vector3{8, 4, 2});
+    CHECK(decoded.Environment.Rgb == ludus::foundation::math::Vector3{1, 1, 1});
+    REQUIRE(decoded.Materials.GetSize() == 1);
+    CHECK(decoded.Materials[0].IsEmissionTwoSided == true);
+    CHECK(decoded.Materials[0].HasEmissionPower == true);
+    CHECK(decoded.Materials[0].EmissionPower == 100.0F);
+    CHECK(decoded.Materials[0].AreaSourceId != 0);
+    CHECK(decoded.Objects[0].SourceId != 0);
+    REQUIRE(decoded.Meshes[0].BakeTexcoords.GetSize() == 3);
+    CHECK(decoded.Meshes[0].BakeTexcoords[0] != decoded.Meshes[0].BakeTexcoords[1]);
+    bool hasEnvironmentDigest = false;
+    for (const ludus::foundation::String& input : result.Inputs)
+    {
+        hasEnvironmentDigest = hasEnvironmentDigest || input.GetView() == "sky.pfm";
+    }
+    CHECK(hasEnvironmentDigest == true);
+    const std::string_view report(reinterpret_cast<const char*>(result.Report.GetData()), result.Report.GetSize());
+    CHECK(report.find("not cooked") == std::string_view::npos);
+    CHECK(report.find("\"analytic_lights\": 2") != std::string_view::npos);
+    CHECK(report.find("\"scene_format_version\": 3") != std::string_view::npos);
+    BestEffortResult repeat;
+    REQUIRE(ImportPbrtBestEffort((scratch.Path / "lighting.pbrt").string(), {}, repeat, error) == true);
+    REQUIRE(result.Bundle.GetSize() == repeat.Bundle.GetSize());
+    CHECK(std::memcmp(result.Bundle.GetData(), repeat.Bundle.GetData(), result.Bundle.GetSize()) == 0);
+}
+
+TEST_CASE("Authored lighting rejects power and cone terms that cannot round-trip the frozen profile",
+          "[scene-cook][lighting]")
+{
+    ScratchDirectory scratch;
+    const std::string geometry =
+        "Shape \"trianglemesh\" \"point3 P\" [0 0 0 100 0 0 0 100 0] \"integer indices\" [0 1 2]\n";
+    for (const std::string& light :
+         {std::string("AreaLightSource \"diffuse\" \"float power\" 2000000\n"),
+          std::string("LightSource \"spot\" \"float coneangle\" 0.001 \"float conedeltaangle\" 0.0001\n")})
+    {
+        WriteFile(scratch.Path / "bounds.pbrt", "WorldBegin\n" + light + geometry);
+        BestEffortResult result;
+        CookError error;
+        CHECK(ImportPbrtBestEffort((scratch.Path / "bounds.pbrt").string(), {}, result, error) == false);
+        CHECK(ReportHasCode(result, codes::LIMIT_EXCEEDED) == true);
+    }
 }

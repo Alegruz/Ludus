@@ -91,6 +91,49 @@ struct MaterialTerms final
     return distance;
 }
 
+struct EmitterUse final
+{
+    math::Vector3 Emission{};
+    bool IsTwoSided = false;
+    bool HasPower = false;
+    float64 PowerLumens = 0.0;
+    float64 Area = 0.0;
+    Array<uint32> Sources;
+};
+// Thanks to Pharr, Jakob and Humphreys, Physically Based Rendering, fourth
+// edition, section 12.5, for diffuse power = PI * area * luminance * side count.
+// https://pbr-book.org/4ed/Light_Sources/Area_Lights
+// The frozen RGB/Y proxy is an explicit approximation of PBRT's spectral
+// photometric normalization. Resolve each bound Shape/placement independently.
+[[nodiscard]] bool ResolveEmission(const IrShape& shape, float64 area, math::Vector3& outEmission) noexcept
+{
+    const float64 luminance = ComputeLuminance(shape.Emission);
+    float64 scale = shape.EmissionScale;
+    if (shape.HasEmissionPower == true)
+    {
+        if (area <= 0.0)
+        {
+            return false;
+        }
+        scale *= shape.EmissionPowerLumens / (math::kPi * area * (shape.IsEmissionTwoSided == true ? 2.0 : 1.0));
+    }
+    if (luminance <= 0.0 || math::IsFinite(luminance) == false || math::IsFinite(scale) == false)
+    {
+        return false;
+    }
+    const float64 r = shape.Emission[0] / luminance * scale;
+    const float64 g = shape.Emission[1] / luminance * scale;
+    const float64 b = shape.Emission[2] / luminance * scale;
+    const float64 maximum = static_cast<float64>(format::MAX_EMISSION);
+    if (math::IsFinite(r) == false || math::IsFinite(g) == false || math::IsFinite(b) == false || r < 0.0 || g < 0.0 ||
+        b < 0.0 || r > maximum || g > maximum || b > maximum)
+    {
+        return false;
+    }
+    outEmission = {static_cast<float32>(r), static_cast<float32>(g), static_cast<float32>(b)};
+    return true;
+}
+
 struct MaterialUse final
 {
     /// IR material index or IR_NONE.
@@ -158,6 +201,12 @@ PlanBudget(const SceneIr& scene, DiagnosticLog& inoutLog, CookPlan& outPlan, con
         order[i] = static_cast<uint32>(i);
     }
     foundation::Sort(order.GetData(), order.GetSize(), [&](uint32 left, uint32 right) noexcept {
+        const bool isLeftEmitter = IsEmissive(scene.Shapes[plan.Placements[left].Shape]);
+        const bool isRightEmitter = IsEmissive(scene.Shapes[plan.Placements[right].Shape]);
+        if (isLeftEmitter != isRightEmitter)
+        {
+            return isLeftEmitter;
+        }
         const float64 a = plan.Placements[left].Area;
         const float64 b = plan.Placements[right].Area;
         return a > b || (a == b && left < right);
@@ -165,22 +214,50 @@ PlanBudget(const SceneIr& scene, DiagnosticLog& inoutLog, CookPlan& outPlan, con
 
     // 3. Material usage by area (emissive surfaces are tracked separately).
     Array<MaterialUse> uses;
-    float64 emissiveArea = 0.0;
-    float64 brightestEmission[3] = {0.0, 0.0, 0.0};
-    bool hasEmissive = false;
-    for (const Placement& placement : plan.Placements)
+    Array<EmitterUse> emitters;
+    for (Placement& placement : plan.Placements)
     {
         const IrShape& shape = scene.Shapes[placement.Shape];
         if (IsEmissive(shape) == true)
         {
-            hasEmissive = true;
-            emissiveArea += placement.Area;
-            if (ComputeLuminance(shape.Emission) > ComputeLuminance(brightestEmission))
+            math::Vector3 emission;
+            if (ResolveEmission(shape, placement.Area, emission) == false)
             {
-                for (usize k = 0; k < 3; ++k)
+                (void)inoutLog.Add(DiagnosticSeverity::Error,
+                                   codes::LIMIT_EXCEEDED,
+                                   {},
+                                   shape.Line,
+                                   "area-light normalization exceeds the finite RGB-nits profile");
+                return Status::Invalid;
+            }
+            for (usize i = 0; i < emitters.GetSize(); ++i)
+            {
+                if (emitters[i].Emission == emission && emitters[i].IsTwoSided == shape.IsEmissionTwoSided &&
+                    emitters[i].HasPower == shape.HasEmissionPower)
                 {
-                    brightestEmission[k] = shape.Emission[k];
+                    placement.EmitterGroup = static_cast<uint32>(i);
+                    break;
                 }
+            }
+            if (placement.EmitterGroup == IR_NONE)
+            {
+                placement.EmitterGroup = static_cast<uint32>(emitters.GetSize());
+                EmitterUse* emitterOrNull = emitters.TryAddInPlace();
+                if (emitterOrNull == nullptr)
+                {
+                    return Status::OutOfMemory;
+                }
+                emitterOrNull->Emission = emission;
+                emitterOrNull->IsTwoSided = shape.IsEmissionTwoSided;
+                emitterOrNull->HasPower = shape.HasEmissionPower;
+            }
+            EmitterUse& emitter = emitters[placement.EmitterGroup];
+            emitter.Area += placement.Area;
+            emitter.PowerLumens +=
+                shape.HasEmissionPower == true ? shape.EmissionPowerLumens * shape.EmissionScale : 0.0;
+            if (emitter.Sources.TryAdd(placement.Shape) == false)
+            {
+                return Status::OutOfMemory;
             }
             continue;
         }
@@ -220,7 +297,16 @@ PlanBudget(const SceneIr& scene, DiagnosticLog& inoutLog, CookPlan& outPlan, con
     });
     // Each cooked mesh carries exactly one material, so the slot count is bounded by MAX_MESHES.
     const usize slotLimit = format::MAX_MESHES < format::MAX_MATERIALS ? format::MAX_MESHES : format::MAX_MATERIALS;
-    const usize keptLimit = hasEmissive == true ? slotLimit - 1 : slotLimit;
+    if (emitters.GetSize() > slotLimit || (emitters.GetSize() == slotLimit && uses.IsEmpty() == false))
+    {
+        (void)inoutLog.Add(DiagnosticSeverity::Error,
+                           codes::LIMIT_EXCEEDED,
+                           {},
+                           0,
+                           "distinct emitter radiance/sidedness groups exceed the material/mesh budget");
+        return Status::Invalid;
+    }
+    const usize keptLimit = slotLimit - emitters.GetSize();
     const usize keptCount = useOrder.GetSize() < keptLimit ? useOrder.GetSize() : keptLimit;
     for (usize rank = 0; rank < keptCount; ++rank)
     {
@@ -266,41 +352,35 @@ PlanBudget(const SceneIr& scene, DiagnosticLog& inoutLog, CookPlan& outPlan, con
             return Status::OutOfMemory;
         }
     }
-    uint32 emissiveSlot = IR_NONE;
-    if (hasEmissive == true)
+    const uint32 firstEmitterSlot = static_cast<uint32>(plan.Materials.GetSize());
+    for (EmitterUse& emitter : emitters)
     {
-        emissiveSlot = static_cast<uint32>(plan.Materials.GetSize());
-        PlannedMaterial* planned = plan.Materials.TryAddInPlace();
-        if (planned == nullptr)
+        if (math::IsFinite(emitter.PowerLumens) == false || emitter.PowerLumens < 0 ||
+            emitter.PowerLumens > static_cast<float64>(format::MAX_LIGHT_INTENSITY))
+        {
+            (void)inoutLog.Add(DiagnosticSeverity::Error,
+                               codes::LIMIT_EXCEEDED,
+                               {},
+                               0,
+                               "grouped emitter power exceeds the one-million-lumen scene profile");
+            return Status::Invalid;
+        }
+        PlannedMaterial* plannedOrNull = plan.Materials.TryAddInPlace();
+        if (plannedOrNull == nullptr)
         {
             return Status::OutOfMemory;
         }
-        planned->IsEmissive = true;
-        planned->BaseColour[0] = planned->BaseColour[1] = planned->BaseColour[2] = 1.0;
-        planned->IsTextureRepeated = false;
-        planned->Area = emissiveArea;
-        bool isClamped = false;
-        for (usize k = 0; k < 3; ++k)
-        {
-            planned->Emission[k] = math::Min(brightestEmission[k], static_cast<float64>(format::MAX_EMISSION));
-            isClamped = isClamped == true || brightestEmission[k] > static_cast<float64>(format::MAX_EMISSION);
-        }
-        if (isClamped == true)
-        {
-            (void)inoutLog.Add(DiagnosticSeverity::Warning,
-                               codes::EMISSION_CLAMPED,
-                               {},
-                               0,
-                               "emission clamped to the LUSCN maximum");
-        }
-        if (scene.Lights.Area > 1)
-        {
-            (void)inoutLog.Add(DiagnosticSeverity::Info,
-                               codes::MATERIALS_MERGED,
-                               {},
-                               0,
-                               "area lights merged into one emissive slot (brightest radiance kept)");
-        }
+        plannedOrNull->IsEmissive = true;
+        plannedOrNull->IsEmissionTwoSided = emitter.IsTwoSided;
+        plannedOrNull->HasEmissionPower = emitter.HasPower;
+        plannedOrNull->EmissionPowerLumens = emitter.PowerLumens;
+        plannedOrNull->EmitterSources = static_cast<Array<uint32>&&>(emitter.Sources);
+        plannedOrNull->BaseColour[0] = plannedOrNull->BaseColour[1] = plannedOrNull->BaseColour[2] = 1.0;
+        plannedOrNull->IsTextureRepeated = false;
+        plannedOrNull->Area = emitter.Area;
+        plannedOrNull->Emission[0] = static_cast<float64>(emitter.Emission.X);
+        plannedOrNull->Emission[1] = static_cast<float64>(emitter.Emission.Y);
+        plannedOrNull->Emission[2] = static_cast<float64>(emitter.Emission.Z);
     }
     if (mergedCount != 0)
     {
@@ -335,7 +415,7 @@ PlanBudget(const SceneIr& scene, DiagnosticLog& inoutLog, CookPlan& outPlan, con
         Placement& placement = plan.Placements[index];
         const IrShape& shape = scene.Shapes[placement.Shape];
         const IrMesh& mesh = scene.Meshes[shape.Mesh];
-        uint32 slot = emissiveSlot;
+        uint32 slot = placement.EmitterGroup == IR_NONE ? IR_NONE : firstEmitterSlot + placement.EmitterGroup;
         if (IsEmissive(shape) == false)
         {
             for (const MaterialUse& use : uses)
@@ -348,12 +428,21 @@ PlanBudget(const SceneIr& scene, DiagnosticLog& inoutLog, CookPlan& outPlan, con
             }
         }
         PlannedMaterial& planned = plan.Materials[slot];
-        const usize vertices = mesh.GetVertexCount();
+        const usize vertices = mesh.Indices.GetSize(); // Unique triangle corners for separate bake charts.
         const usize indices = mesh.Indices.GetSize();
         if (totalVertices + vertices > format::MAX_VERTICES || planned.IndexCount + indices > format::MAX_INDICES)
         {
+            if (IsEmissive(shape) == true)
+            {
+                (void)inoutLog.Add(DiagnosticSeverity::Error,
+                                   codes::LIMIT_EXCEEDED,
+                                   {},
+                                   shape.Line,
+                                   "emitter geometry exceeds the vertex/index budget; lighting cannot be preserved");
+                return Status::Invalid;
+            }
             ++plan.DroppedPlacements;
-            plan.DroppedVertices += static_cast<uint32>(vertices);
+            plan.DroppedVertices += static_cast<uint32>(mesh.GetVertexCount());
             (void)inoutLog.Add(DiagnosticSeverity::Warning,
                                placement.IsInstanced == true ? codes::INSTANCES_DROPPED : codes::GEOMETRY_DROPPED,
                                {},

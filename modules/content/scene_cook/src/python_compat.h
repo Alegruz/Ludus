@@ -28,6 +28,11 @@ public:
     }
     void AppendBytes(std::span<const uint8> data) noexcept;
     void AppendUint32(uint32 value) noexcept;
+    LUDUS_INLINE void AppendUint64(uint64 value) noexcept
+    {
+        AppendUint32(static_cast<uint32>(value));
+        AppendUint32(static_cast<uint32>(value >> 32));
+    }
     /// struct.pack('<f'): rounds to nearest; overflow to infinity is an error.
     void AppendFloat32(float64 value) noexcept;
     [[nodiscard]] bool IsOk() const noexcept

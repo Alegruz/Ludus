@@ -346,3 +346,35 @@ irradiance because transforms and visibility differ. Chart allocation, mesh
 vertex expansion and irradiance storage must all fit their explicit budgets;
 packing does not establish a valid bake or perform transport. The first layout
 supports coarse per-triangle irradiance and is not a general lightmap unwrapper.
+
+The scene asset pipeline stores the validated v3 lighting trailer in a content-addressed
+`lighting` artifact. Its owning scene manifest references that logical ID and binds
+its exact artifact revision through the normal dependency closure. Save, reopen,
+relocation and release publication therefore need no source files to reconstruct
+lights or HDR environments. V3 artifacts use build target `portable-rgba8-f32-le-v3`;
+legacy artifacts retain their existing keys and byte-identical v2 assembly.
+
+V3 material JSON adds `emission_flags`, `emission_power` and `area_source_id`.
+The source ID is two exact unsigned 32-bit JSON integers `[low, high]`, never a
+floating-point 64-bit value. Assembly scopes analytic IDs by the lighting artifact
+identity and emitter equivalence groups by their owning scene identity. Placed
+instance IDs derive from persistent level object UUIDs, so renaming/reordering or
+moving a project does not change identity. Duplicate/colliding instance and analytic
+IDs reject; reusing an imported scene's provenance does not duplicate its lighting.
+
+Distinct imported environments add in linear radiance. Constant environments sum;
+equal-sized HDR maps and constant/map combinations sum with a shared per-channel
+scale. Source scales sum within the v3 `[0,10000]` bound and normalized HDR texels
+remain in that range; overflow rejects the candidate. A single imported map retains
+its original texels and multiplier, including zero-energy channels. Different HDR
+map dimensions reject explicitly: this storage codec does not choose a resampling
+policy. The combined light list remains bounded at 128 and the artifact closure and
+assembled packet remain bounded at 64 MiB. No environment or light is silently dropped.
+
+When legacy and v3 resources coexist, assembly expands legacy vertices with zero
+bake UVs and synthesizes stable legacy emitter identities while retaining their
+two-sided emission semantics. Zero UVs preserve the missing-chart state; they do not
+qualify a valid indirect bake. Producers must supply actual nonoverlapping bake
+charts before requesting baked lighting. The source asset regression suite exercises
+runtime decoding after multi-import, save/reopen, relocated reconstruction and
+release publication, alongside the unchanged legacy byte goldens.

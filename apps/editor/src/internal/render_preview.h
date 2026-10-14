@@ -3,7 +3,9 @@
 #include <ludus/foundation/base/compiler.h>
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/pointer.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/viewport.hpp>
 #include <ludus/graphics/rhi/device.h>
@@ -126,6 +128,14 @@ private:
     bool mHasViewport = false;
     bool mIsAwaitingProducer = false;
     [[nodiscard]] bool prepare();
+    [[nodiscard]] bool prepareLighting();
+    void serviceStaticLighting();
+    [[nodiscard]] graphics::rhi::RasterStatus pollViewport();
+    [[nodiscard]] graphics::rhi::RasterStatus
+    createLightingMaterial(foundation::usize objectIndex,
+                           const graphics::renderer::BakedLighting* bakeOrNull,
+                           bool hasShadows,
+                           graphics::renderer::MaterialVersion& outMaterial);
     void restartResources() noexcept;
     RenderScene Scene_;
     foundation::uint32 RequestedWidth_ = 640, RequestedHeight_ = 480;
@@ -137,7 +147,7 @@ private:
     graphics::rhi::DeviceHandle Device_{};
     graphics::rhi::SurfaceHandle Surface_{};
     graphics::renderer::Mesh Meshes_[6]{};
-    graphics::renderer::MaterialVersion Materials_[8]{};
+    foundation::StaticArray<graphics::renderer::MaterialVersion, content::scene_format::MAX_OBJECTS> Materials_{};
     graphics::renderer::MaterialProgram Program_{};
     graphics::renderer::Snapshot Snapshot_{};
     graphics::renderer::ViewReport Report_{};

@@ -1,3 +1,5 @@
+#include "internal/level_workspace.h"
+#include "internal/preview_lighting.h"
 #include "internal/preview_viewport.h"
 #include "internal/readback.h"
 #include "internal/render_preview.h"
@@ -5,6 +7,7 @@
 #include "renderer_composite.h"
 #include "renderer_flat.h"
 #include <QQuickWindow>
+#include <ludus/foundation/containers/array.hpp>
 
 #import <Cocoa/Cocoa.h>
 
@@ -153,6 +156,61 @@ TEST_CASE("Supplied imported World remains visible in solid and albedo GPU views
             REQUIRE(image.save(imagePrefix + QString::number(mode) + QStringLiteral(".png")));
         }
         previous = image;
+    }
+    LevelWorkspace* sceneWorkspace = workspace.findChild<LevelWorkspace*>();
+    REQUIRE(sceneWorkspace != nullptr);
+    const auto awaitPresentation = [viewport](uint64 target) {
+        QElapsedTimer timer;
+        timer.start();
+        while (viewport->PresentedFrames() < target && timer.elapsed() < 10000)
+        {
+            QTest::qWait(20);
+        }
+        return viewport->PresentedFrames() >= target;
+    };
+    preview_lighting::Inputs inputs;
+    REQUIRE(preview_lighting::BuildInputs(sceneWorkspace->PreviewScene(),
+                                          preview_lighting::MakeKey(sceneWorkspace->PreviewScene()),
+                                          inputs) == ludus::graphics::rhi::RasterStatus::Ready);
+    if (inputs.AreaCount != 0)
+    {
+        REQUIRE(sceneWorkspace->StatusText().contains(
+            QStringLiteral("%1 planar area proxies / %2 shadow faces").arg(inputs.AreaCount).arg(inputs.ShadowCount)));
+        REQUIRE(awaitPresentation(viewport->PresentedFrames() + 2));
+        QElapsedTimer bakeTimer;
+        bakeTimer.start();
+        while (bakeTimer.elapsed() < 300000 &&
+               sceneWorkspace->StatusText().contains(QStringLiteral("static diffuse baked")) == false &&
+               sceneWorkspace->StatusText().contains(QStringLiteral("bake failed")) == false)
+        {
+            QTest::qWait(20);
+        }
+        INFO(sceneWorkspace->StatusText().toStdString());
+        REQUIRE(sceneWorkspace->StatusText().contains(QStringLiteral("static diffuse baked")));
+        REQUIRE(awaitPresentation(viewport->PresentedFrames() + 2));
+        const QImage baked = ReadViewport();
+        REQUIRE(baked.isNull() == false);
+        if (imagePrefix.isEmpty() == false)
+        {
+            REQUIRE(baked.save(imagePrefix + QStringLiteral("baked.png")));
+        }
+        const QColor background = baked.pixelColor(0, 0);
+        uint32 litPixels = 0;
+        for (int32 y = 0; y < baked.height(); y += 4)
+        {
+            for (int32 x = 0; x < baked.width(); x += 4)
+            {
+                const QColor color = baked.pixelColor(x, y);
+                // Count visible nonsaturated geometry, excluding clear pixels
+                // and the bright emitter patches which were already visible.
+                const int32 sum = color.red() + color.green() + color.blue();
+                if (color != background && sum > 12 && sum < 600)
+                {
+                    ++litPixels;
+                }
+            }
+        }
+        CHECK(litPixels > 100);
     }
     CHECK(workspace.Document().Draft() == draft);
     CHECK_FALSE(workspace.Dirty());
@@ -471,4 +529,157 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
         REQUIRE(image.save(qEnvironmentVariable("LUDUS_RENDER_NATIVE_IMAGE")));
     }
     renderer.Reset();
+}
+
+namespace
+{
+using namespace ludus::editor;
+using namespace ludus::foundation;
+void AddLightingQuad(ludus::resources::SceneMesh& inoutMesh,
+                     float32 x,
+                     float32 z,
+                     float32 width,
+                     float32 y,
+                     bool isFacingDown)
+{
+    const uint32 start = static_cast<uint32>(inoutMesh.Positions.GetSize());
+    REQUIRE(inoutMesh.Positions.TryAdd({x, y, z}));
+    REQUIRE(inoutMesh.Positions.TryAdd({x + width, y, z}));
+    REQUIRE(inoutMesh.Positions.TryAdd({x + width, y, z + width}));
+    REQUIRE(inoutMesh.Positions.TryAdd({x, y, z + width}));
+    for (usize i = 0; i < 4; ++i)
+    {
+        REQUIRE(inoutMesh.Normals.TryAdd({0, isFacingDown == true ? -1.0F : 1.0F, 0}));
+        REQUIRE(inoutMesh.Texcoords.TryAdd({0, 0}));
+    }
+    const uint32 order[6]{0, 1, 2, 0, 2, 3};
+    for (usize i = 0; i < 6; i += 3)
+    {
+        REQUIRE(inoutMesh.Indices.TryAdd(start + order[i]));
+        REQUIRE(inoutMesh.Indices.TryAdd(start + order[i + (isFacingDown == true ? 1 : 2)]));
+        REQUIRE(inoutMesh.Indices.TryAdd(start + order[i + (isFacingDown == true ? 2 : 1)]));
+    }
+}
+RenderScene MakeLightingScene()
+{
+    RenderScene scene;
+    scene.Definition = QSharedPointer<ludus::resources::SceneDefinition>::create();
+    scene.Identity = QByteArrayLiteral("lighting-fixture");
+    scene.AssetsIdentity = QByteArrayLiteral("lighting-assets");
+    scene.LogicalId = QStringLiteral("level/lighting-fixture");
+    scene.Lit = true;
+    scene.Center = {0, .5F, 0};
+    scene.Radius = 4;
+    ludus::resources::SceneDefinition& data = *scene.Definition;
+    REQUIRE(data.Meshes.TryResize(2));
+    REQUIRE(data.Materials.TryResize(2));
+    REQUIRE(data.Objects.TryResize(2));
+    AddLightingQuad(data.Meshes[0], -2, -2, 4, 0, false);
+    for (usize i = 0; i < 13; ++i)
+    {
+        const usize row = i / 5;
+        AddLightingQuad(data.Meshes[1],
+                        static_cast<float32>(i % 5) * .6F - 1.3F,
+                        static_cast<float32>(row) * .6F - .7F,
+                        .2F,
+                        1,
+                        true);
+    }
+    data.Materials[1].Emission = {20, 20, 20};
+    data.Materials[1].AreaSourceId = 51;
+    data.Materials[1].IsEmissionTwoSided = false;
+    data.Objects[0].SourceId = 101;
+    data.Objects[1].SourceId = 102;
+    data.Objects[1].Mesh = 1;
+    data.Objects[1].Material = 1;
+    data.Eye = {0, 2, 4};
+    data.Target = {0, 0, 0};
+    data.Up = {0, 1, 0};
+    scene.Meshes.resize(2);
+    scene.Surfaces.resize(2);
+    for (int32 i = 0; i < 2; ++i)
+    {
+        scene.Surfaces[i].Texture = -1;
+        scene.Surfaces[i].Tint = {.7F, .7F, .7F, 1};
+        scene.Surfaces[i].Emission = data.Materials[static_cast<usize>(i)].Emission;
+        PreviewObject object;
+        object.Id = QString::number(101 + i);
+        object.Mesh = i;
+        object.Surface = i;
+        object.Texture = -1;
+        scene.Objects.append(object);
+    }
+    return scene;
+}
+} // namespace
+
+TEST_CASE("Native Lit viewport publishes thirteen shadowed area patches and per-instance baked charts",
+          "[.render-native][lighting]")
+{
+    RenderScene scene = MakeLightingScene();
+    const QByteArray key = preview_lighting::MakeKey(scene);
+    preview_lighting::Inputs inputs;
+    REQUIRE(preview_lighting::BuildInputs(scene, key, inputs) == ludus::graphics::rhi::RasterStatus::Ready);
+    REQUIRE(inputs.AreaCount == 13);
+    REQUIRE(inputs.ShadowCount == 78);
+    RenderScene cameraOnly = scene;
+    cameraOnly.Identity = QByteArrayLiteral("changed-camera");
+    PreviewCamera camera;
+    camera.Id = QStringLiteral("authored-camera-update");
+    cameraOnly.Cameras.append(camera);
+    REQUIRE(preview_lighting::MakeKey(cameraOnly) == key);
+    RenderPreview preview;
+    PreviewViewport viewport(&preview);
+    viewport.resize(320, 240);
+    viewport.show();
+    REQUIRE(preview.SetScene(scene));
+    preview.SetShading(PreviewShading::Lit);
+    REQUIRE(preview.Start());
+    REQUIRE(Frames(preview, 2));
+    REQUIRE(viewport.PresentedFrames() > 0);
+    const uint64 beforeCamera = preview.Frames();
+    preview.Orbit(2, 0);
+    REQUIRE(preview.SetScene(cameraOnly));
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 40000 && preview.Status().contains(QStringLiteral("static diffuse baked")) == false)
+    {
+        QTest::qWait(20);
+    }
+    INFO(preview.Status().toStdString());
+    REQUIRE(preview.Status().contains(QStringLiteral("13 planar area proxies / 78 shadow faces")));
+    REQUIRE(preview.Status().contains(QStringLiteral("static diffuse baked")));
+    REQUIRE(Frames(preview, beforeCamera + 2));
+    REQUIRE(ReadViewport().isNull() == false);
+    preview.Stop();
+}
+TEST_CASE("Native Lit bake failure retains direct lighting and live camera rendering", "[.render-native][lighting]")
+{
+    RenderScene scene = MakeLightingScene();
+    // GPU raster accepts a zero-area receiver primitive; static transport must
+    // reject its undefined chart normal without retiring the direct snapshot.
+    const uint32 degenerate[] = {0, 0, 0};
+    REQUIRE(scene.Definition->Meshes[0].Indices.TryAddRange(degenerate));
+    RenderPreview preview;
+    PreviewViewport viewport(&preview);
+    viewport.resize(320, 240);
+    viewport.show();
+    REQUIRE(preview.SetScene(scene));
+    preview.SetShading(PreviewShading::Lit);
+    REQUIRE(preview.Start());
+    REQUIRE(Frames(preview, 2));
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 10000 &&
+           preview.Status().contains(QStringLiteral("bake failed; direct lighting retained")) == false)
+    {
+        QTest::qWait(20);
+    }
+    INFO(preview.Status().toStdString());
+    REQUIRE(preview.Status().contains(QStringLiteral("bake failed; direct lighting retained")));
+    const uint64 previous = preview.Frames();
+    preview.Orbit(4, 2);
+    REQUIRE(Frames(preview, previous + 2));
+    CHECK(viewport.PresentedFrames() > 0);
+    preview.Stop();
 }

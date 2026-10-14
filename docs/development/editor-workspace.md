@@ -515,8 +515,8 @@ World now has a native 3D authoring adapter using the engine's mesh, unlit mater
 reverse-Z view and C0 camera APIs. It extracts **applied** World data; it never loads
 project code or changes simulation state. Camera/orbit/reference controls are
 preview settings and do not enter Save, Undo or recovery. The engine's current
-L4 lighting implementation remains available to games, but this adapter previews
-opaque flat/textured unlit surfaces only. See the owning
+lighting implementation supplies Lit materials, authored lights and shadows;
+Solid and Albedo remain inspection modes. See the owning
 [renderer contract](../architecture/renderer-systems.md) and
 [camera contract](../architecture/camera-systems.md).
 
@@ -597,6 +597,8 @@ object containing `schema` equal to the World schema ID, `transform`, `renderabl
 `component` ID and `properties` map. Component and property IDs may be renamed:
 the map keys below are semantic names; the map values are project property IDs.
 The `camera` role may be `null` when the project uses editor orbit only.
+An optional `light` role maps an authored photometric component; absent or null
+keeps older descriptors valid.
 Unknown fields, duplicate keys, missing/duplicate mappings and wrong property
 types reject. The shipped descriptor is a complete example.
 
@@ -605,8 +607,13 @@ types reject. The shipped descriptor is a complete example.
 | transform | `x`, `y`, `z`, `rx`, `ry`, `rz`, `sx`, `sy`, `sz`: number. Translation uses world units; rotations use degrees, applying X then Y then Z; scales are positive. |
 | renderable | `mesh`, `texture`: asset; `visible`: boolean; `r`, `g`, `b`: number in [0,1], interpreted as linear tint. Empty texture selects flat color; visible renderables require a mapped mesh. |
 | camera | `projection`: enum with supported values `perspective`, `orthographic`, `infinite`; `fov`, `span`, `near`, `far`: number; `follow`: entity. Empty follow is fixed; nonempty follow resolves a transformed target through C0's immediate orthographic XY recipe with zero offset. |
+| light | `kind`: enum (`point`, `spot`, `directional`); `enabled`: boolean; `r`, `g`, `b`: number in [0,1] linear hue; `intensity`: number in [0,1000000], candela for point/spot or lux for directional; `range`: number in [0.01,1000000] metres; `innerAngle`, `outerAngle`: number in degrees, 0 ≤ inner < outer < 90. |
 
-Renderable/camera entities must also have the mapped transform component. Camera
+Renderable/camera/light entities must also have the mapped transform component.
+Lights require unit scale and use -Z forward; position and rigid rotation update
+authored lighting, with persistent World entity IDs identifying the source. Disabled
+lights are omitted without removing their authored component. The shipped schema
+includes an optional Light component, which users attach explicitly. Camera
 rotation is rigid, +Y up and -Z forward; XY follow requires identity rotation.
 Other entity components remain untouched. Camera selection uses the persistent
 World ID and falls back visibly to editor orbit when the selected camera is removed.
@@ -631,7 +638,7 @@ particular device; file/schema validation does not promise GPU availability.
 It validates every declared preview asset, including unused entries.
 
 The sample cube mesh, texture and rendering World are editor authoring examples;
-they do not drive live-edit-game's runtime. Lighting, shadows, bake authoring,
+they do not drive live-edit-game's runtime. High-resolution bake authoring,
 masked/painter surfaces, UV/sampler/mip editing, mesh importers, viewport picking,
 transform gizmos, hierarchy/prefabs and browser rendering remain later slices.
 
@@ -730,8 +737,8 @@ shading**. It gives surfaces a neutral material and imported geometry an editor-
 directional fill and ambient contribution, so imported rooms remain visible for
 inspection and editing. **Albedo — unlit surface colors** displays base-color textures and material tints; emitting meshes
 with black authored albedo remain black in this view.
-**Lit — scene lighting** displays the existing material-lighting path, including
-emission. During resource preparation, the viewport retains its last drawable GPU
+**Lit — scene lighting** displays authored analytic lights, emitting surfaces,
+shadowed area-light proxies and the completed static diffuse/indirect bake. During resource preparation, the viewport retains its last drawable GPU
 image until Qt presents the replacement. A failed replacement reports its error
 without clearing that image; a later scene or shading change can retry preparation.
 Switching modes keeps the World, camera and layout; the shading choice
@@ -741,12 +748,34 @@ authored materials or add lights to the World. Solid lighting is a navigation
 aid, not the imported scene lighting. Wireframe and normal visualizations are
 not yet available.
 
-The Lit raster profile uses authored material emission and the renderer's admitted
-lighting. It does **not** infer indirect illumination from emissive geometry or
-invent editor lights: imported scenes lit solely by emitting meshes can have dark
-non-emissive surfaces. This viewport is an interactive raster view, not the old
-64-sample CPU reference capture. Optional GPU path tracing belongs to the
-renderer API and is not required for ordinary viewport navigation.
+Lit first publishes shadowed direct lighting, then prepares static diffuse and
+indirect lighting on a cancellable CPU worker. The worker computes illumination
+charts rather than viewport pixels; navigation and Qt presentation continue on
+the GPU. Completed charts upload once on the device owner thread and replace the
+per-instance materials and snapshot only after they are ready. Analytic direct
+lighting and area specular remain raster; baked area diffuse replaces its proxy
+contribution. HDR/constant authored environments supply the initial irradiance
+and retain specular reflection after the bake. No editor fill is added to Lit.
+
+The status shows planar proxy/shadow counts, bake progress, completion or failure.
+A failed bake retains the direct-lit viewport and camera controls. Camera, orbit,
+exposure and layout changes do not restart this view-independent bake; geometry,
+material, light and environment changes create a new exact revision. Saved World
+assets preserve authored lighting through reopen and relocation. Legacy v1/v2
+imports can use the bake without reimport, retaining historical two-sided emission.
+
+This bounded quality profile uses one centroid quadrature proxy per connected
+planar emitter patch and hard cube-map shadows. It supports up to 128 admitted
+lights and 80 shadow regions: point/area lights consume six faces, while
+spot/directional lights consume one. The 2048-pixel atlas packs guttered cells;
+capacity, malformed or unsupported source topology rejects rather than dropping
+illumination. Curved or concave sources can exceed this proxy profile. The
+static bake uses 64 cosine samples per triangle, depth four, and separate
+4×4 guttered triangle tiles; it can show spatial discontinuities and sampling
+noise. It includes diffuse bounces, with finite-depth bias, rather than glossy
+indirect transport, soft area shadows or spectral PBRT parity. See the owning
+[renderer contract](../architecture/renderer-systems.md) for transport semantics.
+Optional GPU path tracing remains a separate renderer API.
 
 Qt Quick's native surface is embedded in the World splitter and uses the basic
 owner-thread render loop. The adapter admits Qt's exact device and queue, imports

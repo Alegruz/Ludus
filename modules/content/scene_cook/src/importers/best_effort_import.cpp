@@ -1,4 +1,4 @@
-// Best-effort pbrt-v4 import: SceneIR -> budget plan -> LUSCN v2 bundle and a
+// Best-effort pbrt-v4 import: SceneIR -> budget plan -> LUSCN v3 bundle and a
 // deterministic import report. See docs/development/best-effort-scene-import.md.
 
 #include <ludus/content/scene_cook/best_effort_import.h>
@@ -6,6 +6,7 @@
 
 #include "../native_files.h"
 #include "../python_compat.h"
+#include "authored_lighting.h"
 #include "budget_planner.h"
 #include "image/image_reader.h"
 #include "pbrt/pbrt_parser.h"
@@ -164,6 +165,7 @@ struct CookedTexture final
 struct CookedMesh final
 {
     Array<float32> Vertices;
+    Array<float32> BakeUvs;
     Array<uint32> Indices;
 };
 
@@ -425,6 +427,45 @@ struct CookedMesh final
     return Status::Ok;
 }
 
+// Bake charts have independent triangle-corner ownership; source texture UVs
+// and normals remain unchanged. The planner budgets these deindexed vertices.
+[[nodiscard]] Status PrepareBakeCharts(Array<CookedMesh>& inoutMeshes) noexcept
+{
+    for (CookedMesh& mesh : inoutMeshes)
+    {
+        format::BakeChartLayout layout;
+        if (format::TryMakeBakeChartLayout(static_cast<uint32>(mesh.Indices.GetSize() / 3), layout) == false)
+        {
+            return Status::Invalid;
+        }
+        Array<float32> vertices;
+        if (vertices.TryResize(mesh.Indices.GetSize() * format::VERTEX_COMPONENTS) == false ||
+            mesh.BakeUvs.TryResize(mesh.Indices.GetSize() * 2) == false)
+        {
+            return Status::OutOfMemory;
+        }
+        for (usize i = 0; i < mesh.Indices.GetSize(); ++i)
+        {
+            const usize source = usize{mesh.Indices[i]} * format::VERTEX_COMPONENTS;
+            for (usize component = 0; component < format::VERTEX_COMPONENTS; ++component)
+            {
+                vertices[i * format::VERTEX_COMPONENTS + component] = mesh.Vertices[source + component];
+            }
+            if (format::TryGetBakeChartUv(layout,
+                                          static_cast<uint32>(i / 3),
+                                          static_cast<uint32>(i % 3),
+                                          mesh.BakeUvs[i * 2],
+                                          mesh.BakeUvs[i * 2 + 1]) == false)
+            {
+                return Status::Invalid;
+            }
+            mesh.Indices[i] = static_cast<uint32>(i);
+        }
+        mesh.Vertices.Swap(vertices);
+    }
+    return Status::Ok;
+}
+
 /// Camera from the IR, or framed on the cooked bounds when absent or degenerate.
 void ResolveCamera(const SceneIr& scene,
                    const Array<CookedMesh>& meshes,
@@ -469,10 +510,11 @@ void PackBundle(const IrCamera& camera,
                 const CookPlan& plan,
                 const Array<CookedTexture>& textures,
                 const Array<CookedMesh>& meshes,
+                const CookedLighting& lighting,
                 detail::ByteWriter& inoutBlob) noexcept
 {
     inoutBlob.Append(format::MAGIC);
-    inoutBlob.AppendUint32(format::VERSION_2);
+    inoutBlob.AppendUint32(format::VERSION_3);
     const uint32 count = static_cast<uint32>(plan.Materials.GetSize());
     inoutBlob.AppendUint32(count); // Meshes.
     inoutBlob.AppendUint32(count); // Materials.
@@ -503,14 +545,25 @@ void PackBundle(const IrCamera& camera,
         {
             inoutBlob.AppendFloat32(channel);
         }
+        const uint32 flags = (planned.IsEmissionTwoSided == true ? format::EMISSION_TWO_SIDED : 0U) |
+                             (planned.HasEmissionPower == true ? format::EMISSION_HAS_POWER : 0U);
+        inoutBlob.AppendUint32(flags);
+        inoutBlob.AppendUint64(planned.IsEmissive == true ? static_cast<uint64>(slot) + 1 : 0);
+        inoutBlob.AppendFloat32(planned.EmissionPowerLumens);
+        inoutBlob.AppendUint32(0);
     }
     for (const CookedMesh& mesh : meshes)
     {
         inoutBlob.AppendUint32(static_cast<uint32>(mesh.Vertices.GetSize() / 8));
         inoutBlob.AppendUint32(static_cast<uint32>(mesh.Indices.GetSize()));
-        for (const float32 value : mesh.Vertices)
+        for (usize i = 0; i < mesh.Vertices.GetSize() / format::VERTEX_COMPONENTS; ++i)
         {
-            inoutBlob.AppendFloat32(static_cast<float64>(value));
+            for (usize component = 0; component < format::VERTEX_COMPONENTS; ++component)
+            {
+                inoutBlob.AppendFloat32(static_cast<float64>(mesh.Vertices[i * format::VERTEX_COMPONENTS + component]));
+            }
+            inoutBlob.AppendFloat32(static_cast<float64>(mesh.BakeUvs[i * 2]));
+            inoutBlob.AppendFloat32(static_cast<float64>(mesh.BakeUvs[i * 2 + 1]));
         }
         for (const uint32 index : mesh.Indices)
         {
@@ -526,6 +579,40 @@ void PackBundle(const IrCamera& camera,
         {
             inoutBlob.AppendFloat32(value);
         }
+        inoutBlob.AppendUint64(static_cast<uint64>(slot) + 1);
+    }
+    inoutBlob.AppendUint32(format::LIGHTING_PROFILE_REC709_PHOTOMETRIC);
+    inoutBlob.AppendUint32(static_cast<uint32>(lighting.Lights.GetSize()));
+    inoutBlob.AppendUint32(lighting.Environment.Width);
+    inoutBlob.AppendUint32(lighting.Environment.Height);
+    for (const float32 value : lighting.EnvironmentRgb)
+    {
+        inoutBlob.AppendFloat32(static_cast<float64>(value));
+    }
+    for (const format::LightRecord& light : lighting.Lights)
+    {
+        inoutBlob.AppendUint64(light.SourceId);
+        inoutBlob.AppendUint32(light.Kind);
+        inoutBlob.AppendUint32(light.Flags);
+        for (const float32 value : light.IntensityRgb)
+        {
+            inoutBlob.AppendFloat32(static_cast<float64>(value));
+        }
+        for (const float32 value : light.PositionWorld)
+        {
+            inoutBlob.AppendFloat32(static_cast<float64>(value));
+        }
+        for (const float32 value : light.DirectionWorld)
+        {
+            inoutBlob.AppendFloat32(static_cast<float64>(value));
+        }
+        inoutBlob.AppendFloat32(static_cast<float64>(light.Range));
+        inoutBlob.AppendFloat32(static_cast<float64>(light.InnerCos));
+        inoutBlob.AppendFloat32(static_cast<float64>(light.OuterCos));
+    }
+    for (const float32 value : lighting.Environment.Rgb)
+    {
+        inoutBlob.AppendFloat32(static_cast<float64>(value));
     }
 }
 
@@ -551,6 +638,7 @@ struct ReportFacts final
     const IrCamera* CameraOrNull = nullptr;
     const Array<CookedTexture>* TexturesOrNull = nullptr;
     const Array<CookedMesh>* MeshesOrNull = nullptr;
+    const CookedLighting* LightingOrNull = nullptr;
 };
 
 /// Deterministic report: fixed key order, root-relative paths, Python-repr floats.
@@ -616,6 +704,8 @@ void WriteReport(const SceneIr& scene,
     writeCount("objects", summary.CookedObjects);
     writeCount("vertices", summary.CookedVertices);
     writeCount("bundle_bytes", summary.BundleBytes);
+    writeCount("scene_format_version", format::VERSION_3);
+    writeCount("analytic_lights", facts.LightingOrNull != nullptr ? facts.LightingOrNull->Lights.GetSize() : 0);
     writeCount("dropped_placements", plan.DroppedPlacements);
     writeCount("dropped_vertices", plan.DroppedVertices);
     json.EndObject();
@@ -634,7 +724,7 @@ void WriteReport(const SceneIr& scene,
     {
         json.BeginObject();
         json.WriteKey("fallback");
-        json.WriteString("not cooked: LUSCN has no environment term");
+        json.WriteString("Rec709 photometric proxy; PBRT spectral/equal-area conversion");
         json.WriteKey("radiance");
         json.BeginArray();
         for (const float64 channel : scene.Environment.Radiance)
@@ -644,6 +734,20 @@ void WriteReport(const SceneIr& scene,
         json.EndArray();
         json.WriteKey("file");
         json.WriteString(scene.Environment.File.GetView());
+        json.WriteKey("pixels_deferred");
+        json.WriteBoolean(facts.IsDryRun == true && scene.Environment.File.IsEmpty() == false);
+        if (facts.LightingOrNull != nullptr)
+        {
+            writeCount("width", facts.LightingOrNull->Environment.Width);
+            writeCount("height", facts.LightingOrNull->Environment.Height);
+            json.WriteKey("cooked_radiance_multiplier");
+            json.BeginArray();
+            for (const float32 channel : facts.LightingOrNull->EnvironmentRgb)
+            {
+                json.WriteFloat(static_cast<float64>(channel));
+            }
+            json.EndArray();
+        }
         json.EndObject();
     }
     else
@@ -694,6 +798,33 @@ void WriteReport(const SceneIr& scene,
         for (const float64 channel : planned.Emission)
         {
             json.WriteFloat(static_cast<float64>(static_cast<float32>(channel)));
+        }
+        json.EndArray();
+        json.WriteKey("emission_two_sided");
+        json.WriteBoolean(planned.IsEmissionTwoSided);
+        json.WriteKey("emission_power_lumens");
+        if (planned.HasEmissionPower == true)
+        {
+            json.WriteFloat(planned.EmissionPowerLumens);
+        }
+        else
+        {
+            json.WriteNull();
+        }
+        json.WriteKey("emitter_sources");
+        json.BeginArray();
+        for (const uint32 index : planned.EmitterSources)
+        {
+            const IrShape& source = scene.Shapes[index];
+            json.BeginObject();
+            writeCount("shape", index);
+            writeCount("area_light", source.AreaLight);
+            writeCount("line", source.Line);
+            json.WriteKey("file");
+            json.WriteString(source.SourceFile < scene.SourceFiles.GetSize()
+                                 ? scene.SourceFiles[source.SourceFile].GetView()
+                                 : std::string_view());
+            json.EndObject();
         }
         json.EndArray();
         writeCount("placements", planned.Placements.GetSize());
@@ -791,6 +922,7 @@ void CountDiagnostics(const DiagnosticLog& log, ImportSummary& inoutSummary) noe
 [[nodiscard]] Status CollectInputs(const SceneIr& scene,
                                    std::string_view root,
                                    const Array<CookedTexture>& textures,
+                                   const CookedLighting& lighting,
                                    const Digest* licenseDigestOrNull,
                                    std::string_view licenseName,
                                    BestEffortResult& inoutResult) noexcept
@@ -853,6 +985,34 @@ void CountDiagnostics(const DiagnosticLog& log, ImportSummary& inoutSummary) noe
             return Status::OutOfMemory;
         }
     }
+    if (scene.Environment.File.IsEmpty() == false)
+    {
+        String path;
+        constexpr usize PATH_PARTS = 3;
+        const foundation::StaticArray<std::string_view, PATH_PARTS> parts{root, "/", scene.Environment.File.GetView()};
+        Digest digest;
+        if (path.TryAppendMany({parts.GetData(), parts.GetSize()}) != foundation::StringStatus::Ok)
+        {
+            return Status::OutOfMemory;
+        }
+        Status hashed = Status::Ok;
+        if (lighting.HasEnvironmentSourceDigest == true)
+        {
+            digest = lighting.EnvironmentSourceDigest;
+        }
+        else
+        {
+            hashed = detail::HashFile(path.GetView(), digest);
+        }
+        if (hashed != Status::Ok)
+        {
+            return hashed;
+        }
+        if (AddInput(scene.Environment.File.GetView(), digest, inoutResult) == false)
+        {
+            return Status::OutOfMemory;
+        }
+    }
     if (licenseDigestOrNull != nullptr && AddInput(licenseName, *licenseDigestOrNull, inoutResult) == false)
     {
         return Status::OutOfMemory;
@@ -896,23 +1056,55 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
     {
         status = BakeMeshes(scene, plan, meshes, cancelOrNull);
     }
+    if (status == Status::Ok)
+    {
+        status = PrepareBakeCharts(meshes);
+    }
     usize geometryBytes = 0;
     for (const CookedMesh& mesh : meshes)
     {
-        geometryBytes += sizeof(format::MeshRecord) + mesh.Vertices.GetSize() * sizeof(float32) +
+        geometryBytes += sizeof(format::MeshRecord) +
+                         (mesh.Vertices.GetSize() + mesh.BakeUvs.GetSize()) * sizeof(float32) +
                          mesh.Indices.GetSize() * sizeof(uint32);
-    }
-    if (status == Status::Ok && options.IsDryRun == false)
-    {
-        const usize remaining = format::MAX_BUNDLE_BYTES > geometryBytes + RECORD_RESERVE_BYTES
-                                    ? format::MAX_BUNDLE_BYTES - geometryBytes - RECORD_RESERVE_BYTES
-                                    : 0;
-        const usize budget = remaining < format::MAX_TOTAL_TEXTURE_BYTES ? remaining : format::MAX_TOTAL_TEXTURE_BYTES;
-        status = CookTextures(scene, root.GetView(), plan, budget, log, textures);
     }
     IrCamera camera;
     bool isFramed = false;
     ResolveCamera(scene, meshes, camera, isFramed);
+    CookedLighting lighting;
+    const float64 extent = math::Max(math::Length(camera.Eye - camera.Target), 1.0);
+    const float64 lightRange = math::Min(extent * 100.0, 1000000.0);
+    const usize lightingRecords =
+        sizeof(format::LightingRecord) + scene.AnalyticLights.GetSize() * sizeof(format::LightRecord);
+    const usize fixedBytes = geometryBytes + RECORD_RESERVE_BYTES + lightingRecords;
+    const usize lightingBudget = format::MAX_BUNDLE_BYTES > fixedBytes ? format::MAX_BUNDLE_BYTES - fixedBytes : 0;
+    if (status == Status::Ok)
+    {
+        status = CookAuthoredLighting(scene,
+                                      root.GetView(),
+                                      {
+                                          .RangeMetres = lightRange,
+                                          .EnvironmentByteBudget = lightingBudget,
+                                          .ShouldDecodeEnvironment = options.IsDryRun == false,
+                                      },
+                                      lighting,
+                                      log);
+        if (status != Status::Ok)
+        {
+            (void)log.Add(DiagnosticSeverity::Error,
+                          codes::LIMIT_EXCEEDED,
+                          {},
+                          0,
+                          "authored lighting cannot be preserved within the bounded photometric scene profile");
+        }
+    }
+    const usize lightingBytes = lightingRecords + lighting.Environment.Rgb.GetSize() * sizeof(float32);
+    if (status == Status::Ok && options.IsDryRun == false)
+    {
+        const usize reserved = geometryBytes + RECORD_RESERVE_BYTES + lightingBytes;
+        const usize remaining = format::MAX_BUNDLE_BYTES > reserved ? format::MAX_BUNDLE_BYTES - reserved : 0;
+        const usize budget = math::Min(remaining, format::MAX_TOTAL_TEXTURE_BYTES);
+        status = CookTextures(scene, root.GetView(), plan, budget, log, textures);
+    }
     if (status == Status::Ok)
     {
         summary.CookedMeshes = static_cast<uint32>(meshes.GetSize());
@@ -926,7 +1118,7 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
     }
     if (status == Status::Ok && options.IsDryRun == false)
     {
-        usize expected = sizeof(format::Header) + geometryBytes + RECORD_RESERVE_BYTES;
+        usize expected = sizeof(format::Header) + geometryBytes + RECORD_RESERVE_BYTES + lightingBytes;
         for (const CookedTexture& texture : textures)
         {
             expected += sizeof(format::TextureRecord) + texture.Image.Texels.GetSize();
@@ -937,7 +1129,7 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
             return FailWith(outError, Status::OutOfMemory, "out of memory");
         }
         detail::ByteWriter blob(outResult.Bundle);
-        PackBundle(camera, plan, textures, meshes, blob);
+        PackBundle(camera, plan, textures, meshes, lighting, blob);
         if (blob.IsOk() == false)
         {
             status = blob.HasOverflowed() == true ? Status::Invalid : Status::OutOfMemory;
@@ -960,6 +1152,7 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
     facts.CameraOrNull = &camera;
     facts.TexturesOrNull = options.IsDryRun == true ? nullptr : &textures;
     facts.MeshesOrNull = &meshes;
+    facts.LightingOrNull = &lighting;
     if (status != Status::NotFound && status != Status::IoError)
     {
         WriteReport(scene, plan, log, summary, facts, outResult.Report);
@@ -986,6 +1179,7 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
     const Status collected = CollectInputs(scene,
                                            root.GetView(),
                                            textures,
+                                           lighting,
                                            licenseName.empty() == true ? nullptr : &licenseDigest,
                                            licenseName,
                                            outResult);
