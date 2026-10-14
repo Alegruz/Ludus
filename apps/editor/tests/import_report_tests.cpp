@@ -192,6 +192,14 @@ TEST_CASE("World shows the import preview, imports on confirmation and shows the
     QWidget* viewport = workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport"));
     REQUIRE(viewport != nullptr);
     CHECK(viewport->isHidden() == false);
+    // Without native GPU sharing (offscreen) the viewport explains itself instead of the placeholder.
+    bool hasExplanation = false;
+    for (const QLabel* label : viewport->findChildren<QLabel*>())
+    {
+        hasExplanation = hasExplanation == true || label->text().contains(QStringLiteral("Scene ready")) == true;
+        CHECK(label->text().contains(QStringLiteral("Import a reference scene")) == false);
+    }
+    CHECK(hasExplanation == true);
 }
 
 TEST_CASE("World import without an open World explains why nothing happened", "[editor][import][world]")
