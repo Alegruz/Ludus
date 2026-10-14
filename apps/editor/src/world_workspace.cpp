@@ -220,6 +220,12 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     connect(Scene_, &LevelWorkspace::DocumentChanged, this, [this]() { Changed(); });
     connect(Scene_, &LevelWorkspace::PreviewStarting, this, [this]() {
         Render_->Stop();
+        // The candidate scene commits only after its first rendered frame, and the
+        // native surface is created only once its widget is shown. Show the scene
+        // viewport now; Render() restores the previous layout if the import fails.
+        BoundViewport_->hide();
+        Render_->hide();
+        Viewport_->show();
         Q_EMIT PreviewStarting();
     });
     auto* scroll = new QScrollArea(split);
@@ -628,8 +634,19 @@ bool WorldWorkspace::ImportScene(const QString& source)
 }
 bool WorldWorkspace::StartSceneImport(const QString& source, bool isPreviewed)
 {
-    if (!Document_.Loaded() || Pending_ || SceneBusy())
+    if (Document_.Loaded() == false)
     {
+        Changed(QStringLiteral("Create or open a World before importing a scene."));
+        return false;
+    }
+    if (Pending_ == true)
+    {
+        Changed(QStringLiteral("Apply or reset the inspector edits before importing a scene."));
+        return false;
+    }
+    if (SceneBusy() == true)
+    {
+        Changed(QStringLiteral("A scene operation is still running; wait for it or cancel it before importing."));
         return false;
     }
     auto level = Document_.SceneLevel();
@@ -655,6 +672,8 @@ bool WorldWorkspace::StartSceneImport(const QString& source, bool isPreviewed)
     if (isStarted == false)
     {
         Importing_ = false;
+        const QString status = Scene_->StatusText();
+        Changed(status.isEmpty() == false ? status : QStringLiteral("Could not start the scene import."));
         return false;
     }
     Changed(QStringLiteral("Importing scene assets into World…"));
@@ -662,14 +681,26 @@ bool WorldWorkspace::StartSceneImport(const QString& source, bool isPreviewed)
 }
 bool WorldWorkspace::PreviewImportScene(const QString& source)
 {
-    if (Document_.Loaded() == false || Pending_ == true || SceneBusy() == true)
+    if (Document_.Loaded() == false)
     {
+        Changed(QStringLiteral("Create or open a World before importing a scene."));
+        return false;
+    }
+    if (Pending_ == true)
+    {
+        Changed(QStringLiteral("Apply or reset the inspector edits before importing a scene."));
+        return false;
+    }
+    if (SceneBusy() == true)
+    {
+        Changed(QStringLiteral("A scene operation is still running; wait for it or cancel it before importing."));
         return false;
     }
     PreviewedSource_.clear();
     ShowImportPreview(false);
     if (Scene_->PreviewImport(source) == false)
     {
+        Changed(Scene_->StatusText());
         return false;
     }
     PreviewedSource_ = source;
@@ -681,6 +712,7 @@ bool WorldWorkspace::ConfirmImportPreview()
     const QString source = PreviewedSource_;
     if (source.isEmpty() == true || Scene_->ImportPreview().isEmpty() == true)
     {
+        Changed(QStringLiteral("The import preview is no longer available; choose Import scene… again."));
         return false;
     }
     PreviewedSource_.clear();
@@ -762,6 +794,7 @@ void WorldWorkspace::SceneCompleted(bool accepted)
     if (!accepted)
     {
         SceneError_ = Scene_->StatusText();
+        Render();
         Changed(SceneError_);
         if (SavePending_)
         {

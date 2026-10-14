@@ -166,6 +166,14 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
             Rollback(error);
         }
     });
+    connect(&Preview_, &RenderPreview::Stopped, this, [this]() {
+        // A viewport that stops before its first frame (no GPU sharing, hidden or
+        // failed surface) must not leave the operation waiting forever.
+        if (AwaitingViewport_ == true)
+        {
+            Rollback(QStringLiteral("The viewport stopped before rendering the candidate scene."));
+        }
+    });
     connect(&Preview_, &RenderPreview::FrameReady, this, [this]() {
         if (PublishingCatalog_)
         {
