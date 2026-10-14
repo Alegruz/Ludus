@@ -26,7 +26,9 @@ def main():
     cli = str(Path(args.cli).resolve())
     def run_cli(*arguments):
         result = subprocess.run([cli, '--json', 'render-graph', *map(str, arguments)], cwd=output,
-                                check=True, text=True, stdout=subprocess.PIPE)
+                                check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            raise RuntimeError(f"RG2 CLI failed ({result.returncode}): {result.stdout}\n{result.stderr}")
         return json.loads(result.stdout)
     source = output / 'sources'
     run_cli('new', source / 'graphs', '--output', 'depth')
