@@ -16,29 +16,64 @@ struct SceneTexture final
     uint32 Height = 0;               ///< Positive height, at most 4096 texels.
     foundation::Array<uint8> Pixels; ///< Exactly Width*Height*4 bytes; at most 16 MiB.
 };
-/// Frozen RGB metallic/roughness reflection and two-sided emission profile.
+/// Frozen RGB metallic/roughness reflection and authored emission profile.
 struct SceneMaterial final
 {
     uint32 Texture = ~uint32{0};          ///< Scene-local texture index; all ones means black untextured surface.
     bool Repeat = false;                  ///< Repeat UV addressing; false clamps at texture borders.
     float32 Metallic = 0;                 ///< Metallic fraction in [0,1].
     float32 Roughness = .5F;              ///< Perceptual roughness in [0.045,1], matching renderer admission.
-    foundation::math::Vector3 Emission{}; ///< Scene-linear RGB emitted radiance, each channel in [0,10000].
+    foundation::math::Vector3 Emission{}; ///< Linear RGB nits in v3; legacy scene-linear emission otherwise.
+    bool IsEmissionTwoSided = true;       ///< Legacy v1/v2 defaults to two-sided; v3 uses its flags.
+    bool HasEmissionPower = false;        ///< Resolve EmissionPower independently per placed Shape.
+    uint64 AreaSourceId =
+        0; ///< Stable emitter group ID; derived from material order in legacy bundles; zero for nonemitters.
+    float32 EmissionPower = 0; ///< Total lumens after scale; zero without HasEmissionPower.
 };
 /// Owned immutable CPU mesh arrays. Renderer installation copies these attributes.
 struct SceneMesh final
 {
-    foundation::Array<foundation::math::Vector3> Positions; ///< Finite mesh-local positions.
-    foundation::Array<foundation::math::Vector3> Normals;   ///< Finite nonzero authored shading normals.
-    foundation::Array<foundation::math::Vector2> Texcoords; ///< Finite mip-zero texture coordinates.
-    foundation::Array<uint32> Indices;                      ///< Triangle list, bounded by Positions count.
+    foundation::Array<foundation::math::Vector3> Positions;     ///< Finite mesh-local positions.
+    foundation::Array<foundation::math::Vector3> Normals;       ///< Finite nonzero authored shading normals.
+    foundation::Array<foundation::math::Vector2> Texcoords;     ///< Finite mip-zero texture coordinates.
+    foundation::Array<foundation::math::Vector2> BakeTexcoords; ///< V3 normalized independent bake UVs; empty in v1/v2.
+    foundation::Array<uint32> Indices;                          ///< Triangle list, bounded by Positions count.
 };
 /// Transient resolved binding; persist resource IDs in the level, never these indices.
 struct SceneObject final
 {
     uint32 Mesh = 0;                     ///< Index into SceneDefinition::Meshes.
     uint32 Material = 0;                 ///< Index into SceneDefinition::Materials.
+    uint64 SourceId = 0;                 ///< Stable nonzero instance ID; derived from object order in legacy bundles.
     foundation::math::Affine3 Transform; ///< Finite nonsingular mesh-local to world transform.
+};
+/// Versioned authored analytic light kind, independent of renderer GPU types.
+enum class SceneLightKind : uint8
+{
+    Directional = 0, ///< IntensityRgb is illuminance in lux.
+    Point = 1,       ///< IntensityRgb is luminous intensity in candela.
+    Spot = 2,        ///< Candela with cosine cone attenuation.
+};
+/// CPU-owned authored light in the fixed Rec.709 photometric proxy.
+struct SceneLight final
+{
+    uint64 SourceId = 0;                         ///< Stable nonzero identity unique in Lights.
+    SceneLightKind Kind = SceneLightKind::Point; ///< Selects intensity units and attenuation.
+    bool IsEnabled = true;                       ///< Disabled source keeps authoring values without transporting light.
+    foundation::math::Vector3 IntensityRgb{};    ///< Nonnegative finite lux or candela, up to 1e6 per channel.
+    foundation::math::Vector3 PositionWorld{};   ///< Metres.
+    foundation::math::Vector3 DirectionWorld{0, -1, 0}; ///< Nonzero outgoing direction; not necessarily normalized.
+    float32 Range = 100;                                ///< Positive transport/shadow range in metres, at most 1e6.
+    float32 InnerCos = .9F;                             ///< Full-intensity cone cosine in [-1,1].
+    float32 OuterCos = .8F;                             ///< Zero-intensity cone cosine in [-1,InnerCos].
+};
+/// Retained linear HDR source; workers decode without Qt, GPU calls or tone mapping.
+struct SceneEnvironment final
+{
+    uint32 Width = 0;                ///< Equirectangular width; zero for constant radiance.
+    uint32 Height = 0;               ///< Equirectangular height; zero for constant radiance.
+    foundation::math::Vector3 Rgb{}; ///< RGB scale of Pixels, or constant nits when dimensions are zero.
+    foundation::Array<foundation::math::Vector3> Pixels; ///< Width*Height finite nonnegative RGB nits, north-to-south.
 };
 /// Fully resident initial reference profile. Independent of Qt, source formats and GPU handles.
 /// Decode on a worker, then publish immutable storage on the Manager control owner.
@@ -49,14 +84,16 @@ struct SceneDefinition final
     foundation::Array<SceneMaterial> Materials; ///< At most eight distinct materials.
     foundation::Array<SceneMesh> Meshes;        ///< At most six distinct meshes, 500000 combined vertices.
     foundation::Array<SceneObject> Objects;     ///< At most 128 independent instances.
+    foundation::Array<SceneLight> Lights;       ///< At most 128 analytic sources; empty for legacy bundles.
+    SceneEnvironment Environment;               ///< Authored environment; black for legacy bundles.
     foundation::math::Vector3 Eye;              ///< Authored perspective pinhole in world units.
     foundation::math::Vector3 Target;           ///< Finite look-at target distinct from Eye.
     foundation::math::Vector3 Up;               ///< Camera up direction not parallel to its forward direction.
     float32 VerticalFov = 1;                    ///< Perspective vertical field of view in radians, in (0,pi).
-    /// Decode LUSCN01 versions one/two little-endian interchange, at most 64 MiB. No file I/O or source import.
+    /// Decode LUSCN01 versions one/two/three little-endian interchange, at most 64 MiB. No file I/O or source import.
     /// Failure preserves output; allocation failures return OutOfMemory. The caller owns all
     /// resulting arrays and must keep them immutable while any adapter/lease references them.
-    [[nodiscard]] static Status Decode(const uint8* bytes, usize count, SceneDefinition& output) noexcept;
+    [[nodiscard]] static Status Decode(const uint8* bytesOrNull, usize count, SceneDefinition& outScene) noexcept;
     /// Known owned array bytes, excluding allocator metadata and driver allocations.
     [[nodiscard]] uint64 Bytes() const noexcept;
 };

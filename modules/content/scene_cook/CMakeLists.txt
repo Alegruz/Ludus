@@ -47,7 +47,7 @@ if(LUDUS_BUILD_TESTS)
     target_compile_definitions(ludus_scene_assets_tests PRIVATE
         LUDUS_SCENE_GOLDENS_DIR="${PROJECT_SOURCE_DIR}/tests/goldens/scene_pipeline")
     target_link_libraries(ludus_scene_assets_tests PRIVATE
-        Ludus::SceneCook Ludus::FoundationParsingJson Ludus::FoundationStrings Catch2::Catch2WithMain)
+        Ludus::SceneCook Ludus::Resources Ludus::FoundationParsingJson Ludus::FoundationStrings Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_scene_assets_tests)
     ludus_enable_test_exceptions(ludus_scene_assets_tests)
     add_test(NAME ludus_scene_assets_tests COMMAND ludus_scene_assets_tests)
