@@ -2,6 +2,7 @@
 
 #include "internal/import_report.h"
 #include "internal/level_workspace.h"
+#include "internal/preview_viewport.h"
 #include "internal/world_workspace.h"
 
 #include <QDir>
@@ -192,6 +193,27 @@ TEST_CASE("World shows the import preview, imports on confirmation and shows the
     QWidget* viewport = workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport"));
     REQUIRE(viewport != nullptr);
     CHECK(viewport->isHidden() == false);
+    if (PreviewViewport::GetPresentation() == ViewportPresentation::OffscreenReadback)
+    {
+        // The engine-owned device renders offscreen and the copied frame replaces the placeholder.
+        const auto getPresentedFrames = [viewport]() {
+            const PreviewViewport* presenter = dynamic_cast<const PreviewViewport*>(viewport);
+            return presenter != nullptr ? presenter->PresentedFrames() : 0;
+        };
+        REQUIRE(WaitUntil([&getPresentedFrames]() { return getPresentedFrames() > 0; }) == true);
+        const QWidget* canvas = viewport->findChild<QWidget*>(QStringLiteral("LudusOffscreenViewport"));
+        REQUIRE(canvas != nullptr);
+        CHECK(canvas->isHidden() == false);
+        return;
+    }
+    // Without any presentation path (offscreen Qt) the viewport explains itself instead of the placeholder.
+    bool hasExplanation = false;
+    for (const QLabel* label : viewport->findChildren<QLabel*>())
+    {
+        hasExplanation = hasExplanation == true || label->text().contains(QStringLiteral("Scene ready")) == true;
+        CHECK(label->text().contains(QStringLiteral("Import a reference scene")) == false);
+    }
+    CHECK(hasExplanation == true);
 }
 
 TEST_CASE("World import without an open World explains why nothing happened", "[editor][import][world]")
