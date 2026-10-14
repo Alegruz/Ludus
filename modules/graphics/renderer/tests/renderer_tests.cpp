@@ -2188,3 +2188,34 @@ TEST_CASE("All thirteen area proxies require complete cube coverage and atomic d
     REQUIRE(session.Renderer.Release(atlas) == rhi::RasterStatus::Ready);
     REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
 }
+
+TEST_CASE("Triangle bake texture admission requires canonical dimensions and preserves failed material output",
+          "[renderer][lighting]")
+{
+    constexpr uint32 WIDTH = 6;
+    constexpr uint32 HEIGHT = 4;
+    constexpr usize PIXEL_BYTES = usize(WIDTH) * HEIGHT * 4;
+    Session session;
+    LitFixture fixture;
+    fixture.Enable(session);
+    const rr::MaterialProgram program = fixture.Prewarm(session);
+    StaticArray<uint8, PIXEL_BYTES> pixels{};
+    rhi::TextureHandle texture;
+    REQUIRE(rhi::CreateTexture(session.Device,
+                               {WIDTH, HEIGHT, rhi::RasterFormat::Rgba8Unorm},
+                               {{pixels.GetData(), pixels.GetSize()}, usize(WIDTH) * 4},
+                               texture) == rhi::RasterStatus::Ready);
+    rr::LitMaterialDescription description;
+    description.Bake.Texture = texture;
+    description.Bake.SourceId = 1;
+    description.Bake.SceneRevision = 1;
+    description.Bake.DependencyRevision = 1;
+    description.Bake.AreTriangleChartsEnabled = true;
+    rr::MaterialVersion output;
+    rr::LightSelection report;
+    report.Dropped = 99;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, description, output, report) ==
+            rhi::RasterStatus::InvalidDescription);
+    REQUIRE(report.Dropped == 99);
+    REQUIRE(rhi::Destroy(session.Device, texture) == rhi::RasterStatus::Ready);
+}

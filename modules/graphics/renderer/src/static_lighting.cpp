@@ -419,6 +419,11 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
         {
             const math::Vector3 mean =
                 state.Irradiance[chart.FirstTriangle + i].Value / float32(state.Description.SamplesPerTriangle);
+            if (internal::ReferenceColor(mean, 10000) == false)
+            {
+                state.Progress = math::IsFinite(mean) == true ? Status::CapacityExceeded : Status::Failed;
+                return state.Progress;
+            }
             chart.Scale = {math::Max(chart.Scale.X, mean.X),
                            math::Max(chart.Scale.Y, mean.Y),
                            math::Max(chart.Scale.Z, mean.Z)};

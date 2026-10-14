@@ -27,7 +27,7 @@ struct StaticLightingSurfaceDescription final
     foundation::math::Vector4 UvTransform{1,
                                           1,
                                           0,
-                                          0};    ///< Base texture UV scale XY and offset ZW, finite and bounded to1e6.
+                                          0};    ///< Base texture UV scale XY and offset ZW, finite and bounded to 1e6.
     foundation::float32 Metallic = 0;            ///< Metallic fraction in [0,1].
     foundation::float32 Roughness = .5F;         ///< Perceptual roughness in [.045,1].
     foundation::math::Vector3 Emission{};        ///< Resolved linear RGB nits, each channel in [0,10000].

@@ -330,6 +330,7 @@ TEST_CASE("Cooked v3 rejects unknown contracts and invalid transport values atom
         REQUIRE(bytes.TryResize(original.GetSize()) == true);
         std::memcpy(bytes.GetData(), original.GetData(), original.GetSize());
         SetFixtureWord(bytes, mutation.Offset, mutation.Word);
+        CAPTURE(mutation.Offset, mutation.Word);
         REQUIRE(r::SceneDefinition::Decode(bytes.GetData(), bytes.GetSize(), scene) == r::Status::Failed);
         REQUIRE(scene.Materials[0].AreaSourceId == 41);
         REQUIRE(scene.Environment.Pixels[0].X == 16);

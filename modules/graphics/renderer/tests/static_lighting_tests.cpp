@@ -275,3 +275,22 @@ TEST_CASE("Static transport copies current per-object World material terms", "[r
     rr::StaticLightingBake invalid;
     REQUIRE(invalid.Initialize(scene, description) == rhi::RasterStatus::InvalidDescription);
 }
+
+TEST_CASE("Static chart encoding rejects excess irradiance without publishing partial data",
+          "[renderer][static-lighting]")
+{
+    resources::SceneDefinition scene = MakeBakeScene(false, false, false);
+    scene.Environment.Rgb = {10000, 10000, 10000};
+    rr::StaticLightingBake bake;
+    REQUIRE(bake.Initialize(scene, MakeBakeDescription()) == rhi::RasterStatus::Pending);
+    rhi::RasterStatus status = rhi::RasterStatus::Pending;
+    while (status == rhi::RasterStatus::Pending)
+    {
+        status = bake.Step(13);
+    }
+    REQUIRE(status == rhi::RasterStatus::CapacityExceeded);
+    rr::StaticLightingChart output;
+    output.SourceId = 999;
+    REQUIRE(bake.GetChart(0, output) == rhi::RasterStatus::CapacityExceeded);
+    REQUIRE(output.SourceId == 999);
+}

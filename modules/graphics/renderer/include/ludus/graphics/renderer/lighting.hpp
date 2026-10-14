@@ -204,8 +204,8 @@ struct BakedLighting final
     /// Bounds must leave a replicated gutter texel plus half a texel on every side (1e-6 UV rounding tolerance).
     ludus::foundation::math::Vector4 UvTransform{1, 1, 0, 0};
     /// True selects independent guttered triangle charts from SceneFormat helpers,
-    /// with identity UvTransform and no mipmaps. False retains the legacy subrectangle
-    /// transform admission. The producer must replicate each chart's gutter texels.
+    /// with power-of-two dimensions up to 4096, identity UvTransform and no mipmaps. False retains the legacy
+    /// subrectangle transform admission. The producer must replicate each chart's gutter texels.
     bool AreTriangleChartsEnabled = false;
     /// True declares static area direct diffuse in this chart; do not also submit
     /// raster area samples for its diffuse term. Analytic direct stays raster.

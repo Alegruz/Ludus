@@ -1,6 +1,7 @@
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/views.hpp>
 
+#include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/stable_sort.hpp>
@@ -3552,7 +3553,11 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
         if (bake.SourceId == 0 || bake.SceneRevision == 0 || bake.DependencyRevision == 0 ||
             texture.Format != rhi::RasterFormat::Rgba8Unorm || texture.MipLevels != 1 || texture.Attachment ||
             texture.Width < 4 || texture.Height < 4 ||
-            (bake.AreTriangleChartsEnabled == true && bake.UvTransform != math::Vector4{1, 1, 0, 0}) ||
+            (bake.AreTriangleChartsEnabled == true &&
+             (bake.UvTransform != math::Vector4{1, 1, 0, 0} ||
+              texture.Width > content::scene_format::MAX_BAKE_CHART_DIMENSION ||
+              texture.Height > content::scene_format::MAX_BAKE_CHART_DIMENSION ||
+              (texture.Width & (texture.Width - 1)) != 0 || (texture.Height & (texture.Height - 1)) != 0)) ||
             (bake.AreTriangleChartsEnabled == false &&
              (bake.UvTransform.X < texelX || bake.UvTransform.Y < texelY ||
               bake.UvTransform.Z + 1e-6F < 1.5F * texelX || bake.UvTransform.W + 1e-6F < 1.5F * texelY ||
