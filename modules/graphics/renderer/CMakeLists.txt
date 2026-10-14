@@ -1,7 +1,8 @@
-add_library(ludus_graphics_renderer STATIC src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp)
+add_library(ludus_graphics_renderer STATIC src/render_graph.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp)
 add_library(Ludus::GraphicsRenderer ALIAS ludus_graphics_renderer)
 set_target_properties(ludus_graphics_renderer PROPERTIES EXPORT_NAME GraphicsRenderer)
 target_sources(ludus_graphics_renderer PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include FILES
+    include/ludus/graphics/renderer/render_graph.hpp
     include/ludus/graphics/renderer/renderer.hpp
     include/ludus/graphics/renderer/views.hpp
     include/ludus/graphics/renderer/overlays.hpp
@@ -11,7 +12,7 @@ target_sources(ludus_graphics_renderer PUBLIC FILE_SET public_headers TYPE HEADE
     include/ludus/graphics/renderer/reference.hpp
     include/ludus/graphics/renderer/gpu_preview.hpp
     include/ludus/graphics/renderer/viewport.hpp)
-target_link_libraries(ludus_graphics_renderer PUBLIC Ludus::FoundationBase Ludus::FoundationMath Ludus::GraphicsRhi
+target_link_libraries(ludus_graphics_renderer PUBLIC Ludus::FoundationBase Ludus::FoundationMath Ludus::GraphicsRhi Ludus::RenderGraphFormat
     PRIVATE Ludus::FoundationContainers Ludus::FoundationHash)
 target_compile_options(ludus_graphics_renderer PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
 ludus_apply_project_defaults(ludus_graphics_renderer)
@@ -22,10 +23,10 @@ install(FILES shaders/recipes.json shaders/renderer_gpu_preview_layout.h shaders
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     # Exercise the production renderer/RHI registry with the existing deterministic backend.
-    add_executable(ludus_renderer_tests tests/renderer_tests.cpp tests/reference_backend.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp tests/views_tests.cpp
+    add_executable(ludus_renderer_tests tests/renderer_tests.cpp tests/reference_backend.cpp src/render_graph.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp tests/views_tests.cpp tests/render_graph_tests.cpp
         ../rhi/src/rhi.cpp ../rhi/src/device.cpp ../rhi/src/profile.cpp ../rhi/src/raster.cpp ../rhi/tests/reference_raster.cpp ../rhi/src/ray_unsupported.cpp)
     target_include_directories(ludus_renderer_tests PRIVATE include ../rhi/include ../rhi/src ../rhi/tests "${PROJECT_SOURCE_DIR}/tests/sdk_consumer")
-    target_link_libraries(ludus_renderer_tests PRIVATE Ludus::Platform Ludus::FoundationContainers Ludus::FoundationMath Ludus::Resources Ludus::FoundationHash Catch2::Catch2WithMain)
+    target_link_libraries(ludus_renderer_tests PRIVATE Ludus::RenderGraphFormat Ludus::Platform Ludus::FoundationContainers Ludus::FoundationMath Ludus::Resources Ludus::FoundationHash Catch2::Catch2WithMain)
     target_compile_options(ludus_renderer_tests PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
     ludus_apply_project_defaults(ludus_renderer_tests)
     ludus_enable_test_exceptions(ludus_renderer_tests)
@@ -33,7 +34,7 @@ if(LUDUS_BUILD_TESTS)
     set_tests_properties(ludus_renderer_tests PROPERTIES LABELS "unit;renderer;build-contract")
 endif()
 if(TARGET ludus_rhi_render_tests)
-    add_executable(ludus_renderer_render_tests tests/render_tests.cpp tests/gpu_preview_tests.cpp tests/authored_tests.cpp)
+    add_executable(ludus_renderer_render_tests tests/render_tests.cpp tests/gpu_preview_tests.cpp tests/authored_tests.cpp tests/render_graph_render_tests.cpp)
     target_include_directories(ludus_renderer_render_tests PRIVATE ../rhi/src "${PROJECT_SOURCE_DIR}/tests/sdk_consumer")
     target_link_libraries(ludus_renderer_render_tests PRIVATE Ludus::GraphicsText Ludus::FoundationTime Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_renderer_render_tests)
@@ -72,4 +73,21 @@ endif()
 
 if(TARGET ludus_renderer_render_tests)
     ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_authored renderer_authored_shadow renderer_clustered_authored renderer_clustered_authored_shadow)
+endif()
+
+if(TARGET ludus_renderer_render_tests)
+    set(RG2_TEST_PROFILES "[\"spirv\", \"wgsl\"]")
+    if(APPLE)
+        set(RG2_TEST_PROFILES "[\"metal\", \"wgsl\"]")
+    endif()
+    foreach(kind surface offscreen depth)
+        set(input "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/rg2/${kind}")
+        set(staged "${CMAKE_CURRENT_BINARY_DIR}/rg2-inputs/${kind}")
+        file(COPY "${input}/" DESTINATION "${staged}" PATTERN "*.in" EXCLUDE)
+        configure_file("${input}/main.lushader.json.in" "${staged}/main.lushader.json" @ONLY)
+        ludus_compile_render_graph(TARGET ludus_renderer_render_tests NAME rg2_${kind}
+            MANIFEST "${staged}/main.lushader.json")
+    endforeach()
+    ludus_compile_shader(TARGET ludus_renderer_render_tests NAME rg2_depth_display RASTER
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/rg2/depth_display.slang" VERTEX VSMain FRAGMENT PSMain)
 endif()

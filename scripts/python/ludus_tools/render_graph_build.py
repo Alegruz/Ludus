@@ -290,6 +290,8 @@ def shader_source(program, schemas):
         lines += ['};']
     for binding in program['bindings']:
         lines.append(f'[[vk::binding({binding["slot"]}, 0)]] ConstantBuffer<{binding["schema"]}> {binding["id"]};')
+    if program['stage'] == 'fragment' and program['output'] == 'Depth':
+        lines.append('void ' + program['function'] + '(' + program['input'] + ' value);')
     lines += ['#include "' + program['source'] + '"', '[shader("' + program['stage'] + '")]']
     if program['stage'] == 'vertex':
         result, suffix = program['output'], ''
@@ -344,6 +346,7 @@ def cpp_header(schemas, compiled):
     for (pid, target), result in compiled.items():
         for layout in result['layouts']:
             label = pid + '_' + target + '_' + layout['binding']
+            require(label not in layouts, 'Schema', label, 'generated packer name collision; rename the program or binding')
             layouts[label] = layout
     for label, layout in sorted(layouts.items()):
         lines += ['/// Pack native-endian target uniform bytes. Caller owns output; any thread.',
@@ -708,7 +711,7 @@ def verify_package(path):
     return document(read(path / 'package.json', 2 * 1024 * 1024), 'package descriptor')
 
 
-def new_build_sources(path, *, profiles=('metal',)):
+def new_build_sources(path, *, profiles=('metal',), root=None, renderer_static=False):
     """Save an explicit build manifest and shader functions next to an RG0 root.
 
     Refuses any existing destination. This is a source template, not GPU execution
@@ -717,10 +720,13 @@ def new_build_sources(path, *, profiles=('metal',)):
     shader structs. Returns the sibling .lushader.json path.
     """
     path = Path(path).resolve()
-    graph.compile_graph(path)
+    source_root = Path(root).resolve() if root is not None else path.parent
+    graph.compile_graph(path, root=source_root)
+    require(path.is_relative_to(source_root), 'Source', str(path), 'graph is outside its package')
     require(path.name.endswith('.lurender.json'), 'Source', str(path), 'expected .lurender.json root')
     manifest = path.with_name(path.name.removesuffix('.lurender.json') + '.lushader.json')
     source_dir = path.name.removesuffix('.lurender.json') + '_shaders'
+    source_label = (path.parent / source_dir).relative_to(source_root).as_posix()
     field = lambda fid, ty: {'id': fid, 'type': ty}
     vertex = {'id': 'RendererStatic', 'role': 'Vertex', 'fields': [
         {**field('position', 'Float3'), 'semantic': 'POSITION', 'location': 0}]}
@@ -728,11 +734,11 @@ def new_build_sources(path, *, profiles=('metal',)):
         {**field('position', 'Float4'), 'semantic': 'SV_Position', 'location': 0}]}
     material = {'id': 'Material', 'role': 'Uniform', 'fields': [field('tint', 'Float3'), field('gain', 'Float32')]}
     programs = [
-        {'id': 'Geometry', 'stage': 'vertex', 'source': source_dir + '/geometry.slang', 'function': 'VSMain',
+        {'id': 'Geometry', 'stage': 'vertex', 'source': source_label + '/geometry.slang', 'function': 'VSMain',
          'input': 'RendererStatic', 'output': 'RasterVarying', 'bindings': []},
-        {'id': 'Color', 'stage': 'fragment', 'source': source_dir + '/color.slang', 'function': 'PSMain',
+        {'id': 'Color', 'stage': 'fragment', 'source': source_label + '/color.slang', 'function': 'PSMain',
          'input': 'RasterVarying', 'output': 'Color', 'bindings': [{'id': 'material', 'schema': 'Material', 'slot': 0}]},
-        {'id': 'Depth', 'stage': 'fragment', 'source': source_dir + '/depth.slang', 'function': 'DepthMain',
+        {'id': 'Depth', 'stage': 'fragment', 'source': source_label + '/depth.slang', 'function': 'DepthMain',
          'input': 'RasterVarying', 'output': 'Depth', 'bindings': []}]
     techniques = []
     for mode in graph.MODES:
@@ -749,6 +755,25 @@ def new_build_sources(path, *, profiles=('metal',)):
     sources = {'geometry.slang': 'RasterVarying VSMain(RendererStatic value)\n{\n    RasterVarying result;\n    result.position = float4(value.position, 1);\n    return result;\n}\n',
                'color.slang': 'float4 PSMain(RasterVarying value)\n{\n    return float4(material.tint * material.gain, 1);\n}\n',
                'depth.slang': 'void DepthMain(RasterVarying value)\n{\n    // Authored opaque coverage: no alpha discard or custom depth.\n}\n'}
+    if renderer_static:
+        fields = [{'id': 'PositionMesh', 'type': 'Float3', 'semantic': 'POSITION', 'location': 0}]
+        fields += [{'id': 'MeshToClipRow' + str(i), 'type': 'Float4', 'semantic': 'TEXCOORD' + str(i), 'location': i + 1} for i in range(4)]
+        fields.append({'id': 'Color', 'type': 'Float4', 'semantic': 'COLOR0', 'location': 5})
+        vertex['fields'] = fields
+        varying['fields'] = [{'id': 'PositionClip', 'type': 'Float4', 'semantic': 'SV_Position', 'location': 0},
+                             {'id': 'Color', 'type': 'Float4', 'semantic': 'COLOR0', 'location': 0}]
+        value['schemas'] = [vertex, varying]
+        value['programs'][1]['bindings'] = []
+        value['id'] = 'RendererStaticBuild'
+        for technique in value['techniques']:
+            technique['recipes'][0]['cull'] = 'None'
+        sources['geometry.slang'] = ('RasterVarying VSMain(RendererStatic value)\n{\n'
+            '    RasterVarying result;\n    float4 positionMesh = float4(value.PositionMesh, 1);\n'
+            '    result.PositionClip = float4(dot(value.MeshToClipRow0, positionMesh), dot(value.MeshToClipRow1, positionMesh), '
+            'dot(value.MeshToClipRow2, positionMesh), dot(value.MeshToClipRow3, positionMesh));\n'
+            '    result.Color = value.Color;\n    return result;\n}\n')
+        sources['color.slang'] = 'float4 PSMain(RasterVarying value)\n{\n    return value.Color;\n}\n'
+        validate_manifest(value)
     require(not manifest.exists() and not (path.parent / source_dir).exists(), 'Source', str(manifest), 'build sources already exist')
     # Keep creation transactional: publish the owning manifest last.
     with tempfile.TemporaryDirectory(prefix='.rg1-source-', dir=path.parent) as temp:

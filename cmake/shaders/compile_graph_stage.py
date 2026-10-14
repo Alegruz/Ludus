@@ -36,6 +36,17 @@ def varying_interface(point, stage):
     return sorted(result, key=lambda x: x['location'])
 
 
+def verify_glsl_links(reflected, emitted, stage):
+    """Allow optimized-away fragment inputs, preserving typed vertex outputs."""
+    provided = {value['location']: value['type'] for value in reflected}
+    consumed = {value['location']: value['type'] for value in emitted}
+    if (len(provided) != len(reflected) or len(consumed) != len(emitted)
+            or any(provided.get(location) != kind for location, kind in consumed.items())
+            or (stage == 'vertex' and provided != consumed)):
+        raise RuntimeError('RG1 Slang and emitted GLSL stage links differ')
+    return emitted
+
+
 def metal_layouts(code, interface, document):
     """Independently derive emitted scalar/vector Metal uniform struct layouts."""
     for entry_value in interface['entries']:
@@ -134,8 +145,7 @@ def compile_graph_stage(args, lock):
         code, varyings = glsl_varyings(artifact.read_text(), cross, stage)
         interface['blocks'], interface['textures'] = glsl_interface(code, interface, cross)
         cross_links = [{'location': loc, 'type': {'float': 'Float32', 'vec2': 'Float2', 'vec3': 'Float3', 'vec4': 'Float4'}[ty]} for loc, ty in varyings]
-        if links != cross_links:
-            raise RuntimeError('RG1 Slang and emitted GLSL stage links differ')
+        links = verify_glsl_links(links, cross_links, stage)
         artifact.write_text(code)
         emitted = 'main'
     # Result contains no machine-specific commands or temporary paths. Raw
