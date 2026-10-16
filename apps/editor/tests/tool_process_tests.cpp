@@ -7,6 +7,8 @@
 #include "internal/play_process.h"
 #include "internal/tool_process.h"
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
