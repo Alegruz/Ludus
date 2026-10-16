@@ -1,8 +1,10 @@
 #include "internal/recorder.hpp"
 
-#include <ludus/foundation/profiling/clock.hpp>
+#include <ludus/foundation/base/assert.hpp>
+#include <ludus/foundation/base/checked_integer.hpp>
+#include <ludus/foundation/memory/allocation_domain.hpp>
 
-#include <cstdlib>
+#include <new>
 
 namespace ludus::foundation::profiling::internal
 {
@@ -15,18 +17,40 @@ constinit std::atomic<bool> gCaptureActive{false};
 // The final design shows a dedicated collector thread draining producers
 // continuously. For Phase 1 (explicit capture sessions, not the continuous ring
 // / hitch trigger of Phase 3) a background thread buys nothing and adds join /
-// lifetime surface. So the MVP drains SYNCHRONOUSLY: producers still hand full
-// chunks to a lock-free stack during capture, and EndCapture() (or the exporter)
-// drains that stack on the calling thread. The producer hot path is identical to
-// the final design; only the (off-hot-path) drain is simplified. The dedicated
-// collector thread lands with Phase 3, where continuous rolling capture needs
-// it. This preserves every hot-path property the gates measure.
+// lifetime surface. So the MVP drains SYNCHRONOUSLY: producers hand full chunks
+// to the recorder's full list, and EndCapture() (or the exporter) drains that
+// list on the calling thread. The dedicated collector thread lands with Phase 3,
+// where continuous rolling capture needs it.
+//
+// Lifetime protocol: see internal/recorder.hpp. The slab comes from the system
+// AllocationDomain with TraceChunk's 64-byte alignment and is released through
+// the same domain with the same size and alignment. The previous calloc/free
+// pair did not portably guarantee that alignment for placement construction.
 // -----------------------------------------------------------------------------
+
+// Never destroyed: TLS destructors of threads that outlive static destruction
+// still detach safely. Constant-initialized, so there is no initialization-order
+// dependency on first use.
+union ImmortalTraceRecorder
+{
+    constexpr ImmortalTraceRecorder() noexcept : Recorder() {}
+    ImmortalTraceRecorder(const ImmortalTraceRecorder&) = delete;
+    ImmortalTraceRecorder& operator=(const ImmortalTraceRecorder&) = delete;
+    ImmortalTraceRecorder(ImmortalTraceRecorder&&) = delete;
+    ImmortalTraceRecorder& operator=(ImmortalTraceRecorder&&) = delete;
+    ~ImmortalTraceRecorder() noexcept {}
+
+    TraceRecorder Recorder;
+};
+
+namespace
+{
+constinit ImmortalTraceRecorder gTraceRecorder;
+} // namespace
 
 TraceRecorder& TraceRecorder::Instance() noexcept
 {
-    static TraceRecorder instance;
-    return instance;
+    return gTraceRecorder.Recorder;
 }
 
 ThreadRecorder& CurrentThreadRecorder() noexcept
@@ -37,58 +61,171 @@ ThreadRecorder& CurrentThreadRecorder() noexcept
 
 ThreadRecorder::~ThreadRecorder() noexcept
 {
-    // Thread destruction: flush any partial chunk so its events are not lost
+    // Thread destruction: publish any partial chunk so its events are not lost
     // (§21). The recorder owns the chunk memory, so we only publish, never free.
-    // A chunk from a stale generation points into freed storage — drop it.
-    if (Current != nullptr)
-    {
-        if (Generation == TraceRecorder::Instance().Generation())
-        {
-            TraceRecorder::Instance().RecycleOrPublishOnThreadExit(Current);
-        }
-        Current = nullptr;
-    }
+    TraceRecorder::Instance().DetachThread(*this);
 }
 
-} // namespace ludus::foundation::profiling::internal
+// ---- Chunk lists (mMutex held) ----------------------------------------------
 
-// The thread-exit helper is declared out-of-line to keep the header lean.
-namespace ludus::foundation::profiling::internal
+void TraceRecorder::pushFree(TraceChunk* chunk) noexcept
 {
+    chunk->Count = 0;
+    chunk->PoolNextOrNull = mFreeHeadOrNull;
+    mFreeHeadOrNull = chunk;
+    mHasFreeChunks.store(true, std::memory_order_relaxed);
+}
 
-TraceChunk* TraceRecorder::AcquireChunk(uint32 threadId) noexcept
+void TraceRecorder::pushFull(TraceChunk* chunk) noexcept
 {
-    TraceChunk* chunk = mFreeList.Pop();
+    chunk->PoolNextOrNull = mFullHeadOrNull;
+    mFullHeadOrNull = chunk;
+}
+
+TraceChunk* TraceRecorder::popFree() noexcept
+{
+    TraceChunk* chunk = mFreeHeadOrNull;
     if (chunk == nullptr)
     {
-        return nullptr; // pool exhausted -> caller drops + counts
+        return nullptr;
     }
-    chunk->ThreadId = threadId;
-    chunk->Count = 0;
+    mFreeHeadOrNull = chunk->PoolNextOrNull;
+    chunk->PoolNextOrNull = nullptr;
+    if (mFreeHeadOrNull == nullptr)
+    {
+        mHasFreeChunks.store(false, std::memory_order_relaxed);
+    }
     return chunk;
 }
 
-void TraceRecorder::PublishChunk(TraceChunk* chunk) noexcept
+void TraceRecorder::returnHeldChunk(ThreadRecorder& inoutRecorder) noexcept
 {
-    mFullChunks.Push(chunk);
-}
-
-void TraceRecorder::RecycleOrPublishOnThreadExit(TraceChunk* chunk) noexcept
-{
-    // If it holds events, publish for draining; otherwise return it to the pool.
+    TraceChunk* chunk = inoutRecorder.CurrentOrNull;
+    if (chunk == nullptr)
+    {
+        return;
+    }
+    inoutRecorder.CurrentOrNull = nullptr;
     if (chunk->Count > 0)
     {
-        mFullChunks.Push(chunk);
+        pushFull(chunk);
     }
     else
     {
-        mFreeList.Push(chunk);
+        pushFree(chunk);
     }
 }
 
+void TraceRecorder::linkProducer(ThreadRecorder& inoutRecorder) noexcept
+{
+    if (inoutRecorder.IsLinked == true)
+    {
+        return;
+    }
+    inoutRecorder.PreviousOrNull = nullptr;
+    inoutRecorder.NextOrNull = mProducersOrNull;
+    if (mProducersOrNull != nullptr)
+    {
+        mProducersOrNull->PreviousOrNull = &inoutRecorder;
+    }
+    mProducersOrNull = &inoutRecorder;
+    inoutRecorder.IsLinked = true;
+}
+
+void TraceRecorder::unlinkProducer(ThreadRecorder& inoutRecorder) noexcept
+{
+    if (inoutRecorder.IsLinked == false)
+    {
+        return;
+    }
+    if (inoutRecorder.PreviousOrNull != nullptr)
+    {
+        inoutRecorder.PreviousOrNull->NextOrNull = inoutRecorder.NextOrNull;
+    }
+    else
+    {
+        mProducersOrNull = inoutRecorder.NextOrNull;
+    }
+    if (inoutRecorder.NextOrNull != nullptr)
+    {
+        inoutRecorder.NextOrNull->PreviousOrNull = inoutRecorder.PreviousOrNull;
+    }
+    inoutRecorder.NextOrNull = nullptr;
+    inoutRecorder.PreviousOrNull = nullptr;
+    inoutRecorder.IsLinked = false;
+}
+
+bool TraceRecorder::isAnyProducerEmitting() const noexcept
+{
+    for (const ThreadRecorder* producer = mProducersOrNull; producer != nullptr; producer = producer->NextOrNull)
+    {
+        // Sequentially consistent: pairs with Emit()'s announce-then-test.
+        if (producer->IsEmitting.load(std::memory_order_seq_cst) == true)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void TraceRecorder::harvestProducerChunks() noexcept
+{
+    for (ThreadRecorder* producer = mProducersOrNull; producer != nullptr; producer = producer->NextOrNull)
+    {
+        returnHeldChunk(*producer);
+    }
+}
+
+// ---- Slab (mMutex held) -----------------------------------------------------
+
+bool TraceRecorder::reservePool(usize chunkCount) noexcept
+{
+    usize bytes = 0;
+    if (TryMultiply(chunkCount, sizeof(TraceChunk), bytes) == false)
+    {
+        return false;
+    }
+    void* storage = GetSystemAllocationDomain().TryAllocate(bytes, alignof(TraceChunk));
+    if (storage == nullptr)
+    {
+        return false; // OOM: leave capture disabled, engine runs normally.
+    }
+    mPoolStorageOrNull = static_cast<TraceChunk*>(storage);
+    mPoolCapacity = chunkCount;
+    mPoolBytes = bytes;
+    for (usize i = 0; i < chunkCount; ++i)
+    {
+        // Value-initialization zeroes each chunk's events, as the former calloc did.
+        (void)new (&mPoolStorageOrNull[i]) TraceChunk();
+    }
+    return true;
+}
+
+void TraceRecorder::releasePool() noexcept
+{
+    mFreeHeadOrNull = nullptr;
+    mFullHeadOrNull = nullptr;
+    mHasFreeChunks.store(false, std::memory_order_relaxed);
+    if (mPoolStorageOrNull == nullptr)
+    {
+        return;
+    }
+    for (usize i = 0; i < mPoolCapacity; ++i)
+    {
+        mPoolStorageOrNull[i].~TraceChunk();
+    }
+    GetSystemAllocationDomain().Free(mPoolStorageOrNull, mPoolBytes, alignof(TraceChunk));
+    mPoolStorageOrNull = nullptr;
+    mPoolCapacity = 0;
+    mPoolBytes = 0;
+}
+
+// ---- Capture lifecycle ------------------------------------------------------
+
 bool TraceRecorder::BeginCapture(usize maxChunks) noexcept
 {
-    if (gCaptureActive.load(std::memory_order_acquire))
+    const std::lock_guard<std::mutex> lock(mMutex);
+    if (gCaptureActive.load(std::memory_order_relaxed) == true)
     {
         return false;
     }
@@ -97,88 +234,96 @@ bool TraceRecorder::BeginCapture(usize maxChunks) noexcept
         maxChunks = 1;
     }
 
-    // Pre-reserve the entire pool up front so nothing allocates on the hot path
-    // (§21). One contiguous array; chunks are threaded onto the free list.
-    if (mPoolStorage == nullptr || mPoolCapacity != maxChunks)
+    // No producer holds a chunk here: chunks are acquired only while armed, and
+    // the preceding EndCapture() harvested every held chunk.
+    for (const ThreadRecorder* producer = mProducersOrNull; producer != nullptr; producer = producer->NextOrNull)
     {
-        Reset();
-        // Overflow-safe: TraceChunk is ~96 KiB; maxChunks is a small bounded
-        // count. Use calloc so the (large) Events arrays start zeroed.
-        void* raw = std::calloc(maxChunks, sizeof(TraceChunk));
-        if (raw == nullptr)
+        LUDUS_ASSERT(producer->CurrentOrNull == nullptr, "trace producer kept a chunk across EndCapture");
+    }
+
+    // Pre-reserve the entire pool up front so nothing allocates on the hot path
+    // (§21). One contiguous slab; every chunk is threaded onto the free list.
+    if (mPoolStorageOrNull == nullptr || mPoolCapacity != maxChunks)
+    {
+        releasePool();
+        if (reservePool(maxChunks) == false)
         {
-            return false; // OOM: leave capture disabled, engine runs normally.
+            return false;
         }
-        mPoolStorage = static_cast<TraceChunk*>(raw);
-        mPoolCapacity = maxChunks;
-        for (usize i = 0; i < maxChunks; ++i)
-        {
-            TraceChunk* chunk = new (&mPoolStorage[i]) TraceChunk();
-            mFreeList.Push(chunk);
-        }
+    }
+    mFreeHeadOrNull = nullptr;
+    mFullHeadOrNull = nullptr;
+    for (usize i = mPoolCapacity; i > 0; --i)
+    {
+        TraceChunk& chunk = mPoolStorageOrNull[i - 1];
+        chunk.ThreadId = 0;
+        pushFree(&chunk);
     }
 
     mEventsRecorded.store(0, std::memory_order_relaxed);
     mEventsDropped.store(0, std::memory_order_relaxed);
-    // New generation: any ThreadRecorder::Current from a prior capture now points
-    // into freed/reused storage and will be discarded on next touch.
-    mGeneration.fetch_add(1, std::memory_order_acq_rel);
-    gCaptureActive.store(true, std::memory_order_release);
+    gCaptureActive.store(true, std::memory_order_seq_cst);
     return true;
 }
 
 void TraceRecorder::EndCapture() noexcept
 {
-    // Disarm first so producers stop acquiring new chunks.
-    gCaptureActive.store(false, std::memory_order_release);
-    // Note: partial chunks still held by live producer threads are flushed lazily
-    // (on their next Emit after re-arm, on thread exit, or by the exporter which
-    // calls FlushAllForExport). For a single-shot capture the common pattern is
-    // that the capturing thread has already closed its scopes.
+    // Disarm first so producers stop acquiring and writing chunks.
+    gCaptureActive.store(false, std::memory_order_seq_cst);
+    for (;;)
+    {
+        {
+            const std::lock_guard<std::mutex> lock(mMutex);
+            if (isAnyProducerEmitting() == false)
+            {
+                harvestProducerChunks();
+                return;
+            }
+        }
+        // A producer is between announcing an emit and finishing its write. It
+        // may need the mutex to finish (chunk handoff), so wait with the mutex
+        // released. The wait is bounded by that producer's scheduling: an emit
+        // performs no blocking work other than this mutex.
+    }
 }
 
 uint32 TraceRecorder::RegisterThread(std::string_view name) noexcept
 {
-    ThreadRecorder& tr = CurrentThreadRecorder();
-    if (tr.Registered)
+    ThreadRecorder& recorder = CurrentThreadRecorder();
+    if (recorder.IsRegistered == true)
     {
-        return tr.ThreadId;
+        return recorder.ThreadId;
     }
     const uint32 id = mNextThreadId.fetch_add(1, std::memory_order_relaxed);
-    tr.ThreadId = id;
-    tr.Registered = true;
+    recorder.ThreadId = id;
+    recorder.IsRegistered = true;
 
-    // Store the name in the bounded table. Claim a slot with a relaxed CAS-free
-    // fetch_add; this runs once per thread, off the hot path.
-    const uint32 slot = mThreadNameCount.fetch_add(1, std::memory_order_relaxed);
-    if (slot < kMaxThreads)
+    // Bounded table: append under the mutex, then publish the entry.
+    const std::lock_guard<std::mutex> lock(mMutex);
+    const uint32 slot = mThreadNameCount.load(std::memory_order_relaxed);
+    if (slot < MAX_THREADS)
     {
         ThreadNameEntry& entry = mThreadNames[slot];
         entry.Id = id;
-        const usize n = name.size() < kThreadNameCap ? name.size() : kThreadNameCap;
-        for (usize i = 0; i < n; ++i)
+        const usize length = name.size() < THREAD_NAME_CAPACITY ? name.size() : THREAD_NAME_CAPACITY;
+        for (usize i = 0; i < length; ++i)
         {
             entry.Name[i] = name[i];
         }
-        entry.Len = static_cast<uint16>(n);
-    }
-    else
-    {
-        // Table full: keep the count from growing unbounded.
-        mThreadNameCount.store(kMaxThreads, std::memory_order_relaxed);
+        entry.Length = static_cast<uint16>(length);
+        mThreadNameCount.store(slot + 1, std::memory_order_release);
     }
     return id;
 }
 
 std::string_view TraceRecorder::ThreadName(uint32 threadId) const noexcept
 {
-    const uint32 count = mThreadNameCount.load(std::memory_order_relaxed);
-    const uint32 limit = count < kMaxThreads ? count : kMaxThreads;
-    for (uint32 i = 0; i < limit; ++i)
+    const uint32 count = mThreadNameCount.load(std::memory_order_acquire);
+    for (uint32 i = 0; i < count; ++i)
     {
         if (mThreadNames[i].Id == threadId)
         {
-            return std::string_view(mThreadNames[i].Name, mThreadNames[i].Len);
+            return std::string_view(mThreadNames[i].Name, mThreadNames[i].Length);
         }
     }
     return std::string_view{};
@@ -186,35 +331,30 @@ std::string_view TraceRecorder::ThreadName(uint32 threadId) const noexcept
 
 usize TraceRecorder::ThreadCount() const noexcept
 {
-    const uint32 count = mThreadNameCount.load(std::memory_order_relaxed);
-    return count < kMaxThreads ? count : kMaxThreads;
+    return mThreadNameCount.load(std::memory_order_acquire);
 }
 
 void TraceRecorder::RegisterSite(uint32 siteId, std::string_view name, std::string_view file, uint32 line) noexcept
 {
-    // Called at most once per site (caller-guarded). Bounded table; a genuinely
-    // new id past capacity is dropped from the name table (events still record,
-    // the exporter falls back to the numeric id).
-    const uint32 slot = mSiteCount.fetch_add(1, std::memory_order_relaxed);
-    if (slot < kMaxSites)
+    // Called once per site. Bounded table; a site past capacity is dropped from
+    // the name table (events still record, the exporter falls back to the id).
+    const std::lock_guard<std::mutex> lock(mMutex);
+    const uint32 slot = mSiteCount.load(std::memory_order_relaxed);
+    if (slot < MAX_SITES)
     {
         SiteEntry& entry = mSites[slot];
         entry.SiteId = siteId;
         entry.Name = name;
         entry.File = file;
         entry.Line = line;
-    }
-    else
-    {
-        mSiteCount.store(kMaxSites, std::memory_order_relaxed);
+        mSiteCount.store(slot + 1, std::memory_order_release);
     }
 }
 
 std::string_view TraceRecorder::SiteName(uint32 siteId) const noexcept
 {
     const uint32 count = mSiteCount.load(std::memory_order_acquire);
-    const uint32 limit = count < kMaxSites ? count : kMaxSites;
-    for (uint32 i = 0; i < limit; ++i)
+    for (uint32 i = 0; i < count; ++i)
     {
         if (mSites[i].SiteId == siteId)
         {
@@ -226,95 +366,99 @@ std::string_view TraceRecorder::SiteName(uint32 siteId) const noexcept
 
 void TraceRecorder::UnregisterThread() noexcept
 {
-    ThreadRecorder& tr = CurrentThreadRecorder();
-    if (tr.Current != nullptr)
+    ThreadRecorder& recorder = CurrentThreadRecorder();
+    DetachThread(recorder);
+    recorder.IsRegistered = false;
+}
+
+void TraceRecorder::DetachThread(ThreadRecorder& inoutRecorder) noexcept
+{
+    // Runs on the owning thread, which is not emitting. A held chunk is still
+    // valid storage: it is cleared by EndCapture() before any slab release.
+    const std::lock_guard<std::mutex> lock(mMutex);
+    returnHeldChunk(inoutRecorder);
+    unlinkProducer(inoutRecorder);
+}
+
+TraceChunk* TraceRecorder::replaceChunk(ThreadRecorder& inoutRecorder) noexcept
+{
+    const std::lock_guard<std::mutex> lock(mMutex);
+    if (inoutRecorder.CurrentOrNull != nullptr)
     {
-        if (tr.Generation == mGeneration.load(std::memory_order_acquire))
-        {
-            RecycleOrPublishOnThreadExit(tr.Current);
-        }
-        tr.Current = nullptr;
+        pushFull(inoutRecorder.CurrentOrNull);
+        inoutRecorder.CurrentOrNull = nullptr;
     }
-    tr.Registered = false;
+    // EndCapture() disarms before taking the mutex; never acquire a chunk after it.
+    if (gCaptureActive.load(std::memory_order_relaxed) == false)
+    {
+        return nullptr;
+    }
+    linkProducer(inoutRecorder);
+    TraceChunk* chunk = popFree();
+    if (chunk == nullptr)
+    {
+        mEventsDropped.fetch_add(1, std::memory_order_relaxed);
+        return nullptr; // pool exhausted: drop + count (§21 overflow policy)
+    }
+    chunk->ThreadId = inoutRecorder.ThreadId;
+    chunk->Count = 0;
+    inoutRecorder.CurrentOrNull = chunk;
+    return chunk;
 }
 
 bool TraceRecorder::Emit(const TraceEvent& event) noexcept
 {
-    ThreadRecorder& tr = CurrentThreadRecorder();
+    ThreadRecorder& recorder = CurrentThreadRecorder();
 
-    // Fast reject when no capture is active — already checked by the inline
-    // wrapper, re-checked here for direct callers.
-    if (!gCaptureActive.load(std::memory_order_relaxed))
+    // Announce the in-flight write before testing the capture flag. Both sides
+    // are sequentially consistent (pairs with EndCapture), so EndCapture cannot
+    // miss a producer that observed an armed capture.
+    recorder.IsEmitting.store(true, std::memory_order_seq_cst);
+    if (gCaptureActive.load(std::memory_order_seq_cst) == false)
     {
+        recorder.IsEmitting.store(false, std::memory_order_release);
         return false;
     }
 
-    // Discard a Current left over from a previous capture generation: its pool
-    // may have been reallocated, so we must not publish or write through it.
-    const uint32 generation = mGeneration.load(std::memory_order_acquire);
-    if (tr.Generation != generation)
+    TraceChunk* chunk = recorder.CurrentOrNull;
+    if (chunk == nullptr || chunk->Count >= kEventsPerChunk)
     {
-        tr.Current = nullptr;
-        tr.Generation = generation;
-    }
-
-    if (tr.Current == nullptr || tr.Current->Count >= kEventsPerChunk)
-    {
-        if (tr.Current != nullptr)
+        if (chunk == nullptr && mHasFreeChunks.load(std::memory_order_relaxed) == false)
         {
-            PublishChunk(tr.Current);
-        }
-        tr.Current = AcquireChunk(tr.ThreadId);
-        if (tr.Current == nullptr)
-        {
+            // Pool already exhausted and nothing to publish: drop without the mutex.
             mEventsDropped.fetch_add(1, std::memory_order_relaxed);
-            return false; // pool exhausted: drop + count (§21 overflow policy)
+            recorder.IsEmitting.store(false, std::memory_order_release);
+            return false;
+        }
+        chunk = replaceChunk(recorder);
+        if (chunk == nullptr)
+        {
+            recorder.IsEmitting.store(false, std::memory_order_release);
+            return false;
         }
     }
 
-    tr.Current->Events[tr.Current->Count] = event;
-    ++tr.Current->Count;
+    chunk->Events[chunk->Count] = event;
+    ++chunk->Count;
     mEventsRecorded.fetch_add(1, std::memory_order_relaxed);
+    // Release: EndCapture's acquiring observation of `false` makes this chunk's
+    // writes visible before it publishes the chunk.
+    recorder.IsEmitting.store(false, std::memory_order_release);
     return true;
-}
-
-void TraceRecorder::FlushAllForExport() noexcept
-{
-    // Publish the calling thread's partial chunk so a single-threaded capture is
-    // fully drained at export time. Other threads' partials are published on
-    // their own next Emit/exit; a capture that spans threads should EndCapture
-    // after those threads have quiesced (documented contract).
-    ThreadRecorder& tr = CurrentThreadRecorder();
-    if (tr.Current == nullptr)
-    {
-        return;
-    }
-    if (tr.Generation != mGeneration.load(std::memory_order_acquire))
-    {
-        // Stale chunk from a prior capture; storage may be gone. Drop the pointer.
-        tr.Current = nullptr;
-        return;
-    }
-    if (tr.Current->Count > 0)
-    {
-        PublishChunk(tr.Current);
-    }
-    else
-    {
-        mFreeList.Push(tr.Current);
-    }
-    tr.Current = nullptr;
 }
 
 TraceChunk* TraceRecorder::DrainFullChunks() noexcept
 {
-    return mFullChunks.PopAll();
+    const std::lock_guard<std::mutex> lock(mMutex);
+    TraceChunk* head = mFullHeadOrNull;
+    mFullHeadOrNull = nullptr;
+    return head;
 }
 
 void TraceRecorder::RecycleChunk(TraceChunk* chunk) noexcept
 {
-    chunk->Count = 0;
-    mFreeList.Push(chunk);
+    const std::lock_guard<std::mutex> lock(mMutex);
+    pushFree(chunk);
 }
 
 TraceHealth TraceRecorder::Health() const noexcept
@@ -326,25 +470,21 @@ TraceHealth TraceRecorder::Health() const noexcept
     return health;
 }
 
-void TraceRecorder::Reset() noexcept
+bool TraceRecorder::Reset() noexcept
 {
-    // Only safe with capture inactive and no producer holding a live chunk.
-    // Clear the intrusive stack heads FIRST: every node they hold points into
-    // mPoolStorage, so we must not walk PoolNext after the storage is freed.
-    // Since all chunks live in the one contiguous array, dropping the heads is
-    // sufficient — there is nothing else to reclaim.
-    mFreeList.Reset();
-    mFullChunks.Reset();
-    if (mPoolStorage != nullptr)
+    const std::lock_guard<std::mutex> lock(mMutex);
+    if (gCaptureActive.load(std::memory_order_relaxed) == true)
     {
-        for (usize i = 0; i < mPoolCapacity; ++i)
-        {
-            mPoolStorage[i].~TraceChunk();
-        }
-        std::free(mPoolStorage);
-        mPoolStorage = nullptr;
-        mPoolCapacity = 0;
+        return false;
     }
+    releasePool();
+    return true;
+}
+
+usize TraceRecorder::PoolCapacity() const noexcept
+{
+    const std::lock_guard<std::mutex> lock(mMutex);
+    return mPoolCapacity;
 }
 
 } // namespace ludus::foundation::profiling::internal

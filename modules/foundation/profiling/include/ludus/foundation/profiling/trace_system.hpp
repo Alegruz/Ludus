@@ -33,21 +33,28 @@ struct TraceHealth
 /// logging module, preserving the FoundationBase-only dependency direction — AGENTS.md.)
 void RegisterThreadForTrace(std::string_view threadName) noexcept;
 
-/// @brief Unregister the calling thread (flushes its partial chunk).
+/// @brief Unregister the calling thread (publishes its partial chunk).
 ///
 /// Optional — thread destruction does this automatically.
 void UnregisterThreadForTrace() noexcept;
 
 /// @brief Arm a capture session.
 ///
-/// `maxChunks` bounds total trace memory (maxChunks * ~96 KiB). Returns false if a capture is already active or
-/// memory reservation failed (in which case tracing stays disabled and the engine runs normally — §21). No-op /
-/// returns false in a profiling-disabled build.
+/// Reserves one slab of `maxChunks` 64-byte-aligned chunks (about 96 KiB each; zero is treated as one) so recording
+/// never allocates. Events of a previous capture that were not exported are discarded.
+/// @param maxChunks Bound on total trace memory, in chunks.
+/// @return False when a capture is already active, the slab size overflows `usize`, or the reservation fails; tracing
+/// then stays disabled and the engine runs normally (§21).
+/// @note Capture control calls (Begin/End/Export) must be serialized by the caller. Producer threads may keep
+/// emitting events across them.
 bool BeginCapture(usize maxChunks = 64) noexcept;
 
-/// @brief End the active capture session.
+/// @brief End the active capture session and join its producers.
 ///
-/// After this, ExportPerfettoTrace() can be called to serialise the recorded events.
+/// Disarms recording, waits for threads that are writing an event, and publishes every thread's partial chunk, so
+/// all events accepted before this returns are available to ExportPerfettoTrace(), including those of threads that
+/// are still running. Safe to call when no capture is active.
+/// @note Waits only for an in-progress event write; a producer thread suspended in the middle of one delays the return.
 void EndCapture() noexcept;
 
 /// @brief Serialise the most recent capture to a Chrome/Perfetto trace-event JSON file (final design §16 primary
