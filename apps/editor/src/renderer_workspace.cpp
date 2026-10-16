@@ -1308,12 +1308,15 @@ void RendererWorkspace::SetPreviewSource(RenderPreview* sourceOrNull)
     {
         disconnect(mPreviewSourceOrNull, nullptr, this, nullptr);
     }
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     if (mPreviewOrNull != nullptr && sourceOrNull != mPreviewSourceOrNull)
     {
         mPreviewOrNull->Detach();
     }
+#endif
     mPreviewSourceOrNull = sourceOrNull;
     mPreviewDeviceSerial = 0;
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     if (mPreviewSourceOrNull != nullptr && mPreviewOrNull != nullptr)
     {
         // Release generations before RenderPreview destroys the shared device.
@@ -1322,6 +1325,7 @@ void RendererWorkspace::SetPreviewSource(RenderPreview* sourceOrNull)
             mPreviewDeviceSerial = 0;
         });
     }
+#endif
     if (mPreviewSourceOrNull != nullptr)
     {
         connect(mPreviewSourceOrNull, &QObject::destroyed, this, [this]() {
