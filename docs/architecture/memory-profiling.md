@@ -1,7 +1,9 @@
 # Ludus Memory Profiling Architecture
 
-**Status:** Proposed design. No memory profiler, new allocator, or production
-code is implemented by this document. The design follows
+**Status:** Proposed design. No memory profiler or new allocator is implemented
+by this document. Phase 0 trace slab alignment/lifetime repair and baselines are
+implemented; the owner repair lands separately; see
+[memory phase 0](../development/memory-phase-0.md). The design follows
 [ADR 0008](../decisions/0008-memory-management.md) and the
 [memory ownership architecture](memory-management.md). The subsequent
 [article review](memory-profiling-gems-review.md) records sources, page ranges,
@@ -546,7 +548,7 @@ instead of concealing it; change architecture only on representative evidence.
 
 | Phase | Independently reviewable outcome |
 | --- | --- |
-| 0 | Repair owned-pointer move/deleter behavior and trace slab alignment/lifecycle before dependent migrations. The aliased Array resize prerequisite is already implemented. Establish current allocation/footprint baselines. |
+| 0 | Repair owned-pointer move/deleter behavior and trace slab alignment/lifecycle before dependent migrations. The aliased Array resize prerequisite is already implemented. Establish current allocation/footprint baselines. **Trace repair and baselines implemented:** [memory phase 0](../development/memory-phase-0.md); owner repair pending. |
 | 1 | Extend the existing system-backed AllocationDomain boundary with checked counters/registry; explicit Array migration; coverage manifest and quiescent gauge export |
 | 2 | One activity recorder, site definitions, fixed table/journal, safe-point begin/end, artifact validator and traffic reports |
 | 3 | Proven-domain persistent table, exact checkpoints and survivor differences; shared validation table; independent restart/loss tests |

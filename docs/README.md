@@ -66,6 +66,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Independent Ludus game projects and shared SDKs — user guide](development/project-sdk-workflow.md)
 - [Ludus Wiki: development and publication](development/wiki.md)
 - [ludus-tools](development/host-tools.md)
+- [Memory Phase 0: Trace Prerequisites and Baselines](development/memory-phase-0.md)
 - [Mobile support implementation plan](development/mobile-support-plan.md)
 - [Native debugging with RAD on Linux](development/debugging.md)
 - [Native diagnostics and assertion policies](development/diagnostics.md)
