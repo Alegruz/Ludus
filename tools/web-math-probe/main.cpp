@@ -164,7 +164,8 @@ int main()
 
     // Outward-rounded enclosures (ADR 0024 Certified class): the same exact-oracle corpus as the native tests,
     // so the pinned Wasm toolchain validates the helper before Geometry advertises Certified bounds.
-    const ludus::foundation::core::int32 enclosureFailures = enclosure_oracle::RunCorpus(ENCLOSURE_SEED, ENCLOSURE_CASE_COUNT);
+    const ludus::foundation::core::int32 enclosureFailures =
+        enclosure_oracle::RunCorpus(ENCLOSURE_SEED, ENCLOSURE_CASE_COUNT);
     Check(enclosureFailures == 0, "outward enclosures contain exact results");
     Enclosure exactSum;
     Check(TryAddOutward(MakePointEnclosure(1.0), MakePointEnclosure(2.0), exactSum) == MathStatus::Success &&
