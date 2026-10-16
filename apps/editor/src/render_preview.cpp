@@ -398,6 +398,7 @@ bool RenderPreview::AdmitDevice(const rhi::NativeDeviceDescription& native)
     }
     mIsStarting = false;
     OwnsDevice_ = true;
+    ++mDeviceSerial;
     Width_ = Height_ = 0;
     Frames_ = 0;
     restartResources();
@@ -434,6 +435,7 @@ bool RenderPreview::AdmitOffscreenDevice()
     }
     mIsStarting = false;
     OwnsDevice_ = true;
+    ++mDeviceSerial;
     Width_ = Height_ = 0;
     Frames_ = 0;
     restartResources();
@@ -450,6 +452,8 @@ void RenderPreview::Stop() noexcept
     Timer_.stop();
     if (OwnsDevice_)
     {
+        // Borrowers such as the render-graph preview release their resources first.
+        Q_EMIT DeviceStopping();
         resetFrames();
         mResources.Reset();
         mRetiredResources.Reset();

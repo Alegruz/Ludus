@@ -106,6 +106,21 @@ public:
     {
         return Device_;
     }
+    /// Whether a device is admitted and owned (not merely requested).
+    [[nodiscard]] LUDUS_INLINE bool HasDevice() const noexcept
+    {
+        return OwnsDevice_;
+    }
+    /// Borrowed headless surface of the owned device; null while no device is admitted.
+    [[nodiscard]] LUDUS_INLINE graphics::rhi::SurfaceHandle GetSurface() const noexcept
+    {
+        return Surface_;
+    }
+    /// Increments each time a device is admitted, so borrowers can rebind after a restart.
+    [[nodiscard]] LUDUS_INLINE foundation::uint64 GetDeviceSerial() const noexcept
+    {
+        return mDeviceSerial;
+    }
     [[nodiscard]] graphics::rhi::RasterStatus PinDevice(graphics::rhi::NativeDeviceLease& outLease) noexcept;
     [[nodiscard]] LUDUS_INLINE bool HasPendingFrame() const noexcept
     {
@@ -117,6 +132,8 @@ Q_SIGNALS:
     void FrameReady();
     void DeviceRequested();
     void ResettingFrames();
+    /// Emitted before the owned device is destroyed; borrowers must release device resources.
+    void DeviceStopping();
     void Stopped();
     void Failed(const QString& error);
 
@@ -179,6 +196,7 @@ private:
     bool FreshReport_ = true;
     bool OwnsDevice_ = false;
     bool mIsStarting = false;
+    foundation::uint64 mDeviceSerial = 0;
     bool AssetsCreated_ = false;
     QTimer Timer_;
     QString Status_;
