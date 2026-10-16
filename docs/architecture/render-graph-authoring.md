@@ -2,10 +2,10 @@
 
 Status: RG0 contracts, RG1 bounded offline shader builds and RG2 static opaque
 Renderer execution implemented, October 13, 2026; RG3a editing, mapped
-diagnostics and runtime activation implemented, October 15, 2026; RG3b canvas and
-live preview, and RG4, remain proposed. This defines the renderer
-authoring/compiler contract; it does not claim a graph editor, unrestricted
-shader composition or new RHI capability.
+diagnostics and runtime activation implemented, October 15, 2026; RG3b node canvas
+and trusted in-editor preview implemented, October 16, 2026; RG4 remains proposed.
+This defines the renderer authoring/compiler contract; it does not claim
+unrestricted shader composition or new RHI capability.
 Baseline design: `5c44d19`. See [usage and source formats](../development/render-graph-authoring.md).
 The existing [Renderer](renderer-systems.md), [RHI/GDI](rhi-gdi.md),
 [editor](editor-architecture.md) and [game reload](project-live-reload.md) retain
@@ -534,7 +534,7 @@ architecture fits Ludus or that current features exist on our pinned tools.
 | RG2: Renderer integration | Scene matching, coverage reports, ready pipeline admission and error route | Mixed layouts/material slots; missing/conflicting roles; alpha/deformation/depth parity; capability rejection; no compile during draw; streaming/resize/history invalidation |
 | RG3: editor and reload | Graph/schema/source editing, preview, undo/save, diagnostics and atomic version activation | CLI/editor equivalent result; mapped errors; draft/save separation; failed reload old pixels preserved; pending pipelines; CPU schema mismatch/migration and unload/completion lifetime fixtures |
 | RG3a (delivered) | Typed document/undo/save, source editing, mapped diagnostics, runtime generations and native activation | All RG3 acceptance fixtures above, without visual canvas or in-editor GPU preview |
-| RG3b | Node canvas and trusted in-editor preview of the activated generation | Preview/live parity on a frozen fixture; pending/failed preview keeps the last drawable view |
+| RG3b (delivered) | Node canvas and trusted in-editor preview of the activated generation | Preview/live parity on a frozen fixture; pending/failed preview keeps the last drawable view |
 | RG4: measured scheduling/memory work | Optional pooling improvements, merging/aliasing/parallel paths individually | Identical serial-control pixels/effects and actual retained memory; named native/browser profiles; repeated resize/reload and frames in flight; unsupported paths explicit |
 
 RG0 is delivered in `ludus_tools.render_graph` and the installed `ludus
@@ -625,9 +625,22 @@ RestartRequired and stages nothing. The replaced generation is Reset at the
 boundary and its GPU uses retire through RHI completion; GameHost quiescence
 remains a separate obligation. Parameter migration keeps values only for equal
 field identity and type, requires explicit defaults for added or changed fields
-and reports dropped values; it never writes sources. The editor cooks runtime
-generations but does not yet render or activate them: the canvas and live
-preview are RG3b. See [RG3 usage and evidence](../development/render-graph-authoring.md#edit-and-reload-graphs-rg3).
+and reports dropped values; it never writes sources. See
+[RG3 usage and evidence](../development/render-graph-authoring.md#edit-and-reload-graphs-rg3).
+
+RG3b is delivered in the editor's Renderer tab. The node canvas is another view
+of the same typed draft: drags commit one layout edit per gesture, links are
+pre-checked with the validator's Port/MultipleWriters/TypeMismatch/Cycle codes
+before Connect, and double-clicking a Subgraph opens its source. The trusted
+preview owns its own RenderGraphActivation on the World viewport's existing
+device, fed by that World extraction; it stages a cooked `.lurgrt` only on an
+explicit request and replaces its image only with a complete copy of an active
+generation's frame, so pending, failed and restart-requiring candidates and a
+stopped device keep the last drawable view. The editor host is compiled against
+the RendererStatic offscreen fixture's interface; preview/live parity compares
+that frozen fixture's cooked generation with its compiled header byte for byte.
+Presentation-surface roots stay in the game host. See
+[RG3b usage and evidence](../development/render-graph-authoring.md#node-canvas-and-preview-rg3b).
 
 Run representative native and browser raster fixtures under pinned tools, SDK
 consumer checks, warning/format/tidy gates and sanitizers for implementation.

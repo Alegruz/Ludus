@@ -34,10 +34,16 @@ NATIVE_JOBS = (
 # Slow native jobs deferred from ordinary pull-request runs to the merge queue,
 # pushes to main and manual runs. Every change still passes them before landing.
 MERGE_QUEUE_JOBS = (
-    "macos-compile", "macos-sanitizers", "macos-analysis", "sanitizers", "editor", "build-budget",
+    "macos-compile", "macos-sanitizers", "sanitizers", "editor", "build-budget",
 )
 FULL_TIER = "full"
 PULL_REQUEST_TIER = "pull-request"
+INTEGRATION_TIER = "integration"
+NIGHTLY_TIER = "nightly"
+NIGHTLY_JOBS = ("macos-analysis",)
+TIERS = frozenset({FULL_TIER, PULL_REQUEST_TIER, INTEGRATION_TIER, NIGHTLY_TIER})
+# Integration PRs keep source/tooling checks; every compiled variant runs once per batch.
+INTEGRATION_JOBS = tuple(name for name in NATIVE_JOBS if name != "formatting")
 # A pull request carrying this label runs the full tier before entering the queue.
 FULL_VALIDATION_LABEL = "ci:full"
 
@@ -97,11 +103,17 @@ def classify(event_name: str, event: dict, root: Path) -> tuple[bool, str]:
     return True, "Engine, tooling, policy, unknown paths, or an empty diff require full validation."
 
 
-def validation_tier(event_name: str, event: dict) -> str:
-    """Select the pull-request tier only for unlabeled pull requests; anything else is full."""
+def validation_tier(event_name: str, event: dict, *, is_batch: bool = False) -> str:
+    """Use cheap checks for develop PRs, retain legacy main tiers, and fully validate batches."""
+    if is_batch:
+        return FULL_TIER
+    if event_name in {"schedule", "workflow_dispatch"}:
+        return NIGHTLY_TIER
     if event_name != "pull_request":
         return FULL_TIER
     try:
+        if event["pull_request"].get("base", {}).get("ref") == "develop":
+            return INTEGRATION_TIER
         names = {label["name"] for label in event["pull_request"].get("labels") or []}
     except (AttributeError, KeyError, TypeError):
         return FULL_TIER
@@ -118,12 +130,14 @@ def gate_failures(results: dict) -> list[str]:
     if required not in {"true", "false"}:
         return ["Change classification did not report a valid native_required output."]
     tier = outputs.get("validation_tier")
-    if tier not in {FULL_TIER, PULL_REQUEST_TIER}:
+    if tier not in TIERS:
         return ["Change classification did not report a valid validation_tier output."]
     if set(results) != {"changes", *NATIVE_JOBS}:
         failures.append("Required native job inventory is incomplete or unexpected.")
     for name in NATIVE_JOBS:
-        deferred = tier == PULL_REQUEST_TIER and name in MERGE_QUEUE_JOBS
+        deferred = ((tier == PULL_REQUEST_TIER and name in MERGE_QUEUE_JOBS)
+                    or (tier == INTEGRATION_TIER and name in INTEGRATION_JOBS)
+                    or (tier != NIGHTLY_TIER and name in NIGHTLY_JOBS))
         expected = "success" if required == "true" and not deferred else "skipped"
         actual = results.get(name, {}).get("result")
         if actual != expected:
@@ -146,7 +160,7 @@ def main() -> int:
     try:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         required, reason = classify(event_name, event, Path.cwd())
-        tier = validation_tier(event_name, event)
+        tier = validation_tier(event_name, event, is_batch=bool(os.environ.get("LUDUS_CI_BATCH_SHA")))
     except (OSError, ValueError, KeyError):
         required, reason = True, "Event metadata unavailable; full validation required."
         tier = FULL_TIER

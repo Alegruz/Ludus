@@ -68,8 +68,9 @@ constexpr usize FRAMES = 2;
 constexpr uint32 MAX_DIMENSION = 16384;
 // Thanks to Apple, "MTLPipelineOption", Metal documentation, for the reflection
 // flags: https://developer.apple.com/documentation/metal/mtlpipelineoption
-// SDK 26 renamed this same bit; older SDKs expose only ArgumentInfo.
-#if defined(__MAC_26_0)
+// SDK 15+ provides BindingInfo; retain the legacy name for older SDKs.
+// Both names request the same reflection bit.
+#if defined(__MAC_15_0)
 constexpr MTLPipelineOption BINDING_INFO = MTLPipelineOptionBindingInfo;
 #else
 constexpr MTLPipelineOption BINDING_INFO = MTLPipelineOptionArgumentInfo;

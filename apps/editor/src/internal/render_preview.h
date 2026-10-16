@@ -6,6 +6,7 @@
 #include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/math/vector.hpp>
 #include <ludus/foundation/threading/jobs.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/viewport.hpp>
@@ -15,6 +16,7 @@
 #include <ludus/graphics/rhi/raster.h>
 #include <ludus/platform/native_window.h>
 
+#include "internal/editor_camera_controller.h"
 #include "internal/render_scene.h"
 
 #include <QJsonObject>
@@ -46,21 +48,27 @@ public:
     /// @return False when no preview start is pending or the device cannot start.
     [[nodiscard]] bool AdmitOffscreenDevice();
     void Stop() noexcept;
+    /// Select a view; orbitDegrees contains yaw/pitch in degrees and zoom is the legacy radius scale.
     void Navigate(foundation::int32 camera,
-                  foundation::float32 yaw,
-                  foundation::float32 pitch,
+                  foundation::math::Vector2 orbitDegrees,
                   foundation::float32 zoom,
-                  bool reference);
+                  bool isReference);
     void FrameAll() noexcept;
+    void SetSelection(const QString& id);
+    [[nodiscard]] bool FrameSelection() noexcept;
+    void Look(foundation::float32 deltaX, foundation::float32 deltaY);
+    void Fly(foundation::math::Vector3 movementControls, foundation::float32 deltaSeconds, foundation::float32 speed);
+    [[nodiscard]] foundation::float32 GetFocusDistance() const noexcept;
     void SetShading(PreviewShading shading);
     [[nodiscard]] LUDUS_INLINE PreviewShading GetShading() const noexcept
     {
         return mShading;
     }
     void Resize(foundation::int32 width, foundation::int32 height);
-    void Orbit(foundation::int32 dx, foundation::int32 dy);
-    void Pan(foundation::int32 dx, foundation::int32 dy);
-    void Zoom(foundation::int32 steps);
+    void Orbit(foundation::float32 deltaX, foundation::float32 deltaY);
+    void Pan(foundation::float32 deltaX, foundation::float32 deltaY, foundation::float32 heightLogical = 480);
+    void Zoom(foundation::float32 steps);
+    void SetFocusDistance(foundation::float32 distance);
     [[nodiscard]] QJsonObject Navigation() const;
     /// Build the current camera or orbit view for an explicit physical size, without a device.
     /// Software viewports call this after NavigationChanged. Failure preserves outView.
@@ -107,6 +115,21 @@ public:
     {
         return Device_;
     }
+    /// Whether a device is admitted and owned (not merely requested).
+    [[nodiscard]] LUDUS_INLINE bool HasDevice() const noexcept
+    {
+        return OwnsDevice_;
+    }
+    /// Borrowed headless surface of the owned device; null while no device is admitted.
+    [[nodiscard]] LUDUS_INLINE graphics::rhi::SurfaceHandle GetSurface() const noexcept
+    {
+        return Surface_;
+    }
+    /// Increments each time a device is admitted, so borrowers can rebind after a restart.
+    [[nodiscard]] LUDUS_INLINE foundation::uint64 GetDeviceSerial() const noexcept
+    {
+        return mDeviceSerial;
+    }
     [[nodiscard]] graphics::rhi::RasterStatus PinDevice(graphics::rhi::NativeDeviceLease& outLease) noexcept;
     [[nodiscard]] LUDUS_INLINE bool HasPendingFrame() const noexcept
     {
@@ -118,10 +141,16 @@ Q_SIGNALS:
     void FrameReady();
     void DeviceRequested();
     void ResettingFrames();
+    /// Emitted before the owned device is destroyed; borrowers must release device resources.
+    void DeviceStopping();
     void Stopped();
     void Failed(const QString& error);
 
 private:
+    [[nodiscard]] bool beginNavigation();
+    void navigationChanged();
+    EditorCameraController mCameraController;
+    QString mSelectedId;
     [[nodiscard]] LUDUS_INLINE bool usesLitMaterials() const noexcept
     {
         return Scene_.Lit == true && mShading != PreviewShading::Albedo;
@@ -184,6 +213,7 @@ private:
     bool FreshReport_ = true;
     bool OwnsDevice_ = false;
     bool mIsStarting = false;
+    foundation::uint64 mDeviceSerial = 0;
     bool AssetsCreated_ = false;
     QTimer Timer_;
     QString Status_;

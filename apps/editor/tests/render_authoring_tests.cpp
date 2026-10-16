@@ -12,11 +12,13 @@
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/transform.hpp>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDir>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -300,7 +302,11 @@ TEST_CASE("Preview UI validates assets, selects authored cameras and clears stat
     cameras->setCurrentIndex(1);
     CHECK_FALSE(panel.findChild<QSlider*>(QStringLiteral("worldPreviewYaw"))->isEnabled());
     CHECK(panel.findChild<QLabel*>(QStringLiteral("worldPreviewTrace"))->text().contains(QStringLiteral("C0 fixed")));
-    const auto draft = f.World.Draft();
+    const QJsonObject draft = f.World.Draft();
+    panel.Preview().Orbit(0.5F, 0);
+    CHECK(cameras->currentIndex() == 0);
+    CHECK(panel.findChild<QSlider*>(QStringLiteral("worldPreviewYaw"))->isEnabled() == true);
+    CHECK(f.World.Draft() == draft);
     panel.findChild<QPushButton*>(QStringLiteral("worldPreviewFrameAll"))->click();
     CHECK(cameras->currentIndex() == 0);
     CHECK(f.World.Draft() == draft);
@@ -391,6 +397,14 @@ TEST_CASE("Renderer controls and inspector remain reachable in a small styled Wo
     REQUIRE(scroll != nullptr);
     CHECK(scroll->height() <= 120);
     CHECK(scroll->verticalScrollBar()->maximum() > 0);
+    QDoubleSpinBox* distance = world.findChild<QDoubleSpinBox*>(QStringLiteral("worldPreviewZoom"));
+    REQUIRE(distance != nullptr);
+    scroll->ensureWidgetVisible(distance);
+    QApplication::processEvents();
+    QLineEdit* distanceEditor = distance->findChild<QLineEdit*>();
+    REQUIRE(distanceEditor != nullptr);
+    CHECK(distance->isVisible() == true);
+    CHECK(distanceEditor->height() >= distanceEditor->minimumSizeHint().height());
     for (const auto& name : {QStringLiteral("worldPreview3D"),
                              QStringLiteral("worldPreviewReload"),
                              QStringLiteral("worldAdd"),

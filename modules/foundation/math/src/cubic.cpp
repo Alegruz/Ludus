@@ -93,9 +93,9 @@ template <class Hermite, class Curve>
     return MathStatus::Success;
 }
 template <class Curve>
-[[nodiscard]] MathStatus SplitCurve(const Curve& curve, float64 u, Curve& left, Curve& right) noexcept
+[[nodiscard]] MathStatus SplitCurve(const Curve& curve, float64 u, Curve& outLeft, Curve& outRight) noexcept
 {
-    if (&left == &right)
+    if (&outLeft == &outRight)
     {
         return MathStatus::InvalidArgument;
     }
@@ -115,8 +115,8 @@ template <class Curve>
             return MathStatus::OutOfRange;
         }
     }
-    left = leftResult;
-    right = rightResult;
+    outLeft = leftResult;
+    outRight = rightResult;
     return MathStatus::Success;
 }
 } // namespace
@@ -157,16 +157,16 @@ MathStatus TryFromHermite(const CubicHermite3& hermite, float64 domainWidth, Cub
 {
     return FromHermite(hermite, domainWidth, out);
 }
-MathStatus TrySplitCubic(const CubicBezier1& curve, float64 u, CubicBezier1& left, CubicBezier1& right) noexcept
+MathStatus TrySplitCubic(const CubicBezier1& curve, float64 u, CubicBezier1& outLeft, CubicBezier1& outRight) noexcept
 {
-    return SplitCurve(curve, u, left, right);
+    return SplitCurve(curve, u, outLeft, outRight);
 }
-MathStatus TrySplitCubic(const CubicBezier2& curve, float64 u, CubicBezier2& left, CubicBezier2& right) noexcept
+MathStatus TrySplitCubic(const CubicBezier2& curve, float64 u, CubicBezier2& outLeft, CubicBezier2& outRight) noexcept
 {
-    return SplitCurve(curve, u, left, right);
+    return SplitCurve(curve, u, outLeft, outRight);
 }
-MathStatus TrySplitCubic(const CubicBezier3& curve, float64 u, CubicBezier3& left, CubicBezier3& right) noexcept
+MathStatus TrySplitCubic(const CubicBezier3& curve, float64 u, CubicBezier3& outLeft, CubicBezier3& outRight) noexcept
 {
-    return SplitCurve(curve, u, left, right);
+    return SplitCurve(curve, u, outLeft, outRight);
 }
 } // namespace ludus::foundation::math
