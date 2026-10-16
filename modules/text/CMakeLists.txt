@@ -109,10 +109,33 @@ if(LUDUS_BUILD_TESTS)
     target_link_libraries(ludus_text_tests
         PRIVATE
             Ludus::Text
+            Ludus::FoundationContainers
             Catch2::Catch2WithMain
     )
     ludus_apply_project_defaults(ludus_text_tests)
     ludus_enable_test_exceptions(ludus_text_tests)
     add_test(NAME ludus_text_tests COMMAND ludus_text_tests)
     set_tests_properties(ludus_text_tests PROPERTIES LABELS "unit;text" TIMEOUT 120)
+
+    # Allocation-failure injection replaces the aligned nothrow operator new used
+    # by Ludus Array storage. It runs only without sanitizers, whose runtimes
+    # provide their own allocation functions.
+    if(NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
+        add_executable(ludus_text_alloc_tests)
+        target_sources(ludus_text_alloc_tests PRIVATE tests/allocation_failure_tests.cpp)
+        target_include_directories(ludus_text_alloc_tests PRIVATE tests)
+        target_compile_definitions(ludus_text_alloc_tests PRIVATE
+            LUDUS_TEXT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+        )
+        target_link_libraries(ludus_text_alloc_tests
+            PRIVATE
+                Ludus::Text
+                Ludus::FoundationContainers
+                Catch2::Catch2WithMain
+        )
+        ludus_apply_project_defaults(ludus_text_alloc_tests)
+        ludus_enable_test_exceptions(ludus_text_alloc_tests)
+        add_test(NAME ludus_text_alloc_tests COMMAND ludus_text_alloc_tests)
+        set_tests_properties(ludus_text_alloc_tests PROPERTIES LABELS "unit;text;alloc" TIMEOUT 120)
+    endif()
 endif()

@@ -41,8 +41,8 @@ TEST_CASE("Loaded bytes are copied, not retained", "[text][lifetime]")
     FontId font;
     {
         // bytes goes out of scope before use; the system must own its own copy.
-        auto bytes = LoadFixtureFont(LatinFont());
-        REQUIRE_FALSE(bytes.empty());
+        ludus::foundation::Array<ludus::foundation::uint8> bytes = LoadFixtureFont(LatinFont());
+        REQUIRE(bytes.IsEmpty() == false);
         REQUIRE(IsOk(LoadFont(guard.System, bytes, 0, &font)));
         for (auto& b : bytes)
         {

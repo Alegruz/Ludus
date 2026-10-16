@@ -14,10 +14,10 @@ namespace
 {
 std::atomic<uint32> gAllocations{0};
 std::atomic<uint32> gFailAt{0};
-std::atomic<bool> gTracking{false};
+std::atomic<bool> gIsTracking{false};
 void* Allocate(usize bytes) noexcept
 {
-    if (gTracking.load())
+    if (gIsTracking.load() == true)
     {
         const uint32 count = ++gAllocations;
         if (count == gFailAt.load())
@@ -36,9 +36,10 @@ JobOutcome Increment(void* context) noexcept
 
 void* operator new(usize bytes)
 {
-    if (auto* allocation = Allocate(bytes))
+    void* allocationOrNull = Allocate(bytes);
+    if (allocationOrNull != nullptr)
     {
-        return allocation;
+        return allocationOrNull;
     }
     throw std::bad_alloc{};
 }
@@ -86,9 +87,9 @@ TEST_CASE("Every graph allocation failure cleans up and permits retry", "[thread
         JobGraph graph;
         gAllocations = 0;
         gFailAt = failAt;
-        gTracking = true;
-        const auto status = graph.Initialize({8, 8});
-        gTracking = false;
+        gIsTracking = true;
+        const JobStatus status = graph.Initialize({8, 8});
+        gIsTracking = false;
         gFailAt = 0;
         REQUIRE(status == JobStatus::OutOfMemory);
         REQUIRE(graph.Initialize({8, 8}) == JobStatus::Ok);
@@ -96,9 +97,9 @@ TEST_CASE("Every graph allocation failure cleans up and permits retry", "[thread
     JobSystem system;
     gAllocations = 0;
     gFailAt = 1;
-    gTracking = true;
-    const auto status = system.Initialize();
-    gTracking = false;
+    gIsTracking = true;
+    const JobStatus status = system.Initialize();
+    gIsTracking = false;
     gFailAt = 0;
     REQUIRE(status == JobStatus::OutOfMemory);
     REQUIRE(system.Initialize() == JobStatus::Ok);
@@ -121,23 +122,23 @@ TEST_CASE("Graph build seal submit wait reset have zero scheduler allocations", 
         REQUIRE(system.Wait(outcome) == JobStatus::Ok);
         REQUIRE(graph.Reset() == JobStatus::Ok);
         gAllocations = 0;
-        gTracking = true;
-        bool valid = true;
+        gIsTracking = true;
+        bool isValid = true;
         for (uint32 iteration = 0; iteration < 100; ++iteration)
         {
             JobHandle first{};
             JobHandle second{};
-            valid &= graph.Add(Increment, &count, first) == JobStatus::Ok;
-            valid &= graph.Add(Increment, &count, second) == JobStatus::Ok;
-            valid &= graph.DependsOn(second, first) == JobStatus::Ok;
-            valid &= graph.Seal() == JobStatus::Ok;
-            valid &= system.Submit(graph) == JobStatus::Ok;
-            valid &= system.Wait(outcome) == JobStatus::Ok;
-            valid &= outcome == JobOutcome::Succeeded;
-            valid &= graph.Reset() == JobStatus::Ok;
+            isValid &= graph.Add(Increment, &count, first) == JobStatus::Ok;
+            isValid &= graph.Add(Increment, &count, second) == JobStatus::Ok;
+            isValid &= graph.DependsOn(second, first) == JobStatus::Ok;
+            isValid &= graph.Seal() == JobStatus::Ok;
+            isValid &= system.Submit(graph) == JobStatus::Ok;
+            isValid &= system.Wait(outcome) == JobStatus::Ok;
+            isValid &= outcome == JobOutcome::Succeeded;
+            isValid &= graph.Reset() == JobStatus::Ok;
         }
-        gTracking = false;
-        REQUIRE(valid);
+        gIsTracking = false;
+        REQUIRE(isValid == true);
         REQUIRE(gAllocations == 0);
         REQUIRE(count == 200);
     }

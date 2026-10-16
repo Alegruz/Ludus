@@ -2,6 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/math/geometry.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/gameplay/camera/evaluation.hpp>
@@ -69,6 +70,7 @@ struct PreviewViewOptions final
     bool Reference = false;
     const foundation::math::Vector3* OrbitCenter = nullptr;
     foundation::float32 OrbitRadius = 0;
+    const gameplay::camera::CameraSample* EditorCameraOrNull = nullptr;
 };
 struct RenderScene final
 {
@@ -102,8 +104,10 @@ struct RenderScene final
     QJsonObject RenderableBinding;
     [[nodiscard]] static bool
     Load(const QString& root, const WorldDocument& world, RenderScene& output, QString& error);
+    /// Bounds of the extracted visible objects, or one selected stable ID; failure preserves output.
+    [[nodiscard]] bool TryGetBounds(const QString& id, foundation::math::Aabb3& outBoundsWorld) const noexcept;
     // camera=-1 selects the independent editor orbit. All failures preserve output.
     [[nodiscard]] bool
-    View(const PreviewViewOptions& options, graphics::renderer::ViewDescription& output, QString& error) const;
+    View(const PreviewViewOptions& options, graphics::renderer::ViewDescription& outView, QString& outError) const;
 };
 } // namespace ludus::editor

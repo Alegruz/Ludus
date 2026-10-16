@@ -10,7 +10,9 @@
 #        define NOMINMAX
 #    endif
 #    include <windows.h>
-#elif !defined(LUDUS_PLATFORM_WEB)
+#elif defined(LUDUS_PLATFORM_WEB)
+// The serial browser backend uses no native primitives.
+#else
 #    include <pthread.h>
 #endif
 
@@ -23,7 +25,8 @@ struct NativeGate
 #if defined(LUDUS_PLATFORM_WINDOWS)
     CRITICAL_SECTION Mutex{};
     CONDITION_VARIABLE Condition{};
-#elif !defined(LUDUS_PLATFORM_WEB)
+#elif defined(LUDUS_PLATFORM_WEB)
+#else
     pthread_mutex_t Mutex{};
     pthread_cond_t Condition{};
 #endif
@@ -40,19 +43,20 @@ struct NativeThread
 {
 #if defined(LUDUS_PLATFORM_WINDOWS)
     HANDLE Handle = nullptr;
-#elif !defined(LUDUS_PLATFORM_WEB)
+#elif defined(LUDUS_PLATFORM_WEB)
+#else
     pthread_t Handle{};
 #endif
     ThreadFunction Function = nullptr;
-    void* Context = nullptr;
-    [[nodiscard]] bool Start(ThreadFunction function, void* context) noexcept;
+    void* ContextOrNull = nullptr;
+    [[nodiscard]] bool Start(ThreadFunction function, void* contextOrNull) noexcept;
     void Join() noexcept;
 };
 
 class GateLock final
 {
 public:
-    explicit GateLock(NativeGate& gate) noexcept : mGate(gate)
+    explicit GateLock(NativeGate& inoutGate) noexcept : mGate(inoutGate)
     {
         mGate.Lock();
     }

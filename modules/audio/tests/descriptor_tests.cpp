@@ -3,18 +3,19 @@
 
 #include <ludus/audio/audio_app_adapter.h>
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
-#include <vector>
 
 using namespace ludus::audio;
 using ludus::audio::app::DescriptorField;
 using ludus::audio::app::EventAdapter;
 using ludus::audio::app::EventDescriptor;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -161,7 +162,7 @@ TEST_CASE("A scheduled voice emits zero before its exact sub-span StartFrame", "
     REQUIRE(IsOk(sys.PlayClip(p, v)));
 
     constexpr uint32 frames = 512;
-    std::vector<float32> out(static_cast<std::size_t>(frames) * 2);
+    Array<float32> out(static_cast<usize>(frames) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,

@@ -10,6 +10,8 @@
 
 #include <ludus/foundation/base/core.h>
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MODULE_H
@@ -22,7 +24,6 @@
 
 #include <new>
 #include <string>
-#include <vector>
 
 namespace ludus::text
 {
@@ -75,7 +76,7 @@ struct FontSlot final
 {
     uint32 Generation = 0; // 0 == free slot.
     bool InUse = false;
-    std::vector<uint8> Bytes;
+    foundation::Array<uint8> Bytes;
     FT_Face Face = nullptr;
     hb_font_t* HbFont = nullptr;
     uint32 LiveLayouts = 0;
@@ -92,7 +93,7 @@ struct LayoutSlot final
     uint32 PixelHeight = 0;
     Direction TextDirection = Direction::LeftToRight;
     std::string Source;
-    std::vector<ShapedGlyph> Glyphs;
+    foundation::Array<ShapedGlyph> Glyphs;
     LayoutMetrics Metrics;
 };
 } // namespace
@@ -101,8 +102,8 @@ struct FontSystem final
 {
     FontSystemConfig Config;
     FT_Library Library = nullptr;
-    std::vector<FontSlot> Fonts;
-    std::vector<LayoutSlot> Layouts;
+    foundation::Array<FontSlot> Fonts;
+    foundation::Array<LayoutSlot> Layouts;
     uint32 FontGenerationCursor = 1;
     uint32 LayoutGenerationCursor = 1;
     uint64 RetainedGlyphRecords = 0;
@@ -111,7 +112,7 @@ struct FontSystem final
     uint64 MissingGlyphs = 0;
     usize OwnedFontBytes = 0;
     // Rasterization scratch, valid only until the next raster call.
-    std::vector<uint8> RasterScratch;
+    foundation::Array<uint8> RasterScratch;
     uint32 RendererRefCount = 0; // set by GraphicsText; blocks destruction.
 };
 
@@ -134,7 +135,7 @@ namespace
         return nullptr;
     }
     const uint32 slot = HandleSlot(font.Value);
-    if (slot >= system->Fonts.size())
+    if (slot >= system->Fonts.GetSize())
     {
         return nullptr;
     }
@@ -153,7 +154,7 @@ namespace
         return nullptr;
     }
     const uint32 slot = HandleSlot(layout.Value);
-    if (slot >= system->Layouts.size())
+    if (slot >= system->Layouts.GetSize())
     {
         return nullptr;
     }
@@ -273,9 +274,14 @@ Status CreateFontSystem(const FontSystemConfig& config, FontSystem** outSystem) 
 
     const uint32 maxFonts = ResolveLimit(config.MaxFonts, kDefaultMaxFonts);
     const uint32 maxLayouts = ResolveLimit(config.MaxLayouts, kDefaultMaxLayouts);
-    // Reserve metadata up front; warm paths never grow these.
-    system->Fonts.resize(maxFonts);
-    system->Layouts.resize(maxLayouts);
+    // Reserve metadata up front; warm paths never grow these. Allocation
+    // failure releases the partially built system and publishes nothing.
+    if (system->Fonts.TryResize(maxFonts) == false || system->Layouts.TryResize(maxLayouts) == false)
+    {
+        FT_Done_FreeType(system->Library);
+        delete system;
+        return Status::OutOfMemory;
+    }
 
     *outSystem = system;
     return Status::Ok;
@@ -347,7 +353,7 @@ Status LoadFont(FontSystem* system, std::span<const uint8> bytes, uint32 faceInd
     // Find a free slot.
     uint32 slotIndex = 0;
     bool found = false;
-    for (uint32 i = 0; i < system->Fonts.size(); ++i)
+    for (uint32 i = 0; i < system->Fonts.GetSize(); ++i)
     {
         if (!system->Fonts[i].InUse)
         {
@@ -364,23 +370,17 @@ Status LoadFont(FontSystem* system, std::span<const uint8> bytes, uint32 faceInd
     FontSlot& slot = system->Fonts[slotIndex];
     // Copy bytes into bounded owned storage before any FT/HB object references
     // them (never store a raw caller pointer).
-    std::vector<uint8> owned;
-    {
-        owned.resize(bytes.size());
-    }
-    if (owned.size() != bytes.size())
+    // Allocation failure leaves the system, slot and output untouched.
+    foundation::Array<uint8> owned;
+    if (owned.TryAddRange(bytes) == false)
     {
         return Status::OutOfMemory;
-    }
-    for (usize i = 0; i < bytes.size(); ++i)
-    {
-        owned[i] = bytes[i];
     }
 
     FT_Face face = nullptr;
     const FT_Error error = FT_New_Memory_Face(system->Library,
-                                              reinterpret_cast<const FT_Byte*>(owned.data()),
-                                              static_cast<FT_Long>(owned.size()),
+                                              reinterpret_cast<const FT_Byte*>(owned.GetData()),
+                                              static_cast<FT_Long>(owned.GetSize()),
                                               static_cast<FT_Long>(faceIndex),
                                               &face);
     if (error != 0)
@@ -409,7 +409,7 @@ Status LoadFont(FontSystem* system, std::span<const uint8> bytes, uint32 faceInd
     slot.HbFont = hbFont;
     slot.LiveLayouts = 0;
     slot.CurrentPixelHeight = 0;
-    system->OwnedFontBytes += slot.Bytes.size();
+    system->OwnedFontBytes += slot.Bytes.GetSize();
 
     *outFont = FontId{MakeHandle(slotIndex, slot.Generation)};
     return Status::Ok;
@@ -435,7 +435,7 @@ Status UnloadFont(FontSystem* system, FontId font) noexcept
     {
         FT_Done_Face(slot->Face);
     }
-    system->OwnedFontBytes -= slot->Bytes.size();
+    system->OwnedFontBytes -= slot->Bytes.GetSize();
     *slot = FontSlot{};
     return Status::Ok;
 }
@@ -510,7 +510,7 @@ Status ShapeInternal(FontSystem* system,
     // Find a free layout slot before shaping so a late failure publishes nothing.
     uint32 layoutIndex = 0;
     bool found = false;
-    for (uint32 i = 0; i < system->Layouts.size(); ++i)
+    for (uint32 i = 0; i < system->Layouts.GetSize(); ++i)
     {
         if (!system->Layouts[i].InUse)
         {
@@ -586,8 +586,8 @@ Status ShapeInternal(FontSystem* system,
     // Build the immutable layout. Keep HarfBuzz's returned order (RTL included);
     // never reverse UTF-8 bytes or re-add kerning.
     LayoutSlot staging;
-    staging.Glyphs.reserve(glyphCount);
-    if (staging.Glyphs.capacity() < glyphCount)
+    // Reserve every record before the loop so appending below cannot allocate.
+    if (staging.Glyphs.TryEnsureCapacity(glyphCount) == false)
     {
         hb_buffer_destroy(buffer);
         return Status::OutOfMemory;
@@ -653,7 +653,7 @@ Status ShapeInternal(FontSystem* system,
 
         penX += F26Dot6ToPixels(positions[i].x_advance);
         penY += F26Dot6ToPixels(positions[i].y_advance);
-        staging.Glyphs.push_back(glyph);
+        staging.Glyphs.Add(glyph);
     }
 
     hb_buffer_destroy(buffer);
@@ -741,7 +741,7 @@ Status GetLayout(FontSystem* system, LayoutId layout, LayoutView* outView) noexc
     outView->Font = slot->Font;
     outView->PixelHeight = slot->PixelHeight;
     outView->TextDirection = slot->TextDirection;
-    outView->Glyphs = std::span<const ShapedGlyph>(slot->Glyphs.data(), slot->Glyphs.size());
+    outView->Glyphs = slot->Glyphs.AsSpan();
     outView->SourceUtf8 = std::string_view(slot->Source.data(), slot->Source.size());
     outView->Metrics = slot->Metrics;
     return Status::Ok;
@@ -759,9 +759,9 @@ Status DestroyLayout(FontSystem* system, LayoutId layout) noexcept
     {
         --fontSlot->LiveLayouts;
     }
-    if (system->RetainedGlyphRecords >= slot->Glyphs.size())
+    if (system->RetainedGlyphRecords >= slot->Glyphs.GetSize())
     {
-        system->RetainedGlyphRecords -= slot->Glyphs.size();
+        system->RetainedGlyphRecords -= slot->Glyphs.GetSize();
     }
     *slot = LayoutSlot{};
     return Status::Ok;
@@ -828,18 +828,16 @@ Status RasterizeGlyph(FontSystem* system,
         return Status::UnsupportedGlyphFormat;
     }
 
-    ++system->RasterizeCalls;
-
-    outBitmap->GlyphId = glyphId;
-    outBitmap->BearingLeft = gs->bitmap_left;
-    outBitmap->BearingTop = gs->bitmap_top;
-
     // Zero-area glyph (e.g. space): valid metrics, no coverage, no allocation.
     if (bmp.width == 0 || bmp.rows == 0)
     {
+        ++system->RasterizeCalls;
+        outBitmap->GlyphId = glyphId;
+        outBitmap->BearingLeft = gs->bitmap_left;
+        outBitmap->BearingTop = gs->bitmap_top;
         outBitmap->Width = 0;
         outBitmap->Height = 0;
-        system->RasterScratch.clear();
+        system->RasterScratch.Clear();
         outBitmap->Coverage = std::span<const uint8>();
         return Status::Ok;
     }
@@ -862,7 +860,7 @@ Status RasterizeGlyph(FontSystem* system,
     {
         return Status::BackendFailure;
     }
-    if (layout.CoverageBytes > system->RasterScratch.max_size())
+    if (layout.CoverageBytes > foundation::Array<uint8>::GetMaxSize())
     {
         return Status::ResourceLimit;
     }
@@ -870,8 +868,7 @@ Status RasterizeGlyph(FontSystem* system,
 
     // Normalize into top-down, tightly packed coverage (Width is not a stride).
     const usize total = layout.CoverageBytes;
-    system->RasterScratch.resize(total);
-    if (system->RasterScratch.size() != total)
+    if (system->RasterScratch.TryResize(total) == false)
     {
         return Status::OutOfMemory;
     }
@@ -880,16 +877,22 @@ Status RasterizeGlyph(FontSystem* system,
         // When pitch < 0 the buffer is bottom-up; read rows in reverse.
         const uint8* srcRow = (bmp.pitch >= 0) ? (bmp.buffer + static_cast<usize>(row) * absPitch)
                                                : (bmp.buffer + static_cast<usize>(height - 1U - row) * absPitch);
-        uint8* dstRow = system->RasterScratch.data() + static_cast<usize>(row) * width;
+        uint8* dstRow = system->RasterScratch.GetData() + static_cast<usize>(row) * width;
         for (uint32 col = 0; col < width; ++col)
         {
             dstRow[col] = srcRow[col];
         }
     }
 
+    // Publish only after the scratch allocation succeeded; failure above leaves
+    // the cleared output and the counters unchanged.
+    ++system->RasterizeCalls;
+    outBitmap->GlyphId = glyphId;
+    outBitmap->BearingLeft = gs->bitmap_left;
+    outBitmap->BearingTop = gs->bitmap_top;
     outBitmap->Width = width;
     outBitmap->Height = height;
-    outBitmap->Coverage = std::span<const uint8>(system->RasterScratch.data(), system->RasterScratch.size());
+    outBitmap->Coverage = system->RasterScratch.AsSpan();
     return Status::Ok;
 }
 

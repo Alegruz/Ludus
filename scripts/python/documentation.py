@@ -40,7 +40,8 @@ def group(relative):
         return "Historical baselines"
     if any("evidence" in part for part in parts) or name.endswith(("-validation", "-performance", "-decision-log")):
         return "Validation and evidence"
-    if name in {"assertions-m0-m1", "luau-s0", "luau-s1", "memory-phase-0a", "webgpu-hosted-acceptance"} or name.startswith("webgpu-w"):
+    if name in {"assertions-m0-m1", "localization-l0", "luau-s0", "luau-s1", "memory-phase-0a",
+                "webgpu-hosted-acceptance"} or name.startswith("webgpu-w"):
         return "Validation and evidence"
     if name.endswith(("-handoff", "-milestones", "-implementation-plan", "-development-plan")):
         return "Plans and handoffs"

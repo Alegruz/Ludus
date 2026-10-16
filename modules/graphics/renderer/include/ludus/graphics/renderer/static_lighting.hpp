@@ -6,6 +6,7 @@
 #include <ludus/foundation/containers/borrowed_view.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
+#include <ludus/foundation/threading/jobs.hpp>
 #include <ludus/graphics/renderer/materials.hpp>
 #include <ludus/graphics/rhi/raster.h>
 
@@ -71,24 +72,74 @@ struct StaticLightingChart final
     foundation::uint64 DependencyRevision = 0; ///< Must match the retained cooked dependency revision.
     foundation::math::Affine3 Transform{};     ///< Exact mesh-to-world used by the bake.
 };
-/// CPU-only worker-owned incremental static diffuse bake. Charts include all
+/// @brief Upper bound on StaticLightingScheduleDescription::RangeCount.
+inline constexpr foundation::uint32 MAX_STATIC_LIGHTING_RANGES = 1024;
+/// @brief Coarse range decomposition for StaticLightingBake::Submit.
+///
+/// The bake is split into one preparation job followed by RangeCount jobs over
+/// contiguous, disjoint triangle ranges. Each range evaluates every sample of its
+/// triangles in the same order as Step, so the output does not depend on the range
+/// count, worker count or completion order.
+struct StaticLightingScheduleDescription final
+{
+    /// @brief Triangle ranges, 1..MAX_STATIC_LIGHTING_RANGES; ranges beyond the triangle count are empty.
+    ///
+    /// Use several ranges per worker so uneven path cost balances, while keeping
+    /// each range long enough that dispatch is small relative to its path work.
+    foundation::uint32 RangeCount = 64;
+};
+/// @brief Phase durations of a scheduled bake, read from FoundationTime's monotonic clock.
+///
+/// All values are nanoseconds and describe the latest Submit after its lifetime
+/// fence. The critical path of the job graph is PrepareNanoseconds +
+/// DispatchNanoseconds + LongestRangeNanoseconds, followed by MergeNanoseconds on
+/// the owner. Skipped (cancelled or blocked) ranges contribute no time.
+struct StaticLightingBakeProfile final
+{
+    foundation::uint64 PrepareNanoseconds = 0;      ///< Preparation job: validation, surfaces and BVH build.
+    foundation::uint64 DispatchNanoseconds = 0;     ///< End of preparation to the first range callback start.
+    foundation::uint64 LongestRangeNanoseconds = 0; ///< Slowest executed range callback.
+    foundation::uint64 RangeNanoseconds = 0;        ///< Sum of executed range callbacks (total path work).
+    foundation::uint64 ExecutionNanoseconds = 0;    ///< Submit entry to the end of the last executed callback.
+    foundation::uint64 MergeNanoseconds = 0;        ///< Owner-side status merge and chart encoding.
+    foundation::uint32 RangeCount = 0;              ///< Submitted ranges, including empty ones.
+    foundation::uint32 ExecutedRangeCount = 0;      ///< Range callbacks that ran; cancellation skips the rest.
+};
+/// @brief Path-sample progress of a bake; both counts are zero for an unbound bake.
+struct StaticLightingBakeProgress final
+{
+    foundation::uint64 CompletedSamples = 0; ///< Evaluated cosine path samples.
+    foundation::uint64 TotalSamples = 0;     ///< Triangles times SamplesPerTriangle.
+};
+/// CPU-only incremental static diffuse bake. Charts include all
 /// visible static area/environment direct diffuse and later indirect transport;
 /// analytic direct diffuse/specular stays raster. Set BakedLighting's
 /// AreTriangleChartsEnabled and HasStaticAreaDirect, and DirectLightId=0.
 /// Area specular is outside this profile. Per-triangle centroid irradiance is
 /// coarse spatial reconstruction; sample count controls transport variance.
-/// CPU-only worker-owned incremental static diffuse bake. No Renderer, GPU,
-/// Qt or native ray-query state is touched. Use serial calls on one worker;
-/// transfer the completed job to the composition owner after worker completion.
-/// Source scene storage stays immutable and alive until job destruction because
-/// retained CPU texture bytes are borrowed. Cancel by ceasing work and destroying
-/// on that worker; discard obsolete revision results before publication.
+/// No Renderer, GPU, Qt or native ray-query state is touched.
+///
+/// Two execution modes share the same transport and produce bit-identical charts:
+/// - Serial: Initialize, then Step until Ready, all on one thread.
+/// - Scheduled: Submit to a caller-owned foundation::threading::JobSystem, then
+///   Poll (nonblocking) or Finish (blocking) on the owner thread that serializes
+///   that system. Preparation and coarse triangle ranges run as jobs reading one
+///   immutable prepared scene; each range writes only its own triangles. After the
+///   JobSystem::Wait lifetime fence, the owner merges range results in stable
+///   range order and encodes the charts.
+///
+/// Source scene storage stays immutable and alive until destruction because
+/// retained CPU texture bytes are borrowed. Discard obsolete revision results
+/// before publication; transfer a completed bake to the composition owner.
 class StaticLightingBake final
 {
 public:
     /// Construct an unbound job without allocation.
     LUDUS_INLINE StaticLightingBake() noexcept = default;
-    /// Release only CPU storage; must not race Initialize/Step/GetChart.
+    /// Release only CPU storage; must not race any other call.
+    /// An in-flight scheduled bake is cancelled and drained through its JobSystem
+    /// first; this blocks until running ranges reach their next sample boundary.
+    /// @warning Destroying an in-flight bake from a job callback is a fatal contract violation.
     ~StaticLightingBake() noexcept;
     /// Worker job identity cannot be copied.
     StaticLightingBake(const StaticLightingBake&) = delete;
@@ -111,6 +162,57 @@ public:
     /// BakedLighting must be zero: charts contain static area/environment direct diffuse plus indirect irradiance.
     [[nodiscard]] rhi::RasterStatus GetChart(foundation::usize objectIndex,
                                              StaticLightingChart& outChart) const noexcept;
+
+    /// @brief Submits preparation and range evaluation of an unbound bake to a JobSystem.
+    ///
+    /// Copies the description, including every Surfaces override, before returning.
+    /// Validation and preparation run in the first job, so their failures are
+    /// reported by Poll or Finish. With zero workers the whole bake runs inside this
+    /// call; Poll or Finish is still required to merge it. Step is unavailable for a
+    /// scheduled bake.
+    /// @param inoutSystem Initialized system with no graph in flight. It must outlive
+    ///        this bake; do not reinitialize it while this bake is in flight.
+    /// @param scene Source scene; immutable and alive until this bake is destroyed.
+    /// @param description Transport quality and provenance, validated as for Initialize.
+    /// @param schedule Range decomposition.
+    /// @return Pending once submitted. InvalidState when already initialized or submitted,
+    ///         or when the system is uninitialized, busy, or called from a job callback;
+    ///         InvalidDescription for an invalid range count or Surfaces view; or
+    ///         OutOfMemory. Failure leaves the bake unbound.
+    [[nodiscard]] rhi::RasterStatus Submit(foundation::threading::JobSystem& inoutSystem,
+                                           const resources::SceneDefinition& scene,
+                                           const StaticLightingBakeDescription& description,
+                                           const StaticLightingScheduleDescription& schedule = {}) noexcept;
+    /// @brief Nonblocking completion check for a scheduled bake, on the owner thread.
+    ///
+    /// Returns Pending while any job is unresolved. Once every job is resolved, it
+    /// releases the graph through JobSystem::Wait without helping, merges range
+    /// results in stable order and encodes all charts on the calling thread.
+    /// @return Pending; Ready when every chart is encoded; NotReady after cancellation;
+    ///         the first preparation or range failure in range order; or InvalidState
+    ///         for a bake that was not submitted, or a call from a job callback.
+    ///         Later calls return the same final status.
+    [[nodiscard]] rhi::RasterStatus Poll() noexcept;
+    /// @brief Blocking form of Poll: waits for the submitted graph, helping execute ready jobs.
+    /// @return As for Poll, never Pending.
+    [[nodiscard]] rhi::RasterStatus Finish() noexcept;
+    /// @brief Requests cooperative cancellation of a scheduled bake; no effect otherwise.
+    ///
+    /// Ranges that have not started are skipped, and running ranges stop at their
+    /// next sample boundary. Poll or Finish then returns NotReady, unless every job
+    /// had already completed. Call on the owner thread while the system is initialized.
+    void Cancel() noexcept;
+    /// @brief Reads evaluated and total path samples.
+    ///
+    /// Scheduled progress is a relaxed sum of per-range counters advanced once per
+    /// completed triangle, so it is monotonic but may lag the work in flight.
+    /// @param outProgress Receives the counts; zero for an unbound bake.
+    void GetProgress(StaticLightingBakeProgress& outProgress) const noexcept;
+    /// @brief Reads phase durations of a scheduled bake once Poll or Finish has merged it.
+    /// @return Ready, including after cancellation or failure; Pending while in flight;
+    ///         or InvalidState for a bake that was not submitted. Pending and
+    ///         InvalidState preserve outProfile.
+    [[nodiscard]] rhi::RasterStatus GetProfile(StaticLightingBakeProfile& outProfile) const noexcept;
 
 private:
     struct State;

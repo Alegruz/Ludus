@@ -7,8 +7,10 @@
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/status.hpp>
 #include <ludus/foundation/math/summation.hpp>
+#include <ludus/foundation/time/time.hpp>
 #include <ludus/runtime/resources/scene.h>
 
+#include <atomic>
 #include <new>
 
 #include "internal/reference_data.h"
@@ -19,11 +21,14 @@ using namespace foundation;
 namespace math = foundation::math;
 namespace format = content::scene_format;
 using Status = rhi::RasterStatus;
+namespace threading = foundation::threading;
 namespace
 {
 constexpr uint32 BAKE_RANDOM_DOMAIN = 0x42414B45; // Independent addressed BAKE stream.
 constexpr usize TRIANGLE_CORNERS = 3;
 constexpr float32 AFFINE_ERROR_ALLOWANCE = 1e-6F; // Conservative FP32 transformed-position allowance.
+// Apple ARM64 cores use 128-byte cache lines; this also separates 64-byte x86 lines.
+constexpr usize RANGE_RECORD_ALIGNMENT = 128;
 struct ChartRecord final
 {
     format::BakeChartLayout Layout;
@@ -33,9 +38,37 @@ struct ChartRecord final
     uint64 SourceId = 0;
     math::Affine3 Transform;
 };
+[[nodiscard]] uint64 GetElapsed(uint64 startTicks, uint64 endTicks) noexcept
+{
+    return endTicks > startTicks ? endTicks - startTicks : 0;
+}
 } // namespace
+// Thanks to Brad Werth, "Holistic Task Parallelism for Common Game Architecture
+// Patterns," Game Engine Gems 1, ch. 22, pp. 381-390, for coarse range
+// decomposition over shared read-only input, and to Julien Hamaide, "Thread
+// Communication Techniques," Game Engine Gems 2, ch. 29, pp. 459-467, for keeping
+// worker outputs disjoint and aggregating them on one owner. Ludus departs by
+// fixing the ranges before submission (no recursive splitting or waits) and by
+// merging in range order after the JobSystem::Wait lifetime fence. See
+// docs/architecture/threading.md#reference-review-and-resulting-changes.
 struct StaticLightingBake::State final
 {
+    /// One triangle range job's results, read by the owner only after the Wait fence.
+    struct alignas(RANGE_RECORD_ALIGNMENT) Range final
+    {
+        State* OwnerOrNull = nullptr;
+        uint32 Index = 0;
+        Status Result = Status::NotReady;
+        bool HasRun = false;
+        uint64 StartTicks = 0;
+        uint64 EndTicks = 0;
+        ReferenceCaptureInfo Info; // Private path diagnostics of this range.
+    };
+    /// Per-range progress, the only range state read while jobs run.
+    struct alignas(RANGE_RECORD_ALIGNMENT) RangeProgress final
+    {
+        std::atomic<uint64> CompletedSamples{0};
+    };
     StaticLightingBakeDescription Description;
     internal::ReferenceJob Job;
     Array<internal::ReferenceSurfaceData> Surfaces;
@@ -44,14 +77,57 @@ struct StaticLightingBake::State final
     uint32 Triangle = 0;
     uint32 Sample = 0;
     Status Progress = Status::Pending;
+    // Scheduled mode. The prepare job and ranges reach State through context pointers.
+    const resources::SceneDefinition* SceneOrNull = nullptr;
+    threading::JobSystem* SystemOrNull = nullptr;
+    Array<StaticLightingSurfaceDescription> SurfaceOverrides;
+    Array<Range> Ranges;
+    RangeProgress* ProgressOrNull = nullptr; // Owned; one slot per range.
+    Array<threading::JobHandle> Handles;     // Preparation, then ranges in order.
+    Status PrepareResult = Status::NotReady;
+    uint64 SubmitTicks = 0;
+    uint64 PrepareStartTicks = 0;
+    uint64 PrepareEndTicks = 0;
+    uint64 TotalSamples = 0;
+    StaticLightingBakeProfile Profile;
+    std::atomic<bool> ShouldStop{false};
+    bool IsScheduled = false;
+    bool IsInFlight = false;
+    // Declared last so it is destroyed, and any submission drained, before its contexts.
+    threading::JobGraph Graph;
 
     LUDUS_INLINE State() noexcept
     {
         Job.IsCpuOnly = true;
     }
+    ~State() noexcept
+    {
+        // The owner drains every submission before destroying its contexts.
+        LUDUS_REQUIRE(IsInFlight == false);
+        delete[] ProgressOrNull;
+    }
+    State(const State&) = delete;
+    State& operator=(const State&) = delete;
+    [[nodiscard]] Status Prepare(const resources::SceneDefinition& scene,
+                                 const StaticLightingBakeDescription& description) noexcept;
+    [[nodiscard]] Status EncodeCharts() noexcept;
+    [[nodiscard]] Status Merge() noexcept;
+    [[nodiscard]] Status Release(bool shouldHelp) noexcept;
+    void RequestStop() noexcept;
+    static threading::JobOutcome RunPrepare(void* context) noexcept;
+    static threading::JobOutcome RunRange(void* context) noexcept;
 };
 StaticLightingBake::~StaticLightingBake() noexcept
 {
+    if (mStateOrNull != nullptr && mStateOrNull->IsInFlight == true)
+    {
+        mStateOrNull->RequestStop();
+        threading::JobOutcome outcome = threading::JobOutcome::Pending;
+        const threading::JobStatus waited = mStateOrNull->SystemOrNull->Wait(outcome);
+        // A callback stack cannot drain itself; NotInitialized means Shutdown already drained it.
+        LUDUS_REQUIRE(waited != threading::JobStatus::InsideJob);
+        mStateOrNull->IsInFlight = false;
+    }
     delete mStateOrNull;
 }
 Status StaticLightingBake::Initialize(const resources::SceneDefinition& scene,
@@ -61,12 +137,30 @@ Status StaticLightingBake::Initialize(const resources::SceneDefinition& scene,
     {
         return Status::InvalidState;
     }
+    core::UniquePtr<State> state;
+    state.Reset(new (std::nothrow) State);
+    if (state.Get() == nullptr)
+    {
+        return Status::OutOfMemory;
+    }
+    const Status status = state->Prepare(scene, description);
+    if (status != Status::Pending)
+    {
+        return status;
+    }
+    mStateOrNull = state.Release();
+    return Status::Pending;
+}
+Status StaticLightingBake::State::Prepare(const resources::SceneDefinition& scene,
+                                          const StaticLightingBakeDescription& description) noexcept
+{
     if (description.SceneRevision == 0 || description.DependencyRevision == 0 || description.SamplesPerTriangle == 0 ||
-        description.SamplesPerTriangle > 65536 || description.MaxDepth < 2 || description.MaxDepth > 64 ||
-        math::IsFinite(description.SecondaryDistance) == false || description.SecondaryDistance <= 0 ||
-        description.SecondaryDistance > 2000000 || scene.Objects.IsEmpty() == true ||
-        scene.Objects.GetSize() > format::MAX_OBJECTS || scene.Materials.GetSize() > format::MAX_MATERIALS ||
-        scene.Lights.GetSize() > format::MAX_LIGHTS || description.Surfaces.IsValid() == false ||
+        description.SamplesPerTriangle > 65536 || description.MaxDepth < 2 ||
+        description.MaxDepth > LUDUS_REFERENCE_MAX_DEPTH || math::IsFinite(description.SecondaryDistance) == false ||
+        description.SecondaryDistance <= 0 || description.SecondaryDistance > 2000000 ||
+        scene.Objects.IsEmpty() == true || scene.Objects.GetSize() > format::MAX_OBJECTS ||
+        scene.Materials.GetSize() > format::MAX_MATERIALS || scene.Lights.GetSize() > format::MAX_LIGHTS ||
+        description.Surfaces.IsValid() == false ||
         (description.Surfaces.IsEmpty() == false && description.Surfaces.GetSize() != scene.Objects.GetSize()))
     {
         return Status::InvalidDescription;
@@ -110,12 +204,7 @@ Status StaticLightingBake::Initialize(const resources::SceneDefinition& scene,
     {
         return Status::CapacityExceeded;
     }
-    core::UniquePtr<State> state;
-    state.Reset(new (std::nothrow) State);
-    if (state.Get() == nullptr)
-    {
-        return Status::OutOfMemory;
-    }
+    State* state = this;
     state->Description = description;
     state->Description.Surfaces = {}; // All caller overrides are copied during this call, never retained.
     internal::ReferenceJob& job = state->Job;
@@ -375,7 +464,6 @@ Status StaticLightingBake::Initialize(const resources::SceneDefinition& scene,
     {
         return bvhStatus;
     }
-    mStateOrNull = state.Release();
     return Status::Pending;
 }
 Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
@@ -385,6 +473,10 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
         return Status::InvalidState;
     }
     State& state = *mStateOrNull;
+    if (state.IsScheduled == true)
+    {
+        return Status::InvalidState;
+    }
     if (state.Progress != Status::Pending)
     {
         return state.Progress;
@@ -394,6 +486,7 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
         math::Vector3 irradiance;
         const Status status =
             internal::EvaluateReferenceDiffuseProbe(state.Job,
+                                                    state.Job.Info,
                                                     { .TriangleIndex = state.Triangle, .SampleIndex = state.Sample },
                                                     irradiance);
         if (status != Status::Ready)
@@ -413,6 +506,12 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
     {
         return Status::Pending;
     }
+    state.Progress = state.EncodeCharts();
+    return state.Progress;
+}
+Status StaticLightingBake::State::EncodeCharts() noexcept
+{
+    State& state = *this;
     for (ChartRecord& chart : state.Charts)
     {
         for (usize i = 0; i < chart.Layout.TriangleCount; ++i)
@@ -421,8 +520,7 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
                 state.Irradiance[chart.FirstTriangle + i].Value / float32(state.Description.SamplesPerTriangle);
             if (internal::ReferenceColor(mean, 10000) == false)
             {
-                state.Progress = math::IsFinite(mean) == true ? Status::CapacityExceeded : Status::Failed;
-                return state.Progress;
+                return math::IsFinite(mean) == true ? Status::CapacityExceeded : Status::Failed;
             }
             chart.Scale = {math::Max(chart.Scale.X, mean.X),
                            math::Max(chart.Scale.Y, mean.Y),
@@ -430,8 +528,7 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
         }
         if (internal::ReferenceColor(chart.Scale, 10000) == false)
         {
-            state.Progress = Status::CapacityExceeded;
-            return state.Progress;
+            return Status::CapacityExceeded;
         }
         constexpr float32 MIN_IRRADIANCE_SCALE =
             1e-6F; // Avoid zero-channel division without losing weak illumination to a unit-scale floor.
@@ -463,7 +560,6 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
             }
         }
     }
-    state.Progress = Status::Ready;
     return Status::Ready;
 }
 Status StaticLightingBake::GetChart(usize objectIndex, StaticLightingChart& outChart) const noexcept
@@ -494,5 +590,290 @@ Status StaticLightingBake::GetChart(usize objectIndex, StaticLightingChart& outC
         .Transform = chart.Transform,
     };
     return Status::Ready;
+}
+Status StaticLightingBake::Submit(threading::JobSystem& inoutSystem,
+                                  const resources::SceneDefinition& scene,
+                                  const StaticLightingBakeDescription& description,
+                                  const StaticLightingScheduleDescription& schedule) noexcept
+{
+    if (mStateOrNull != nullptr)
+    {
+        return Status::InvalidState;
+    }
+    const uint32 rangeCount = schedule.RangeCount;
+    if (rangeCount == 0 || rangeCount > MAX_STATIC_LIGHTING_RANGES || description.Surfaces.IsValid() == false)
+    {
+        return Status::InvalidDescription;
+    }
+    const uint64 submitTicks = time::NowTicks();
+    core::UniquePtr<State> state;
+    state.Reset(new (std::nothrow) State);
+    if (state.Get() == nullptr)
+    {
+        return Status::OutOfMemory;
+    }
+    state->ProgressOrNull = new (std::nothrow) State::RangeProgress[rangeCount];
+    if (state->ProgressOrNull == nullptr || state->Ranges.TryResize(rangeCount) == false ||
+        state->Handles.TryEnsureCapacity(usize{rangeCount} + 1) == false ||
+        (description.Surfaces.IsEmpty() == false &&
+         state->SurfaceOverrides.TryAddRange({description.Surfaces.GetDataOrNull(), description.Surfaces.GetSize()}) ==
+             false))
+    {
+        return Status::OutOfMemory;
+    }
+    state->Description = description;
+    state->Description.Surfaces = {state->SurfaceOverrides.GetData(), state->SurfaceOverrides.GetSize()};
+    state->SceneOrNull = &scene;
+    state->SystemOrNull = &inoutSystem;
+    state->SubmitTicks = submitTicks;
+    state->IsScheduled = true;
+    uint64 triangleCount = 0;
+    for (const resources::SceneObject& object : scene.Objects)
+    {
+        if (object.Mesh < scene.Meshes.GetSize())
+        {
+            triangleCount += scene.Meshes[object.Mesh].Indices.GetSize() / TRIANGLE_CORNERS;
+        }
+    }
+    state->TotalSamples = triangleCount * description.SamplesPerTriangle;
+    threading::JobGraph& graph = state->Graph;
+    threading::JobHandle prepare;
+    if (graph.Initialize({ .MaxJobs = rangeCount + 1, .MaxDependencies = rangeCount }) != threading::JobStatus::Ok ||
+        graph.Add(&State::RunPrepare, state.Get(), prepare) != threading::JobStatus::Ok)
+    {
+        return Status::OutOfMemory;
+    }
+    LUDUS_REQUIRE(state->Handles.TryAdd(prepare) == true);
+    for (uint32 i = 0; i < rangeCount; ++i)
+    {
+        State::Range& range = state->Ranges[i];
+        range.OwnerOrNull = state.Get();
+        range.Index = i;
+        threading::JobHandle handle;
+        // Capacity was reserved above, so neither call can fail for a valid graph.
+        LUDUS_REQUIRE(graph.Add(&State::RunRange, &range, handle) == threading::JobStatus::Ok);
+        LUDUS_REQUIRE(graph.DependsOn(handle, prepare) == threading::JobStatus::Ok);
+        LUDUS_REQUIRE(state->Handles.TryAdd(handle) == true);
+    }
+    LUDUS_REQUIRE(graph.Seal() == threading::JobStatus::Ok);
+    // Mark in flight first: the serial executor runs every job inside Submit.
+    state->IsInFlight = true;
+    if (inoutSystem.Submit(graph) != threading::JobStatus::Ok)
+    {
+        state->IsInFlight = false;
+        return Status::InvalidState;
+    }
+    mStateOrNull = state.Release();
+    return Status::Pending;
+}
+Status StaticLightingBake::Poll() noexcept
+{
+    if (mStateOrNull == nullptr || mStateOrNull->IsScheduled == false)
+    {
+        return Status::InvalidState;
+    }
+    State& state = *mStateOrNull;
+    if (state.IsInFlight == false)
+    {
+        return state.Progress;
+    }
+    // GetOutcome reads only this graph, so another system state cannot be mistaken
+    // for it. Once every job is resolved, Wait releases the graph without blocking.
+    for (const threading::JobHandle handle : state.Handles)
+    {
+        threading::JobOutcome outcome = threading::JobOutcome::Pending;
+        LUDUS_REQUIRE(state.Graph.GetOutcome(handle, outcome) == threading::JobStatus::Ok);
+        if (outcome == threading::JobOutcome::Pending || outcome == threading::JobOutcome::Running)
+        {
+            return Status::Pending;
+        }
+    }
+    return state.Release(false);
+}
+Status StaticLightingBake::Finish() noexcept
+{
+    if (mStateOrNull == nullptr || mStateOrNull->IsScheduled == false)
+    {
+        return Status::InvalidState;
+    }
+    if (mStateOrNull->IsInFlight == false)
+    {
+        return mStateOrNull->Progress;
+    }
+    return mStateOrNull->Release(true);
+}
+void StaticLightingBake::Cancel() noexcept
+{
+    if (mStateOrNull != nullptr && mStateOrNull->IsInFlight == true)
+    {
+        mStateOrNull->RequestStop();
+    }
+}
+void StaticLightingBake::GetProgress(StaticLightingBakeProgress& outProgress) const noexcept
+{
+    outProgress = {};
+    if (mStateOrNull == nullptr)
+    {
+        return;
+    }
+    const State& state = *mStateOrNull;
+    if (state.IsScheduled == true)
+    {
+        for (usize i = 0; i < state.Ranges.GetSize(); ++i)
+        {
+            outProgress.CompletedSamples += state.ProgressOrNull[i].CompletedSamples.load(std::memory_order_relaxed);
+        }
+        outProgress.TotalSamples = state.TotalSamples;
+        return;
+    }
+    const uint64 samples = state.Description.SamplesPerTriangle;
+    outProgress.CompletedSamples = uint64(state.Triangle) * samples + state.Sample;
+    outProgress.TotalSamples = uint64(state.Job.Scene.Triangles.GetSize()) * samples;
+}
+Status StaticLightingBake::GetProfile(StaticLightingBakeProfile& outProfile) const noexcept
+{
+    if (mStateOrNull == nullptr || mStateOrNull->IsScheduled == false)
+    {
+        return Status::InvalidState;
+    }
+    if (mStateOrNull->IsInFlight == true)
+    {
+        return Status::Pending;
+    }
+    outProfile = mStateOrNull->Profile;
+    return Status::Ready;
+}
+void StaticLightingBake::State::RequestStop() noexcept
+{
+    ShouldStop.store(true, std::memory_order_relaxed);
+    // Skips jobs that have not started; NotInitialized after Shutdown drained the graph.
+    static_cast<void>(SystemOrNull->Cancel());
+}
+threading::JobOutcome StaticLightingBake::State::RunPrepare(void* context) noexcept
+{
+    State& state = *static_cast<State*>(context);
+    state.PrepareStartTicks = time::NowTicks();
+    if (state.ShouldStop.load(std::memory_order_relaxed) == true)
+    {
+        state.PrepareEndTicks = state.PrepareStartTicks;
+        return threading::JobOutcome::Cancelled;
+    }
+    // Prepare overwrites Description, so pass a copy that still views the owned overrides.
+    const StaticLightingBakeDescription description = state.Description;
+    state.PrepareResult = state.Prepare(*state.SceneOrNull, description);
+    state.PrepareEndTicks = time::NowTicks();
+    return state.PrepareResult == Status::Pending ? threading::JobOutcome::Succeeded : threading::JobOutcome::Failed;
+}
+threading::JobOutcome StaticLightingBake::State::RunRange(void* context) noexcept
+{
+    Range& range = *static_cast<Range*>(context);
+    State& state = *range.OwnerOrNull;
+    range.HasRun = true;
+    range.StartTicks = time::NowTicks();
+    // Preparation published the immutable job through the graph edge. Each range
+    // reads it concurrently and writes only Irradiance[first, last).
+    const uint64 triangleCount = state.Job.Scene.Triangles.GetSize();
+    const uint64 rangeCount = state.Ranges.GetSize();
+    const uint32 first = static_cast<uint32>(triangleCount * range.Index / rangeCount);
+    const uint32 last = static_cast<uint32>(triangleCount * (uint64(range.Index) + 1) / rangeCount);
+    const uint32 samples = state.Description.SamplesPerTriangle;
+    std::atomic<uint64>& completed = state.ProgressOrNull[range.Index].CompletedSamples;
+    threading::JobOutcome outcome = threading::JobOutcome::Succeeded;
+    range.Result = Status::Ready;
+    for (uint32 triangle = first; triangle < last && outcome == threading::JobOutcome::Succeeded; ++triangle)
+    {
+        // Same per-triangle accumulation order as Step, so results are bit-identical.
+        internal::ReferenceSum sum;
+        for (uint32 sample = 0; sample < samples; ++sample)
+        {
+            if (state.ShouldStop.load(std::memory_order_relaxed) == true)
+            {
+                range.Result = Status::NotReady;
+                outcome = threading::JobOutcome::Cancelled;
+                break;
+            }
+            math::Vector3 irradiance;
+            const Status status =
+                internal::EvaluateReferenceDiffuseProbe(state.Job,
+                                                        range.Info,
+                                                        { .TriangleIndex = triangle, .SampleIndex = sample },
+                                                        irradiance);
+            if (status != Status::Ready)
+            {
+                // Stop sibling ranges early; Merge reports this failure over their cancellation.
+                range.Result = status;
+                outcome = threading::JobOutcome::Failed;
+                state.RequestStop();
+                break;
+            }
+            sum.Add(irradiance);
+        }
+        if (outcome == threading::JobOutcome::Succeeded)
+        {
+            state.Irradiance[triangle] = sum;
+            completed.store(completed.load(std::memory_order_relaxed) + samples, std::memory_order_relaxed);
+        }
+    }
+    range.EndTicks = time::NowTicks();
+    return outcome;
+}
+Status StaticLightingBake::State::Release(bool shouldHelp) noexcept
+{
+    threading::JobOutcome outcome = threading::JobOutcome::Pending;
+    const threading::JobStatus waited = SystemOrNull->Wait(outcome, shouldHelp);
+    if (waited == threading::JobStatus::InsideJob)
+    {
+        return Status::InvalidState;
+    }
+    // Ok releases the graph. NotInitialized or InvalidArgument means Shutdown already
+    // drained and released it. Either way every callback write is now visible.
+    IsInFlight = false;
+    const uint64 mergeStartTicks = time::NowTicks();
+    Progress = Merge();
+    Profile.MergeNanoseconds = GetElapsed(mergeStartTicks, time::NowTicks());
+    return Progress;
+}
+Status StaticLightingBake::State::Merge() noexcept
+{
+    Profile = {};
+    Profile.RangeCount = static_cast<uint32>(Ranges.GetSize());
+    Profile.PrepareNanoseconds = GetElapsed(PrepareStartTicks, PrepareEndTicks);
+    uint64 lastEndTicks = PrepareEndTicks;
+    uint64 firstStartTicks = ~uint64{0};
+    bool isCancelled = PrepareResult == Status::NotReady;
+    Status failure =
+        PrepareResult == Status::Pending || PrepareResult == Status::NotReady ? Status::Ready : PrepareResult;
+    // Stable range order: the first failure wins, and failure dominates cancellation.
+    for (const Range& range : Ranges)
+    {
+        if (range.HasRun == true)
+        {
+            const uint64 elapsed = GetElapsed(range.StartTicks, range.EndTicks);
+            ++Profile.ExecutedRangeCount;
+            Profile.RangeNanoseconds += elapsed;
+            Profile.LongestRangeNanoseconds = math::Max(Profile.LongestRangeNanoseconds, elapsed);
+            firstStartTicks = math::Min(firstStartTicks, range.StartTicks);
+            lastEndTicks = math::Max(lastEndTicks, range.EndTicks);
+        }
+        if (range.Result == Status::NotReady)
+        {
+            isCancelled = true;
+        }
+        else if (range.Result != Status::Ready && failure == Status::Ready)
+        {
+            failure = range.Result;
+        }
+    }
+    Profile.DispatchNanoseconds = Profile.ExecutedRangeCount == 0 ? 0 : GetElapsed(PrepareEndTicks, firstStartTicks);
+    Profile.ExecutionNanoseconds = GetElapsed(SubmitTicks, lastEndTicks);
+    if (failure != Status::Ready)
+    {
+        return failure;
+    }
+    if (isCancelled == true)
+    {
+        return Status::NotReady;
+    }
+    return EncodeCharts();
 }
 } // namespace ludus::graphics::renderer

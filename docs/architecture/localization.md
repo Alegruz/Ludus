@@ -5,7 +5,12 @@ is implemented by [Localization](../modules/localization.md). Its
 `ludus-static-utf8-v1` profile stores literal UTF-8, provides catalog leases and
 exact bindings, and validates/cooks reviewed translations offline. Each successful
 load requires rebinding; schema-compatible binding reuse remains future work.
-ICU patterns, locale negotiation, context switching and paragraph integration
+[L0](localization-l0.md) specifies the `ludus-icu-mf1-v1` documents, release
+manifest and message profile, adds a representative corpus, and proves ICU4C
+78.3 in a private exception-free probe on native and wasm32. It accepts ICU for
+semantics and size but finds it unsafe under allocation failure, so L2 treats
+ICU allocation failure as fatal; its CAT profile remains unconfirmed. ICU
+formatting, locale negotiation, context switching and paragraph integration
 below describe subsequent phases. No throughput or complete language-support
 claim is made. Original design baseline: `52e29ce`; initial implementation base:
 `afe3b78`, with FoundationMemory/Strings now available.
@@ -498,7 +503,9 @@ budgets. Limit checking after ICU formatting is an output limit, not proof of a
 hard backend allocation cap. If hard allocator caps are required, install audited
 ICU allocation hooks at host initialization and prove null-allocation propagation;
 never install global hooks during a locale switch. Until that gate passes, label
-backend memory as measured/attributed rather than strictly capped.
+backend memory as measured/attributed rather than strictly capped. ICU4C 78.3
+fails that gate ([L0 findings](localization-l0.md#allocation-failure-findings)):
+its hook must treat allocation failure as fatal.
 
 | Path | Intended cost and verification |
 | --- | --- |
@@ -675,7 +682,7 @@ architecture-only change does not configure, repair, or build such a project.
 
 | Phase | Deliverable | Exit evidence |
 | --- | --- | --- |
-| L0 | Schema/manifest/profile specification, ICU dependency probe, representative corpus | Native/wasm exception-free backend proof, sizes, failure behavior and confirmed CAT profile; report unsupported targets |
+| L0 | Schema/manifest/profile specification, ICU dependency probe, representative corpus | Native/wasm exception-free backend proof, sizes, failure behavior and confirmed CAT profile; report unsupported targets. [Implemented](localization-l0.md) except the CAT confirmation |
 | L1 | Source validation, static cooker/reader, exact bindings and generated descriptors | Static escaping/UTF-8, corruption/collision/lifetime tests, reproducible packages and CLI inspection |
 | L2 | Typed ICU formatting, context preparation and consumer caches | Grammar corpus, failure injection, native/wasm formatting parity and measured dynamic cost |
 | L3 | Candidate loading, visible-view readiness and generation publication | Cancellation, old-plus-new budgets, consistent visible switch, hot reload and multi-context tests |

@@ -20,9 +20,10 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace ludus::runtime::game_host
 {
@@ -131,6 +132,8 @@ private:
     // Emit an event frame on the control channel (no-op if no control fd).
     void Emit(const protocol::Message& message, bool priority = false) noexcept;
     void FlushOutput() noexcept;
+    // Fails the control channel after an output/result allocation failure.
+    void latchOutputAllocationFailure() noexcept;
     void EmitReloadPhase(protocol::ReloadPhase phase) noexcept;
     void EmitCommandResult(uint64 requestId, protocol::CommandStatus status, std::string_view message) noexcept;
     void EmitReady() noexcept;
@@ -185,10 +188,12 @@ private:
     protocol::FrameReader Reader_;
     struct OutputFrame
     {
-        std::vector<ludus::foundation::uint8> Bytes;
+        ludus::foundation::Array<ludus::foundation::uint8> Bytes;
         usize Offset = 0;
     };
-    std::vector<OutputFrame> Output_;
+    // Capacity is reserved at construction; an allocation failure while
+    // queueing latches the channel as failed instead of dropping a frame.
+    ludus::foundation::Array<OutputFrame> Output_;
     usize OutputBytes_ = 0;
     bool ChannelFailed_ = false;
     struct RetainedResult
@@ -197,7 +202,7 @@ private:
         std::string Payload;
         protocol::Message Result;
     };
-    std::vector<RetainedResult> Results_;
+    ludus::foundation::Array<RetainedResult> Results_;
     uint64 PendingRequest_ = 0;
     std::string PendingPayload_;
     bool RetainPending_ = false;

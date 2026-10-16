@@ -1,7 +1,8 @@
 # High-resolution time
 
-Status: FoundationTime implementation slice; simulation and scheduling extensions
-below are proposed. Reviewed October 4, 2026. See [ADR 0017](../decisions/0017-foundation-time.md).
+Status: FoundationTime implementation slice and frame integration implemented;
+simulation and scheduling extensions below are proposed. Reviewed October 4, 2026;
+frame integration October 15, 2026. See [ADR 0017](../decisions/0017-foundation-time.md).
 
 ## Goals and independent baseline
 
@@ -121,10 +122,19 @@ of OS sleep, define whether a suspended game catches up. On Linux,
 other clocks may include it. Do not promise uniform suspend behavior from the
 measurement API.
 
-The first slice leaves the existing [fixed-tick driver](frame-update.md) in place:
+The frame integration keeps the [fixed-tick driver](frame-update.md) policy:
 60 Hz by default, 250 ms clamp, four catch-up ticks and explicit discarded time.
-It inherits the shared source through Profiling. Do not clamp twice or lose its
-existing discard accounting when migrating it to FrameClock in a later PR.
+The world reference application reads `time::Now()` once per callback and passes
+that timestamp to its `TickDriver`, which owns the FrameClock. Every existing
+debt reset (pause/resume, focus changes, queued browser input resets, hidden
+frames, faults and session activation) also drops the frame baseline, so lifecycle resets cannot
+diverge between the clock and the driver. The FrameClock is the only clamp; its
+discarded excess joins the existing discard total. The driver additionally
+reports accepted, clamped and lifecycle-excluded nanoseconds and a regression
+count. It keeps the highest observed timestamp across resets, so a regressed
+sample cannot become a baseline below it. The smoke application samples its own
+100 ms FrameClock the same way. Its float64 debt accumulator remains until the
+integer driver below replaces it.
 
 A future integer fixed-step driver should retain a rational phase rather than
 rounding `1e9 / rate` to a nanosecond tick length. Accumulate `elapsed_ns * rate`
@@ -238,7 +248,7 @@ and [ADR 0017](../decisions/0017-foundation-time.md) as the implementation basel
 | Stage | Work before the improvement pass | Completion evidence |
 | --- | --- | --- |
 | FoundationTime slice | Retain the shared source, checked arithmetic, stopwatch, deadline and frame helpers; document changed public APIs beside their declarations. | Existing native/browser semantic tests and installed-SDK coverage; updated Doxygen coverage for any changed API. |
-| Frame integration | Migrate application loops to one explicit frame sample and wire lifecycle resets using the existing frame/simulation contract. | Integration tests for startup, pause/resume, visibility and session replacement, clock regression and accepted/discarded time; no duplicate clamp. |
+| Frame integration (implemented) | Migrate application loops to one explicit frame sample and wire lifecycle resets using the existing frame/simulation contract. | Integration tests for startup, pause/resume, visibility and session replacement, clock regression and accepted/discarded time; no duplicate clamp. See [validation evidence](../development/high-resolution-time-evidence.md#frame-integration). |
 | Integer simulation driver | Implement the rational phase accumulator described above, including checked configuration, catch-up bounds, interpolation and exhaustion. | Partition-independent tick/remainder accounting when no time is intentionally discarded, exact 60 Hz accounting over one second, explicit clamp/catch-up loss and failure tests. |
 | Pacing and inspection | Implement the agreed native pacing policy under Platform/RHI/application ownership; define runtime timing telemetry and the proposed editor Timing view under their existing owners. | Reproducible target/wake/presentation measurements, interruption/lateness and lifecycle tests; runtime-reported intervals/status across the editor process boundary. |
 

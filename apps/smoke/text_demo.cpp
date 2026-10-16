@@ -1,6 +1,7 @@
 #include "internal/text_demo.h"
 
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 
@@ -8,7 +9,6 @@
 
 #include <cstdio>
 #include <string>
-#include <vector>
 
 // Where the example reads its font from. The native smoke CMake target injects
 // LUDUS_SMOKE_FONT_PATH pointing at a bundled OFL font (NotoSans-Regular.ttf).
@@ -25,30 +25,35 @@ namespace
 {
 // Ludus::Text never reads files itself: the caller owns loading font bytes and
 // passes them to LoadFont, which copies them into bounded owned storage. This
-// helper reads the whole file into a byte vector (empty on failure).
-std::vector<uint8> ReadFileBytes(const char* path) noexcept
+// helper reads the whole file into outBytes. A missing/unreadable file yields
+// empty bytes; false reports that the byte buffer could not be allocated.
+[[nodiscard]] bool ReadFileBytes(const char* path, Array<uint8>& outBytes) noexcept
 {
-    std::vector<uint8> bytes;
+    outBytes.Clear();
     if (path == nullptr || path[0] == '\0')
     {
-        return bytes;
+        return true;
     }
     std::FILE* file = std::fopen(path, "rb");
     if (file == nullptr)
     {
-        return bytes;
+        return true;
     }
     std::fseek(file, 0, SEEK_END);
     const long size = std::ftell(file);
     std::fseek(file, 0, SEEK_SET);
     if (size > 0)
     {
-        bytes.resize(static_cast<usize>(size));
-        const usize read = std::fread(bytes.data(), 1, bytes.size(), file);
-        bytes.resize(read);
+        if (outBytes.TryResize(static_cast<usize>(size)) == false)
+        {
+            std::fclose(file);
+            return false;
+        }
+        const usize read = std::fread(outBytes.GetData(), 1, outBytes.GetSize(), file);
+        outBytes.Resize(read); // shrinking never allocates
     }
     std::fclose(file);
-    return bytes;
+    return true;
 }
 
 // Map an 8-bit coverage value (0..255) to a character for an ASCII-art preview
@@ -98,8 +103,14 @@ bool RunDemo() noexcept
     bool ok = true;
 
     // 2. Load font bytes ourselves and hand them to LoadFont (face index 0).
-    const std::vector<uint8> fontBytes = ReadFileBytes(LUDUS_SMOKE_FONT_PATH);
-    if (fontBytes.empty())
+    Array<uint8> fontBytes;
+    if (ReadFileBytes(LUDUS_SMOKE_FONT_PATH, fontBytes) == false)
+    {
+        LUDUS_LOG_ERROR(LOG_CORE, "text demo: out of memory reading '{}'", LUDUS_SMOKE_FONT_PATH);
+        (void)text::DestroyFontSystem(system);
+        return false;
+    }
+    if (fontBytes.IsEmpty())
     {
         LUDUS_LOG_WARN(LOG_CORE, "text demo: no font at '{}'; skipping font example", LUDUS_SMOKE_FONT_PATH);
         (void)text::DestroyFontSystem(system);

@@ -114,6 +114,7 @@ if(LUDUS_BUILD_TESTS)
         ludus_foundation_math_tests
         PRIVATE
             Ludus::FoundationMath
+            Ludus::FoundationContainers
             Catch2::Catch2WithMain
             # Test-only G0 reference corpus (tests/fixtures/curves_surfaces); Math itself links only Base.
             ludus_geometry_reference_fixtures

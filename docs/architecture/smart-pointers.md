@@ -1,9 +1,12 @@
 # Smart pointer architecture
 
-Status: Proposed implementation contract, reviewed against HEAD `1e6bd1a` on
-2026-10-06. The existing unique owner, allocation domain and shared string are
-implemented. The repairs, domain object factories and general shared/weak owners
-specified here are future work. No performance results accompany this design.
+Status: Implementation contract, reviewed against HEAD `1e6bd1a` on 2026-10-06.
+Slice 1 (unique correctness) is implemented in
+[pointer.hpp](../../modules/foundation/base/include/ludus/foundation/base/pointer.hpp)
+with [ownership tests](../../modules/foundation/base/tests/pointer_tests.cpp) and
+the `ludus_pointer_diagnostics` negative-compilation gate. The allocation domain
+and shared string were already implemented. Domain object factories and general
+shared/weak owners are future work. No performance results accompany this design.
 
 Use **unique ownership by default, atomic shared ownership for independent
 overlapping lifetimes, and explicit handles and leases for managed objects**.
@@ -21,12 +24,15 @@ design and the changes made after reading the relevant Gems chapters.
 
 ## Current implementation and immediate repairs
 
+The first four rows record the defects found at review time and their slice 1
+repair; the remaining rows describe existing facilities later slices build on.
+
 | Inspected source | Finding and consequence |
 | --- | --- |
-| [pointer.hpp](../../modules/foundation/base/include/ludus/foundation/base/pointer.hpp) | Same-type and converting move assignment overwrite the destination without deletion. Move construction and assignment do not move the deleter; swap exchanges only pointers. Fix ownership correctness before allocator migration. |
-| `Deleter` in that header | The requirement exercises `DefaultDeleter` rather than the supplied deleter against the actual element pointer. Validate `D&` called with `T*`, plus the nothrow operations each overload performs. |
-| Public `foundation::UniquePtr` alias | Exposes only `T`; extend it to `T, D = core::DefaultDeleter<T>` while retaining the canonical implementation and existing `core::UniquePtr` spelling. |
-| [Base CMake](../../modules/foundation/base/CMakeLists.txt) | Exports `pointer.hpp`; its test source list contains no dedicated pointer tests. Add focused ownership and compile-constraint coverage in the repair slice. |
+| [pointer.hpp](../../modules/foundation/base/include/ludus/foundation/base/pointer.hpp) | Same-type and converting move assignment overwrote the destination without deletion. Move construction and assignment did not move the deleter; swap exchanged only pointers. **Repaired:** assignment stages the source pair, destroys the old object with its own deleter, then installs the pair; moves and swap transfer pointer and deleter together. |
+| `Deleter` in that header | The requirement exercised `DefaultDeleter` rather than the supplied deleter against the actual element pointer. **Repaired:** `Deleter<D, T>` requires a non-cv value `D` that is nothrow destructible and nothrow callable as `D&(T*)`; each operation adds the nothrow construction, move or assignment it performs. |
+| Public `foundation::UniquePtr` alias | Exposed only `T`. **Repaired:** it is `UniquePtr<T, D = core::DefaultDeleter<T>>`, still naming the canonical `core::UniquePtr`. |
+| [Base CMake](../../modules/foundation/base/CMakeLists.txt) | Exported `pointer.hpp` without dedicated pointer tests. **Repaired:** [pointer_tests.cpp](../../modules/foundation/base/tests/pointer_tests.cpp) covers ownership and constraints; [pointer_compile_failures.cpp](../../modules/foundation/base/tests/pointer_compile_failures.cpp) holds the hard-error cases compiled by `ludus_pointer_diagnostics`. |
 | [AllocationDomain](../../modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp) | Already supplies immutable domain identity, fallible allocation and original-layout free. Object factories can use it without placing Memory below Base. |
 | [SharedString](../../modules/foundation/strings/src/shared_string.cpp) | Already uses an immutable block, domain attribution, `uint64` atomic count and saturation pinning. Preserve its API and semantics; its private count helpers do not establish weak-promotion safety. |
 | [Wayland owners](../../modules/platform/include/ludus/platform/wayland/window.h), [Cocoa window factory](../../modules/platform/src/window_cocoa.mm), [Audio facade](../../modules/audio/src/facade.cpp) | Native deleter specializations and raw ownership transfers already exist. Preserve creator-specific destruction and audit the receiving protocol before changing factories. |

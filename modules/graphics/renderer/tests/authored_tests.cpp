@@ -18,7 +18,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <fstream>
-#include <vector>
 
 namespace
 {
@@ -35,20 +34,20 @@ constexpr usize ACCEPTANCE_CHANNELS = 4;
 struct FixtureMaterial final
 {
     rr::LitMaterialDescription Description;
-    std::vector<uint8> Base;
-    std::vector<uint8> Surface;
-    std::vector<uint8> Emission;
+    Array<uint8> Base;
+    Array<uint8> Surface;
+    Array<uint8> Emission;
     uint32 Dimensions[6]{};
 };
 struct FixtureMesh final
 {
-    std::vector<math::Vector3> Positions;
-    std::vector<math::Vector3> Normals;
-    std::vector<math::Vector2> Uvs;
-    std::vector<math::Vector2> Uvs1;
-    std::vector<math::Vector4> Tangents;
-    std::vector<math::Vector4> Colors;
-    std::vector<uint32> Indices;
+    Array<math::Vector3> Positions;
+    Array<math::Vector3> Normals;
+    Array<math::Vector2> Uvs;
+    Array<math::Vector2> Uvs1;
+    Array<math::Vector4> Tangents;
+    Array<math::Vector4> Colors;
+    Array<uint32> Indices;
     uint32 Material = 0;
     bool HasTangents = false;
 };
@@ -59,11 +58,11 @@ struct FixtureItem final
 };
 struct Fixture final
 {
-    std::vector<FixtureMaterial> Materials;
-    std::vector<FixtureMesh> Meshes;
-    std::vector<FixtureItem> Items;
-    std::vector<math::Vector4> Environment;
-    std::vector<rr::DirectLight> Lights;
+    Array<FixtureMaterial> Materials;
+    Array<FixtureMesh> Meshes;
+    Array<FixtureItem> Items;
+    Array<math::Vector4> Environment;
+    Array<rr::DirectLight> Lights;
     math::Matrix4 WorldToClip = math::Matrix4::Identity();
     math::Vector3 Eye{0, 0, 1};
     uint32 EnvironmentWidth = 0;
@@ -83,10 +82,10 @@ struct Reader final
         REQUIRE(Input.good());
     }
     template <typename T>
-    void ReadArray(std::vector<T>& outValues, usize count)
+    void ReadArray(Array<T>& outValues, usize count)
     {
-        outValues.resize(count);
-        Input.read(reinterpret_cast<char*>(outValues.data()), static_cast<std::streamsize>(count * sizeof(T)));
+        outValues.Resize(count);
+        Input.read(reinterpret_cast<char*>(outValues.GetData()), static_cast<std::streamsize>(count * sizeof(T)));
         REQUIRE(Input.good());
     }
 };
@@ -109,8 +108,8 @@ Fixture Load(const char* path)
     fixture.EnvironmentWidth = header[5];
     fixture.EnvironmentHeight = header[6];
     reader.ReadArray(fixture.Environment, usize(header[5]) * header[6]);
-    fixture.Lights.resize(header[7]);
-    for (usize index = 0; index < fixture.Lights.size(); ++index)
+    fixture.Lights.Resize(header[7]);
+    for (usize index = 0; index < fixture.Lights.GetSize(); ++index)
     {
         rr::DirectLight& light = fixture.Lights[index];
         uint32 kind = 0;
@@ -125,7 +124,7 @@ Fixture Load(const char* path)
         reader.Read(light.InnerCos);
         reader.Read(light.OuterCos);
     }
-    fixture.Materials.resize(header[3]);
+    fixture.Materials.Resize(header[3]);
     for (FixtureMaterial& material : fixture.Materials)
     {
         reader.Read(material.Dimensions);
@@ -143,7 +142,7 @@ Fixture Load(const char* path)
         reader.ReadArray(material.Surface, usize(material.Dimensions[2]) * material.Dimensions[3] * 4);
         reader.ReadArray(material.Emission, usize(material.Dimensions[4]) * material.Dimensions[5] * 4);
     }
-    fixture.Meshes.resize(header[2]);
+    fixture.Meshes.Resize(header[2]);
     for (FixtureMesh& mesh : fixture.Meshes)
     {
         uint32 vertices = 0;
@@ -156,7 +155,7 @@ Fixture Load(const char* path)
         mesh.HasTangents = hasTangents != 0;
         REQUIRE(vertices <= 2000000);
         REQUIRE(indices <= 6000000);
-        REQUIRE(mesh.Material < fixture.Materials.size());
+        REQUIRE(mesh.Material < fixture.Materials.GetSize());
         reader.ReadArray(mesh.Positions, vertices);
         reader.ReadArray(mesh.Normals, vertices);
         reader.ReadArray(mesh.Uvs, vertices);
@@ -165,11 +164,11 @@ Fixture Load(const char* path)
         reader.ReadArray(mesh.Colors, vertices);
         reader.ReadArray(mesh.Indices, indices);
     }
-    fixture.Items.resize(header[4]);
+    fixture.Items.Resize(header[4]);
     for (FixtureItem& item : fixture.Items)
     {
         reader.Read(item.Mesh);
-        REQUIRE(item.Mesh < fixture.Meshes.size());
+        REQUIRE(item.Mesh < fixture.Meshes.GetSize());
         reader.Read(item.Transform);
     }
     REQUIRE(reader.Input.peek() == std::char_traits<char>::eof());
@@ -180,7 +179,7 @@ Fixture BuildSynthetic()
     Fixture fixture;
     fixture.EnvironmentWidth = 64;
     fixture.EnvironmentHeight = 32;
-    fixture.Environment.resize(usize{64} * 32, {8, 8, 8, 1});
+    fixture.Environment.Resize(usize{64} * 32, {8, 8, 8, 1});
     FixtureMaterial material;
     material.Dimensions[0] = material.Dimensions[1] = 2;
     material.Dimensions[2] = material.Dimensions[3] = material.Dimensions[4] = material.Dimensions[5] = 1;
@@ -189,18 +188,18 @@ Fixture BuildSynthetic()
     material.Emission = {255, 255, 255, 255};
     material.Description.MaterialUvSet = 1;
     material.Description.Roughness = 1;
-    fixture.Materials.push_back(material);
+    fixture.Materials.Add(material);
     FixtureMesh mesh;
     mesh.Positions = {{-.8F, -.8F, .5F}, {.8F, -.8F, .5F}, {.8F, .8F, .5F}, {-.8F, .8F, .5F}};
-    mesh.Normals.resize(4, {0, 0, 1});
-    mesh.Tangents.resize(4, {1, 0, 0, 1});
-    mesh.Colors.resize(4, {.25F, 1, .5F, 1});
-    mesh.Uvs.resize(4, {.25F, .25F});
-    mesh.Uvs1.resize(4, {.75F, .25F});
+    mesh.Normals.Resize(4, {0, 0, 1});
+    mesh.Tangents.Resize(4, {1, 0, 0, 1});
+    mesh.Colors.Resize(4, {.25F, 1, .5F, 1});
+    mesh.Uvs.Resize(4, {.25F, .25F});
+    mesh.Uvs1.Resize(4, {.75F, .25F});
     mesh.Indices = {0, 1, 2, 0, 2, 3};
     mesh.HasTangents = true;
-    fixture.Meshes.push_back(mesh);
-    fixture.Items.push_back({});
+    fixture.Meshes.Add(mesh);
+    fixture.Items.Add({});
     return fixture;
 }
 void RenderFixture(const Fixture& fixture, bool isSynthetic)
@@ -228,9 +227,9 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         rhi::CreateDevice({}, { .Width = ACCEPTANCE_SIZE, .Height = ACCEPTANCE_SIZE }, description, device, surface) ==
         rhi::DeviceStatus::Ready);
     rr::Limits limits;
-    limits.Meshes = static_cast<uint32>(fixture.Meshes.size() + 4);
-    limits.Materials = static_cast<uint32>(fixture.Materials.size() + 4);
-    limits.Objects = static_cast<uint32>(fixture.Items.size() + 4);
+    limits.Meshes = static_cast<uint32>(fixture.Meshes.GetSize() + 4);
+    limits.Materials = static_cast<uint32>(fixture.Materials.GetSize() + 4);
+    limits.Objects = static_cast<uint32>(fixture.Items.GetSize() + 4);
     rr::Renderer renderer;
     REQUIRE(renderer.Initialize(device, shaders::renderer_flat::Vertex(), shaders::renderer_flat::Fragment(), limits) ==
             Status::Ready);
@@ -257,7 +256,7 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
     wait(program);
     rr::EnvironmentMap environment;
     rr::EnvironmentDescription hdr;
-    hdr.PixelsOrNull = fixture.Environment.data();
+    hdr.PixelsOrNull = fixture.Environment.GetData();
     hdr.Width = fixture.EnvironmentWidth;
     hdr.Height = fixture.EnvironmentHeight;
     hdr.CpuByteBudget = usize{512} * 1024 * 1024;
@@ -269,15 +268,15 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
     {
     }
     REQUIRE(environment.GetStatus() == Status::Ready);
-    std::vector<rr::MaterialVersion> materials(fixture.Materials.size());
+    Array<rr::MaterialVersion> materials(fixture.Materials.GetSize());
     rr::LightClusterDescription clusters;
     clusters.Bounds = {{-1000000, -1000000, -1000000}, {1000000, 1000000, 1000000}};
-    for (usize index = 0; index < fixture.Materials.size(); ++index)
+    for (usize index = 0; index < fixture.Materials.GetSize(); ++index)
     {
         const FixtureMaterial& input = fixture.Materials[index];
         rr::LitMaterialDescription material = input.Description;
         rhi::TextureHandle textures[3]{};
-        const std::vector<uint8>* bytes[]{&input.Base, &input.Surface, &input.Emission};
+        const Array<uint8>* bytes[]{&input.Base, &input.Surface, &input.Emission};
         for (usize texture = 0; texture < 3; ++texture)
         {
             const uint32 width = input.Dimensions[texture * 2];
@@ -285,7 +284,7 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
             REQUIRE(rhi::CreateTexture(
                         device,
                         {width, height, texture == 1 ? rhi::RasterFormat::Rgba8Unorm : rhi::RasterFormat::Rgba8Srgb},
-                        {{bytes[texture]->data(), bytes[texture]->size()}, usize(width) * 4},
+                        {{bytes[texture]->GetData(), bytes[texture]->GetSize()}, usize(width) * 4},
                         textures[texture]) == Status::Ready);
         }
         material.Surface.Texture = textures[0];
@@ -294,15 +293,15 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         material.AreAuthoredInputsEnabled = true;
         material.EnvironmentOrNull = &environment;
         material.Clusters = &clusters;
-        material.Lights = fixture.Lights.data();
-        material.LightCount = fixture.Lights.size();
+        material.Lights = fixture.Lights.GetData();
+        material.LightCount = fixture.Lights.GetSize();
         material.Surface.Sampler.Filter = rhi::RasterFilter::Linear;
         material.Surface.Sampler.U = material.Surface.Sampler.V = rhi::RasterAddress::Repeat;
         material.Surface.Lod = 0;
         rr::LightSelection selected;
         const Status created = renderer.CreateLitMaterial(program, material, materials[index], selected);
         REQUIRE((created == Status::Ready || created == Status::Pending));
-        CHECK(selected.Count == fixture.Lights.size());
+        CHECK(selected.Count == fixture.Lights.GetSize());
         CHECK(selected.Dropped == 0);
         wait(materials[index]);
         for (rhi::TextureHandle texture : textures)
@@ -311,33 +310,33 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         }
     }
     environment.Reset(); // Materials must retain source data, prefiltered texture and sampler.
-    std::vector<rr::Mesh> meshes(fixture.Meshes.size());
-    for (usize index = 0; index < fixture.Meshes.size(); ++index)
+    Array<rr::Mesh> meshes(fixture.Meshes.GetSize());
+    for (usize index = 0; index < fixture.Meshes.GetSize(); ++index)
     {
         const FixtureMesh& input = fixture.Meshes[index];
-        rr::MeshDescription geometry{input.Positions.data(),
-                                     input.Positions.size(),
-                                     input.Indices.data(),
-                                     input.Indices.size()};
-        geometry.Normals = input.Normals.data();
-        geometry.Texcoords = input.Uvs.data();
-        geometry.MaterialTexcoords1 = {input.Uvs1.data(), input.Uvs1.size()};
+        rr::MeshDescription geometry{input.Positions.GetData(),
+                                     input.Positions.GetSize(),
+                                     input.Indices.GetData(),
+                                     input.Indices.GetSize()};
+        geometry.Normals = input.Normals.GetData();
+        geometry.Texcoords = input.Uvs.GetData();
+        geometry.MaterialTexcoords1 = {input.Uvs1.GetData(), input.Uvs1.GetSize()};
         if (input.HasTangents == true)
         {
-            geometry.Tangents = {input.Tangents.data(), input.Tangents.size()};
+            geometry.Tangents = {input.Tangents.GetData(), input.Tangents.GetSize()};
         }
-        geometry.Colors = {input.Colors.data(), input.Colors.size()};
+        geometry.Colors = {input.Colors.GetData(), input.Colors.GetSize()};
         if (isSynthetic == true)
         {
             rr::MeshDescription invalid = geometry;
-            invalid.Tangents = {nullptr, input.Positions.size()};
+            invalid.Tangents = {nullptr, input.Positions.GetSize()};
             rr::Mesh rejected;
             CHECK(renderer.CreateMesh(invalid, rejected) == Status::InvalidDescription);
             invalid = geometry;
-            invalid.Colors = {input.Colors.data(), input.Colors.size() - 1};
+            invalid.Colors = {input.Colors.GetData(), input.Colors.GetSize() - 1};
             CHECK(renderer.CreateMesh(invalid, rejected) == Status::InvalidDescription);
             invalid = geometry;
-            invalid.MaterialTexcoords1 = {input.Uvs1.data(), input.Uvs1.size() + 1};
+            invalid.MaterialTexcoords1 = {input.Uvs1.GetData(), input.Uvs1.GetSize() + 1};
             CHECK(renderer.CreateMesh(invalid, rejected) == Status::InvalidDescription);
         }
 
@@ -345,8 +344,8 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         REQUIRE((created == Status::Ready || created == Status::Pending));
         wait(meshes[index]);
     }
-    std::vector<rr::SceneItem> items(fixture.Items.size());
-    for (usize index = 0; index < fixture.Items.size(); ++index)
+    Array<rr::SceneItem> items(fixture.Items.GetSize());
+    for (usize index = 0; index < fixture.Items.GetSize(); ++index)
     {
         const FixtureItem& input = fixture.Items[index];
         items[index].Geometry = meshes[input.Mesh];
@@ -359,7 +358,7 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
                                 : rr::Layer::Opaque;
     }
     rr::Snapshot snapshot;
-    REQUIRE(renderer.CreateSnapshot(items.data(), items.size(), snapshot) == Status::Ready);
+    REQUIRE(renderer.CreateSnapshot(items.GetData(), items.GetSize(), snapshot) == Status::Ready);
     rhi::TextureHandle target;
     REQUIRE(rhi::CreateTexture(device,
                                {ACCEPTANCE_SIZE, ACCEPTANCE_SIZE, rhi::RasterFormat::Rgba16Float, true},
@@ -376,7 +375,7 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
     REQUIRE((composed == Status::Ready || composed == Status::Pending));
     wait(presentation);
     const uint64 preparationNanoseconds = time::NowTicks() - preparationStart;
-    std::vector<uint8> images[2];
+    Array<uint8> images[2];
     rr::ViewReport reports[2];
     uint64 frameNanoseconds[2]{};
     for (usize variant = 0; variant < 2; ++variant)
@@ -392,8 +391,8 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         REQUIRE((prepared == Status::Ready || prepared == Status::Pending));
         wait(view);
         reports[variant] = report;
-        CHECK(report.Submitted == items.size());
-        CHECK(report.Visible + report.Culled == items.size());
+        CHECK(report.Submitted == items.GetSize());
+        CHECK(report.Visible + report.Culled == items.GetSize());
         INFO("submitted=" << report.Submitted << " visible=" << report.Visible << " draws=" << report.Draws);
         const uint64 frameStart = time::NowTicks();
         REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
@@ -403,8 +402,8 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         REQUIRE(renderer.DrawLightingPresentation(presentation) == Status::Ready);
         rhi::SubmissionToken completion;
         REQUIRE(rhi::EndFrame(device, completion) == Status::Ready);
-        images[variant].resize(usize{ACCEPTANCE_SIZE} * ACCEPTANCE_SIZE * ACCEPTANCE_CHANNELS);
-        REQUIRE(rhi::backend::ReadHeadlessPixels({images[variant].data(), images[variant].size()}));
+        images[variant].Resize(usize{ACCEPTANCE_SIZE} * ACCEPTANCE_SIZE * ACCEPTANCE_CHANNELS);
+        REQUIRE(rhi::backend::ReadHeadlessPixels({images[variant].GetData(), images[variant].GetSize()}));
         frameNanoseconds[variant] = time::NowTicks() - frameStart;
         REQUIRE(renderer.Release(view) == Status::Ready);
     }
@@ -412,7 +411,7 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
     usize nonblack = 0;
     usize magenta = 0;
     int32 maximum = 0;
-    for (usize pixel = 0; pixel < images[0].size(); pixel += 4)
+    for (usize pixel = 0; pixel < images[0].GetSize(); pixel += 4)
     {
         bool isChanged = false;
         for (usize channel = 0; channel < 3; ++channel)
@@ -441,9 +440,9 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         std::ofstream output(outputPath, std::ios::binary);
         REQUIRE(output.good());
         output << "P6\n" << ACCEPTANCE_SIZE << " " << ACCEPTANCE_SIZE << "\n255\n";
-        for (usize pixel = 0; pixel < images[0].size(); pixel += 4)
+        for (usize pixel = 0; pixel < images[0].GetSize(); pixel += 4)
         {
-            output.write(reinterpret_cast<const char*>(images[0].data() + pixel), 3);
+            output.write(reinterpret_cast<const char*>(images[0].GetData() + pixel), 3);
         }
         REQUIRE(output.good());
         rhi::StorageUsage usage;

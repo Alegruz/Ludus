@@ -1,41 +1,42 @@
 name: ci
 
 on:
-  # The merge queue already validated each landed commit, so main reruns the
-  # full tier only when shared cache keys change, plus nightly. Caches saved by
-  # pull-request and merge-queue runs are not visible to other branches; these
-  # main runs keep the dependency and compiler caches that every PR restores warm.
-  push:
-    branches: [main]
-    paths:
-      - 'conanfile.py'
-      - 'conan.lock'
-      - 'third_party/**'
-      - 'config/conan/**'
-      - 'config/tool_versions.json'
-      - 'config/luau_toolchain.json'
-      - 'CMakePresets.json'
-      - '.github/workflows/ci.yml'
-      - '.github/actions/**'
+  # The batch coordinator owns periodic full validation. Promotion does not
+  # trigger another full build; batch runs on main also warm its shared caches.
   schedule:
     - cron: '17 9 * * *'
   pull_request:
-    # labeled lets the ci:full label rerun the deferred merge-queue jobs on a PR.
-    types: [opened, synchronize, reopened, labeled]
+    # Legacy main PRs retain queue validation during the rollout.
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled]
   merge_group:
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen develop commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ inputs.batch_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI: "true"
   LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
-  CMAKE_BUILD_PARALLEL_LEVEL: "2"
+  # Match hosted runner cores; the uncached budget retains two for comparability.
+  # Thanks to GitHub, "GitHub-hosted runners", standard public runner capacities:
+  # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+  LUDUS_CI_BATCH_SHA: ${{ inputs.batch_sha }}
+  LUDUS_CI_COMMIT_SHA: ${{ inputs.batch_sha || github.sha }}
 
 jobs:
   changes:
@@ -47,18 +48,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/change-scope
         id: scope
 
+  # Thanks to GitHub Actions runner-images, macOS 14 deprecation announcement #13518:
+  # https://github.com/actions/runner-images/issues/13518
+  # Keep arm64 native coverage on macOS 15; SDKs still declare a 14.0 deployment floor.
   macos-compile:
     needs: changes
-    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'pull-request' && needs.changes.outputs.validation_tier != 'integration'
     name: macOS native backends and diagnostics
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/macos-setup
         id: setup
         with:
@@ -78,12 +88,14 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross" -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_BUILD_WORLD_DEMO=ON
           ./scripts/build macos-clang-development
+      - name: Require complete macOS source inventory
+        run: ./scripts/check macos-clang-development --inventory
       - name: Test macOS setup contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_rhi_measurements test_metal_shaders test_raster_shaders test_texture_cooker test_macos_editor test_editor_tool test_process_ownership test_play_probe test_play_session test_play_build test_play_documents test_play_assets -v
-      - name: Test native Cocoa, Metal, filesystem, Content and Audio
+      - name: Test native Cocoa, Metal, filesystem, threading, Content and Audio
         env:
           LUDUS_TEST_COCOA: "1"
-        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|content|audio|build-contract|diagnostic-startup|editor|loader|session|reload|protocol|acceptance' --no-tests=error
+        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|threading|content|audio|build-contract|diagnostic-startup|editor|loader|session|reload|protocol|acceptance' --no-tests=error
       - name: Test native Debug helper and explicit assertion decisions
         run: |
           ./init.sh --cli --preset macos-clang-debug --preset-only --locked --with-tests --no-system-install
@@ -121,7 +133,7 @@ jobs:
             -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -isystem $PWD/out/host-tools/libcxx-include" \
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel 2
+          out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           out/renderer-sdk/ludus_sdk_renderer_consumer
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
@@ -200,6 +212,8 @@ jobs:
             apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
             apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/editor_camera_controller.cpp apps/editor/src/viewport_navigation.cpp \
+            apps/editor/tests/viewport_navigation_tests.cpp \
             apps/editor/src/preview_viewport.cpp apps/editor/src/qt_viewport_device_metal.mm \
             apps/editor/src/level_workspace.cpp apps/editor/tests/level_workspace_tests.cpp \
             apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \
@@ -221,7 +235,7 @@ jobs:
             -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -isystem \"$PWD/out/host-tools/libcxx-include\"" \
             -DCMAKE_PREFIX_PATH="$PWD/out/install/macos-clang-development;$PWD/out/conan/macos-clang-development" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          out/host-tools/venv/bin/cmake --build out/build/content-consumer --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/content-consumer --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           out/build/content-consumer/ludus_content_consumer
           out/host-tools/bin/clang-tidy -p out/build/content-consumer --warnings-as-errors='*' tests/sdk_consumer/content.cpp
       - name: Build and test the independent Cornell box tutorial (Metal)
@@ -344,11 +358,16 @@ jobs:
 
   macos-sanitizers:
     needs: changes
-    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'pull-request' && needs.changes.outputs.validation_tier != 'integration'
     name: macOS ASan and UBSan
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/macos-setup
         id: setup
         with:
@@ -356,16 +375,16 @@ jobs:
           cache-variant: sanitizers
       - name: Configure sanitized Behavior provider
         run: out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan -DLUDUS_BUILD_BEHAVIOR=ON -DLUDUS_BUILD_BEHAVIOR_ACCEPTANCE=ON
-      - name: Validate Cocoa, Metal, filesystem, Content and Audio with ASan and UBSan
+      - name: Validate Cocoa, Metal, filesystem, threading, Content and Audio with ASan and UBSan
         env:
           LUDUS_TEST_COCOA: "1"
         run: |
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_EDITOR_RENDER_PREVIEW=ON
-          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_editor_tests ludus_editor_scene_tests ludus_game_host_app ludus_game_host_loader_tests ludus_game_host_session_tests ludus_game_host_reload_tests ludus_game_host_protocol_tests ludus_game_fixture_C ludus_game_fixture_D ludus_game_fixture_H ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_filesystem_persistence_fault_tests ludus_filesystem_watch_fault_tests ludus_content_tests ludus_content_save_fault_tests
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_editor_tests ludus_editor_scene_tests ludus_game_host_app ludus_game_host_loader_tests ludus_game_host_session_tests ludus_game_host_reload_tests ludus_game_host_protocol_tests ludus_game_fixture_C ludus_game_fixture_D ludus_game_fixture_H ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_filesystem_persistence_fault_tests ludus_filesystem_watch_fault_tests ludus_foundation_threading_tests ludus_content_tests ludus_content_save_fault_tests
 
           out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_asan_control_child ludus_ubsan_control_child
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --label-regex sanitizer-control --output-on-failure --no-tests=error
-          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault|_persistence_fault|_watch_fault)?|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault|_persistence_fault|_watch_fault)?|foundation_threading|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --label-regex '^(editor|loader|session|reload|protocol)$' --no-tests=error
           QT_QPA_PLATFORM=cocoa out/build/macos-clang-asan-ubsan/apps/editor/ludus_editor_tests '[.render-native],[.level-native]'
 
@@ -411,13 +430,17 @@ jobs:
 
   macos-analysis:
     needs: changes
-    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'nightly'
     name: macOS analyzer baseline
-    runs-on: macos-14
+    runs-on: macos-15
     env:
-      LUDUS_TIDY_JOBS: "2"
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
+      LUDUS_TIDY_JOBS: "3"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/macos-setup
         id: setup
         with:
@@ -428,8 +451,6 @@ jobs:
           ./scripts/script-provider run --preset macos-clang-development
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_BUILD_WORLD_DEMO=ON
           ./scripts/build macos-clang-development
-      - name: Require complete macOS source inventory
-        run: ./scripts/check macos-clang-development --inventory
       - name: Review complete macOS analyzer baseline
         continue-on-error: true
         run: ./scripts/check macos-clang-development --analyzer
@@ -450,7 +471,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Install pinned formatter and GUI test dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 clang-tidy-18 python3-venv python3-tk xvfb xauth liblz4-1
       - name: Install pinned CMake and Ninja for live project setup tests
@@ -469,6 +492,8 @@ jobs:
         run: ./scripts/setup-quality-tools
       - name: Test tooling checks and editor preset boundaries
         run: PYTHONPATH=scripts/python python3 -m unittest test_quality_tools test_editor_setup -v
+      - name: Validate workflow syntax before admitting a candidate
+        run: out/host-tools/bin/actionlint -shellcheck= -pyflakes=
       - name: Review Python and workflow correctness baseline
         continue-on-error: true
         run: ./scripts/check --tooling
@@ -491,7 +516,7 @@ jobs:
       - name: Test graphical and CLI initialization routing
         run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init*.py' -v
       - name: Test CI initialization and analysis contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_ci test_quality test_ray_reference test_runtime_profile -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_ci test_batch_ci test_quality test_ray_reference test_runtime_profile -v
       - name: Live reload tooling tests
         run: |
           python3 -m unittest discover -s scripts/python -p 'test_play*.py' -v
@@ -500,27 +525,36 @@ jobs:
         run: |
           python3 tools/check_build_time_includes.py
           python3 tests/build_time/policy_tests.py
+          python3 tools/check_container_policy.py
+          python3 -m unittest discover -s scripts/python -p test_check_container_policy.py -v
       - name: Verify source formatting before builds
         run: ./scripts/check --format
       - name: Enforce review-derived source rules
         env:
-          SOURCE_POLICY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || 'origin/main' }}
-          SOURCE_POLICY_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          SOURCE_POLICY_BASE: ${{ inputs.batch_base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || 'origin/main' }}
+          SOURCE_POLICY_HEAD: ${{ inputs.batch_sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
           python3 scripts/python/source_policy.py --base "$SOURCE_POLICY_BASE" --head "$SOURCE_POLICY_HEAD" --clang-format clang-format-18
           PYTHONPATH=scripts/python python3 -m unittest test_source_policy test_renderer_shader_recipes -v
       - name: Test S0 Luau source and bytecode integrity contracts
         run: python3 -m unittest discover -s tools/luau-probe -p 'test_*.py' -v
+      - name: Test L0 localization document, receipt and manifest contracts
+        run: |
+          python3 -m unittest discover -s scripts/python -p 'test_localization_corpus.py' -v
+          ./scripts/localization-corpus validate --manifest modules/localization/corpus/release.json
       - name: Test S1 manifest and cook admission contracts
         run: python3 -m unittest discover -s tools/script-cook -p 'test_*.py' -v
 
   debug-runtime:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Debug runtime and source debugger
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-debug
@@ -541,11 +575,14 @@ jobs:
 
   development:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Development and SDK
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -603,7 +640,7 @@ jobs:
       - name: Measure bounded filesystem reads and native syscall overhead
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development -DLUDUS_BUILD_FILESYSTEM_BENCHMARK=ON
-          out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_filesystem_benchmark --parallel 2
+          out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_filesystem_benchmark --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           python3 tests/filesystem/generate_benchmark.py out/filesystem-benchmark
           {
             uname -a
@@ -668,7 +705,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=/usr/bin/clang++-18 \
             -DCMAKE_PREFIX_PATH="$reloc" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          env -i PATH="$tools:/usr/bin:/bin" "$tools/cmake" --build "$consumer" --parallel 2
+          env -i PATH="$tools:/usr/bin:/bin" "$tools/cmake" --build "$consumer" --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           "$consumer/ludus_sdk_consumer"
           if grep -q '/modules/' "$consumer/compile_commands.json"; then
             echo 'Relocated consumer compiled engine sources'; exit 1
@@ -717,7 +754,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/build/linux-clang-development --target ludus_rhi_render_tests ludus_renderer_render_tests ludus_rhi_ray_tests ludus_rhi_native_interop_consumer ludus_rhi_r11_consumer ludus_rhi_r9_consumer ludus_rhi_r18c_consumer --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/linux-clang-development --target ludus_rhi_render_tests ludus_renderer_render_tests ludus_rhi_ray_tests ludus_rhi_native_interop_consumer ludus_rhi_r11_consumer ludus_rhi_r9_consumer ludus_rhi_r18c_consumer --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           set -o pipefail
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/rhi/ludus_rhi_render_tests 2>&1 | tee out/raster-vulkan-validation.log
           python3 -c 'from pathlib import Path; text=Path("out/raster-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
@@ -736,7 +773,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/r11-raster-sdk --target ludus_sdk_r11_consumer ludus_sdk_r9_consumer ludus_sdk_r18c_consumer --parallel 2
+          out/host-tools/venv/bin/cmake --build out/r11-raster-sdk --target ludus_sdk_r11_consumer ludus_sdk_r9_consumer ludus_sdk_r18c_consumer --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/r11-raster-sdk/ludus_sdk_r11_consumer 2>&1 | tee out/r11-sdk-vulkan-validation.log
           python3 -c 'from pathlib import Path; text=Path("out/r11-sdk-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/r11-raster-sdk/ludus_sdk_r18c_consumer 2>&1 | tee out/r18c-sdk-vulkan-validation.log
@@ -754,7 +791,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel 2
+          out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           out/renderer-sdk/ludus_sdk_renderer_consumer
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
@@ -782,7 +819,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/reference-scene-sanitized --parallel 2
+          out/host-tools/venv/bin/cmake --build out/reference-scene-sanitized --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           out/host-tools/venv/bin/ctest --test-dir out/reference-scene-sanitized --output-on-failure
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
@@ -825,11 +862,14 @@ jobs:
 
   sanitizers:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'pull-request' && needs.changes.outputs.validation_tier != 'integration'
     name: ASan and UBSan
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-asan-ubsan
@@ -864,6 +904,27 @@ jobs:
         run: ./scripts/visual-sequence run --preset linux-clang-asan-ubsan
       - name: Validate S4 provider transactions and state under sanitizers
         run: ./scripts/script-provider run --preset linux-clang-asan-ubsan
+      - name: Cache pinned L0 ICU archives, host data tools and sliced data
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/icu-probe/icu4c-sources.tgz
+            out/icu-probe/icu4c-data.zip
+            out/icu-probe/source
+            out/icu-probe/host-build
+            out/icu-probe/data
+          key: icu-probe-v1-${{ runner.os }}-${{ hashFiles('config/icu_toolchain.json', 'tools/icu-probe/data-filter.json', 'scripts/icu-probe') }}
+      - name: Validate L0 ICU backend, corpus and isolated allocation-failure sweep with sanitizers
+        run: |
+          ./scripts/icu-probe bootstrap
+          ./scripts/icu-probe cook
+          ./scripts/icu-probe run --preset linux-clang-asan-ubsan
+          ./scripts/icu-probe check --preset linux-clang-asan-ubsan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: localization-l0-linux-sanitized-evidence
+          path: out/build/linux-clang-asan-ubsan/tools/icu-probe/evidence.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: behavior-s6-linux-sanitized-evidence
@@ -900,12 +961,15 @@ jobs:
 
   scripting-qualification:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: S7 reference performance and release acceptance
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-release
@@ -919,7 +983,7 @@ jobs:
             -DLUDUS_BUILD_BEHAVIOR_ACCEPTANCE=OFF -DLUDUS_BUILD_TESTS=OFF \
             -DLUDUS_BUILD_EDITOR=OFF -DLUDUS_PLATFORM_ENABLE_WAYLAND=OFF \
             -DLUDUS_WARNINGS_AS_ERRORS=ON
-          out/host-tools/venv/bin/cmake --build --preset linux-clang-release --parallel 2
+          out/host-tools/venv/bin/cmake --build --preset linux-clang-release --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           ./scripts/install-sdk linux-clang-release
       - name: Validate qualification evidence and run the reference workload
         run: |
@@ -939,12 +1003,15 @@ jobs:
 
   filesystem-fuzz:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Filesystem pack fuzzing
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -953,7 +1020,7 @@ jobs:
       - name: Build fully instrumented reader and decoder
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/filesystem-fuzz -DLUDUS_BUILD_FILESYSTEM_FUZZERS=ON
-          out/host-tools/venv/bin/cmake --build out/build/filesystem-fuzz --target ludus_filesystem_pack_fuzzer --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/filesystem-fuzz --target ludus_filesystem_pack_fuzzer --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           out/host-tools/bin/clang-tidy -p out/build/filesystem-fuzz --warnings-as-errors='*' modules/foundation/filesystem/tests/pack_fuzzer.cpp
       - name: Fuzz seeded indexes and independent decode under ASan and UBSan
         run: |
@@ -969,11 +1036,14 @@ jobs:
 
   threading-races:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Threading race detection
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -983,7 +1053,7 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/threading-tsan \
             -DLUDUS_ENABLE_TSAN=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
-          out/host-tools/venv/bin/cmake --build out/build/threading-tsan --parallel 2 \
+          out/host-tools/venv/bin/cmake --build out/build/threading-tsan --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" \
             --target ludus_tsan_control_child ludus_foundation_threading_tests ludus_threading_startup_tests ludus_filesystem_tests ludus_filesystem_async_fault_tests ludus_audio_content_tests ludus_audio_content_worker_tests ludus_resources_tests ludus_resources_audio_tests
       - name: Prove TSan detection before race acceptance
         run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --label-regex sanitizer-control --output-on-failure --no-tests=error --repeat until-fail:16
@@ -1002,7 +1072,7 @@ jobs:
 
   analysis:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Clang static analysis (${{ matrix.shard }})
     strategy:
       fail-fast: false
@@ -1011,11 +1081,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      LUDUS_TIDY_JOBS: "2"
+      LUDUS_TIDY_JOBS: "4"
       LUDUS_TIDY_SHARD_COUNT: "2"
       LUDUS_TIDY_SHARD_INDEX: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1027,6 +1100,7 @@ jobs:
       - name: Analyze every project translation unit
         run: ./scripts/check linux-clang-development --tidy
       - name: Review complete stable analyzer baseline
+        if: needs.changes.outputs.validation_tier == 'nightly'
         continue-on-error: true
         run: ./scripts/check linux-clang-development --analyzer
       - name: Preserve source inventory and bounded analysis diagnostics
@@ -1043,11 +1117,14 @@ jobs:
 
   editor:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'pull-request' && needs.changes.outputs.validation_tier != 'integration'
     name: Optional editor
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1090,6 +1167,8 @@ jobs:
             apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
             apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/editor_camera_controller.cpp apps/editor/src/viewport_navigation.cpp \
+            apps/editor/tests/viewport_navigation_tests.cpp \
             apps/editor/src/preview_viewport.cpp apps/editor/src/qt_viewport_device_vulkan.cpp \
             apps/editor/src/level_workspace.cpp apps/editor/tests/level_workspace_tests.cpp \
             apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \
@@ -1114,7 +1193,7 @@ jobs:
   # Debug runtime already runs the complete Debug assertion/build contracts.
   assertion-policy:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Assertion policy (${{ matrix.preset }})
     runs-on: ubuntu-24.04
     strategy:
@@ -1123,13 +1202,16 @@ jobs:
         preset: [linux-clang-profile, linux-clang-release]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: ${{ matrix.preset }}
       - name: Build and test all assertion policies including Release
         run: |
           out/host-tools/venv/bin/cmake --preset ${{ matrix.preset }} -B out/build/assertion-policy -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
-          out/host-tools/venv/bin/cmake --build out/build/assertion-policy --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/assertion-policy --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           out/host-tools/venv/bin/ctest --test-dir out/build/assertion-policy --output-on-failure
       - name: Report compiler cache
         if: always()
@@ -1137,11 +1219,14 @@ jobs:
 
   pch:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: PCH build (LUDUS_ENABLE_PCH=ON)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1151,7 +1236,7 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/pch \
             -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON -DLUDUS_ENABLE_PCH=ON
-          out/host-tools/venv/bin/cmake --build out/build/pch --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/pch --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           # Compile-policy/header contracts run in the non-PCH jobs; their
           # standalone reparsing does not support injected PCH flags.
           out/host-tools/venv/bin/ctest --test-dir out/build/pch --output-on-failure --label-exclude build-contract
@@ -1161,11 +1246,16 @@ jobs:
 
   build-budget:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'pull-request' && needs.changes.outputs.validation_tier != 'integration'
     name: Build-time budget
     runs-on: ubuntu-24.04
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1202,6 +1292,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
       - name: Enforce validation for the classified change scope
         env:

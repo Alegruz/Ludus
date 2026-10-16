@@ -19,7 +19,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     ludus_enable_test_exceptions(ludus_catch_header_boundary_tests)
 
     add_executable(ludus_test_diagnostics_tests tests/support/catch_diagnostics_tests.cpp)
-    target_link_libraries(ludus_test_diagnostics_tests PRIVATE Ludus::FoundationBase Catch2::Catch2WithMain)
+    target_link_libraries(ludus_test_diagnostics_tests PRIVATE Ludus::FoundationBase Ludus::FoundationContainers Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_test_diagnostics_tests)
     ludus_enable_test_exceptions(ludus_test_diagnostics_tests)
     add_test(NAME ludus_test_diagnostics_values COMMAND ludus_test_diagnostics_tests)
