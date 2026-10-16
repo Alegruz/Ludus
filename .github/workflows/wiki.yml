@@ -183,6 +183,9 @@ jobs:
           path: out/wiki
 
   macos-documentation-tools:
+    # Pull requests build the wiki on Linux; the macOS tool checks run in the
+    # merge queue and on main, keeping scarce macOS runners for queued work.
+    if: github.event_name != 'pull_request'
     name: Documentation tools (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
