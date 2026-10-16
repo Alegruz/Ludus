@@ -65,3 +65,29 @@ this Linux validation. It requires validation on a supported Windows toolchain
 before shipping there. No real engine workload has been migrated in this slice.
 See [the architecture](../architecture/threading.md) for the staged measurement
 and consumer-integration plan.
+
+## macOS ARM64 validation (T0)
+
+Measured on 2026-10-16 on an Apple M5 (4 performance and 6 efficiency cores,
+10 logical CPUs, 16 GiB) running macOS 26.6. The pinned Clang 18.1.8 built the
+Development configuration with warnings as errors. Other builds shared the machine;
+the one-minute load average was 24.8-25.2.
+
+- `ludus_foundation_threading_tests` (16 test cases, including the T0 contract
+  tests) passed in 200 consecutive runs. `ludus_threading_alloc_tests` passed in 20
+  repeated CTest runs, with zero scheduler allocations during steady reuse.
+- `ludus_threading_benchmark` produced the same checksums as the Linux run above
+  (`256`, `18367026793921049022`, `7928766144346410088`). Every per-job output
+  matched the serial oracle for 0, 1, 2, 4 and 8 workers. Because of the load,
+  its timings are not reported as performance evidence.
+- ASan/UBSan and TSan were not completed on this host. With the pinned LLVM 18
+  runtime on macOS 26.6, ASan deadlocks during runtime initialization before
+  `main` (an existing ASan test binary from another checkout behaves the same), and
+  an empty TSan program crashes on start. These are toolchain failures before test
+  entry, not threading results. CI's macOS 14 ASan/UBSan job now runs
+  `ludus_foundation_threading_tests`; the development job runs every test labelled
+  `threading`.
+
+The Linux-only startup-failure tests (`--wrap` linker injection), a completed
+macOS TSan run and any Windows execution remain open under milestone T3 of
+[the architecture](../architecture/threading.md#milestones).
