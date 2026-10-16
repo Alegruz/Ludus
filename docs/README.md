@@ -279,6 +279,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Hosted acceptance and support record](development/webgpu-hosted-acceptance.md)
 - [Keyboard input: implementation decision log](architecture/keyboard-input-decision-log.md)
 - [Keyboard input: performance evidence](development/keyboard-input-performance.md)
+- [L0: localization schemas, message profile and ICU backend probe](architecture/localization-l0.md)
 - [Ludus audio decision log](architecture/audio-decision-log.md)
 - [Ludus Editor workspace (E0) — implementation evidence ledger](development/editor-workspace-evidence.md)
 - [Memory Phase 0A: Aliased Array Resize](development/memory-phase-0a.md)

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "domain": "game/ui",
+  "source_locale": "en-US",
+  "profile": "ludus-icu-mf1-v1",
+  "locale": "ar",
+  "messages": [
+    {"key": "chat/player-said", "source_revision": 1, "reviewed_source_digest": "4a144ecf6e568d1566a19d23db6e1fa64878a0e18113ffbc2a81c9deebee6f96", "translation_revision": 1, "status": "approved",
+     "pattern": "قال {player}: {message}"},
+    {"key": "hud/distance", "source_revision": 1, "reviewed_source_digest": "5e0a7bbb64a32b8249f49ac2425f73549127bb5e1eaed3f1932b738772e84b56", "translation_revision": 1, "status": "approved",
+     "pattern": "المسافة: {distance, number, ::.0} كم"},
+    {"key": "hud/score", "source_revision": 1, "reviewed_source_digest": "eec9969cde9386e174eec50d922f451d432c33bd37024636f2e07a2db43b3e3d", "translation_revision": 1, "status": "approved",
+     "pattern": "النقاط: {score, number, integer}"},
+    {"key": "inventory/item-count", "source_revision": 1, "reviewed_source_digest": "78d11959b37212ddb6aa9e399839a8c2b070d765c20f8b0db12f83be68713e84", "translation_revision": 1, "status": "approved",
+     "pattern": "{count, plural, =0 {مخزونك فارغ.} one {لديك عنصر واحد.} two {لديك عنصران.} few {لديك # عناصر.} many {لديك # عنصرًا.} other {لديك # عنصر.}}"},
+    {"key": "literal/braces", "source_revision": 1, "reviewed_source_digest": "2e155ff8a8f28ee2fcd7cb35d7c51587bad8876dc28431af91c0a037f03f1037", "translation_revision": 1, "status": "approved",
+     "pattern": "اكتب '{'name'}' لإدراج اسم. لا تقلق: هذا نص حرفي."},
+    {"key": "loot/picked-up", "source_revision": 1, "reviewed_source_digest": "bf22aa6cc3699fed41620cee455484b591425f9ccf8a3ae6fbcdcf1406e84473", "translation_revision": 1, "status": "approved",
+     "pattern": "{picker_gender, select, feminine {{count, plural, one {التقطت قطعة نقدية واحدة.} two {التقطت قطعتين نقديتين.} few {التقطت # قطع نقدية.} many {التقطت # قطعة نقدية.} other {التقطت # قطعة نقدية.}}} masculine {{count, plural, one {التقط قطعة نقدية واحدة.} two {التقط قطعتين نقديتين.} few {التقط # قطع نقدية.} many {التقط # قطعة نقدية.} other {التقط # قطعة نقدية.}}} other {{count, plural, one {تم التقاط قطعة نقدية واحدة.} two {تم التقاط قطعتين نقديتين.} few {تم التقاط # قطع نقدية.} many {تم التقاط # قطعة نقدية.} other {تم التقاط # قطعة نقدية.}}}}"},
+    {"key": "menu/play", "source_revision": 1, "reviewed_source_digest": "a15485fd32003bbd5e27e38ccfbb2add19718724ae1c2cbec44a6af29901bdf5", "translation_revision": 1, "status": "approved",
+     "pattern": "العب"},
+    {"key": "menu/subtitle", "source_revision": 1, "reviewed_source_digest": "fa9094e449f7c7913b4dd096c6810bb7f99736b9c8f8ce2f08ab8bb0b11de4d8", "translation_revision": 1, "status": "approved",
+     "pattern": "الإصدار النهائي"},
+    {"key": "party/online", "source_revision": 1, "reviewed_source_digest": "536c9adfe6ded5271665733357e3d88cdad3fb25b1508173ff607f53edbf1dd8", "translation_revision": 1, "status": "approved",
+     "pattern": "{count, plural, offset:1 =0 {لا أحد متصل.} =1 {{leader} متصل.} one {{leader} ولاعب آخر متصلون.} two {{leader} ولاعبان آخران متصلون.} few {{leader} و# لاعبين آخرين متصلون.} many {{leader} و# لاعبًا آخر متصلون.} other {{leader} و# لاعب آخر متصلون.}}"},
+    {"key": "quest/companion-joined", "source_revision": 1, "reviewed_source_digest": "6857d3fe5fa33b4b409121c0ad3cd920cb1bada8a14f9e497916711853f9907a", "translation_revision": 1, "status": "approved",
+     "pattern": "{companion_gender, select, feminine {انضمت {companion} إلى الفريق. إنها مستعدة.} masculine {انضم {companion} إلى الفريق. إنه مستعد.} other {انضم {companion} إلى الفريق.}}"},
+    {"key": "race/place", "source_revision": 1, "reviewed_source_digest": "75258071a1ef61d4f09712c01bfe2f6d1acd5605829f2a0e7214dd025f434810", "translation_revision": 1, "status": "approved",
+     "pattern": "أنهيت السباق في المركز {place, selectordinal, other {#}}."}
+  ]
+}
