@@ -83,6 +83,24 @@ trigger on `merge_group`, and `test_ci_scope.py` checks this. The path-filtered
 browser package and release workflows stay advisory pull-request checks outside
 the queue.
 
+### Stale merge-queue runs
+
+GitHub tests every queued pull request separately, on a temporary
+`gh-readonly-queue/main/pr-<number>-<base>` branch built from `main` plus every
+entry ahead of it. When an entry leaves the queue (it fails, times out or is
+removed), GitHub rebuilds the branches of every entry behind it and deletes the
+old ones, but it leaves the old branches' workflow runs queued. Those runs would
+later occupy runners, including macOS runners, for results nobody uses.
+
+`merge-queue-cleanup.yml` runs for every new queue group and on manual dispatch.
+`scripts/python/merge_queue_cleanup.py` lists unfinished `merge_group` runs, then
+the live queue branches, and force-cancels runs whose branch no longer exists.
+Force-cancel also skips jobs with `if: always()`, such as the required gate, which
+an ordinary cancel would still schedule. Listing runs before branches means a run
+created during the cleanup is never mistaken for a stale one, and the job stops
+without cancelling anything if the triggering entry's own branch is missing from
+the listing. Runs on any other branch are never touched.
+
 ### macOS runner images
 
 Native compilation, analyzer and sanitizer jobs run on the explicit `macos-15`

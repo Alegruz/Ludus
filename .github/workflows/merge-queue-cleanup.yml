@@ -1,0 +1,33 @@
+name: Merge queue cleanup
+
+# When an entry leaves the merge queue or its group is rebuilt, GitHub deletes
+# the old gh-readonly-queue branch but leaves its workflow runs queued. Every new
+# queue group triggers this job, which cancels runs whose branch is gone so they
+# never take runners from live candidates. Manual dispatch runs the same check.
+# See docs/development/continuous-integration.md.
+on:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: merge-queue-cleanup
+  cancel-in-progress: true
+
+jobs:
+  cancel-stale-runs:
+    name: Cancel stale merge-queue runs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/python
+      - name: Cancel runs whose queue entry no longer exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/python/merge_queue_cleanup.py
