@@ -40,6 +40,24 @@ new run. Agents do not add it: a labeled pull request repeats the full tier,
 and its macOS jobs compete with queued candidates for the account's few
 concurrent macOS runners. Validate locally and let the queue run the full tier.
 
+### Draft pull requests
+
+Pull-request workflows skip every job while a pull request is a draft, and
+trigger on `ready_for_review`, so marking a draft ready starts its first run.
+Skipped jobs report as successful required checks, which is harmless because
+GitHub does not merge or queue drafts. The run started by `ready_for_review`
+replaces those results on the same commit.
+
+Iterate as a draft: validate locally with the commands in
+[Building](building.md) and the documentation checks, request a Codex review by
+commenting `@codex review`, address it, then mark the pull request ready.
+Copilot's ruleset review skips drafts and runs once the pull request is ready.
+
+After a pull request is ready, every push cancels its run in progress and
+restarts all of its jobs. Cancelled runs had already used about three quarters
+of the runner minutes of a completed run, and were close to half of all
+pull-request runs, so batch follow-up fixes into as few pushes as possible.
+
 ### Runner capacity and `main` runs
 
 Wall time is usually dominated by waiting for a runner, not by job execution:

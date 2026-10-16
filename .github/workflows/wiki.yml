@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Draft pull requests skip CI; marking one ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   workflow_dispatch:
 
@@ -21,6 +23,7 @@ concurrency:
 jobs:
   api-documentation:
     name: Public API documentation
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -51,6 +54,8 @@ jobs:
 
   editor:
     name: Build or reuse browser editor
+    # Sample playback and the wiki build need this job and skip with it.
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:

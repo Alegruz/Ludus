@@ -53,6 +53,14 @@ that violates it.
   agent work into `main` directly. Report the task branch and worktree path so
   the user can locate and review the changes. This policy guides agent behavior;
   it does not automatically move agents that are already using a shared checkout.
+- Open agent pull requests as drafts and iterate there. CI does not run on
+  drafts, so validate locally with the checks under *Build, test, and validate*
+  for your platform (plus the documentation checks when docs change). Then
+  comment `@codex review` and address its findings while the PR is still a
+  draft. Mark it ready for review only after local checks pass and the review is
+  addressed; that starts CI. On a ready PR, batch follow-up fixes into as few
+  pushes as possible: each push cancels the run in progress and restarts every
+  job, and superseded runs were about 40% of pull-request runner time.
 - Pull requests land through the `main` merge queue, never by a direct merge.
   Pull-request CI runs a fast tier; slow macOS, sanitizer, editor and budget jobs
   run on the queued candidate. The `ci:full` label runs them on the PR as well;

@@ -21,7 +21,8 @@ on:
     - cron: '17 9 * * *'
   pull_request:
     # labeled lets the ci:full label rerun the deferred merge-queue jobs on a PR.
-    types: [opened, synchronize, reopened, labeled]
+    # Draft pull requests skip CI; ready_for_review starts their first run.
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
   merge_group:
   workflow_dispatch:
 
@@ -40,6 +41,9 @@ env:
 jobs:
   changes:
     name: Classify changes
+    # Every native job needs this one, so skipping it skips the whole run for
+    # drafts. Drafts cannot be merged or queued.
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     outputs:
       native_required: ${{ steps.scope.outputs.native_required }}
@@ -1197,7 +1201,7 @@ jobs:
     # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions
     name: Ubuntu Clang
     needs: [changes, macos-compile, macos-sanitizers, macos-analysis, formatting, debug-runtime, development, sanitizers, filesystem-fuzz, threading-races, analysis, editor, assertion-policy, pch, build-budget, scripting-qualification]
-    if: always()
+    if: always() && github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

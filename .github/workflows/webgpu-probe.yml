@@ -2,6 +2,8 @@ name: Browser backends and packages
 
 on:
   pull_request:
+    # Draft pull requests skip CI; marking one ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/workflows/webgpu-probe.yml'
       - 'tools/webgpu-probe/**'
@@ -95,6 +97,7 @@ env:
 
 jobs:
   compile-and-package:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:

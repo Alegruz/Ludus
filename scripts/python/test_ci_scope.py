@@ -229,6 +229,39 @@ class RequiredGateTests(unittest.TestCase):
         self.assertEqual(json.loads(runners.group(1)), ["ubuntu-24.04"])
         self.assertIn("macos-14", json.loads(runners.group(2)))
 
+    def test_pull_request_workflows_skip_drafts_and_run_when_ready(self):
+        # Drafts must not consume runners, and marking one ready must start CI;
+        # otherwise a ready pull request keeps the skipped draft results.
+        draft = "github.event.pull_request.draft != true"
+        entry_jobs = {
+            "ci.yml": ("changes",), "project-sdk.yml": ("host-tooling",),
+            "wiki.yml": ("api-documentation", "editor"), "webgpu-probe.yml": ("compile-and-package",),
+            "release.yml": ("lint",), "filesystem-recovery.yml": ("block-prefix-recovery",),
+        }
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        for name, jobs in entry_jobs.items():
+            workflow = root.joinpath(name).read_text()
+            with self.subTest(workflow=name):
+                pull_request = workflow.split("\n  pull_request:\n", 1)[1].split("\n  merge_group:", 1)[0]
+                types = re.search(r"(?m)^    types: \[([^\]]+)\]$", pull_request)
+                self.assertIsNotNone(types)
+                self.assertIn("ready_for_review", [value.strip() for value in types.group(1).split(",")])
+            for job in jobs:
+                with self.subTest(workflow=name, job=job):
+                    header = workflow.split(f"\n  {job}:\n", 1)[1].split("\n    steps:", 1)[0]
+                    self.assertRegex(header, rf"(?m)^    if: .*{re.escape(draft)}$")
+        # Pull-request jobs without needs would still run for drafts.
+        for name in entry_jobs:
+            workflow = root.joinpath(name).read_text().split("\njobs:\n", 1)[1]
+            for job, header in re.findall(r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)^    steps:", workflow):
+                if "needs:" in header or job in entry_jobs[name]:
+                    continue
+                with self.subTest(workflow=name, independent_job=job):
+                    self.assertRegex(header, r"(?m)^    if: .*(github.event_name != 'pull_request'|"
+                                     r"github.event_name == 'workflow_dispatch'|github.ref == 'refs/heads/main')")
+        gate = root.joinpath("ci.yml").read_text().split("\n  linux:", 1)[1]
+        self.assertIn(f"    if: always() && {draft}\n", gate)
+
     def results(self, native_required=True, tier=ci_scope.FULL_TIER):
         def expected(name):
             deferred = tier == ci_scope.PULL_REQUEST_TIER and name in ci_scope.MERGE_QUEUE_JOBS

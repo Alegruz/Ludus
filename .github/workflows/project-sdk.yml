@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Draft pull requests skip CI; marking one ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   workflow_dispatch:
 
@@ -23,6 +25,7 @@ concurrency:
 jobs:
   host-tooling:
     name: Host tooling (ludus_tools) unit tests
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     outputs:
       native_required: ${{ steps.scope.outputs.native_required }}
