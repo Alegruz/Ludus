@@ -93,6 +93,9 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_pack_builder_tests COMMAND "${CMAKE_COMMAND}" -E env
         "PYTHONPATH=${PROJECT_SOURCE_DIR}/scripts/python" "${Python3_EXECUTABLE}" -m unittest test_pack_builder -v)
     set_tests_properties(ludus_pack_builder_tests PROPERTIES LABELS "unit;foundation;filesystem;tooling" TIMEOUT 30)
+    add_test(NAME ludus_filesystem_streaming_fixture_tests
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/test_streaming.py")
+    set_tests_properties(ludus_filesystem_streaming_fixture_tests PROPERTIES LABELS "foundation;filesystem;tooling" TIMEOUT 30)
 endif()
 
 if(LUDUS_BUILD_TESTS)
@@ -187,10 +190,4 @@ if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EM
     ludus_enable_test_exceptions(ludus_filesystem_watch_fault_tests)
     add_test(NAME ludus_filesystem_watch_fault_tests COMMAND ludus_filesystem_watch_fault_tests)
     set_tests_properties(ludus_filesystem_watch_fault_tests PROPERTIES LABELS "unit;foundation;filesystem;watch" TIMEOUT 30)
-endif()
-
-if(LUDUS_BUILD_TESTS)
-    add_test(NAME ludus_filesystem_streaming_fixture_tests
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/test_streaming.py")
-    set_tests_properties(ludus_filesystem_streaming_fixture_tests PROPERTIES LABELS "foundation;filesystem;tooling" TIMEOUT 30)
 endif()
