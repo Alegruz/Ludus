@@ -256,7 +256,7 @@ Index 0 is always the empty spelling. Indices change whenever the spelling set
 changes, so they are meaningful only with the dictionary whose revision digest
 the records were cooked against. Version 1 limits a dictionary to 2^24 entries,
 65535-byte spellings and a 256 MiB blob; the
-[format header](https://github.com/Alegruz/Ludus/blob/main/modules/content/string_dictionary_format/include/ludus/content/string_dictionary_format/lustr.h)
+[format header](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/content/string_dictionary_format/include/ludus/content/string_dictionary_format/lustr.h)
 records the exact layout.
 
 ## Validate at the boundary
@@ -279,14 +279,14 @@ checked text slicing, normalization and SIMD validation are separate future APIs
 ## Implementation and further reading
 
 The file logger shares its base/active path allocation until rotation. The
-[SDK example](https://github.com/Alegruz/Ludus/blob/main/tests/sdk_consumer/strings.cpp)
+[SDK example](https://github.com/The-Ludus-Project/Ludus/blob/main/tests/sdk_consumer/strings.cpp)
 and native/browser tests exercise the public contracts. The cooked dictionary
 reader and writer are not yet adopted by a content cooker or snapshot; that
 integration, format adapters, debugger printers and an editor strings inspector
 remain follow-on work.
 
 See the [implementation status](../../architecture/strings.md#implementation-status),
-[public headers](https://github.com/Alegruz/Ludus/tree/main/modules/foundation/strings/include/ludus/foundation/strings),
+[public headers](https://github.com/The-Ludus-Project/Ludus/tree/main/modules/foundation/strings/include/ludus/foundation/strings),
 [hashing guide](hashing.md) and [reference reading path](../learn/references.md#8-own-text-and-identify-names).
 Thanks to The Qt Company, *Implicit Sharing*, Qt 6 documentation, for cheap
 shared-copy inspiration; Ludus uses immutable storage rather than detachment.

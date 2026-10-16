@@ -4,7 +4,7 @@ Ludus is a C++23 engine and toolset in active development, with modular runtime
 systems, an installed SDK and CLI, and an optional Linux editor. A bounded editor
 preview also runs in the browser.
 
-[Read Ludus Wiki](https://alegruz.github.io/Ludus/) or open
+[Read Ludus Wiki](https://the-ludus-project.github.io/Ludus/) or open
 [the same documentation locally](docs/README.md). The Markdown, local assets and
 checked HTML are also available as an [offline bundle](docs/development/wiki.md#offline-reading).
 

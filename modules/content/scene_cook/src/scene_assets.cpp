@@ -474,11 +474,12 @@ ReadBytes(std::string_view path, usize maximum, Array<uint8>& outData, Failure& 
     }
 }
 
-/// document(path): read at most 1 MiB and json.loads it with duplicate keys rejected.
-[[nodiscard]] bool LoadDocument(std::string_view path, Document& outDocument, Failure& inoutFailure) noexcept
+/// document(path): read at most maximumBytes and json.loads it with duplicate keys rejected.
+[[nodiscard]] bool
+LoadDocument(std::string_view path, usize maximumBytes, Document& outDocument, Failure& inoutFailure) noexcept
 {
     Array<uint8> data;
-    return ReadBytes(path, MAX_METADATA_BYTES, data, inoutFailure) == true &&
+    return ReadBytes(path, maximumBytes, data, inoutFailure) == true &&
            ParseDocument(GetSpan(data), AssetErrorCode::AssetCorrupt, outDocument, inoutFailure) == true;
 }
 
@@ -614,7 +615,7 @@ private:
     JsonTree& tree = outCatalog.Tree;
     if (DoesPathExist(path.GetView()) == true)
     {
-        if (LoadDocument(path.GetView(), outCatalog, inoutFailure) == false)
+        if (LoadDocument(path.GetView(), MAX_CATALOG_BYTES, outCatalog, inoutFailure) == false)
         {
             return false;
         }
@@ -2616,7 +2617,7 @@ struct BuildRecord final
         return true;
     }
     Array<uint8> data;
-    if (ReadBytes(path.GetView(), MAX_METADATA_BYTES, data, inoutFailure) == false)
+    if (ReadBytes(path.GetView(), MAX_CATALOG_BYTES, data, inoutFailure) == false)
     {
         return false;
     }
@@ -2659,7 +2660,7 @@ struct PreparedImport final
             return inoutFailure.FailInvalid("Invalid artifact path");
         }
         if (ResolveInside(root, tree.GetText(path), native, inoutFailure) == false ||
-            LoadDocument(native.GetView(), previous, inoutFailure) == false)
+            LoadDocument(native.GetView(), MAX_METADATA_BYTES, previous, inoutFailure) == false)
         {
             return false;
         }
@@ -3258,9 +3259,9 @@ ComputeSourceDigest(const JsonTree& manifest, JsonIndex root, HexDigest& outHex,
     {
         return false;
     }
-    if (catalogBytes.GetSize() > MAX_METADATA_BYTES)
+    if (catalogBytes.GetSize() > MAX_CATALOG_BYTES)
     {
-        return inoutFailure.FailInvalid("Project catalog metadata exceeds 1 MiB");
+        return inoutFailure.FailInvalid("Project catalog exceeds 64 MiB (MAX_CATALOG_BYTES)");
     }
     if (AreSourceInputsUnchanged(source,
                                  manifest.Tree,
@@ -3323,7 +3324,7 @@ ComputeSourceDigest(const JsonTree& manifest, JsonIndex root, HexDigest& outHex,
             return inoutFailure.FailInvalid("Missing imported scene record");
         }
         if (ResolveInside(root, catalogTree.GetText(path), native, inoutFailure) == false ||
-            LoadDocument(native.GetView(), manifest, inoutFailure) == false)
+            LoadDocument(native.GetView(), MAX_METADATA_BYTES, manifest, inoutFailure) == false)
         {
             return false;
         }
@@ -3342,9 +3343,9 @@ ComputeSourceDigest(const JsonTree& manifest, JsonIndex root, HexDigest& outHex,
     {
         return false;
     }
-    if (outCatalog.GetSize() > MAX_METADATA_BYTES)
+    if (outCatalog.GetSize() > MAX_CATALOG_BYTES)
     {
-        return inoutFailure.FailInvalid("Project catalog metadata exceeds 1 MiB");
+        return inoutFailure.FailInvalid("Project catalog exceeds 64 MiB (MAX_CATALOG_BYTES)");
     }
     if (IsCancelled(options) == true)
     {
@@ -3385,7 +3386,7 @@ OpenLevelDocument(std::string_view root, std::string_view relative, Document& ou
     Array<uint8> bundle;
     return lock.Enter(root, LockMode::Shared, inoutFailure) == true &&
            ResolveInside(root, relative, path, inoutFailure) == true &&
-           LoadDocument(path.GetView(), outLevel, inoutFailure) == true &&
+           LoadDocument(path.GetView(), MAX_METADATA_BYTES, outLevel, inoutFailure) == true &&
            ValidateLevelNode(outLevel.Tree, outLevel.Root, inoutFailure) == true &&
            ComputeClosure(root, outLevel.Tree, outLevel.Root, nullptr, closure, inoutFailure) == true &&
            AssembleBundle(root, outLevel.Tree, outLevel.Root, nullptr, bundle, inoutFailure) == true;
@@ -3512,7 +3513,7 @@ private:
 {
     const bool hasOldCatalog = DoesPathExist(catalogPath);
     Array<uint8> oldCatalog;
-    if (hasOldCatalog == true && ReadBytes(catalogPath, MAX_METADATA_BYTES, oldCatalog, inoutFailure) == false)
+    if (hasOldCatalog == true && ReadBytes(catalogPath, MAX_CATALOG_BYTES, oldCatalog, inoutFailure) == false)
     {
         return false;
     }
@@ -4133,7 +4134,7 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
         String native;
         Document manifest;
         if (ResolveInside(root, catalog.Tree.GetText(path), native, inoutFailure) == false ||
-            LoadDocument(native.GetView(), manifest, inoutFailure) == false)
+            LoadDocument(native.GetView(), MAX_METADATA_BYTES, manifest, inoutFailure) == false)
         {
             return false;
         }
@@ -4269,7 +4270,7 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
         String native;
         Document manifest;
         if (ResolveInside(root, catalog.Tree.GetText(path), native, inoutFailure) == false ||
-            LoadDocument(native.GetView(), manifest, inoutFailure) == false)
+            LoadDocument(native.GetView(), MAX_METADATA_BYTES, manifest, inoutFailure) == false)
         {
             return false;
         }

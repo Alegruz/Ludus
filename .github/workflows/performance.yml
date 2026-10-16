@@ -1,0 +1,130 @@
+name: performance
+
+# Scheduled runtime profiling on GitHub-hosted runners (hosted lane of the
+# Hardware/performance lane in docs/architecture/engineering-quality.md).
+# ./scripts/profile-engine builds the Profile preset, runs the scenarios in
+# config/runtime_profile_scenarios.json and fails only on correctness failures.
+# Timings and deltas against the previous run are report-only: shared runners
+# cannot calibrate a regression gate. Guide: docs/development/runtime-profiling.md.
+
+on:
+  # Thanks to GitHub's "Events that trigger workflows" reference: schedules run
+  # on the default branch only. Off the hour to avoid the top-of-hour queue.
+  # https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: Space-separated scenario ids (empty runs every scenario the lane supports)
+        required: false
+        default: ""
+      repetitions:
+        description: Override measured repetitions per scenario (1-50, empty keeps the manifest value)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  # Read the previous run's report artifact as the comparison baseline.
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
+  CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+jobs:
+  hosted:
+    name: Hosted runtime profile (${{ matrix.lane }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: ubuntu
+            runner: ubuntu-24.04
+            preset: linux-clang-profile
+            capabilities: ""
+          # Hosted macOS runners already present Metal frames in ci.yml.
+          - lane: macos
+            runner: macos-14
+            preset: macos-clang-profile
+            capabilities: presentation
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare Linux tools and the Profile preset
+        if: matrix.lane == 'ubuntu'
+        uses: ./.github/actions/native-setup
+        with:
+          preset: ${{ matrix.preset }}
+          cache-variant: profile
+      - name: Prepare Linux shader tools
+        if: matrix.lane == 'ubuntu'
+        run: ./scripts/shader-probe bootstrap
+      - name: Prepare macOS tools and the Profile preset
+        if: matrix.lane == 'macos'
+        uses: ./.github/actions/macos-setup
+        with:
+          preset: ${{ matrix.preset }}
+      - name: Fetch the previous report as baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT: runtime-profile-${{ matrix.lane }}
+        run: |
+          directory="$PWD/out/runtime-profile-baseline/$ARTIFACT"
+          # The current run is still in progress, so only earlier runs qualify.
+          runs="$(gh run list --workflow performance.yml --branch main --limit 10 \
+            --json databaseId,status --jq '.[] | select(.status == "completed") | .databaseId' || true)"
+          for run_id in $runs; do
+            rm -rf "$directory"
+            if gh run download "$run_id" --name "$ARTIFACT" --dir "$directory" && [[ -f "$directory/report.json" ]]; then
+              echo "report=$directory/report.json" >> "$GITHUB_OUTPUT"
+              echo "Baseline: run $run_id"
+              exit 0
+            fi
+          done
+          echo "No earlier report is available; this run has no baseline."
+      - name: Profile runtime scenarios
+        env:
+          PRESET: ${{ matrix.preset }}
+          LANE: ${{ matrix.lane }}
+          CAPABILITIES: ${{ matrix.capabilities }}
+          BASELINE: ${{ steps.baseline.outputs.report }}
+          SCENARIOS: ${{ inputs.scenarios }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          arguments=("$PRESET" --output "$PWD/out/runtime-profile/$LANE")
+          for capability in $CAPABILITIES; do arguments+=(--capability "$capability"); done
+          for scenario in $SCENARIOS; do arguments+=(--scenario "$scenario"); done
+          if [[ -n "$REPETITIONS" ]]; then arguments+=(--repetitions "$REPETITIONS"); fi
+          if [[ -n "$BASELINE" ]]; then arguments+=(--baseline "$BASELINE"); fi
+          ./scripts/profile-engine "${arguments[@]}"
+      - name: Publish runtime profile summary
+        if: always()
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          summary="out/runtime-profile/$LANE/summary.md"
+          if [[ -f "$summary" ]]; then
+            cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No runtime profile summary was produced for $LANE." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Save report, traces and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-profile-${{ matrix.lane }}
+          path: out/runtime-profile/${{ matrix.lane }}/
+          if-no-files-found: warn
+          retention-days: 90

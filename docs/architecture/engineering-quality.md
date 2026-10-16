@@ -119,6 +119,11 @@ Add functions to existing scripts rather than a new all-purpose CI executor.
 | Hardware/performance | Scheduled and explicit runs on controlled devices | Backend/device tests, frame/audio budgets, benchmark repetitions | Report until calibrated; release candidate acceptance for declared devices |
 | Release acceptance | Candidate/tag | Locked build, relocated installed SDK, package verification, symbols, smoke journeys and notices | Required before publication |
 
+The hosted part of the hardware/performance lane is implemented as the nightly
+`performance` workflow: report-only timings and traces on GitHub-hosted runners
+([Runtime profiling](../development/runtime-profiling.md)). Controlled devices,
+base/head repetitions and calibrated timing gates remain proposed.
+
 Documentation-only exemptions remain the existing conservative allowlist. Unknown
 paths, malformed comparisons, policy/toolchain changes and mixed changes run full
 validation. Preserve deleted/renamed source paths in classification. Do not add

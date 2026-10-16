@@ -187,19 +187,26 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
     // (threadId, ticks) so each thread's B/E stream is monotonic — the viewer
     // relies on ordering to nest slices. FlatEvent is a POD, so Vector growth
     // relocates it with a single memcpy.
-    foundation::Array<FlatEvent> events;
-    TraceChunk* chunk = recorder.DrainFullChunks();
+    //
+    // The full-chunk stack is LIFO, and each producer publishes its own chunks
+    // in recording order, so flattening the drained list back to front restores
+    // every thread's recording order. The stable sort then keeps equal-tick
+    // events (an End and the next Begin on a fast clock) in recorded order
+    // across a chunk boundary instead of emitting an End before its Begin.
     foundation::Array<TraceChunk*> drained;
-    while (chunk != nullptr)
+    for (TraceChunk* chunk = recorder.DrainFullChunks(); chunk != nullptr; chunk = chunk->PoolNext)
     {
-        TraceChunk* next = chunk->PoolNext;
-        for (uint32 i = 0; i < chunk->Count; ++i)
-        {
-            const TraceEvent& e = chunk->Events[i];
-            events.Add(FlatEvent{e.Ticks, chunk->ThreadId, e.SiteId, e.Kind, e.Flags, e.Aux});
-        }
         drained.Add(chunk);
-        chunk = next;
+    }
+    foundation::Array<FlatEvent> events;
+    for (usize chunkIndex = drained.GetSize(); chunkIndex > 0; --chunkIndex)
+    {
+        const TraceChunk& chunk = *drained[chunkIndex - 1];
+        for (uint32 i = 0; i < chunk.Count; ++i)
+        {
+            const TraceEvent& e = chunk.Events[i];
+            events.Add(FlatEvent{e.Ticks, chunk.ThreadId, e.SiteId, e.Kind, e.Flags, e.Aux});
+        }
     }
 
     // Recycle chunks back to the pool now that we've copied their events.

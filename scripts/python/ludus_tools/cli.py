@@ -366,9 +366,22 @@ def cmd_install_butler(args) -> int:
 def cmd_render_graph(args) -> int:
     from . import render_graph
 
-    if args.graph_action in ("new-build", "build", "verify-package", "emit-runtime"):
+    if args.graph_action in ("schema-diff", "migrate"):
+        from . import render_graph_authoring
+        if args.graph_action == "schema-diff":
+            payload = {"schema_diff": render_graph_authoring.compare_packages(Path(args.old), Path(args.new))}
+        else:
+            values = _read_json_argument(args.values, "--values")
+            defaults = _read_json_argument(args.defaults, "--defaults") if args.defaults else None
+            payload = {"migration": render_graph_authoring.migrate_values(Path(args.old), Path(args.new), values, defaults)}
+        human = _json.dumps(payload, indent=2)
+    elif args.graph_action in ("new-build", "build", "verify-package", "emit-runtime", "cook-runtime"):
         from . import render_graph_build
-        if args.graph_action == "emit-runtime":
+        if args.graph_action == "cook-runtime":
+            from . import render_graph_execution
+            payload = {"runtime": render_graph_execution.cook_runtime(Path(args.package), Path(args.output),
+                        configuration=args.configuration)}
+        elif args.graph_action == "emit-runtime":
             from . import render_graph_execution
             payload = {"execution": render_graph_execution.emit_runtime(Path(args.package), Path(args.output),
                         configuration=args.configuration, name=args.name)}
@@ -399,7 +412,23 @@ def cmd_render_graph(args) -> int:
     _emit(args, payload)
     if not args.json:
         print(human)
-    return EXIT_OK
+    # A rejected migration is reported in full but is not a successful result.
+    return EXIT_FAILED if payload.get("migration", {}).get("status") == "Rejected" else EXIT_OK
+
+
+def _read_json_argument(path, flag):
+    """Read a bounded UTF-8 JSON input file without following it into a project write."""
+    try:
+        with open(path, "rb") as stream:
+            data = stream.read(256 * 1024 + 1)
+    except OSError as error:
+        raise ToolingError("RenderGraphMigration", f"{flag}: {error}") from error
+    if len(data) > 256 * 1024:
+        raise ToolingError("RenderGraphCapacity", f"{flag}: input exceeds 256 KiB")
+    try:
+        return _json.loads(data.decode("utf-8"), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+    except (ValueError, UnicodeError, RecursionError) as error:
+        raise ToolingError("RenderGraphMigration", f"{flag}: {error}") from error
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -445,6 +474,21 @@ def build_parser() -> argparse.ArgumentParser:
     emit_graph.add_argument("--configuration", default="Default")
     emit_graph.add_argument("--name", default="DefaultGraph")
     emit_graph.set_defaults(func=cmd_render_graph)
+    cook_graph = graphs.add_parser("cook-runtime", help="write a runtime-loadable generation for atomic activation (RG3)")
+    cook_graph.add_argument("package", help="immutable generation or build tree with current.json")
+    cook_graph.add_argument("output", help="generated .lurgrt destination")
+    cook_graph.add_argument("--configuration", default="Default")
+    cook_graph.set_defaults(func=cmd_render_graph)
+    diff_graph = graphs.add_parser("schema-diff", help="compare schemas/layouts of two cooked generations (RG3)")
+    diff_graph.add_argument("old")
+    diff_graph.add_argument("new")
+    diff_graph.set_defaults(func=cmd_render_graph)
+    migrate_graph = graphs.add_parser("migrate", help="report migrated Uniform values; never writes sources (RG3)")
+    migrate_graph.add_argument("old")
+    migrate_graph.add_argument("new")
+    migrate_graph.add_argument("--values", required=True, help="JSON schema -> field -> numbers")
+    migrate_graph.add_argument("--defaults", help="JSON explicit defaults for added/changed fields")
+    migrate_graph.set_defaults(func=cmd_render_graph)
     tools = sub.add_parser("tools", help="explicitly acquire optional host tools").add_subparsers(dest="cmd", required=True)
     butler = tools.add_parser("install-butler", help="download the pinned host butler executable; never logs in or uploads")
     butler.add_argument("destination", help="directory for butler; an existing executable is never replaced")
@@ -558,7 +602,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         return args.func(args)
     except ToolingError as exc:
         if getattr(args, "json", False):
-            print(_json.dumps({"schema": 1, "error": {"code": exc.code, "message": exc.message}}))
+            error = {"code": exc.code, "message": exc.message}
+            if exc.location is not None:
+                error["location"] = exc.location
+            if exc.diagnostics is not None:
+                error["diagnostics"] = exc.diagnostics
+            print(_json.dumps({"schema": 1, "error": error}))
         else:
             print(f"error [{exc.code}]: {exc.message}", file=sys.stderr)
         return _exit_for_code(exc.code)

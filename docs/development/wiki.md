@@ -3,7 +3,7 @@
 Ludus Wiki renders the Markdown documentation in `docs/`: tutorials/how-to
 guides, engineering designs, decisions, evidence and references. Each document
 has one editable source shared by the website and offline readers. The expected project-site address is
-`https://alegruz.github.io/Ludus/` once Pages deploys successfully.
+`https://the-ludus-project.github.io/Ludus/` once Pages deploys successfully.
 
 ## Source and tooling
 

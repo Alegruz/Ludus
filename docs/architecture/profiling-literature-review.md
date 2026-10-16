@@ -4,7 +4,7 @@ Status: **Evidence collection for PR #23; no architecture decisions changed.**
 
 Reviewed against the independent [profiling baseline](profiling.md) at commit
 `42863c25004b110b9bff02624b9524ad2979efcb` on
-[PR #23](https://github.com/Alegruz/Ludus/pull/23). The baseline is a proposal,
+[PR #23](https://github.com/The-Ludus-Project/Ludus/pull/23). The baseline is a proposal,
 not an implemented or benchmarked subsystem. This review does not validate its
 overhead estimates, select a backend, or prescribe a replacement design.
 
