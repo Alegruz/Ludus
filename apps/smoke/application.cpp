@@ -200,7 +200,7 @@ State Application::Tick() noexcept
         Shutdown();
         return mState;
     }
-    // The one frame timestamp; visibility resets below apply before it is sampled.
+    // The one frame timestamp; suspension resets below apply before it is sampled.
     const time::Timestamp now = time::Now();
     if (mState == State::Loading)
     {
@@ -243,9 +243,11 @@ State Application::Tick() noexcept
     {
         // Held keys/buttons and pointer positions come from the snapshot,
         // including after queue overflow, blur and visibility transitions.
-        // A suspended page stops callbacks, so a visibility event is the
-        // signal that the next interval spans hidden time.
-        if (event.Kind == platform::browser::EventKind::Visibility)
+        // Platform queues InputReset when the page is hidden or blurred. A
+        // hidden page stops callbacks, so the queued reset marks an interval
+        // spanning hidden time. Visibility events also fire on focus/resize
+        // refreshes and do not distinguish hiding from showing.
+        if (event.Kind == platform::browser::EventKind::InputReset)
         {
             mFrameClock.Reset();
         }

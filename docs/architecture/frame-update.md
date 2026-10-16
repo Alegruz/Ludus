@@ -50,8 +50,8 @@ flowchart TD
 
 Session transitions reset clock debt and the frame baseline. Pause and browser
 suspension also reset both; resuming never catches up the time spent paused or
-hidden. A hidden browser page stops callbacks, so its visibility event performs
-the reset. A first callback starts the clock baseline without simulating elapsed
+hidden. A hidden browser page stops callbacks, so the input reset it queues
+performs the reset. A first callback starts the clock baseline without simulating elapsed
 startup time. Accepted, clamped and lifecycle-excluded time remain visible to
 diagnostics. Do not busy-wait for
 the next tick, a GPU fence, browser readiness, or a worker result in a browser

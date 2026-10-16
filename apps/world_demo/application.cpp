@@ -223,13 +223,10 @@ void Application::BrowserInput(const platform::browser::WindowState& window) noe
                     baseline.Keys[input::KeyIndex(key)] = window.Keys[index];
                 }
             }
+            // Platform queues InputReset when the page is hidden or blurred. A hidden page stops
+            // callbacks, so this queued reset also drops the frame baseline and hidden time never
+            // becomes catch-up ticks. Visibility events also fire on focus/resize refreshes.
             mInput.RequestReset(focused ? input::ResetReason::ExplicitLive : input::ResetReason::FocusLost, baseline);
-            mSession.Driver.Interrupt();
-        }
-        // A suspended page stops callbacks; its visibility events drop the frame baseline so the
-        // first visible callback does not convert hidden time into catch-up ticks.
-        if (event.Kind == platform::browser::EventKind::Visibility)
-        {
             mSession.Driver.Interrupt();
         }
     }

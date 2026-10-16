@@ -126,8 +126,8 @@ The frame integration keeps the [fixed-tick driver](frame-update.md) policy:
 60 Hz by default, 250 ms clamp, four catch-up ticks and explicit discarded time.
 The world reference application reads `time::Now()` once per callback and passes
 that timestamp to its `TickDriver`, which owns the FrameClock. Every existing
-debt reset (pause/resume, focus loss, visibility events, hidden frames, faults
-and session activation) also drops the frame baseline, so lifecycle resets cannot
+debt reset (pause/resume, focus changes, queued browser input resets, hidden
+frames, faults and session activation) also drops the frame baseline, so lifecycle resets cannot
 diverge between the clock and the driver. The FrameClock is the only clamp; its
 discarded excess joins the existing discard total. The driver additionally
 reports accepted, clamped and lifecycle-excluded nanoseconds and a regression

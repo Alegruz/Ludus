@@ -181,7 +181,8 @@ existing discard accounting and apply the frame clamp once.
 
 Read the timestamp once at the callback boundary, apply that callback's lifecycle
 resets, then sample. A browser stops animation callbacks for a hidden page, so a
-hidden frame may never arrive: reset on the visibility event instead. Keep a
+hidden frame may never arrive: reset on the platform's queued suspension signal
+instead (Ludus browser windows queue `InputReset` when hidden or blurred). Keep a
 high-water mark across resets if regressed samples are possible; otherwise the
 first sample after `Reset()` becomes a baseline below an earlier reading. The
 [world reference driver](../../examples/world-demo.md#edit-levels-and-gameplay)

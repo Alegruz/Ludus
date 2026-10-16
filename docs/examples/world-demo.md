@@ -110,8 +110,8 @@ FrameClock is the only clamp. Input edges survive zero-tick frames and apply onc
 during catch-up. Cancellation takes priority over presses; the bridge waits for
 neutral controls before rearming.
 
-Pause/resume, focus changes, browser visibility events, hidden frames, faults and
-activation reset debt and the frame baseline, so the next Playing frame is a
+Pause/resume, focus changes, queued browser input resets (hide or blur), hidden
+frames, faults and activation reset debt and the frame baseline, so the next Playing frame is a
 zero-elapsed baseline and never catches up excluded time. Focus changes preserve
 pause/fault mode. Diagnostics separate accepted time, time clamped by the frame
 cap, excluded lifecycle time and clock regressions; for a monotonic sequence the

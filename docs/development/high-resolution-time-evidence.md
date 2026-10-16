@@ -85,7 +85,7 @@ drive synthetic timestamps at a 2^62 ns epoch without OS sleeps or a mock clock:
 | Startup | First Advance is a zero-elapsed baseline and runs no tick. Uneven integer partitions of one second accept exactly 1,000,000,000 ns; equal readings are valid zero frames. |
 | Accepted/discarded time, no duplicate clamp | A 2 s stall accepts exactly 250 ms and clamps exactly 1.75 s. Catch-up trimming adds less than the accepted 250 ms to the discard total. The next frame measures from the stalled sample. |
 | Pause/resume | Paused frames accept nothing; resuming yields a baseline, so paused time is never caught up. Single step still runs exactly one tick. |
-| Visibility | Hidden frames and an `Interrupt()` (the browser visibility event while callbacks are suspended) exclude 89.99 s of hidden time with no catch-up tick. |
+| Visibility | Hidden frames and an `Interrupt()` (the input reset a browser queues when a page is hidden while callbacks are suspended) exclude 89.99 s of hidden time with no catch-up tick. |
 | Session replacement | Frames during a long load are excluded; activation resets the driver, and the replacement world starts from a baseline at tick zero. |
 | Clock regression | A backwards sample adds no time and increments a counter. Recovery measures from the high-water mark. After a lifecycle reset, a regressed sample cannot become a baseline below it. |
 

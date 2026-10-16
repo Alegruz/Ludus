@@ -243,7 +243,7 @@ TEST_CASE("Frame integration: visibility suspension and interruption exclude hid
     REQUIRE(driver.Advance(world, At(31 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
     REQUIRE(driver.GetFrameSample().IsBaseline);
     REQUIRE(world.GetTick() == tick);
-    // A browser stops callbacks while hidden; its visibility event interrupts the next interval.
+    // A browser stops callbacks while hidden; the queued input reset interrupts the next interval.
     driver.Interrupt();
     REQUIRE(driver.Advance(world, At(90 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
     REQUIRE(driver.GetFrameSample().IsBaseline);

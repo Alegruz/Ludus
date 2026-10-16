@@ -18,9 +18,9 @@ reposition it; input uses the Platform snapshot and CSS pointer coordinates.
 Each callback reads one timestamp and samples an application-owned
 [FrameClock](../wiki/guides/time.md#keep-frame-stalls-visible); visible animation
 and movement accept at most 100 ms of it, reporting the excess as discarded.
-Hidden canvases and visibility events drop the baseline, so a returning page
-never replays hidden time. Hidden canvases freeze simulation and skip rendering;
-held input clears through Platform.
+Hidden canvases and Platform's queued input reset (hide or blur) drop the
+baseline, so a returning page never replays hidden time. Hidden canvases freeze
+simulation and skip rendering; held input clears through Platform.
 The triangle stays inside the canvas through a square viewport on any aspect/DPR.
 The renderer privately owns WGSL and pipeline resources through W5 sample interop;
 no new public RHI or installed SDK API is introduced.
