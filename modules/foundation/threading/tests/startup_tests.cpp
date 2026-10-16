@@ -19,7 +19,7 @@ bool shouldFailCondition = false;
 } // namespace
 
 // GNU linker --wrap requires these exact external symbol names.
-// NOLINTBEGIN(bugprone-reserved-identifier)
+// NOLINTBEGIN(bugprone-reserved-identifier,readability-identifier-naming)
 extern "C" int __real_pthread_create(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
 extern "C" int __real_pthread_join(pthread_t, void**);
 extern "C" int __real_pthread_mutex_init(pthread_mutex_t*, const pthread_mutexattr_t*);
@@ -49,7 +49,7 @@ extern "C" int __wrap_pthread_cond_init(pthread_cond_t* condition, const pthread
     return shouldFailCondition == true ? EAGAIN : __real_pthread_cond_init(condition, attributes);
 }
 
-// NOLINTEND(bugprone-reserved-identifier)
+// NOLINTEND(bugprone-reserved-identifier,readability-identifier-naming)
 
 TEST_CASE("Partial native startup joins every already-started worker and can retry", "[threading]")
 {
