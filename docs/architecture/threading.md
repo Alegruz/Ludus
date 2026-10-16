@@ -1,7 +1,8 @@
 # Threading architecture
 
-Status: the bounded graph kernel is implemented. Work stealing and engine
-consumer migration are later, measured slices. This design builds on
+Status: the bounded graph kernel is implemented, and [milestone T0](#milestones)
+closed its documentation, contract-test and macOS validation gaps. Engine consumer
+migration, tracing and work stealing are later, measured milestones. This design builds on
 [frame ownership](frame-update.md#background-work-and-eventual-jobs) and
 [profiling](profiling-final.md). It does not claim universal optimality or AAA
 scale performance from a small synthetic benchmark.
@@ -73,8 +74,9 @@ an instruction to use every hardware thread. Initialization creates all workers
 once; a failed startup joins every worker already started before returning.
 
 Submit reserves one graph until Wait releases it. A second graph returns Busy;
-there is no hidden backlog or unbounded retry. Sealed graphs can be submitted
-repeatedly with updated contexts after Wait. Reset invalidates handles and permits
+there is no hidden backlog or unbounded retry. Sealed graphs can be resubmitted
+after Wait. Each job keeps the context pointer given to Add, so the owner updates
+the data it references between submissions. Reset invalidates handles and permits
 rebuilding. An empty sealed graph succeeds. The serial Submit executes all work
 synchronously and retains the graph until Wait, keeping the same lifetime API.
 
@@ -94,8 +96,10 @@ Failed or Cancelled. Invalid callback outcomes become Failed. A failed/cancelled
 prerequisite blocks descendants without calling their functions, while unrelated
 branches finish. Failure dominates cancellation in the graph outcome. Explicit
 Cancel skips tasks that have not started; running callbacks retain their actual
-outcomes. It cannot stop an executing stack or roll back side effects. Cancel
-after the last task completed does not change successful completion into failure.
+outcomes. It cannot stop an executing stack or roll back side effects. Once
+requested, every task that has not started reports Cancelled, including one that a
+failed prerequisite would otherwise report Blocked. Cancel after the last task
+completed does not change successful completion into failure.
 
 Wait optionally executes ready CPU callbacks on its calling thread; choose
 `help=false` when thread identity/TLS or responsiveness makes that inappropriate.
@@ -114,14 +118,14 @@ handles between independent runtime copies or across their unload/reload.
 
 Shutdown drains accepted work, sets stop under the gate, wakes sleepers, joins
 all started threads and frees state. System destruction does the same. Destroying
-a submitted graph drains it through its system. Destruction from a callback of
-its active graph or a system is a fatal lifetime-contract violation: that stack
-cannot wait for itself. Application shutdown must first stop admissions, retain
-contexts, drain/cancel, then destroy inputs and owning subsystems.
+a submitted graph drains it through its system. Destroying a submitted graph, or
+any system, from any pool callback is a fatal lifetime-contract violation: that
+stack cannot wait for itself. Application shutdown must first stop admissions,
+retain contexts, drain/cancel, then destroy inputs and owning subsystems.
 
 Build/reset, Submit/Wait, initialization, shutdown and destruction are serialized
 by the application owner. Cancel and Snapshot may run concurrently with execution
-and owner Wait, while lifecycle is stable. GetOutcome may read a published node
+and owner Wait, including from callbacks, while lifecycle is stable. GetOutcome may read a published node
 concurrently with execution, but never race graph reset/rebuild/destruction. A
 caller cannot race the system's destruction with any operation. An arbitrary
 callback that blocks indefinitely can prevent drain; the kernel cannot enforce
@@ -198,7 +202,22 @@ Subsequent reviewable slices, in order:
 
 The first kernel provides a maintainable correctness baseline and a controlled
 migration path. Those later capabilities are deliberately not advertised as
-implemented by this PR.
+implemented.
+
+## Milestones
+
+Each milestone is one reviewable change with its own validation. T0 completes the
+kernel baseline; T1-T3 complete the [baseline gate](#baseline-completion-gate); T4
+and T5 are conditional on measurements and are not scheduled by default.
+
+| Milestone | Scope | Exit criteria |
+| --- | --- | --- |
+| T0 (done) | Public API contracts beside `jobs.hpp` declarations; naming-rule migration of the module; tests for failure-over-cancellation, cancel-after-completion, cancel precedence over Blocked, snapshot counts, concurrent Cancel/Snapshot during Wait, recursive calls into any pool and serial order; macOS runtime tests in CI | Module docs list no undocumented public symbols; macOS development and ASan/UBSan CI run the threading suite; [macOS ARM64 evidence](../development/threading-evidence.md) recorded |
+| T1 | First engine consumer (staged slice 1): move the static-lighting irradiance bake from its dedicated editor thread onto an explicit JobSystem budget, with disjoint output ranges and a stable owner merge | Serial-oracle equality, cancellation and shutdown tests; bake p50/p95/p99, critical path and dispatch overhead against the serial executor |
+| T2 | Task identity and traces (staged slice 2): optional job names/site IDs, profiler dispatch-to-start and completion flows, queue depth and wait duration | Tracing on/off overhead measured; scheduling allocation and lock contracts unchanged |
+| T3 | Platform completion: compile and execute the Windows backend, macOS startup-failure injection and a completed macOS TSan run | Evidence recorded for each target; Windows still blocks shipping until this exits |
+| T4 | Conditional (staged slice 3): worker-local queues and work stealing, only for measured contention | The [research plan](#turning-research-into-an-improvement) comparison shows a repeatable benefit |
+| T5 | Conditional (staged slices 4-5): concurrent admission/priority lanes, browser pthreads, render ownership, NUMA or fibers | A separate measured design decision for each |
 
 ## Post-baseline research and improvement plan
 

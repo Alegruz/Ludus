@@ -11,3 +11,4 @@ apps/editor/src/import_report.cpp
 apps/editor/tests/import_report_tests.cpp
 
 modules/content/render_graph_format
+modules/foundation/threading

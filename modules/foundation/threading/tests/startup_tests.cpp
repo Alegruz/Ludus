@@ -14,8 +14,8 @@ namespace
 std::atomic<uint32> gStarts{0};
 std::atomic<uint32> gJoins{0};
 std::atomic<uint32> gFailStart{0};
-bool gFailMutex = false;
-bool gFailCondition = false;
+bool shouldFailMutex = false;
+bool shouldFailCondition = false;
 } // namespace
 
 // GNU linker --wrap requires these exact external symbol names.
@@ -42,11 +42,11 @@ extern "C" int __wrap_pthread_join(pthread_t thread, void** result)
 }
 extern "C" int __wrap_pthread_mutex_init(pthread_mutex_t* mutex, const pthread_mutexattr_t* attributes)
 {
-    return gFailMutex ? EAGAIN : __real_pthread_mutex_init(mutex, attributes);
+    return shouldFailMutex == true ? EAGAIN : __real_pthread_mutex_init(mutex, attributes);
 }
 extern "C" int __wrap_pthread_cond_init(pthread_cond_t* condition, const pthread_condattr_t* attributes)
 {
-    return gFailCondition ? EAGAIN : __real_pthread_cond_init(condition, attributes);
+    return shouldFailCondition == true ? EAGAIN : __real_pthread_cond_init(condition, attributes);
 }
 
 // NOLINTEND(bugprone-reserved-identifier)
@@ -59,7 +59,7 @@ TEST_CASE("Partial native startup joins every already-started worker and can ret
         gStarts = 0;
         gJoins = 0;
         gFailStart = failAt;
-        const auto status = system.Initialize({4});
+        const JobStatus status = system.Initialize({4});
         gFailStart = 0;
         REQUIRE(status == JobStatus::ThreadCreationFailed);
         REQUIRE(gJoins == failAt - 1);
@@ -72,13 +72,13 @@ TEST_CASE("Partial native startup joins every already-started worker and can ret
 TEST_CASE("Native synchronization initialization failure leaves a reusable system", "[threading]")
 {
     JobSystem system;
-    gFailMutex = true;
-    const auto mutexStatus = system.Initialize({1});
-    gFailMutex = false;
+    shouldFailMutex = true;
+    const JobStatus mutexStatus = system.Initialize({1});
+    shouldFailMutex = false;
     REQUIRE(mutexStatus == JobStatus::ThreadCreationFailed);
-    gFailCondition = true;
-    const auto conditionStatus = system.Initialize({1});
-    gFailCondition = false;
+    shouldFailCondition = true;
+    const JobStatus conditionStatus = system.Initialize({1});
+    shouldFailCondition = false;
     REQUIRE(conditionStatus == JobStatus::ThreadCreationFailed);
     REQUIRE(system.Initialize({1}) == JobStatus::Ok);
 }
