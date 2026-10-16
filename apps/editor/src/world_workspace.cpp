@@ -933,6 +933,8 @@ void WorldWorkspace::Render()
 }
 void WorldWorkspace::RenderInspector()
 {
+    Scene_->SetSelection(Selected_);
+    Render_->SetSelection(Selected_, Pending_);
     world_demo::Name selected;
     const auto selectedBytes = Selected_.toLatin1();
     if (selectedBytes.size() < 32)

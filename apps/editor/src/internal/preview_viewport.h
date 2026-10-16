@@ -2,8 +2,14 @@
 
 #include "internal/render_preview.h"
 
+#include <ludus/foundation/containers/static_array.hpp>
+
+#include <QElapsedTimer>
+#include <QFocusEvent>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
+#include <QTimer>
 #include <QWheelEvent>
 #include <QWidget>
 
@@ -36,52 +42,32 @@ public:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
-    void resizeEvent(QResizeEvent* event) override
-    {
-        QWidget::resizeEvent(event);
-        resizeSurface();
-    }
-    void mousePressEvent(QMouseEvent* event) override
-    {
-        Last_ = event->position().toPoint();
-        setFocus();
-        event->accept();
-    }
-    void mouseMoveEvent(QMouseEvent* event) override
-    {
-        const QPoint point = event->position().toPoint();
-        const QPoint delta = point - Last_;
-        Last_ = point;
-        if (event->buttons().testFlag(Qt::MiddleButton) ||
-            (event->buttons().testFlag(Qt::LeftButton) && event->modifiers().testFlag(Qt::ShiftModifier)))
-        {
-            Preview_->Pan(delta.x(), delta.y());
-        }
-        else if (event->buttons().testFlag(Qt::LeftButton) || event->buttons().testFlag(Qt::RightButton))
-        {
-            Preview_->Orbit(delta.x(), delta.y());
-        }
-        event->accept();
-    }
-    void wheelEvent(QWheelEvent* event) override
-    {
-        WheelRemainder_ += event->angleDelta().y();
-        Preview_->Zoom(WheelRemainder_ / 120);
-        WheelRemainder_ %= 120;
-        event->accept();
-    }
-    void mouseDoubleClickEvent(QMouseEvent* event) override
-    {
-        Preview_->FrameAll();
-        event->accept();
-    }
+    void resizeEvent(QResizeEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
 
 private:
     struct State;
     foundation::UniquePtr<State> mState;
     void resizeSurface();
     RenderPreview* Preview_;
-    QPoint Last_;
-    foundation::int32 WheelRemainder_ = 0;
+    static constexpr foundation::usize MOVEMENT_KEY_COUNT = 7;
+    foundation::StaticArray<bool, MOVEMENT_KEY_COUNT> mHeldKeys{};
+    QPointF mLastPositionGlobal;
+    QTimer mNavigationTimer;
+    QElapsedTimer mNavigationClock;
+    foundation::float32 mSpeedMultiplier = 1;
+    bool mIsFlying = false;
+    bool mHasMouseCapture = false;
+    void stopNavigation();
+    void advanceNavigation();
+    void recenterPointer();
+    [[nodiscard]] foundation::float32 getDrawableHeight() const noexcept;
 };
 } // namespace ludus::editor

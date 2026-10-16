@@ -3,6 +3,7 @@
 
 #include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/containers/borrowed_view.hpp>
+#include <ludus/foundation/math/precision.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/scalar.hpp>
@@ -770,18 +771,58 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
     error.clear();
     return true;
 }
-bool RenderScene::View(const PreviewViewOptions& options, rr::ViewDescription& output, QString& error) const
+bool RenderScene::TryGetBounds(const QString& id, math::Aabb3& outBoundsWorld) const noexcept
 {
-    const auto selected = options.Camera;
-    const auto yaw = options.OrbitDegrees.X, pitch = options.OrbitDegrees.Y;
-    const auto distance = options.Distance;
-    const auto width = options.Width, height = options.Height;
-    const auto reference = options.Reference;
-    const auto* orbitCenter = options.OrbitCenter;
-    const auto orbitRadius = options.OrbitRadius;
+    math::Aabb3 candidate = math::EmptyAabb3();
+    bool hasPoint = false;
+    for (const PreviewObject& object : Objects)
+    {
+        if (id.isEmpty() == false && object.Id != id)
+        {
+            continue;
+        }
+        if (object.Mesh < 0 || object.Mesh >= Meshes.size())
+        {
+            return false;
+        }
+        for (const math::Vector3 positionMesh : Meshes[object.Mesh].Positions)
+        {
+            const math::Vector3 positionWorld = math::TransformPoint(object.Transform, positionMesh);
+            if (math::IsFinite(positionWorld) == false)
+            {
+                return false;
+            }
+            candidate.Min = {math::Min(candidate.Min.X, positionWorld.X),
+                             math::Min(candidate.Min.Y, positionWorld.Y),
+                             math::Min(candidate.Min.Z, positionWorld.Z)};
+            candidate.Max = {math::Max(candidate.Max.X, positionWorld.X),
+                             math::Max(candidate.Max.Y, positionWorld.Y),
+                             math::Max(candidate.Max.Z, positionWorld.Z)};
+            hasPoint = true;
+        }
+    }
+    if (hasPoint == false)
+    {
+        return false;
+    }
+    outBoundsWorld = candidate;
+    return true;
+}
+bool RenderScene::View(const PreviewViewOptions& options, rr::ViewDescription& outView, QString& outError) const
+{
+    const int32 selected = options.Camera;
+    const float32 yaw = options.OrbitDegrees.X;
+    const float32 pitch = options.OrbitDegrees.Y;
+    const float32 distance = options.Distance;
+    const uint32 width = options.Width;
+    const uint32 height = options.Height;
+    const bool isReference = options.Reference;
+    const math::Vector3* orbitCenterOrNull = options.OrbitCenter;
+    const float32 orbitRadius = options.OrbitRadius;
     rr::ViewMapping mapping;
     rr::ProjectionDescription projection;
-    math::Vector3 position, forward;
+    math::Vector3 position;
+    math::Vector3 forward;
     if (selected < -1 || selected >= Cameras.size() ||
         rr::ResolveViewMapping({static_cast<float32>(width), static_cast<float32>(height), rr::ScreenFit::Stretch},
                                {0, 0, width, height},
@@ -789,40 +830,46 @@ bool RenderScene::View(const PreviewViewOptions& options, rr::ViewDescription& o
                                height,
                                mapping) != graphics::rhi::RasterStatus::Ready)
     {
-        return Fail(error, QStringLiteral("Camera selection or drawable dimensions are unavailable."));
+        return Fail(outError, QStringLiteral("Camera selection or drawable dimensions are unavailable."));
     }
-    if (selected == -1)
+    if (selected == -1 && options.EditorCameraOrNull == nullptr)
     {
-        const auto center = orbitCenter == nullptr ? Center : *orbitCenter;
-        const auto radius = orbitCenter == nullptr ? Radius : orbitRadius;
-        if (!math::IsFinite(yaw) || !math::IsFinite(pitch) || !math::IsFinite(distance) || distance < radius * 1.2F ||
-            distance > radius * 20 || pitch < -80 || pitch > 80)
+        const math::Vector3 center = orbitCenterOrNull == nullptr ? Center : *orbitCenterOrNull;
+        const float32 radius = orbitCenterOrNull == nullptr ? Radius : orbitRadius;
+        if (math::IsFinite(yaw) == false || math::IsFinite(pitch) == false || math::IsFinite(distance) == false ||
+            distance <= 0 || distance > 10000000 || pitch < -89.9F || pitch > 89.9F)
         {
-            return Fail(error, QStringLiteral("Editor orbit is outside its safe navigation range."));
+            return Fail(outError, QStringLiteral("Editor orbit is outside its safe navigation range."));
         }
-        const auto y = yaw * 0.01745329252F, p = pitch * 0.01745329252F;
+        const float32 y = math::DegreesToRadians(yaw);
+        const float32 p = math::DegreesToRadians(pitch);
         position =
             center + math::Vector3{math::Sin(y) * math::Cos(p), math::Sin(p), math::Cos(y) * math::Cos(p)} * distance;
         if (math::TryLookAt(position, center, {0, 1, 0}, projection.WorldToView) != math::MathStatus::Success ||
             math::TryNormalize(center - position, forward) != math::MathStatus::Success)
         {
-            return Fail(error, QStringLiteral("Editor orbit cannot produce a valid view."));
+            return Fail(outError, QStringLiteral("Editor orbit cannot produce a valid view."));
         }
         projection.Kind = rr::ProjectionKind::PerspectiveInfinite;
         projection.Near = math::Max(0.000001F, radius * 0.001F);
     }
     else
     {
-        const auto& sample = Cameras[selected].Sample;
+        const camera::CameraSample& sample = selected == -1 ? *options.EditorCameraOrNull : Cameras[selected].Sample;
+        if (camera::ValidateCameraSample(sample) != camera::CameraStatus::Success)
+        {
+            return Fail(outError, QStringLiteral("Editor camera publication is invalid."));
+        }
         math::TransformTRS pose;
-        pose.Translation = {static_cast<float32>(sample.Pose.Position.X),
-                            static_cast<float32>(sample.Pose.Position.Y),
-                            static_cast<float32>(sample.Pose.Position.Z)};
+        if (math::TryMakeRelative(sample.Pose.Position, {}, 10000000.0, pose.Translation) != math::MathStatus::Success)
+        {
+            return Fail(outError, QStringLiteral("Camera position exceeds the renderer's origin-zero range."));
+        }
         pose.Rotation = sample.Pose.Orientation;
         math::Affine3 inverse;
         if (math::TryInverse(math::ToAffine3(pose), inverse) != math::MathStatus::Success)
         {
-            return Fail(error, QStringLiteral("Authored camera pose cannot be inverted."));
+            return Fail(outError, QStringLiteral("Authored camera pose cannot be inverted."));
         }
         projection.WorldToView = math::ToMatrix4(inverse);
         projection.Kind = sample.Lens.Projection == camera::CameraProjection::PerspectiveFinite
@@ -840,14 +887,14 @@ bool RenderScene::View(const PreviewViewOptions& options, rr::ViewDescription& o
     rr::ViewDescription view;
     if (rr::BuildViewDescription(projection, mapping, view) != graphics::rhi::RasterStatus::Ready)
     {
-        return Fail(error, QStringLiteral("Camera lens cannot be represented by the renderer."));
+        return Fail(outError, QStringLiteral("Camera lens cannot be represented by the renderer."));
     }
     view.CameraPosition = position;
     view.CameraForward = forward;
     view.OrthographicCamera = projection.Kind == rr::ProjectionKind::Orthographic;
-    view.Reference = reference;
-    output = view;
-    error.clear();
+    view.Reference = isReference;
+    outView = view;
+    outError.clear();
     return true;
 }
 bool RenderScene::Merge(const RenderScene& authored,

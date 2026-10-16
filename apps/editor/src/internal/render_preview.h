@@ -14,6 +14,7 @@
 #include <ludus/graphics/rhi/raster.h>
 #include <ludus/platform/native_window.h>
 
+#include "internal/editor_camera_controller.h"
 #include "internal/render_scene.h"
 
 #include <QJsonObject>
@@ -51,15 +52,21 @@ public:
                   foundation::float32 zoom,
                   bool reference);
     void FrameAll() noexcept;
+    void SetSelection(const QString& id);
+    [[nodiscard]] bool FrameSelection() noexcept;
+    void Look(foundation::float32 deltaX, foundation::float32 deltaY);
+    void Fly(foundation::math::Vector3 movementLocal, foundation::float32 deltaSeconds, foundation::float32 speed);
+    [[nodiscard]] foundation::float32 GetFocusDistance() const noexcept;
     void SetShading(PreviewShading shading);
     [[nodiscard]] LUDUS_INLINE PreviewShading GetShading() const noexcept
     {
         return mShading;
     }
     void Resize(foundation::int32 width, foundation::int32 height);
-    void Orbit(foundation::int32 dx, foundation::int32 dy);
-    void Pan(foundation::int32 dx, foundation::int32 dy);
-    void Zoom(foundation::int32 steps);
+    void Orbit(foundation::float32 deltaX, foundation::float32 deltaY);
+    void Pan(foundation::float32 deltaX, foundation::float32 deltaY, foundation::float32 heightLogical = 480);
+    void Zoom(foundation::float32 steps);
+    void SetFocusDistance(foundation::float32 distance);
     [[nodiscard]] QJsonObject Navigation() const;
     /// Build the current camera or orbit view for an explicit physical size, without a device.
     /// Software viewports call this after NavigationChanged. Failure preserves outView.
@@ -121,6 +128,10 @@ Q_SIGNALS:
     void Failed(const QString& error);
 
 private:
+    [[nodiscard]] bool beginNavigation();
+    void navigationChanged();
+    EditorCameraController mCameraController;
+    QString mSelectedId;
     [[nodiscard]] LUDUS_INLINE bool usesLitMaterials() const noexcept
     {
         return Scene_.Lit == true && mShading != PreviewShading::Albedo;
