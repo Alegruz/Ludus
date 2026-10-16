@@ -41,41 +41,43 @@ struct Inputs
 };
 JobOutcome Sum(void* context) noexcept
 {
-    auto& inputs = *static_cast<Inputs*>(context);
+    Inputs& inputs = *static_cast<Inputs*>(context);
     inputs.Sum = inputs.Left + inputs.Right;
     return inputs.Sum == 2 ? JobOutcome::Succeeded : JobOutcome::Failed;
 }
 struct HeldJob
 {
-    std::atomic<bool> Entered{false};
-    std::atomic<bool> Release{false};
+    std::atomic<bool> HasEntered{false};
+    std::atomic<bool> IsReleased{false};
 };
 JobOutcome Hold(void* context) noexcept
 {
-    auto& held = *static_cast<HeldJob*>(context);
-    held.Entered.store(true);
-    held.Entered.notify_all();
-    held.Release.wait(false);
+    HeldJob& held = *static_cast<HeldJob*>(context);
+    held.HasEntered.store(true);
+    held.HasEntered.notify_all();
+    held.IsReleased.wait(false);
     return JobOutcome::Succeeded;
 }
 struct Reentrant
 {
-    JobSystem* System = nullptr;
-    JobGraph* Graph = nullptr;
+    JobSystem& System;
+    JobGraph& Graph;
     JobStatus WaitStatus = JobStatus::Ok;
     JobStatus SubmitStatus = JobStatus::Ok;
     JobStatus ShutdownStatus = JobStatus::Ok;
+    JobStatus InitializeStatus = JobStatus::Ok;
 };
 JobOutcome Reenter(void* context) noexcept
 {
-    auto& data = *static_cast<Reentrant*>(context);
+    Reentrant& data = *static_cast<Reentrant*>(context);
     JobOutcome outcome{};
-    data.WaitStatus = data.System->Wait(outcome);
-    data.SubmitStatus = data.System->Submit(*data.Graph);
-    data.ShutdownStatus = data.System->Shutdown();
+    data.WaitStatus = data.System.Wait(outcome);
+    data.SubmitStatus = data.System.Submit(data.Graph);
+    data.ShutdownStatus = data.System.Shutdown();
+    data.InitializeStatus = data.System.Initialize();
     return JobOutcome::Succeeded;
 }
-JobOutcome Outcome(JobGraph& graph, JobHandle handle)
+JobOutcome GetOutcome(const JobGraph& graph, JobHandle handle)
 {
     JobOutcome outcome{};
     REQUIRE(graph.GetOutcome(handle, outcome) == JobStatus::Ok);
@@ -141,6 +143,7 @@ TEST_CASE("Dependency publication and graph reuse agree across serial and worker
         REQUIRE(graph.Seal() == JobStatus::Ok);
         for (uint32 iteration = 0; iteration < 100; ++iteration)
         {
+            // Resubmission reuses the context pointers; only the data they reference changes.
             inputs = {};
             REQUIRE(system.Submit(graph) == JobStatus::Ok);
             REQUIRE(graph.Reset() == JobStatus::Busy);
@@ -149,14 +152,14 @@ TEST_CASE("Dependency publication and graph reuse agree across serial and worker
             REQUIRE(system.Wait(result, iteration % 2 == 0) == JobStatus::Ok);
             REQUIRE(result == JobOutcome::Succeeded);
             REQUIRE(inputs.Sum == 2);
-            REQUIRE(Outcome(graph, sum) == JobOutcome::Succeeded);
+            REQUIRE(GetOutcome(graph, sum) == JobOutcome::Succeeded);
         }
     }
 }
 
 TEST_CASE("Failure and cancellation block dependent callbacks without losing independent work", "[threading]")
 {
-    for (const auto failure : {Fail, InvalidResult, Cancelled})
+    for (const JobFunction failure : {Fail, InvalidResult, Cancelled})
     {
         for (const uint32 workers : {0u, 3u})
         {
@@ -181,10 +184,33 @@ TEST_CASE("Failure and cancellation block dependent callbacks without losing ind
             JobOutcome result{};
             REQUIRE(system.Wait(result) == JobStatus::Ok);
             REQUIRE(result == (failure == Cancelled ? JobOutcome::Cancelled : JobOutcome::Failed));
-            REQUIRE(Outcome(graph, child) == JobOutcome::Blocked);
-            REQUIRE(Outcome(graph, grandchild) == JobOutcome::Blocked);
+            REQUIRE(GetOutcome(graph, child) == JobOutcome::Blocked);
+            REQUIRE(GetOutcome(graph, grandchild) == JobOutcome::Blocked);
             REQUIRE(calls == 0);
             REQUIRE(independentCalls == 1);
+        }
+    }
+}
+
+TEST_CASE("Failure dominates cancellation in the graph outcome", "[threading]")
+{
+    for (const uint32 workers : {0u, 3u})
+    {
+        for (const bool isFailureFirst : {false, true})
+        {
+            JobSystem system;
+            JobGraph graph;
+            REQUIRE(system.Initialize({workers}) == JobStatus::Ok);
+            REQUIRE(graph.Initialize({2, 0}) == JobStatus::Ok);
+            JobHandle first{};
+            JobHandle second{};
+            REQUIRE(graph.Add(isFailureFirst == true ? Fail : Cancelled, nullptr, first) == JobStatus::Ok);
+            REQUIRE(graph.Add(isFailureFirst == true ? Cancelled : Fail, nullptr, second) == JobStatus::Ok);
+            REQUIRE(graph.Seal() == JobStatus::Ok);
+            REQUIRE(system.Submit(graph) == JobStatus::Ok);
+            JobOutcome result{};
+            REQUIRE(system.Wait(result) == JobStatus::Ok);
+            REQUIRE(result == JobOutcome::Failed);
         }
     }
 }
@@ -206,24 +232,208 @@ TEST_CASE("Cancellation skips queued work and preserves a running callback", "[t
     REQUIRE(graph.DependsOn(dependent, running) == JobStatus::Ok);
     REQUIRE(graph.Seal() == JobStatus::Ok);
     REQUIRE(system.Submit(graph) == JobStatus::Ok);
-    held.Entered.wait(false);
+    held.HasEntered.wait(false);
     JobSnapshot snapshot{};
     REQUIRE(system.Snapshot(snapshot) == JobStatus::Ok);
     REQUIRE(snapshot.Running == 1);
     REQUIRE(snapshot.Pending == 2);
     REQUIRE(system.Cancel() == JobStatus::Ok);
-    held.Release.store(true);
-    held.Release.notify_all();
+    held.IsReleased.store(true);
+    held.IsReleased.notify_all();
     JobOutcome result{};
     REQUIRE(system.Wait(result) == JobStatus::Ok);
     REQUIRE(result == JobOutcome::Cancelled);
-    REQUIRE(Outcome(graph, running) == JobOutcome::Succeeded);
-    REQUIRE(Outcome(graph, queued) == JobOutcome::Cancelled);
-    REQUIRE(Outcome(graph, dependent) == JobOutcome::Cancelled);
+    REQUIRE(GetOutcome(graph, running) == JobOutcome::Succeeded);
+    REQUIRE(GetOutcome(graph, queued) == JobOutcome::Cancelled);
+    REQUIRE(GetOutcome(graph, dependent) == JobOutcome::Cancelled);
     REQUIRE(calls == 0);
 }
 
-TEST_CASE("Callbacks cannot recursively wait, submit or shut down", "[threading]")
+namespace
+{
+struct Canceller
+{
+    JobSystem& System;
+    JobStatus CancelStatus = JobStatus::InvalidArgument;
+};
+JobOutcome CancelSystem(void* context) noexcept
+{
+    Canceller& data = *static_cast<Canceller*>(context);
+    data.CancelStatus = data.System.Cancel();
+    return JobOutcome::Failed;
+}
+} // namespace
+
+TEST_CASE("Explicit cancellation takes precedence over blocking for jobs that have not started", "[threading]")
+{
+    // Serial execution is FIFO, so the failing canceller resolves before its
+    // dependent becomes ready and before the independent job starts.
+    JobSystem system;
+    JobGraph graph;
+    REQUIRE(system.Initialize() == JobStatus::Ok);
+    REQUIRE(graph.Initialize({3, 1}) == JobStatus::Ok);
+    uint32 calls = 0;
+    Canceller canceller{ .System = system };
+    JobHandle failing{};
+    JobHandle dependent{};
+    JobHandle independent{};
+    REQUIRE(graph.Add(CancelSystem, &canceller, failing) == JobStatus::Ok);
+    REQUIRE(graph.Add(Increment, &calls, independent) == JobStatus::Ok);
+    REQUIRE(graph.Add(Increment, &calls, dependent) == JobStatus::Ok);
+    REQUIRE(graph.DependsOn(dependent, failing) == JobStatus::Ok);
+    REQUIRE(graph.Seal() == JobStatus::Ok);
+    REQUIRE(system.Submit(graph) == JobStatus::Ok);
+    JobOutcome result{};
+    REQUIRE(system.Wait(result) == JobStatus::Ok);
+    REQUIRE(canceller.CancelStatus == JobStatus::Ok);
+    REQUIRE(result == JobOutcome::Failed);
+    REQUIRE(GetOutcome(graph, failing) == JobOutcome::Failed);
+    REQUIRE(GetOutcome(graph, independent) == JobOutcome::Cancelled);
+    REQUIRE(GetOutcome(graph, dependent) == JobOutcome::Cancelled);
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("Cancelling after the last job resolved keeps a successful outcome", "[threading]")
+{
+    for (const uint32 workers : {0u, 2u})
+    {
+        JobSystem system;
+        JobGraph graph;
+        REQUIRE(system.Initialize({workers}) == JobStatus::Ok);
+        REQUIRE(graph.Initialize({2, 1}) == JobStatus::Ok);
+        uint32 calls = 0;
+        JobHandle first{};
+        JobHandle second{};
+        REQUIRE(graph.Add(Increment, &calls, first) == JobStatus::Ok);
+        REQUIRE(graph.Add(Increment, &calls, second) == JobStatus::Ok);
+        REQUIRE(graph.DependsOn(second, first) == JobStatus::Ok);
+        REQUIRE(graph.Seal() == JobStatus::Ok);
+        REQUIRE(system.Submit(graph) == JobStatus::Ok);
+        JobOutcome outcome = JobOutcome::Pending;
+        while (outcome != JobOutcome::Succeeded)
+        {
+            REQUIRE(graph.GetOutcome(second, outcome) == JobStatus::Ok);
+            std::this_thread::yield();
+        }
+        REQUIRE(system.Cancel() == JobStatus::Ok);
+        JobOutcome result{};
+        REQUIRE(system.Wait(result) == JobStatus::Ok);
+        REQUIRE(result == JobOutcome::Succeeded);
+        REQUIRE(calls == 2);
+    }
+}
+
+namespace
+{
+struct Observer
+{
+    JobSystem& System;
+    JobSnapshot Snapshot{};
+    JobStatus SnapshotStatus = JobStatus::InvalidArgument;
+};
+JobOutcome Observe(void* context) noexcept
+{
+    Observer& data = *static_cast<Observer*>(context);
+    data.SnapshotStatus = data.System.Snapshot(data.Snapshot);
+    return JobOutcome::Succeeded;
+}
+} // namespace
+
+TEST_CASE("Snapshot counts every outcome and is callable from a callback", "[threading]")
+{
+    // Serial FIFO order: failed, succeeded, blocked (released by failed), then
+    // the observer (released by succeeded).
+    JobSystem system;
+    JobGraph graph;
+    REQUIRE(system.Initialize() == JobStatus::Ok);
+    REQUIRE(graph.Initialize({5, 2}) == JobStatus::Ok);
+    Observer observer{ .System = system };
+    uint32 calls = 0;
+    JobHandle failed{};
+    JobHandle succeeded{};
+    JobHandle blocked{};
+    JobHandle observing{};
+    JobHandle cancelled{};
+    REQUIRE(graph.Add(Fail, nullptr, failed) == JobStatus::Ok);
+    REQUIRE(graph.Add(Succeed, nullptr, succeeded) == JobStatus::Ok);
+    REQUIRE(graph.Add(Increment, &calls, blocked) == JobStatus::Ok);
+    REQUIRE(graph.Add(Observe, &observer, observing) == JobStatus::Ok);
+    REQUIRE(graph.DependsOn(blocked, failed) == JobStatus::Ok);
+    REQUIRE(graph.DependsOn(observing, succeeded) == JobStatus::Ok);
+    REQUIRE(graph.Seal() == JobStatus::Ok);
+    REQUIRE(system.Submit(graph) == JobStatus::Ok);
+    JobOutcome result{};
+    REQUIRE(system.Wait(result) == JobStatus::Ok);
+    REQUIRE(result == JobOutcome::Failed);
+    REQUIRE(observer.SnapshotStatus == JobStatus::Ok);
+    REQUIRE(observer.Snapshot.Pending == 0);
+    REQUIRE(observer.Snapshot.Running == 1);
+    REQUIRE(observer.Snapshot.Succeeded == 1);
+    REQUIRE(observer.Snapshot.Failed == 1);
+    REQUIRE(observer.Snapshot.Cancelled == 0);
+    REQUIRE(observer.Snapshot.Blocked == 1);
+    REQUIRE(calls == 0);
+    JobSnapshot idle{};
+    REQUIRE(system.Snapshot(idle) == JobStatus::Ok);
+    REQUIRE(idle.Succeeded == 0);
+    REQUIRE(idle.Failed == 0);
+    REQUIRE(idle.Blocked == 0);
+
+    REQUIRE(graph.Reset() == JobStatus::Ok);
+    REQUIRE(graph.Add(Cancelled, nullptr, cancelled) == JobStatus::Ok);
+    REQUIRE(graph.Add(Succeed, nullptr, succeeded) == JobStatus::Ok);
+    REQUIRE(graph.Add(Observe, &observer, observing) == JobStatus::Ok);
+    REQUIRE(graph.DependsOn(observing, succeeded) == JobStatus::Ok);
+    REQUIRE(graph.Seal() == JobStatus::Ok);
+    REQUIRE(system.Submit(graph) == JobStatus::Ok);
+    REQUIRE(system.Wait(result) == JobStatus::Ok);
+    REQUIRE(result == JobOutcome::Cancelled);
+    REQUIRE(observer.Snapshot.Cancelled == 1);
+    REQUIRE(observer.Snapshot.Succeeded == 1);
+    REQUIRE(observer.Snapshot.Running == 1);
+}
+
+TEST_CASE("Cancel and Snapshot run concurrently with a non-helping owner Wait", "[threading]")
+{
+    HeldJob held;
+    uint32 calls = 0;
+    JobGraph graph;
+    JobSystem system;
+    REQUIRE(graph.Initialize({2, 1}) == JobStatus::Ok);
+    REQUIRE(system.Initialize({2}) == JobStatus::Ok);
+    JobHandle running{};
+    JobHandle dependent{};
+    REQUIRE(graph.Add(Hold, &held, running) == JobStatus::Ok);
+    REQUIRE(graph.Add(Increment, &calls, dependent) == JobStatus::Ok);
+    REQUIRE(graph.DependsOn(dependent, running) == JobStatus::Ok);
+    REQUIRE(graph.Seal() == JobStatus::Ok);
+    REQUIRE(system.Submit(graph) == JobStatus::Ok);
+    std::atomic<JobStatus> snapshotStatus{JobStatus::InvalidArgument};
+    std::atomic<JobStatus> cancelStatus{JobStatus::InvalidArgument};
+    std::atomic<uint32> observedRunning{0};
+    std::thread controller([&] {
+        held.HasEntered.wait(false);
+        JobSnapshot snapshot{};
+        snapshotStatus.store(system.Snapshot(snapshot));
+        observedRunning.store(snapshot.Running);
+        cancelStatus.store(system.Cancel());
+        held.IsReleased.store(true);
+        held.IsReleased.notify_all();
+    });
+    JobOutcome result{};
+    const JobStatus waitStatus = system.Wait(result, false);
+    controller.join();
+    REQUIRE(waitStatus == JobStatus::Ok);
+    REQUIRE(snapshotStatus.load() == JobStatus::Ok);
+    REQUIRE(observedRunning.load() == 1);
+    REQUIRE(cancelStatus.load() == JobStatus::Ok);
+    REQUIRE(result == JobOutcome::Cancelled);
+    REQUIRE(GetOutcome(graph, running) == JobOutcome::Succeeded);
+    REQUIRE(GetOutcome(graph, dependent) == JobOutcome::Cancelled);
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("Callbacks cannot recursively initialize, wait, submit or shut down", "[threading]")
 {
     for (const uint32 workers : {0u, 2u})
     {
@@ -231,7 +441,7 @@ TEST_CASE("Callbacks cannot recursively wait, submit or shut down", "[threading]
         JobGraph graph;
         REQUIRE(system.Initialize({workers}) == JobStatus::Ok);
         REQUIRE(graph.Initialize({1, 0}) == JobStatus::Ok);
-        Reentrant data{&system, &graph};
+        Reentrant data{ .System = system, .Graph = graph };
         JobHandle handle{};
         REQUIRE(graph.Add(Reenter, &data, handle) == JobStatus::Ok);
         REQUIRE(graph.Seal() == JobStatus::Ok);
@@ -241,6 +451,109 @@ TEST_CASE("Callbacks cannot recursively wait, submit or shut down", "[threading]
         REQUIRE(data.WaitStatus == JobStatus::InsideJob);
         REQUIRE(data.SubmitStatus == JobStatus::InsideJob);
         REQUIRE(data.ShutdownStatus == JobStatus::InsideJob);
+        REQUIRE(data.InitializeStatus == JobStatus::InsideJob);
+    }
+}
+
+TEST_CASE("Callbacks cannot drive a different pool", "[threading]")
+{
+    for (const uint32 workers : {0u, 2u})
+    {
+        JobSystem outer;
+        JobSystem inner;
+        JobSystem uninitialized;
+        JobGraph outerGraph;
+        JobGraph innerGraph;
+        REQUIRE(outer.Initialize({workers}) == JobStatus::Ok);
+        REQUIRE(inner.Initialize({1}) == JobStatus::Ok);
+        REQUIRE(innerGraph.Initialize({1, 0}) == JobStatus::Ok);
+        JobHandle handle{};
+        REQUIRE(innerGraph.Add(Succeed, nullptr, handle) == JobStatus::Ok);
+        REQUIRE(innerGraph.Seal() == JobStatus::Ok);
+        Reentrant other{ .System = inner, .Graph = innerGraph };
+        Reentrant fresh{ .System = uninitialized, .Graph = innerGraph };
+        REQUIRE(outerGraph.Initialize({2, 0}) == JobStatus::Ok);
+        REQUIRE(outerGraph.Add(Reenter, &other, handle) == JobStatus::Ok);
+        REQUIRE(outerGraph.Add(Reenter, &fresh, handle) == JobStatus::Ok);
+        REQUIRE(outerGraph.Seal() == JobStatus::Ok);
+        REQUIRE(outer.Submit(outerGraph) == JobStatus::Ok);
+        JobOutcome result{};
+        REQUIRE(outer.Wait(result) == JobStatus::Ok);
+        REQUIRE(result == JobOutcome::Succeeded);
+        for (const Reentrant* data : {&other, &fresh})
+        {
+            REQUIRE(data->WaitStatus == JobStatus::InsideJob);
+            REQUIRE(data->SubmitStatus == JobStatus::InsideJob);
+            REQUIRE(data->ShutdownStatus == JobStatus::InsideJob);
+            REQUIRE(data->InitializeStatus == JobStatus::InsideJob);
+        }
+        // The rejected calls left the inner pool usable from its owner.
+        REQUIRE(inner.Submit(innerGraph) == JobStatus::Ok);
+        REQUIRE(inner.Wait(result) == JobStatus::Ok);
+        REQUIRE(result == JobOutcome::Succeeded);
+    }
+}
+
+namespace
+{
+constexpr uint32 ORDER_JOBS = 6;
+struct OrderRecord
+{
+    uint32 Sequence[ORDER_JOBS]{};
+    uint32 Count = 0;
+};
+// Only the serial executor touches the record, on the test thread.
+OrderRecord gOrder{};
+uint32 gOrderIds[ORDER_JOBS]{0, 1, 2, 3, 4, 5};
+JobOutcome RecordOrder(void* context) noexcept
+{
+    gOrder.Sequence[gOrder.Count++] = *static_cast<const uint32*>(context);
+    return JobOutcome::Succeeded;
+}
+void BuildOrderGraph(JobGraph& inoutGraph)
+{
+    JobHandle handles[ORDER_JOBS]{};
+    for (uint32 index = 0; index < ORDER_JOBS; ++index)
+    {
+        REQUIRE(inoutGraph.Add(RecordOrder, &gOrderIds[index], handles[index]) == JobStatus::Ok);
+    }
+    // A diamond plus an independent chain, declared in a fixed order.
+    REQUIRE(inoutGraph.DependsOn(handles[1], handles[0]) == JobStatus::Ok);
+    REQUIRE(inoutGraph.DependsOn(handles[2], handles[0]) == JobStatus::Ok);
+    REQUIRE(inoutGraph.DependsOn(handles[3], handles[1]) == JobStatus::Ok);
+    REQUIRE(inoutGraph.DependsOn(handles[3], handles[2]) == JobStatus::Ok);
+    REQUIRE(inoutGraph.DependsOn(handles[5], handles[4]) == JobStatus::Ok);
+    REQUIRE(inoutGraph.Seal() == JobStatus::Ok);
+}
+} // namespace
+
+TEST_CASE("Serial execution order repeats for a fixed construction and edge order", "[threading]")
+{
+    JobSystem system;
+    REQUIRE(system.Initialize() == JobStatus::Ok);
+    OrderRecord reference{};
+    for (uint32 build = 0; build < 3; ++build)
+    {
+        JobGraph graph;
+        REQUIRE(graph.Initialize({ORDER_JOBS, ORDER_JOBS}) == JobStatus::Ok);
+        BuildOrderGraph(graph);
+        for (uint32 repeat = 0; repeat < 4; ++repeat)
+        {
+            gOrder = {};
+            REQUIRE(system.Submit(graph) == JobStatus::Ok);
+            JobOutcome result{};
+            REQUIRE(system.Wait(result) == JobStatus::Ok);
+            REQUIRE(result == JobOutcome::Succeeded);
+            REQUIRE(gOrder.Count == ORDER_JOBS);
+            if (build == 0 && repeat == 0)
+            {
+                reference = gOrder;
+            }
+            for (uint32 index = 0; index < ORDER_JOBS; ++index)
+            {
+                REQUIRE(gOrder.Sequence[index] == reference.Sequence[index]);
+            }
+        }
     }
 }
 
@@ -250,7 +563,7 @@ TEST_CASE("Shutdown drains accepted work and supports repeated initialization", 
     REQUIRE(graph.Initialize({512, 0}) == JobStatus::Ok);
     std::vector<uint32> calls(512, 0);
     JobHandle handle{};
-    for (auto& count : calls)
+    for (uint32& count : calls)
     {
         REQUIRE(graph.Add(Increment, &count, handle) == JobStatus::Ok);
     }
@@ -261,7 +574,7 @@ TEST_CASE("Shutdown drains accepted work and supports repeated initialization", 
         REQUIRE(system.Initialize({4}) == JobStatus::Ok);
         REQUIRE(system.Submit(graph) == JobStatus::Ok);
         REQUIRE(system.Shutdown() == JobStatus::Ok);
-        for (const auto count : calls)
+        for (const uint32 count : calls)
         {
             REQUIRE(count == repeat + 1);
         }
@@ -316,48 +629,46 @@ TEST_CASE("A graph cannot be admitted by two pools and graph destruction drains 
 
 namespace
 {
+constexpr uint32 FAN_WIDTH = 128;
 struct FanIn
 {
-    uint32* Values = nullptr;
-    uint32 Count = 0;
+    uint32 Values[FAN_WIDTH]{};
     uint32 Total = 0;
 };
 JobOutcome Reduce(void* context) noexcept
 {
-    auto& data = *static_cast<FanIn*>(context);
+    FanIn& data = *static_cast<FanIn*>(context);
     data.Total = 0;
-    for (uint32 index = 0; index < data.Count; ++index)
+    for (const uint32 value : data.Values)
     {
-        data.Total += data.Values[index];
+        data.Total += value;
     }
-    return data.Total == data.Count ? JobOutcome::Succeeded : JobOutcome::Failed;
+    return data.Total == FAN_WIDTH ? JobOutcome::Succeeded : JobOutcome::Failed;
 }
 } // namespace
 
 TEST_CASE("Wide fan-out and fan-in run exactly once across repeated sleeping workers", "[threading]")
 {
-    constexpr uint32 WIDTH = 128;
-    uint32 values[WIDTH]{};
-    FanIn data{values, WIDTH, 0};
+    FanIn data{};
     JobGraph graph;
     JobSystem system;
-    REQUIRE(graph.Initialize({WIDTH + 2, WIDTH * 2}) == JobStatus::Ok);
+    REQUIRE(graph.Initialize({FAN_WIDTH + 2, FAN_WIDTH * 2}) == JobStatus::Ok);
     REQUIRE(system.Initialize({4}) == JobStatus::Ok);
     JobHandle root{};
     JobHandle join{};
     REQUIRE(graph.Add(Succeed, nullptr, root) == JobStatus::Ok);
     REQUIRE(graph.Add(Reduce, &data, join) == JobStatus::Ok);
-    for (uint32 index = 0; index < WIDTH; ++index)
+    for (uint32 index = 0; index < FAN_WIDTH; ++index)
     {
         JobHandle child{};
-        REQUIRE(graph.Add(Increment, &values[index], child) == JobStatus::Ok);
+        REQUIRE(graph.Add(Increment, &data.Values[index], child) == JobStatus::Ok);
         REQUIRE(graph.DependsOn(child, root) == JobStatus::Ok);
         REQUIRE(graph.DependsOn(join, child) == JobStatus::Ok);
     }
     REQUIRE(graph.Seal() == JobStatus::Ok);
     for (uint32 repeat = 0; repeat < 100; ++repeat)
     {
-        for (auto& value : values)
+        for (uint32& value : data.Values)
         {
             value = 0;
         }
@@ -366,6 +677,6 @@ TEST_CASE("Wide fan-out and fan-in run exactly once across repeated sleeping wor
         JobOutcome outcome{};
         REQUIRE(system.Wait(outcome, false) == JobStatus::Ok);
         REQUIRE(outcome == JobOutcome::Succeeded);
-        REQUIRE(data.Total == WIDTH);
+        REQUIRE(data.Total == FAN_WIDTH);
     }
 }

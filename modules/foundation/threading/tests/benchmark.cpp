@@ -19,7 +19,7 @@ struct Work
 };
 JobOutcome Compute(void* context) noexcept
 {
-    auto& work = *static_cast<Work*>(context);
+    Work& work = *static_cast<Work*>(context);
     uint64 value = work.Seed + 1;
     for (uint32 index = 0; index < work.Iterations; ++index)
     {
@@ -64,7 +64,7 @@ int main()
             // One warm-up sample, then measure whole submit-to-completion runs.
             for (uint32 sample = 0; sample <= SAMPLES; ++sample)
             {
-                const auto begin = std::chrono::steady_clock::now();
+                const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
                 JobOutcome outcome{};
                 if (system.Submit(graph) != JobStatus::Ok || system.Wait(outcome) != JobStatus::Ok ||
                     outcome != JobOutcome::Succeeded)
