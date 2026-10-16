@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -220,4 +221,23 @@ TEST_CASE("Profile violations report the reference messages", "[scene_cook]")
     CookError error;
     CHECK_FALSE(Cook("/nonexistent/ludus-scene-cook", result, error));
     CHECK(error.Result == content::Status::NotFound);
+}
+
+TEST_CASE("ByteWriter appends of a large bundle stay linear", "[scene_cook]")
+{
+    // Regression: the macOS editor dry run of staircase2 hung in PackBundle because
+    // every 4-byte append reallocated the whole bundle (quadratic in its size).
+    foundation::Array<uint8> bytes;
+    detail::ByteWriter writer(bytes);
+    constexpr usize FLOAT_COUNT = usize{16} << 20U; // 64 MiB of float32
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    for (usize index = 0; index < FLOAT_COUNT; ++index)
+    {
+        writer.AppendFloat32(static_cast<float64>(index));
+    }
+    const std::chrono::steady_clock::duration elapsed = std::chrono::steady_clock::now() - start;
+    REQUIRE(writer.IsOk() == true);
+    CHECK(bytes.GetSize() == FLOAT_COUNT * sizeof(float32));
+    // Linear appends take well under a second even in sanitizer builds; quadratic growth takes hours.
+    CHECK(elapsed < std::chrono::seconds(30));
 }

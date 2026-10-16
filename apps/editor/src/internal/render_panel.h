@@ -24,6 +24,8 @@ public:
     explicit RenderPanel(QWidget* parent = nullptr);
     ~RenderPanel() override;
     void SetWorld(const QString& root, const WorldDocument* world);
+    /// Shows a failed scene import in the viewport when there is no previous frame to keep.
+    void ShowSceneFailure(const QString& error);
     [[nodiscard]] bool Refresh(bool launch);
     void Stop() noexcept;
     void WorldChanged();
