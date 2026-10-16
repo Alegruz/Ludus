@@ -15,8 +15,8 @@ target_sources(ludus_graphics_renderer PUBLIC FILE_SET public_headers TYPE HEADE
     include/ludus/graphics/renderer/reference.hpp
     include/ludus/graphics/renderer/gpu_preview.hpp
     include/ludus/graphics/renderer/viewport.hpp)
-target_link_libraries(ludus_graphics_renderer PUBLIC Ludus::FoundationBase Ludus::FoundationMath Ludus::GraphicsRhi Ludus::RenderGraphFormat
-    PRIVATE Ludus::FoundationContainers Ludus::FoundationHash Ludus::Resources Ludus::SceneFormat)
+target_link_libraries(ludus_graphics_renderer PUBLIC Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationThreading Ludus::GraphicsRhi Ludus::RenderGraphFormat
+    PRIVATE Ludus::FoundationContainers Ludus::FoundationHash Ludus::FoundationTime Ludus::Resources Ludus::SceneFormat)
 target_compile_options(ludus_graphics_renderer PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
 ludus_apply_project_defaults(ludus_graphics_renderer)
 install(TARGETS ludus_graphics_renderer EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -29,12 +29,19 @@ if(LUDUS_BUILD_TESTS)
     add_executable(ludus_renderer_tests tests/renderer_tests.cpp tests/reference_backend.cpp src/render_graph.cpp src/render_graph_activation.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/static_lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp tests/views_tests.cpp tests/static_lighting_tests.cpp tests/render_graph_tests.cpp tests/render_graph_activation_tests.cpp
         ../rhi/src/rhi.cpp ../rhi/src/device.cpp ../rhi/src/profile.cpp ../rhi/src/raster.cpp ../rhi/tests/reference_raster.cpp ../rhi/src/ray_unsupported.cpp)
     target_include_directories(ludus_renderer_tests PRIVATE include ../rhi/include ../rhi/src ../rhi/tests "${PROJECT_SOURCE_DIR}/tests/sdk_consumer")
-    target_link_libraries(ludus_renderer_tests PRIVATE Ludus::RenderGraphFormat Ludus::Platform Ludus::FoundationContainers Ludus::FoundationMath Ludus::Resources Ludus::FoundationHash Catch2::Catch2WithMain)
+    target_link_libraries(ludus_renderer_tests PRIVATE Ludus::RenderGraphFormat Ludus::Platform Ludus::FoundationContainers Ludus::FoundationMath Ludus::FoundationThreading Ludus::FoundationTime Ludus::Resources Ludus::FoundationHash Catch2::Catch2WithMain)
     target_compile_options(ludus_renderer_tests PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
     ludus_apply_project_defaults(ludus_renderer_tests)
     ludus_enable_test_exceptions(ludus_renderer_tests)
     add_test(NAME ludus_renderer_tests COMMAND ludus_renderer_tests)
     set_tests_properties(ludus_renderer_tests PROPERTIES LABELS "unit;renderer;build-contract")
+endif()
+# Uses the threading benchmark switch: static-lighting bake timing against the serial executor.
+if(LUDUS_BUILD_THREADING_BENCHMARK AND NOT EMSCRIPTEN)
+    add_executable(ludus_static_lighting_benchmark tests/static_lighting_benchmark.cpp)
+    target_link_libraries(ludus_static_lighting_benchmark PRIVATE
+        Ludus::GraphicsRenderer Ludus::FoundationContainers Ludus::FoundationTime Ludus::Resources)
+    ludus_apply_project_defaults(ludus_static_lighting_benchmark)
 endif()
 if(TARGET ludus_rhi_render_tests)
     add_executable(ludus_renderer_render_tests tests/render_tests.cpp tests/gpu_preview_tests.cpp tests/authored_tests.cpp tests/render_graph_render_tests.cpp)

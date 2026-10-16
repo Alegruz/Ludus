@@ -5,17 +5,26 @@ name: Ludus Wiki
 # permissions. PR checks never publish. Adapted for MkDocs and link validation.
 # https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   merge_group:
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen develop commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: wiki-${{ inputs.batch_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -26,6 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
           # The PR base commit must be available for the shrink-only baseline gate.
           fetch-depth: 0
@@ -41,21 +51,31 @@ jobs:
       - name: Build the authored wiki
         run: python -m mkdocs build --strict
       - name: Reject new API gaps and baseline additions in pull requests and the merge queue
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        if: inputs.batch_base_sha != '' || github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          API_BASELINE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          API_BASELINE_REF: ${{ inputs.batch_base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: python scripts/build-api --bootstrap --baseline-ref "$API_BASELINE_REF"
       - name: Validate API documentation on main and manual runs
-        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        if: inputs.batch_base_sha == '' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: python scripts/build-api --bootstrap
 
+      - name: Validate canonical documentation without rebuilding the browser editor
+        if: github.event_name == 'pull_request' && github.base_ref == 'develop'
+        run: |
+          python scripts/check-docs
+          python -m unittest discover -s scripts/python -p test_docs.py -v
+          python -m unittest discover -s scripts/python -p test_wiki.py -v
+          python scripts/check-wiki --documentation-only
+
   editor:
+    if: github.event_name != 'pull_request' || github.base_ref != 'develop'
     name: Build or reuse browser editor
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
       # Guides/API prose do not change this key. Validate every restored payload
       # before combining it with the newly built wiki; never deploy stale assets.
@@ -113,6 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
@@ -142,6 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
@@ -196,6 +218,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
@@ -220,7 +243,7 @@ jobs:
 
   deploy:
     name: Publish wiki to GitHub Pages
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: inputs.batch_sha == '' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10

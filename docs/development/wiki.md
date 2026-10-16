@@ -68,14 +68,24 @@ that full check in CI.
 
 ## Deployment contract
 
-`.github/workflows/wiki.yml` builds on pull requests, `main` pushes and manual
-dispatch. It runs strict Markdown/anchor checks, validates local rendered links,
-assets, repository source targets and the search index, then uploads `out/wiki`.
-Only a non-PR run on `refs/heads/main` enters the Pages deployment job. The build
-has read-only repository permissions; Pages/OIDC write permissions belong only
-to deployment. Actions are pinned to verified official release commits.
-Superseded PR runs can cancel; production runs are serialized without cancelling
-an active deployment.
+Pull requests targeting `develop` run the public API and documentation checks in
+`.github/workflows/wiki.yml`. Browser editor compilation, playable sample journeys
+and complete website packaging run when the batch coordinator calls that workflow
+with its frozen candidate SHA. The full build runs strict Markdown/anchor checks,
+validates local rendered links, assets, repository source targets and the search
+index, then uploads `out/wiki`.
+
+After every required batch suite succeeds and the tested commit advances `main`,
+the coordinator publishes the already validated Pages artifact. A push to `main`
+does not start another wiki build. Manual dispatch of **Ludus Wiki** on `main`
+remains available to rebuild and publish the current stable documentation.
+See [Continuous integration](continuous-integration.md) for batch activation,
+promotion and recovery.
+
+Build jobs have read-only repository permissions; Pages/OIDC write permissions
+belong only to deployment. Actions are pinned to verified official release
+commits. Superseded PR runs can cancel; production runs are serialized without
+cancelling an active deployment.
 
 The artifact renders every authored Markdown document directly. Engineering
 documents appear under `engineering/`, existing guide URLs stay stable, and
@@ -93,14 +103,16 @@ HTML site. It omits the separate browser editor executable payload.
 
 1. Set repository **Settings → Pages → Source → GitHub Actions**.
 2. Leave Custom domain blank and enable Enforce HTTPS when available.
-3. Optionally restrict the `github-pages` environment's deployment branches to `main`.
-4. Merge the reviewed wiki changes. Alternatively, manually run **Ludus Wiki**
-   on `main` after the workflow is present there.
+3. Restrict the `github-pages` environment's deployment branches to `main`.
+4. Accept reviewed wiki changes into `develop` and let the batch validate and
+   promote them. Alternatively, manually run **Ludus Wiki** on `main` to publish
+   the current stable documentation.
 5. Confirm both build and deployment succeed. Use the deployment job's returned
    URL; a local build or uploaded artifact alone does not prove publication.
 
-No additional publishing credentials or purchased domain are required by this
-workflow. It depends on Pages being enabled for the repository and the account's
+Pages publication uses GitHub Actions' built-in credential. Batch source promotion
+uses the App configured in [Continuous integration](continuous-integration.md#activate-the-process-once).
+Publication depends on Pages being enabled for the repository and the account's
 plan/permissions. `configure-pages` does not silently enable repository settings.
 If a custom domain is added later, update `site_url`, configure/verify its DNS in
 Pages and rerun the workflow so canonical metadata matches.

@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""Prepare and run the private L0 ICU4C backend probe; ordinary builds stay offline.
+
+Bootstrap is the only network action. It verifies the pinned ICU4C sources and
+data archives, builds upstream's data tools in a separate host build and slices
+the linguistic data with tools/icu-probe/data-filter.json. Cook embeds that data
+and the representative corpus as private generated sources. Run builds the
+exception-free probe through the ordinary presets. See
+docs/architecture/localization-l0.md.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+import tarfile
+import urllib.request
+import zipfile
+
+ROOT = Path(__file__).resolve().parent.parent
+WORK = ROOT / "out/icu-probe"
+SOURCE = WORK / "source"
+GENERATED = WORK / "generated"
+PIN_PATH = ROOT / "config/icu_toolchain.json"
+PIN = json.loads(PIN_PATH.read_text())
+FILTER = ROOT / PIN["data_filter"]
+CORPUS = ROOT / "modules/localization/corpus"
+# Only these upstream directories are compiled into the probe; the full data
+# source tree is consumed by the separate host data build during bootstrap.
+COMPILED = ("common/", "i18n/", "stubdata/", "LICENSE")
+DATA_NAME = "icudt" + PIN["version"].split(".")[0] + "l.dat"
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
+def sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def data_pin() -> str:
+    """Fingerprint only the pin fields that change the sliced data package."""
+    fields = {name: PIN[name] for name in ("version", "sources_sha256", "data_sha256", "data_filter")}
+    return sha(json.dumps(fields, sort_keys=True).encode())
+
+
+def run(command: list, **options) -> None:
+    print("+ " + shlex.join(map(str, command)), flush=True)
+    subprocess.run([str(part) for part in command], check=True, **options)
+
+
+def host_tool(name: str) -> str:
+    path = ROOT / "out/host-tools/venv/bin" / name
+    require(path.is_file(), "Prepare pinned host tools with init.sh before this command")
+    return str(path)
+
+
+def fetch(url: str, digest: str, path: Path) -> bytes:
+    if path.is_file() and sha(path.read_bytes()) == digest:
+        return path.read_bytes()
+    temporary = path.with_suffix(".download")
+    print(f"Downloading the explicitly requested, pinned archive {url}", flush=True)
+    urllib.request.urlretrieve(url, temporary)
+    data = temporary.read_bytes()
+    require(sha(data) == digest, f"Integrity failure for {url}")
+    temporary.replace(path)
+    return data
+
+
+def safe(relative: Path) -> Path:
+    require(not relative.is_absolute() and ".." not in relative.parts, f"Unsafe archive path: {relative}")
+    return relative
+
+
+def archive_entries(compiled_only: bool) -> dict[str, bytes]:
+    """Reconstruct the pinned tree: sources archive plus the data archive's data/."""
+    archives = WORK / "icu4c-sources.tgz", WORK / "icu4c-data.zip"
+    require(archives[0].is_file() and sha(archives[0].read_bytes()) == PIN["sources_sha256"],
+            "Missing or modified ICU sources archive; run scripts/icu-probe bootstrap")
+    entries = {}
+    with tarfile.open(archives[0]) as bundle:
+        for member in bundle.getmembers():
+            parts = Path(member.name).parts
+            if parts == ("icu", "LICENSE"):
+                parts = ("icu", "source", "LICENSE")  # Upstream license travels with the probe.
+            if len(parts) < 3 or parts[:2] != ("icu", "source"):
+                continue
+            relative = safe(Path(*parts[2:])).as_posix()
+            require(member.isfile() or member.isdir() or member.issym(), "Unexpected archive entry type")
+            if member.isfile() and not relative.startswith("data/") and \
+                    (not compiled_only or relative.startswith(COMPILED)):
+                stream = bundle.extractfile(member)
+                require(stream is not None, "Unreadable archive entry")
+                entries[relative] = stream.read()
+    if compiled_only:
+        return entries
+    require(archives[1].is_file() and sha(archives[1].read_bytes()) == PIN["data_sha256"],
+            "Missing or modified ICU data archive; run scripts/icu-probe bootstrap")
+    with zipfile.ZipFile(archives[1]) as bundle:
+        for info in bundle.infolist():
+            relative = safe(Path(info.filename)).as_posix()
+            require(relative == "data" or relative.startswith("data/"), "Unexpected data archive layout")
+            if not info.is_dir():
+                entries[relative] = bundle.read(info)
+    return entries
+
+
+def host_environment() -> dict[str, str]:
+    """Build upstream data tools with init's pinned compiler shims."""
+    tools = ROOT / "out/host-tools"
+    environment = dict(os.environ)
+    compilers = {"CC": tools / "bin/clang", "CXX": tools / "bin/clang++"}
+    for name, path in compilers.items():
+        require(path.is_file(), "Prepare pinned compiler shims with init.sh")
+        environment[name] = str(path)
+    flags = "-O2"
+    cxx = flags
+    if platform.system() == "Darwin":
+        sdk, libcxx = tools / "macos-sdk", tools / "libcxx-include"
+        require(sdk.is_dir() and libcxx.is_dir(), "Prepare the pinned macOS SDK/libc++ with init.sh")
+        flags += f" -isysroot {sdk} -mmacosx-version-min=14.0"
+        cxx = flags + f" -stdlib=libc++ -nostdinc++ -isystem {libcxx}"
+        environment["LDFLAGS"] = f"-isysroot {sdk} -mmacosx-version-min=14.0"
+    environment.update(CFLAGS=flags, CXXFLAGS=cxx, PYTHON=host_tool("python3"),
+                       ICU_DATA_FILTER_FILE=str(FILTER))
+    return environment
+
+
+def bootstrap() -> None:
+    WORK.mkdir(parents=True, exist_ok=True)
+    fetch(PIN["sources"], PIN["sources_sha256"], WORK / "icu4c-sources.tgz")
+    fetch(PIN["data"], PIN["data_sha256"], WORK / "icu4c-data.zip")
+    entries = archive_entries(False)
+    for name, data in entries.items():
+        path = SOURCE / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.is_file() or path.read_bytes() != data:
+            path.write_bytes(data)
+    for script in ("configure", "install-sh", "mkinstalldirs", "runConfigureICU", "config.guess", "config.sub"):
+        if (SOURCE / script).is_file():
+            (SOURCE / script).chmod(0o755)
+    # Upstream tools may use exceptions; this host process never links into Ludus.
+    build = WORK / "host-build"
+    stamp = build / "ludus-configuration.json"
+    environment = host_environment()
+    configuration = {"pin": data_pin(),
+                     "environment": {k: environment[k] for k in ("CC", "CXX", "CFLAGS", "CXXFLAGS")}}
+    previous = json.loads(stamp.read_text()) if stamp.is_file() else {}
+    if previous.get("tools") != configuration:
+        shutil.rmtree(build, ignore_errors=True)
+        build.mkdir(parents=True)
+        run([SOURCE / "configure", "--disable-shared", "--enable-static", "--disable-tests", "--disable-samples",
+             "--disable-extras", "--disable-icuio", "--disable-layoutex", "--with-data-packaging=archive"],
+            cwd=build, env=environment)
+    elif previous.get("filter") != sha(FILTER.read_bytes()):
+        # Upstream configure derives data/rules.mk from the filter; regenerate
+        # only that and the data outputs, keeping the built host tools.
+        with (build / "data/rules.mk").open("w") as rules:
+            subprocess.run([environment["PYTHON"], "-m", "icutools.databuilder", "--mode", "gnumake", "--seqmode",
+                            "parallel", "--src_dir", str(SOURCE / "data"), "--filter_file", str(FILTER)],
+                           check=True, stdout=rules, env={**environment, "PYTHONPATH": str(SOURCE / "python")})
+        for name in ("out", "build-local", "packagedata"):
+            target = build / "data" / name
+            shutil.rmtree(target) if target.is_dir() else target.unlink(missing_ok=True)
+    stamp.write_text(json.dumps({"tools": configuration, "filter": sha(FILTER.read_bytes())}, indent=2) + "\n")
+    run(["make", f"-j{os.cpu_count() or 2}"], cwd=build, env=environment)
+    data = build / "data/out" / DATA_NAME
+    require(data.is_file(), f"Host data build did not produce {DATA_NAME}")
+    listing = subprocess.run([build / "bin/icupkg", "-l", data], check=True, stdout=subprocess.PIPE, text=True)
+    items = sorted(line.strip() for line in listing.stdout.splitlines() if line.strip())
+    (WORK / "data").mkdir(exist_ok=True)
+    shutil.copyfile(data, WORK / "data" / DATA_NAME)
+    (WORK / "data/manifest.json").write_text(json.dumps({
+        "pin_sha256": data_pin(),
+        "filter_sha256": sha(FILTER.read_bytes()),
+        "data_sha256": sha(data.read_bytes()),
+        "data_bytes": data.stat().st_size,
+        "items": items,
+    }, indent=2) + "\n")
+
+
+def corpus_inputs() -> dict[str, str]:
+    return {path.name: sha(path.read_bytes()) for path in sorted(CORPUS.glob("*.json"))}
+
+
+def cook() -> None:
+    verify_data()
+    data = (WORK / "data" / DATA_NAME).read_bytes()
+    GENERATED.mkdir(parents=True, exist_ok=True)
+    lines = ["// Generated by scripts/icu-probe from the filtered ICU data; private to L0.",
+             "#include <ludus/foundation/base/types.h>", "",
+             "namespace ludus::icu_probe", "{",
+             f"alignas(16) extern const foundation::uint8 ICU_DATA[{len(data)}];",
+             f"alignas(16) const foundation::uint8 ICU_DATA[{len(data)}] = {{"]
+    lines += ["    " + ",".join(str(b) for b in data[i:i + 32]) + "," for i in range(0, len(data), 32)]
+    lines += ["};", f"extern const foundation::usize ICU_DATA_BYTES;",
+              f"const foundation::usize ICU_DATA_BYTES = {len(data)};", "} // namespace ludus::icu_probe", ""]
+    source = "\n".join(lines).encode()
+    sys.path.insert(0, str(ROOT / "scripts/python"))
+    from localization import write_atomic
+    from localization_corpus import probe_header
+    header = probe_header(CORPUS / "release.json").encode()
+    write_atomic(GENERATED / "icu_data.cpp", source)
+    write_atomic(GENERATED / "corpus.h", header)
+    (GENERATED / "manifest.json").write_text(json.dumps({
+        "pin_sha256": sha(PIN_PATH.read_bytes()),
+        "data_sha256": sha(data),
+        "corpus": corpus_inputs(),
+        "generator_sha256": sha((ROOT / "scripts/python/localization_corpus.py").read_bytes()),
+        "outputs": {"icu_data.cpp": sha(source), "corpus.h": sha(header)},
+    }, indent=2) + "\n")
+
+
+def verify_sources() -> None:
+    for name, data in archive_entries(True).items():
+        path = SOURCE / name
+        require(path.is_file() and path.read_bytes() == data, f"Modified ICU source: {name}")
+
+
+def verify_data() -> None:
+    manifest = WORK / "data/manifest.json"
+    require(manifest.is_file(), "Run scripts/icu-probe bootstrap first")
+    evidence = json.loads(manifest.read_text())
+    require(evidence["pin_sha256"] == data_pin(), "Stale ICU pin; bootstrap again")
+    require(evidence["filter_sha256"] == sha(FILTER.read_bytes()), "Stale ICU data filter; bootstrap again")
+    data = WORK / "data" / DATA_NAME
+    require(data.is_file() and sha(data.read_bytes()) == evidence["data_sha256"], "Modified ICU data package")
+
+
+def verify() -> None:
+    verify_sources()
+    verify_data()
+    manifest = GENERATED / "manifest.json"
+    require(manifest.is_file(), "Run scripts/icu-probe cook first")
+    evidence = json.loads(manifest.read_text())
+    require(evidence["pin_sha256"] == sha(PIN_PATH.read_bytes()), "Stale generated pin; recook")
+    require(evidence["data_sha256"] == json.loads((WORK / "data/manifest.json").read_text())["data_sha256"],
+            "Stale embedded data; recook")
+    require(evidence["corpus"] == corpus_inputs(), "Stale corpus fixtures; recook")
+    require(evidence["generator_sha256"] == sha((ROOT / "scripts/python/localization_corpus.py").read_bytes()),
+            "Stale corpus generator; recook")
+    for name, digest in evidence["outputs"].items():
+        require(sha((GENERATED / name).read_bytes()) == digest, f"Modified generated source: {name}")
+
+
+def pinned_tool(name: str) -> str:
+    """Prefer the pinned versioned binary; macOS init provides it under host-tools."""
+    found = shutil.which(f"{name}-18")
+    if found is not None:
+        return found
+    path = ROOT / "out/host-tools/bin" / name
+    require(path.is_file(), f"Install {name}-18 or prepare host tools with init.sh")
+    return str(path)
+
+
+def check(preset: str, fix: bool) -> None:
+    sys.path.insert(0, str(ROOT / "scripts/python"))
+    from formatting import format_source
+    sources = [ROOT / "tools/icu-probe" / name for name in ("main.cpp", "corpus_types.hpp", "baseline.cpp")]
+    for source in sources:
+        code = source.read_text()
+        formatted = format_source(code, source, pinned_tool("clang-format"))
+        if fix:
+            source.write_text(formatted)
+        else:
+            require(code == formatted, "Run scripts/icu-probe check --fix")
+    if fix:
+        return
+    build = ROOT / "out/build" / preset
+    entries = json.loads((build / "compile_commands.json").read_text())
+    for source in (sources[0], sources[2]):
+        entry = next(e for e in entries if e["file"] == str(source))
+        if preset.startswith("web-"):
+            from web_build import analysis_commands
+            sysroot = ROOT / "out/host-tools/emsdk/upstream/emscripten/cache/sysroot"
+            run(analysis_commands(ROOT, [entry], pinned_tool("clang-tidy"), sysroot)[0])
+            continue
+        flags = shlex.split(entry["command"])[1:]
+        clean = []
+        index = 0
+        while index < len(flags):
+            if flags[index] == "-o":
+                index += 2
+                continue
+            if flags[index] not in ("-c", str(source)) and not flags[index].startswith("@"):
+                clean.append(flags[index])
+            index += 1
+        run([pinned_tool("clang-tidy"), source, "--quiet", "--warnings-as-errors=*", "--", *clean])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("bootstrap", "cook", "verify", "run", "check"))
+    parser.add_argument("--preset", default="linux-clang-development")
+    parser.add_argument("--fix", action="store_true")
+    args = parser.parse_args()
+    if args.action == "bootstrap":
+        bootstrap()
+    elif args.action == "cook":
+        cook()
+    elif args.action == "verify":
+        verify()
+    elif args.action == "check":
+        check(args.preset, args.fix)
+    else:
+        verify()
+        options = ["-DLUDUS_BUILD_ICU_PROBE=ON", "-DLUDUS_WARNINGS_AS_ERRORS=ON"]
+        if args.preset.startswith("web-"):
+            options += ["-DLUDUS_BUILD_SMOKE_APP=OFF", "-DLUDUS_BUILD_WEB_PROBES=OFF"]
+        if args.preset.endswith(("release", "profile")):
+            options.append("-DLUDUS_COMPILED_LOG_LEVEL=2")
+        run([host_tool("cmake"), "--preset", args.preset, *options])
+        run([host_tool("cmake"), "--build", "--preset", args.preset, "--target", "ludus_icu_probe",
+             "ludus_icu_probe_baseline", "-j", str(os.cpu_count() or 2)])
+        run([host_tool("ctest"), "--preset", args.preset, "-R", "^ludus_icu_probe$", "--no-tests=error",
+             "--output-on-failure"])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, subprocess.CalledProcessError, ValueError) as error:
+        print(f"L0 ICU probe failed: {error}", file=sys.stderr)
+        sys.exit(1)
