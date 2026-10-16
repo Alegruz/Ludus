@@ -1,5 +1,6 @@
 #include "streaming_benchmark.hpp"
 
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/filesystem/async.hpp>
 #include <ludus/foundation/filesystem/pack.hpp>
@@ -14,7 +15,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <vector>
 #if defined(LUDUS_PLATFORM_LINUX) || defined(LUDUS_PLATFORM_MACOS)
 #    include <sys/resource.h>
 #endif
@@ -78,10 +78,10 @@ public:
     }
     void Start(usize count)
     {
-        mThreads.reserve(count);
+        mThreads.EnsureCapacity(count);
         for (usize index = 0; index < count; ++index)
         {
-            mThreads.emplace_back([this, index] {
+            mThreads.AddInPlace([this, index] {
                 uint64 value = index + 1;
                 mReady.fetch_add(1);
                 while (mShouldStop.load(std::memory_order_relaxed) == false)
@@ -106,7 +106,7 @@ private:
     std::atomic<usize> mReady{0};
     std::atomic<bool> mShouldStop{false};
     std::atomic<uint64> mChecksum{0};
-    std::vector<std::thread> mThreads;
+    Array<std::thread> mThreads;
 };
 bool ParseUnsigned(std::string_view input, uint64 maximum, uint64& outValue)
 {
@@ -136,7 +136,7 @@ bool ReadNumber(std::ifstream& inoutStream, uint64 maximum, uint64& outValue)
     std::string token;
     return static_cast<bool>(inoutStream >> token) == true && ParseUnsigned(token, maximum, outValue) == true;
 }
-bool ReadTraceFile(const char* path, std::vector<Request>& outRequests)
+bool ReadTraceFile(const char* path, Array<Request>& outRequests)
 {
     std::ifstream stream(path);
     std::string magic;
@@ -147,7 +147,7 @@ bool ReadTraceFile(const char* path, std::vector<Request>& outRequests)
     {
         return false;
     }
-    outRequests.resize(static_cast<usize>(count));
+    outRequests.Resize(static_cast<usize>(count));
     uint64 previous = 0;
     for (Request& request : outRequests)
     {
@@ -203,21 +203,21 @@ bool Validate(const Request& request, std::span<const uint8> bytes)
     }
     return true;
 }
-uint64 Percentile(std::vector<uint64>& inoutValues, usize percent)
+uint64 Percentile(Array<uint64>& inoutValues, usize percent)
 {
-    if (inoutValues.empty() == true)
+    if (inoutValues.IsEmpty() == true)
     {
         return 0;
     }
     std::sort(inoutValues.begin(), inoutValues.end());
-    const usize rank = (inoutValues.size() * percent + 99) / 100;
+    const usize rank = (inoutValues.GetSize() * percent + 99) / 100;
     return inoutValues[rank == 0 ? 0 : rank - 1];
 }
-void PrintDistribution(const char* name, std::vector<uint64> values)
+void PrintDistribution(const char* name, Array<uint64> values)
 {
     std::printf(",\"%s\":{\"count\":%zu,\"p50_ns\":%llu,\"p95_ns\":%llu,\"p99_ns\":%llu}",
                 name,
-                values.size(),
+                values.GetSize(),
                 static_cast<unsigned long long>(Percentile(values, 50)),
                 static_cast<unsigned long long>(Percentile(values, 95)),
                 static_cast<unsigned long long>(Percentile(values, 99)));
@@ -255,7 +255,7 @@ int RunStreamingBenchmark(int argumentCount, char** arguments)
     {
         return 21;
     }
-    std::vector<Request> requests;
+    Array<Request> requests;
     if (ReadTraceFile(arguments[5], requests) == false)
     {
         return 22;
@@ -290,8 +290,8 @@ int RunStreamingBenchmark(int argumentCount, char** arguments)
     }
     // A shared run has one opened ProviderFile per logical asset. Independent
     // runs open each used asset separately for each destination slot, before timing.
-    std::vector<VirtualFile> files(FILE_COUNT * WINDOW_COUNT);
-    std::vector<bool> isUsed(FILE_COUNT, false);
+    Array<VirtualFile> files(FILE_COUNT * WINDOW_COUNT);
+    Array<bool> isUsed(FILE_COUNT, false);
     for (const Request& request : requests)
     {
         isUsed[request.FileIndex] = true;
@@ -326,9 +326,9 @@ int RunStreamingBenchmark(int argumentCount, char** arguments)
         }
     }
     const uint64 openNanoseconds = AsyncNow() - openStart;
-    std::vector<uint8> buffers(WINDOW_COUNT * MAX_READ_BYTES);
-    std::vector<Sample> samples(requests.size());
-    std::vector<Slot> slots(WINDOW_COUNT);
+    Array<uint8> buffers(WINDOW_COUNT * MAX_READ_BYTES);
+    Array<Sample> samples(requests.GetSize());
+    Array<Slot> slots(WINDOW_COUNT);
     if (cache == "warm")
     {
         for (const Request& request : requests)
@@ -586,11 +586,11 @@ int RunStreamingBenchmark(int argumentCount, char** arguments)
                 static_cast<unsigned long long>(traceCount),
                 static_cast<unsigned long long>(metrics.DroppedTraces),
                 static_cast<unsigned long long>(pollTicks));
-    std::vector<uint64> distribution;
-    distribution.reserve(samples.size());
+    Array<uint64> distribution;
+    distribution.EnsureCapacity(samples.GetSize());
     for (const char* name : {"queue", "service", "delivery", "completion", "release_lateness", "cancellation"})
     {
-        distribution.clear();
+        distribution.Clear();
         const std::string_view metric(name);
         for (const Sample& sample : samples)
         {
@@ -608,7 +608,7 @@ int RunStreamingBenchmark(int argumentCount, char** arguments)
                                  : metric == "completion"       ? sample.Completion
                                  : metric == "release_lateness" ? sample.ReleaseLateness
                                                                 : sample.Cancellation;
-            distribution.push_back(value);
+            distribution.Add(value);
         }
         PrintDistribution(name, distribution);
     }

@@ -1,6 +1,7 @@
 // Batch point transform and sphere classification: odd counts, tails, in-place,
 // partial overlap rejection, size mismatch, empty, transactional failure.
 
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/math/batch.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/queries.hpp>
@@ -10,9 +11,9 @@
 #include <array>
 #include <limits>
 #include <span>
-#include <vector>
 
 using namespace ludus::foundation::math;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -31,8 +32,8 @@ TEST_CASE("Batch transform matches per-element and supports odd counts/tails", "
     const Affine3 a = MakeTransform();
     for (int n : {0, 1, 3, 4, 7, 8, 15, 16, 17})
     {
-        std::vector<Vector3> input(static_cast<usize>(n));
-        std::vector<Vector3> output(static_cast<usize>(n));
+        Array<Vector3> input(static_cast<usize>(n));
+        Array<Vector3> output(static_cast<usize>(n));
         for (int i = 0; i < n; ++i)
         {
             input[static_cast<usize>(i)] = Vector3{static_cast<float>(i), static_cast<float>(-i), 1.0f};

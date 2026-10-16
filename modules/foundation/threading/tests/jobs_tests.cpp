@@ -1,10 +1,10 @@
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/threading/jobs.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
 #include <thread>
-#include <vector>
 
 using namespace ludus::foundation;
 using namespace ludus::foundation::threading;
@@ -561,7 +561,7 @@ TEST_CASE("Shutdown drains accepted work and supports repeated initialization", 
 {
     JobGraph graph;
     REQUIRE(graph.Initialize({512, 0}) == JobStatus::Ok);
-    std::vector<uint32> calls(512, 0);
+    Array<uint32> calls(512, 0);
     JobHandle handle{};
     for (uint32& count : calls)
     {

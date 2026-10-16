@@ -730,7 +730,7 @@ TEST_CASE("Array GetMaxSize overflow defense (fallible)", "[array][overflow]")
 // ---------------------------------------------------------------------------
 // Regression tests for the self-referential insertion bug found in audit
 // (heap-use-after-free / silent wrong value when an argument aliased an element
-// and the operation reallocated or shifted). std::vector guarantees these are
+// and the operation reallocated or shifted). The standard vector guarantees these are
 // well-defined; Ludus::Array must match.
 // ---------------------------------------------------------------------------
 

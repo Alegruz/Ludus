@@ -174,7 +174,9 @@ struct FontSystemConfig final
 };
 
 // --- Lifecycle -------------------------------------------------------------
-/// Creates an owned context; on failure publishes no owner (outSystem = nullptr).
+/// @brief Creates an owned context with all font/layout slot metadata preallocated.
+///
+/// On failure, including OutOfMemory for that metadata, publishes no owner (outSystem = nullptr).
 [[nodiscard]] Status CreateFontSystem(const FontSystemConfig& config, FontSystem** outSystem) noexcept;
 /// @brief Returns Busy if a renderer still references the system.
 ///
@@ -185,7 +187,8 @@ struct FontSystemConfig final
 /// @brief Copies bounded bytes and builds a sized-capable outline face plus referenced HarfBuzz font. faceIndex
 /// selects a face within a collection.
 ///
-/// On failure the output ID is invalid.
+/// On failure the output ID is invalid. OutOfMemory (owned byte copy) leaves the system, its counters and every
+/// loaded font unchanged.
 [[nodiscard]] Status LoadFont(FontSystem* system,
                               std::span<const ludus::foundation::uint8> bytes,
                               uint32 faceIndex,
@@ -200,7 +203,8 @@ struct FontSystemConfig final
 /// @brief Validates UTF-8 and the run spec, shapes through hb-ft, and owns an immutable layout plus a copy of its
 /// source UTF-8.
 ///
-/// Empty input is a valid empty layout.
+/// Empty input is a valid empty layout. A failure, including OutOfMemory for the glyph records, publishes no layout
+/// and leaves counters and existing layouts unchanged.
 [[nodiscard]] Status
 ShapeRun(FontSystem* system, FontId font, std::string_view utf8, const RunSpec& runSpec, LayoutId* outLayout) noexcept;
 /// @brief Convenience Latin-LTR entry point (script "Latn", language "und").
@@ -217,7 +221,8 @@ ShapeLatin(FontSystem* system, FontId font, std::string_view utf8, uint32 pixelH
 /// @brief Explicit cold operation.
 ///
 /// The borrowed normalized coverage in outBitmap is valid only until the next raster call or system destruction;
-/// the caller must copy it immediately. Restores the requested size/load state before rendering.
+/// the caller must copy it immediately. Restores the requested size/load state before rendering. On failure,
+/// including OutOfMemory for the scratch coverage, outBitmap stays cleared and RasterizeCalls is not incremented.
 [[nodiscard]] Status
 RasterizeGlyph(FontSystem* system, FontId font, uint32 pixelHeight, uint32 glyphId, GlyphBitmap* outBitmap) noexcept;
 

@@ -10,7 +10,7 @@ install(TARGETS ludus_physics_fluid EXPORT LudusTargets ARCHIVE DESTINATION "${C
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_physics_fluid_tests tests/field_tests.cpp)
-    target_link_libraries(ludus_physics_fluid_tests PRIVATE Ludus::PhysicsFluid Catch2::Catch2WithMain)
+    target_link_libraries(ludus_physics_fluid_tests PRIVATE Ludus::PhysicsFluid Ludus::FoundationContainers Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_physics_fluid_tests)
     ludus_enable_test_exceptions(ludus_physics_fluid_tests)
     add_test(NAME ludus_physics_fluid_tests COMMAND ludus_physics_fluid_tests)

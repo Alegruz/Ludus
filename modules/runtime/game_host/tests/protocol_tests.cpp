@@ -7,12 +7,14 @@
 
 #include "internal/protocol_codec.h"
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
-#include <vector>
 
 using namespace ludus::runtime::game_host::protocol;
+using ludus::foundation::Array;
 
 TEST_CASE("message round-trips typed fields", "[protocol]")
 {
@@ -78,9 +80,9 @@ TEST_CASE("bounded property records reject nesting and invalid UTF-8", "[protoco
 {
     Message parsed;
     REQUIRE(Message::Parse(R"({"edits":[{"value":"\u00e9\ud83d\ude00","kind":4}]})", parsed));
-    std::vector<Message> records;
+    Array<Message> records;
     REQUIRE(parsed.GetRecords("edits", records));
-    REQUIRE(records.size() == 1);
+    REQUIRE(records.GetSize() == 1);
     std::string value;
     REQUIRE(records[0].GetString("value", value));
     REQUIRE(value == "é😀");
@@ -96,7 +98,7 @@ TEST_CASE("bounded property records reject nesting and invalid UTF-8", "[protoco
     REQUIRE_FALSE(ValidUtf8(std::string("\xed\xa0\x80", 3)));
     REQUIRE_FALSE(ValidUtf8(std::string("\xf4\x90\x80\x80", 4)));
     REQUIRE_FALSE(ValidUtf8(std::string("\xe2\x82", 2)));
-    std::vector<Message> edits(kMaxPropertyBatch + 1);
+    Array<Message> edits(kMaxPropertyBatch + 1);
     Message oversized;
     oversized.SetRecords("edits", edits);
     REQUIRE_FALSE(Message::Parse(oversized.Serialize(), parsed));
@@ -108,20 +110,20 @@ TEST_CASE("frame encode/decode across split reads", "[protocol]")
     m.SetString("type", "Status");
     const std::string payload = m.Serialize();
 
-    std::vector<ludus::foundation::uint8> frame;
+    Array<ludus::foundation::uint8> frame;
     REQUIRE(EncodeFrame(payload, frame));
-    REQUIRE(frame.size() == payload.size() + 4);
+    REQUIRE(frame.GetSize() == payload.size() + 4);
 
     // Feed the frame one byte at a time (slow reader): Next yields nothing until
     // the whole frame has arrived.
     FrameReader reader;
     std::string out;
-    for (ludus::foundation::usize i = 0; i + 1 < frame.size(); ++i)
+    for (ludus::foundation::usize i = 0; i + 1 < frame.GetSize(); ++i)
     {
         reader.Append(&frame[i], 1);
         REQUIRE_FALSE(reader.Next(out));
     }
-    reader.Append(&frame.back(), 1);
+    reader.Append(&frame.GetLast(), 1);
     REQUIRE(reader.Next(out));
     REQUIRE(out == payload);
     REQUIRE_FALSE(reader.Next(out));
@@ -134,14 +136,14 @@ TEST_CASE("two frames back to back decode in order", "[protocol]")
     a.SetString("type", "Pause");
     Message b;
     b.SetString("type", "Resume");
-    std::vector<ludus::foundation::uint8> fa;
-    std::vector<ludus::foundation::uint8> fb;
+    Array<ludus::foundation::uint8> fa;
+    Array<ludus::foundation::uint8> fb;
     REQUIRE(EncodeFrame(a.Serialize(), fa));
     REQUIRE(EncodeFrame(b.Serialize(), fb));
 
     FrameReader reader;
-    reader.Append(fa.data(), fa.size());
-    reader.Append(fb.data(), fb.size());
+    reader.Append(fa.GetData(), fa.GetSize());
+    reader.Append(fb.GetData(), fb.GetSize());
     std::string out;
     REQUIRE(reader.Next(out));
     REQUIRE(out == a.Serialize());
@@ -153,9 +155,9 @@ TEST_CASE("two frames back to back decode in order", "[protocol]")
 TEST_CASE("oversize frame length is a protocol failure", "[protocol]")
 {
     // Hand-craft a length prefix exceeding the control-frame bound.
-    std::vector<ludus::foundation::uint8> bad = {0xFF, 0xFF, 0xFF, 0x7F}; // ~2 GiB
+    Array<ludus::foundation::uint8> bad = {0xFF, 0xFF, 0xFF, 0x7F}; // ~2 GiB
     FrameReader reader;
-    reader.Append(bad.data(), bad.size());
+    reader.Append(bad.GetData(), bad.GetSize());
     std::string out;
     REQUIRE_FALSE(reader.Next(out));
     REQUIRE(reader.Failed());
@@ -164,7 +166,7 @@ TEST_CASE("oversize frame length is a protocol failure", "[protocol]")
 TEST_CASE("payload above frame bound cannot be encoded", "[protocol]")
 {
     const std::string huge(kMaxControlFrameBytes + 1, 'x');
-    std::vector<ludus::foundation::uint8> frame;
+    Array<ludus::foundation::uint8> frame;
     REQUIRE_FALSE(EncodeFrame(huge, frame));
 }
 
@@ -207,9 +209,9 @@ TEST_CASE("field update and control escaping round trip", "[protocol]")
 
 TEST_CASE("frame prefixes retain their explicit little endian byte format", "[protocol][primitive]")
 {
-    std::vector<ludus::foundation::uint8> frame;
+    Array<ludus::foundation::uint8> frame;
     REQUIRE(EncodeFrame("A", frame));
-    REQUIRE(frame == std::vector<ludus::foundation::uint8>{1, 0, 0, 0, 'A'});
+    REQUIRE(frame == Array<ludus::foundation::uint8>{1, 0, 0, 0, 'A'});
 }
 
 TEST_CASE("queue size overflow is rejected before accessing incoming bytes", "[protocol][primitive]")
@@ -227,9 +229,9 @@ TEST_CASE("queue size overflow is rejected before accessing incoming bytes", "[p
 TEST_CASE("queue size admits its exact limit and rejects one extra byte", "[protocol][primitive]")
 {
     FrameReader reader;
-    const std::vector<ludus::foundation::uint8> bytes(kMaxCommandQueueBytes, 0);
-    reader.Append(bytes.data(), bytes.size());
+    const Array<ludus::foundation::uint8> bytes(kMaxCommandQueueBytes, 0);
+    reader.Append(bytes.GetData(), bytes.GetSize());
     REQUIRE_FALSE(reader.Failed());
-    reader.Append(bytes.data(), 1);
+    reader.Append(bytes.GetData(), 1);
     REQUIRE(reader.Failed());
 }

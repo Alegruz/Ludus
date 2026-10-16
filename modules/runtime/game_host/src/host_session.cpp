@@ -11,7 +11,6 @@
 #include <cerrno>
 #include <chrono>
 #include <string>
-#include <vector>
 
 #include <poll.h>
 #include <sys/socket.h>
@@ -112,8 +111,10 @@ HostSession::HostSession(uint64 projectId, uint64 gameId, int32 controlFd, uint6
     {
         SessionId_ = 1;
     }
-    Output_.reserve(protocol::kMaxPendingCommands + 2);
-    Results_.reserve(protocol::kMaxRetainedResults);
+    // Reserve so warm emission does not allocate. A failed reservation is not
+    // fatal here: queueing retries growth and latches a channel failure.
+    (void)Output_.TryEnsureCapacity(protocol::kMaxPendingCommands + 2);
+    (void)Results_.TryEnsureCapacity(protocol::kMaxRetainedResults);
 }
 
 HostSession::~HostSession() noexcept
@@ -174,33 +175,51 @@ void HostSession::Emit(const Message& message, bool priority) noexcept
     Message event = message;
     event.SetHexId("epoch", ProjectEpoch_);
     const std::string payload = event.Serialize();
-    std::vector<ludus::foundation::uint8> frame;
-    if (!protocol::EncodeFrame(payload, frame))
+    ludus::foundation::Array<ludus::foundation::uint8> frame;
+    if (protocol::EncodeFrame(payload, frame) == false)
     {
+        if (payload.size() <= protocol::kMaxControlFrameBytes)
+        {
+            latchOutputAllocationFailure(); // An in-bound frame failed to allocate.
+        }
         return;
     }
     constexpr usize kTerminalReserve = 4096;
     const usize budget = protocol::kMaxCommandQueueBytes - (priority ? 0 : kTerminalReserve);
     const usize frameBudget = protocol::kMaxPendingCommands + (priority ? 2 : 0);
-    if (OutputBytes_ > budget || frame.size() > budget - OutputBytes_ || Output_.size() >= frameBudget)
+    if (OutputBytes_ > budget || frame.GetSize() > budget - OutputBytes_ || Output_.GetSize() >= frameBudget)
     {
         // Never discard a partial frame or silently lose a mutation outcome.
         // Backpressure stops new mutations; Status/retained results reconcile.
         return;
     }
-    OutputBytes_ += frame.size();
-    Output_.push_back({std::move(frame), 0});
+    const usize frameBytes = frame.GetSize();
+    if (Output_.TryAdd({std::move(frame), 0}) == false)
+    {
+        latchOutputAllocationFailure();
+        return;
+    }
+    OutputBytes_ += frameBytes;
     FlushOutput();
+}
+
+void HostSession::latchOutputAllocationFailure() noexcept
+{
+    // Dropping a whole event would silently lose an outcome; fail the channel
+    // like a send error so the client observes the session end instead.
+    LUDUS_LOG_ERROR(LOG_SESSION, "control-channel output allocation failed");
+    ChannelFailed_ = true;
+    StopLatched_ = true;
 }
 
 void HostSession::FlushOutput() noexcept
 {
-    while (!Output_.empty() && !ChannelFailed_)
+    while (Output_.IsEmpty() == false && ChannelFailed_ == false)
     {
-        auto& frame = Output_.front();
+        OutputFrame& frame = Output_.GetFirst();
         const ssize_t n = ::send(ControlFd_,
-                                 frame.Bytes.data() + frame.Offset,
-                                 frame.Bytes.size() - frame.Offset,
+                                 frame.Bytes.GetData() + frame.Offset,
+                                 frame.Bytes.GetSize() - frame.Offset,
                                  MSG_DONTWAIT | MSG_NOSIGNAL);
         if (n < 0)
         {
@@ -223,9 +242,9 @@ void HostSession::FlushOutput() noexcept
         const usize sent = static_cast<usize>(n);
         frame.Offset += sent;
         OutputBytes_ -= sent;
-        if (frame.Offset == frame.Bytes.size())
+        if (frame.Offset == frame.Bytes.GetSize())
         {
-            Output_.erase(Output_.begin());
+            Output_.RemoveAt(0);
         }
     }
 }
@@ -258,8 +277,13 @@ void HostSession::EmitCommandResult(uint64 requestId, CommandStatus status, std:
     }
     if (RetainPending_ && requestId == PendingRequest_)
     {
-        Results_.push_back({requestId, std::move(PendingPayload_), m});
         RetainPending_ = false;
+        if (Results_.TryAdd({requestId, std::move(PendingPayload_), m}) == false)
+        {
+            // A mutation outcome that cannot be retained cannot be reconciled.
+            latchOutputAllocationFailure();
+            return;
+        }
     }
     Emit(m, StopLatched_);
 }
@@ -555,11 +579,11 @@ void HostSession::Dispatch(const Message& command) noexcept
             EmitCommandResult(requestId, CommandStatus::InvalidRequest, "missing acknowledge id");
             return;
         }
-        for (auto it = Results_.begin(); it != Results_.end(); ++it)
+        for (usize i = 0; i < Results_.GetSize(); ++i)
         {
-            if (it->Request == acknowledged)
+            if (Results_[i].Request == acknowledged)
             {
-                Results_.erase(it);
+                Results_.RemoveAt(i);
                 break;
             }
         }
@@ -632,8 +656,8 @@ void HostSession::Dispatch(const Message& command) noexcept
                               "outcome no longer retained; reconcile with Status");
             return;
         }
-        if (Results_.size() >= protocol::kMaxRetainedResults || OutputBytes_ > protocol::kMaxCommandQueueBytes / 2 ||
-            Output_.size() >= protocol::kMaxPendingCommands / 2)
+        if (Results_.GetSize() >= protocol::kMaxRetainedResults || OutputBytes_ > protocol::kMaxCommandQueueBytes / 2 ||
+            Output_.GetSize() >= protocol::kMaxPendingCommands / 2)
         {
             EmitCommandResult(requestId, CommandStatus::Busy, "acknowledge results or drain output before mutation");
             return;
@@ -675,7 +699,7 @@ void HostSession::Dispatch(const Message& command) noexcept
         m.SetHexId("clear_asset_generation", Presenter_ == nullptr ? 0 : Presenter_->ClearConfigurationGeneration());
         m.SetUint("work_leases", Services_.OutstandingWork());
         m.SetUint("host_allocations", Services_.OutstandingAllocations());
-        m.SetUint("retained_results", Results_.size());
+        m.SetUint("retained_results", Results_.GetSize());
         m.SetString("identity", CurrentHostIdentity());
         m.SetUint("capabilities", Active_.Metadata().Capabilities);
         m.SetUint("schema_version", Active_.Metadata().PropertySchemaVersion);
@@ -700,11 +724,11 @@ void HostSession::Dispatch(const Message& command) noexcept
                 }
             }
         }
-        if (!Results_.empty())
+        if (Results_.IsEmpty() == false)
         {
-            m.SetHexId("last_request", Results_.back().Request);
+            m.SetHexId("last_request", Results_.GetLast().Request);
             std::string status;
-            (void)Results_.back().Result.GetString("status", status);
+            (void)Results_.GetLast().Result.GetString("status", status);
             m.SetString("last_status", status);
         }
         Emit(m);
@@ -1018,15 +1042,19 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     {
         return reject(CommandStatus::ReloadRejected);
     }
-    std::vector<ludus::foundation::uint8> body(bodySize);
+    ludus::foundation::Array<ludus::foundation::uint8> body;
+    if (body.TryResize(bodySize) == false)
+    {
+        return reject(CommandStatus::ReloadRejected); // A keeps running unchanged.
+    }
     CheckpointHeader header = {};
-    ByteSpan span = {body.data(), body.size()};
+    ByteSpan span = {body.GetData(), body.GetSize()};
     usize written = 0;
     if (Active_.Table().WriteCheckpoint(Instance_, &header, span, &written) != Status::Ok || written != bodySize)
     {
         return reject(CommandStatus::ReloadRejected);
     }
-    if (!ValidateCheckpointEnvelope(header, body.data(), written) || header.ProjectId != ProjectId_ ||
+    if (ValidateCheckpointEnvelope(header, body.GetData(), written) == false || header.ProjectId != ProjectId_ ||
         header.GameId != GameId_ || header.ModuleBuildId != ActiveGeneration_ ||
         header.SchemaVersion != Active_.Metadata().CheckpointSchemaVersion)
     {
@@ -1354,10 +1382,10 @@ RunResult HostSession::RunLoop(uint64 maxFrames, FramePresenter* presenter) noex
         Emit(ended, true);
     }
     // Bounded terminal flush; a client that never reads cannot hang Stop.
-    for (int i = 0; i < 100 && !Output_.empty() && !ChannelFailed_; ++i)
+    for (int i = 0; i < 100 && Output_.IsEmpty() == false && ChannelFailed_ == false; ++i)
     {
         FlushOutput();
-        if (!Output_.empty())
+        if (Output_.IsEmpty() == false)
         {
             pollfd pfd = {ControlFd_, POLLOUT, 0};
             (void)::poll(&pfd, 1, 2);

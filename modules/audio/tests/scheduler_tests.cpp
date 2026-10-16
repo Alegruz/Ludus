@@ -6,15 +6,15 @@
 #include "internal/decode_scheduler.hpp"
 
 #include <ludus/audio/audio_types.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include <catch2/catch_test_macros.hpp>
-
-#include <vector>
 
 using namespace ludus::audio;
 using ludus::audio::internal::DecodeScheduler;
 using ludus::audio::internal::DecodeSource;
 using ludus::audio::internal::SchedulerStats;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -59,7 +59,7 @@ TEST_CASE("Cold decode runs in units of at most 4096 prepared frames", "[audio][
     CountingSource src(100000); // ~24 units of 4096
     REQUIRE(sched.BeginColdPrepare(&src, 100000));
 
-    std::vector<float32> scratch(static_cast<std::size_t>(COLD_DECODE_UNIT_FRAMES) * 2);
+    Array<float32> scratch(static_cast<usize>(COLD_DECODE_UNIT_FRAMES) * 2);
     uint32 passes = 0;
     while (sched.ColdPrepareActive() && passes < 100)
     {
@@ -89,7 +89,7 @@ TEST_CASE("A long cold prepare never starves an established stream", "[audio][wo
     CountingSource coldSrc(1000000);
     REQUIRE(sched.BeginColdPrepare(&coldSrc, 1000000));
 
-    std::vector<float32> scratch(static_cast<std::size_t>(COLD_DECODE_UNIT_FRAMES) * 2);
+    Array<float32> scratch(static_cast<usize>(COLD_DECODE_UNIT_FRAMES) * 2);
     // One bounded pass: the starved stream must be serviced before the cold job.
     const SchedulerStats s = sched.RunPass(scratch.data(), COLD_DECODE_UNIT_FRAMES, 1);
     REQUIRE(s.UnitsDecoded == 1);
@@ -110,7 +110,7 @@ TEST_CASE("Deadline-first refill services the most-starved stream, round-robin t
     sched.Stream(sa)->Buffered = 8000;
     sched.Stream(sb)->Buffered = 2000;
 
-    std::vector<float32> scratch(static_cast<std::size_t>(COLD_DECODE_UNIT_FRAMES) * 2);
+    Array<float32> scratch(static_cast<usize>(COLD_DECODE_UNIT_FRAMES) * 2);
     const uint64 bBefore = sched.Stream(sb)->Buffered;
     const uint64 aBefore = sched.Stream(sa)->Buffered;
     (void)sched.RunPass(scratch.data(), COLD_DECODE_UNIT_FRAMES, 1);
@@ -139,7 +139,7 @@ TEST_CASE("Cancellation is honored between units and retires the stream", "[audi
     sched.Stream(slot)->Buffered = 0;
     sched.CancelStream(slot);
 
-    std::vector<float32> scratch(static_cast<std::size_t>(COLD_DECODE_UNIT_FRAMES) * 2);
+    Array<float32> scratch(static_cast<usize>(COLD_DECODE_UNIT_FRAMES) * 2);
     const SchedulerStats s = sched.RunPass(scratch.data(), COLD_DECODE_UNIT_FRAMES, 2);
     REQUIRE(s.CancellationsHonored >= 1);
     // The cancelled stream was retired before any further decode for it.
@@ -154,7 +154,7 @@ TEST_CASE("Scheduler reports buffered runway and bounds the pass", "[audio][work
     const uint32 slot = sched.AddStream(&src, 20000);
     sched.Stream(slot)->Buffered = 1234;
 
-    std::vector<float32> scratch(static_cast<std::size_t>(COLD_DECODE_UNIT_FRAMES) * 2);
+    Array<float32> scratch(static_cast<usize>(COLD_DECODE_UNIT_FRAMES) * 2);
     const SchedulerStats s = sched.RunPass(scratch.data(), COLD_DECODE_UNIT_FRAMES, 3);
     REQUIRE(s.UnitsDecoded <= 3);             // pass bounded by budgetUnits
     REQUIRE(s.YieldPoints >= s.UnitsDecoded); // a yield recheck precedes each unit
