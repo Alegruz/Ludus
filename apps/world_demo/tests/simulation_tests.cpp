@@ -5,8 +5,25 @@
 #include <string>
 #include <utility>
 using namespace ludus::world_demo;
+using ludus::foundation::time::Duration;
+using ludus::foundation::time::FrameSample;
+using ludus::foundation::time::NANOSECONDS_PER_SECOND;
+using ludus::foundation::time::Timestamp;
+using ludus::foundation::time::TimeStatus;
 namespace
 {
+constexpr uint64 MILLISECOND = NANOSECONDS_PER_SECOND / 1000;
+// A long-uptime epoch: integer intervals must stay exact far from zero.
+constexpr uint64 EPOCH = uint64{1} << 62U;
+Timestamp At(uint64 nanoseconds)
+{
+    return {EPOCH + nanoseconds};
+}
+uint64 GetAccountedTime(const TickDriver& driver)
+{
+    return driver.GetAcceptedTime().Nanoseconds + driver.GetClampedTime().Nanoseconds +
+           driver.GetExcludedTime().Nanoseconds;
+}
 GameWorld Build(uint32 capacity = 48)
 {
     Level level;
@@ -112,20 +129,188 @@ TEST_CASE("Input edges survive zero ticks, catch-up consumes once, and suspensio
     REQUIRE(input.Consume().Pressed);
     auto world = Build();
     TickDriver driver;
-    REQUIRE(driver.Advance(world, 0, { .Pressed = true }) == Status::Success);
+    REQUIRE(driver.Advance(world, At(0), { .Pressed = true }) == Status::Success);
     REQUIRE(world.GetTick() == 0);
-    REQUIRE(driver.Advance(world, 0.1, {}) == Status::Success);
+    REQUIRE(driver.Advance(world, At(100 * MILLISECOND), {}) == Status::Success);
     REQUIRE(world.GetTick() == 4);
     REQUIRE(driver.GetDiscardedTime() > 0.03);
     REQUIRE(driver.GetAlpha() < 1);
     driver.SetMode(Mode::Paused);
-    REQUIRE(driver.Advance(world, 8, {}) == Status::Success);
+    REQUIRE(driver.Advance(world, At(8 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
     REQUIRE(world.GetTick() == 4);
     REQUIRE(driver.Step(world) == Status::Success);
     REQUIRE(world.GetTick() == 5);
     driver.SetMode(Mode::Playing);
-    REQUIRE(driver.Advance(world, 8, {}, false) == Status::Success);
+    REQUIRE(driver.Advance(world, At(16 * NANOSECONDS_PER_SECOND), {}, false) == Status::Success);
     REQUIRE(world.GetTick() == 5);
+}
+TEST_CASE("Frame integration: startup is a zero baseline and accepted time is exact", "[world-demo][frame]")
+{
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().IsBaseline);
+    REQUIRE(driver.GetFrameSample().Elapsed == Duration{});
+    REQUIRE(world.GetTick() == 0);
+    // Uneven integer partitions of one second at a large epoch accumulate without loss.
+    uint64 previous = 0;
+    for (uint64 frame = 1; frame <= 60; ++frame)
+    {
+        const uint64 next = frame * NANOSECONDS_PER_SECOND / 60;
+        REQUIRE(driver.Advance(world, At(next), {}) == Status::Success);
+        REQUIRE(driver.GetFrameSample().Elapsed == Duration{next - previous});
+        previous = next;
+    }
+    REQUIRE(driver.GetAcceptedTime() == Duration{NANOSECONDS_PER_SECOND});
+    REQUIRE(driver.GetClampedTime() == Duration{});
+    REQUIRE(driver.GetExcludedTime() == Duration{});
+    REQUIRE(driver.GetDiscardedTime() == 0);
+    REQUIRE(world.GetTick() >= 59);
+    REQUIRE(world.GetTick() <= 60);
+    // Equal readings are valid zero-length frames.
+    const uint64 tick = world.GetTick();
+    REQUIRE(driver.Advance(world, At(previous), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().Status == TimeStatus::Ok);
+    REQUIRE(driver.GetFrameSample().Elapsed == Duration{});
+    REQUIRE(world.GetTick() == tick);
+}
+TEST_CASE("Frame integration: a stall is clamped once and its loss stays visible", "[world-demo][frame]")
+{
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(driver.Advance(world, At(2 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
+    const FrameSample& stall = driver.GetFrameSample();
+    REQUIRE(stall.Elapsed == MAXIMUM_FRAME_DELTA);
+    REQUIRE(stall.Discarded == Duration{2 * NANOSECONDS_PER_SECOND - MAXIMUM_FRAME_DELTA.Nanoseconds});
+    // The FrameClock is the only clamp: all 250 ms became debt; the catch-up budget ran four ticks.
+    REQUIRE(driver.GetAcceptedTime() == MAXIMUM_FRAME_DELTA);
+    REQUIRE(driver.GetClampedTime() == stall.Discarded);
+    REQUIRE(world.GetTick() == 4);
+    const float64 clamped = ludus::foundation::time::ToSeconds(driver.GetClampedTime());
+    const float64 trimmed = driver.GetDiscardedTime() - clamped;
+    REQUIRE(trimmed > 0);
+    REQUIRE(trimmed < ludus::foundation::time::ToSeconds(MAXIMUM_FRAME_DELTA));
+    // The stall advanced the baseline: the next frame measures from the stalled sample.
+    REQUIRE(driver.Advance(world, At(2 * NANOSECONDS_PER_SECOND + 10 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().Elapsed == Duration{10 * MILLISECOND});
+    REQUIRE(driver.GetFrameSample().Discarded == Duration{});
+    REQUIRE(GetAccountedTime(driver) == 2 * NANOSECONDS_PER_SECOND + 10 * MILLISECOND);
+}
+TEST_CASE("Frame integration: pause and resume never catch up paused time", "[world-demo][frame]")
+{
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(driver.Advance(world, At(50 * MILLISECOND), {}) == Status::Success);
+    const uint64 tick = world.GetTick();
+    REQUIRE(tick == 3);
+    driver.SetMode(Mode::Paused);
+    for (uint64 frame = 1; frame <= 3; ++frame)
+    {
+        REQUIRE(driver.Advance(world, At(50 * MILLISECOND + frame * NANOSECONDS_PER_SECOND), {}) == Status::Success);
+        REQUIRE(driver.GetFrameSample().Elapsed == Duration{});
+        REQUIRE(world.GetTick() == tick);
+        REQUIRE(driver.GetAlpha() == 1);
+    }
+    // Resuming drops the baseline; the first Playing frame contributes nothing.
+    driver.SetMode(Mode::Playing);
+    REQUIRE(driver.Advance(world, At(4 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().IsBaseline);
+    REQUIRE(world.GetTick() == tick);
+    REQUIRE(driver.Advance(world, At(4 * NANOSECONDS_PER_SECOND + 20 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().Elapsed == Duration{20 * MILLISECOND});
+    REQUIRE(world.GetTick() == tick + 1);
+    REQUIRE(driver.GetAcceptedTime() == Duration{70 * MILLISECOND});
+    REQUIRE(driver.GetClampedTime() == Duration{});
+    REQUIRE(driver.GetExcludedTime() == Duration{4 * NANOSECONDS_PER_SECOND - 50 * MILLISECOND});
+    REQUIRE(GetAccountedTime(driver) == 4 * NANOSECONDS_PER_SECOND + 20 * MILLISECOND);
+    // A faulted or paused session discards time identically; Step advances exactly one tick.
+    driver.SetMode(Mode::Paused);
+    REQUIRE(driver.Step(world) == Status::Success);
+    REQUIRE(world.GetTick() == tick + 2);
+}
+TEST_CASE("Frame integration: visibility suspension and interruption exclude hidden time", "[world-demo][frame]")
+{
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(driver.Advance(world, At(10 * MILLISECOND), {}) == Status::Success);
+    // Hidden callbacks reset the baseline and pending edges.
+    REQUIRE(driver.Advance(world, At(20 * MILLISECOND), { .Pressed = true }, false) == Status::Success);
+    REQUIRE(driver.Advance(world, At(30 * NANOSECONDS_PER_SECOND), {}, false) == Status::Success);
+    const uint64 tick = world.GetTick();
+    REQUIRE(driver.Advance(world, At(31 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().IsBaseline);
+    REQUIRE(world.GetTick() == tick);
+    // A browser stops callbacks while hidden; its visibility event interrupts the next interval.
+    driver.Interrupt();
+    REQUIRE(driver.Advance(world, At(90 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().IsBaseline);
+    REQUIRE(driver.GetFrameSample().Discarded == Duration{});
+    REQUIRE(world.GetTick() == tick);
+    REQUIRE(driver.GetMode() == Mode::Playing);
+    REQUIRE(driver.GetAcceptedTime() == Duration{10 * MILLISECOND});
+    REQUIRE(driver.GetClampedTime() == Duration{});
+    REQUIRE(GetAccountedTime(driver) == 90 * NANOSECONDS_PER_SECOND);
+}
+TEST_CASE("Frame integration: session replacement starts from a fresh baseline", "[world-demo][frame]")
+{
+    Session session;
+    Load(session);
+    REQUIRE(session.Driver.Advance(session.World(), At(0), {}) == Status::Success);
+    REQUIRE(session.Driver.Advance(session.World(), At(100 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(session.World().GetTick() == 4);
+    session.Driver.SetMode(Mode::Paused);
+    // A long load: frames keep arriving, the replacement activates and resets the driver.
+    REQUIRE(session.RequestLoad(ExampleLevel()).Error == LevelError::None);
+    uint64 frame = 1;
+    while (session.GetLoadStage() != LoadStage::Ready)
+    {
+        REQUIRE(session.PollLoad() == Status::Success);
+        REQUIRE(session.Driver.Advance(session.World(), At(100 * MILLISECOND + frame * NANOSECONDS_PER_SECOND), {}) ==
+                Status::Success);
+        ++frame;
+    }
+    REQUIRE(session.Activate());
+    REQUIRE(session.Driver.GetMode() == Mode::Playing);
+    REQUIRE(session.World().GetTick() == 0);
+    REQUIRE(session.Driver.Advance(session.World(), At(100 * MILLISECOND + frame * NANOSECONDS_PER_SECOND), {}) ==
+            Status::Success);
+    REQUIRE(session.Driver.GetFrameSample().IsBaseline);
+    REQUIRE(session.World().GetTick() == 0);
+    REQUIRE(session.Driver.GetAcceptedTime() == Duration{100 * MILLISECOND});
+    REQUIRE(GetAccountedTime(session.Driver) == 100 * MILLISECOND + frame * NANOSECONDS_PER_SECOND);
+}
+TEST_CASE("Frame integration: clock regression adds no time and cannot rebase below the high-water mark",
+          "[world-demo][frame]")
+{
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(driver.Advance(world, At(50 * MILLISECOND), {}) == Status::Success);
+    const uint64 tick = world.GetTick();
+    REQUIRE(driver.Advance(world, At(20 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().Status == TimeStatus::ClockRegression);
+    REQUIRE(driver.GetFrameSample().Elapsed == Duration{});
+    REQUIRE(driver.GetClockRegressions() == 1);
+    REQUIRE(world.GetTick() == tick);
+    // Recovery measures from the high-water mark, never re-counting the regressed span.
+    REQUIRE(driver.Advance(world, At(60 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().Status == TimeStatus::Ok);
+    REQUIRE(driver.GetFrameSample().Elapsed == Duration{10 * MILLISECOND});
+    // After a lifecycle reset, a regressed sample must not become the new baseline.
+    driver.Interrupt();
+    REQUIRE(driver.Advance(world, At(40 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().Status == TimeStatus::ClockRegression);
+    REQUIRE_FALSE(driver.GetFrameSample().IsBaseline);
+    REQUIRE(driver.GetClockRegressions() == 2);
+    REQUIRE(driver.Advance(world, At(80 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().IsBaseline);
+    REQUIRE(driver.Advance(world, At(90 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().Elapsed == Duration{10 * MILLISECOND});
+    REQUIRE(driver.GetAcceptedTime() == Duration{70 * MILLISECOND});
+    REQUIRE(GetAccountedTime(driver) == 90 * MILLISECOND);
 }
 TEST_CASE("Deferred spawn and destruction publish complete bundles and stale handles fail", "[world-demo]")
 {
@@ -201,7 +386,8 @@ TEST_CASE("Camera follow shares fixed tick presentation cadence across rates and
         RenderFrame frame;
         for (uint64 sequence = 0; sequence < rate; ++sequence)
         {
-            REQUIRE(driver.Advance(world, 1.0 / static_cast<float64>(rate), { .Axis = {1, 0} }) == Status::Success);
+            const Timestamp now = At(sequence * NANOSECONDS_PER_SECOND / rate);
+            REQUIRE(driver.Advance(world, now, { .Axis = {1, 0} }) == Status::Success);
             const auto hash = world.GetReplayHash();
             const auto alpha = driver.GetAlpha();
             const auto* transform = world.Transforms().Find(player);
@@ -211,8 +397,9 @@ TEST_CASE("Camera follow shares fixed tick presentation cadence across rates and
             REQUIRE(world.GetReplayHash() == hash);
         }
         // Suspension clears clock debt; extraction has no independent camera debt.
-        REQUIRE(driver.Advance(world, 20, {}, false) == Status::Success);
-        REQUIRE(driver.Advance(world, 0, {}) == Status::Success);
+        REQUIRE(driver.Advance(world, At(20 * NANOSECONDS_PER_SECOND), {}, false) == Status::Success);
+        REQUIRE(driver.Advance(world, At(20 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
+        REQUIRE(driver.GetFrameSample().IsBaseline);
         REQUIRE(world.Extract(driver.GetAlpha(), frame, true));
         const auto* transform = world.Transforms().Find(player);
         const auto expected =

@@ -16,7 +16,10 @@ frame delta of 250 ms, and at most four catch-up ticks per presentation callback
 These are configurable application policies and must be recorded with replay
 metadata. They are not engine performance guarantees.
 
-Use a monotonic clock. Accumulate accepted elapsed time in `float64` seconds.
+Read the FoundationTime monotonic clock once per presentation callback and
+sample one [FrameClock](high-resolution-time.md#elapsed-time-state-and-failure-behavior)
+with the 250 ms cap; it is the only clamp. Accumulate accepted elapsed time in
+`float64` seconds; a rational integer accumulator is planned separately.
 While at least one tick remains and the catch-up budget allows it, execute one
 tick and subtract its fixed duration. Increment a `uint64` tick index only after
 a successful tick; exhaustion stops the session rather than wrapping.
@@ -45,9 +48,12 @@ flowchart TD
     Present --> Draw[Render and present or skip frame]
 ```
 
-Session transitions reset clock debt. Pause and browser suspension also reset it;
-resuming never catches up the time spent paused or hidden. A first callback starts
-the clock baseline without simulating elapsed startup time. Do not busy-wait for
+Session transitions reset clock debt and the frame baseline. Pause and browser
+suspension also reset both; resuming never catches up the time spent paused or
+hidden. A hidden browser page stops callbacks, so its visibility event performs
+the reset. A first callback starts the clock baseline without simulating elapsed
+startup time. Accepted, clamped and lifecycle-excluded time remain visible to
+diagnostics. Do not busy-wait for
 the next tick, a GPU fence, browser readiness, or a worker result in a browser
 callback. The native outer loop may use its established pacing mechanism.
 

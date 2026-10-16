@@ -179,6 +179,14 @@ on the next sample. A zero maximum delta deliberately freezes accepted time.
 When adopting this helper into an existing simulation driver, preserve its
 existing discard accounting and apply the frame clamp once.
 
+Read the timestamp once at the callback boundary, apply that callback's lifecycle
+resets, then sample. A browser stops animation callbacks for a hidden page, so a
+hidden frame may never arrive: reset on the visibility event instead. Keep a
+high-water mark across resets if regressed samples are possible; otherwise the
+first sample after `Reset()` becomes a baseline below an earlier reading. The
+[world reference driver](../../examples/world-demo.md#edit-levels-and-gameplay)
+shows these rules with accepted, clamped and excluded totals.
+
 ## Handle failures and debug surprising readings
 
 | Result or symptom | Meaning and recovery |
@@ -202,7 +210,8 @@ from host samples. Clock epochs are not persistent save/replay identities.
 | --- | --- |
 | Shared native/browser clock, checked arithmetic and owner-local helpers | Implemented; explicit public SDK component |
 | Logging/profiling clock producers | Use the shared source |
-| Frame-loop migration and rational integer fixed-step replacement | Planned; existing drivers retain their policies |
+| Frame-loop migration | Implemented in the world reference and smoke applications; one `FrameClock` clamp per loop |
+| Rational integer fixed-step replacement | Planned; the world reference keeps its `float64` debt accumulator |
 | Bounded gameplay event queue and native frame pacing | Planned separate integrations |
 | Editor Timing view and runtime timing telemetry | Proposed; no new timer controls or inspector ship with this slice |
 | Time scaling, additional platform/worker domains, GPU/audio/network clock integration | Separate requirements and validation needed |
