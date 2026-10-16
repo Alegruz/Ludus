@@ -1,8 +1,10 @@
 # Object handles and persistent UUID architecture
 
-**Status:** Proposed architecture and implementation contract. Existing entity,
-audio, and RHI identity mechanisms remain implemented as described below. The
-shared identity module and UUID content workflow are proposed.
+**Status:** Architecture and implementation contract. Stage 1 of the
+[implementation sequence](#implementation-sequence) is implemented as
+[FoundationIdentity](../modules/foundation/identity.md). Existing entity, audio,
+and RHI identity mechanisms remain implemented as described below. Registry
+alignment, entropy adapters, and the UUID content workflow are proposed.
 
 **Audience:** Engine, gameplay, tools, content, and SDK contributors.
 
@@ -588,6 +590,8 @@ and reserved capacity on each target before optimizing them.
 
 1. Add the pure identity values/codecs and lifetime source with tests and SDK
    header checks. Leave existing public types and formats unchanged.
+   *Implemented* in [FoundationIdentity](../modules/foundation/identity.md),
+   including the injected entropy-source seam; platform entropy adapters remain.
 2. Align duplicate generation/token helpers behind existing subsystem facades
    where policies actually match. Validate old-world, old-audio-session, and RHI
    session rejection independently. Preserve audio callback and RHI fence protocols.

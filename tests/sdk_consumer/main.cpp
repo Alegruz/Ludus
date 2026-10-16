@@ -38,6 +38,7 @@ bool ExerciseInstalledParsing() noexcept;
 bool ExerciseInstalledConfiguration() noexcept;
 bool ExerciseInstalledReflection() noexcept;
 int ExerciseInstalledTime() noexcept;
+int ExerciseInstalledIdentity() noexcept;
 bool ExerciseInstalledFluid() noexcept;
 bool ExerciseInstalledCurves() noexcept;
 bool ExerciseInstalledCamera() noexcept;
@@ -374,6 +375,10 @@ int main()
     if (const int timeResult = ExerciseInstalledTime(); timeResult != 0)
     {
         return timeResult;
+    }
+    if (const int identityResult = ExerciseInstalledIdentity(); identityResult != 0)
+    {
+        return identityResult;
     }
     if (const int worldResult = ExerciseInstalledWorld(); worldResult != 0)
     {

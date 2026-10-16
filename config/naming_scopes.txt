@@ -3,6 +3,7 @@
 # migrated; new modules should be added when they are created.
 modules/content/scene_cook
 modules/content/scene_format
+modules/foundation/identity
 modules/foundation/math/include/ludus/foundation/math/summation.hpp
 modules/foundation/math/src/summation.cpp
 modules/foundation/math/tests/summation_tests.cpp
