@@ -200,6 +200,16 @@ or merge-queue check: scenario correctness failures fail that workflow, and
 timings are report-only. Reports, Perfetto traces and logs are kept as artifacts
 for 90 days. See [Runtime profiling](runtime-profiling.md).
 
+Its opt-in `device` job adds self-hosted machines with a declared physical GPU,
+where the RHI and renderer GPU scenarios run. Lanes are listed in the
+`LUDUS_PERF_DEVICE_LANES` repository variable; without it the job is skipped.
+The job runs only scheduled or manually dispatched `main` code, never pull
+requests or forks. Each device runner's job-started hook
+(`tools/ci/perf-runner-job-started.sh`, installed outside the workspace) refuses
+any other job before it runs, so admission does not depend on pull-request YAML.
+Registration steps and the trust boundary are in
+[Controlled device lane](runtime-profiling.md#controlled-device-lane).
+
 ## Sanitizer failure controls
 
 `LUDUS_ENABLE_UBSAN=ON` propagates `-fno-sanitize-recover=undefined` through the
