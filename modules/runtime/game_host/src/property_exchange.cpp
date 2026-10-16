@@ -2,16 +2,18 @@
 
 #include <ludus/runtime/game_api/properties.h>
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <array>
 #include <cstring>
 #include <utility>
-#include <vector>
 
 namespace ludus::runtime::game_host
 {
 namespace
 {
 using namespace game_api;
+using ludus::foundation::Array;
 using protocol::CommandStatus;
 using protocol::Message;
 
@@ -28,8 +30,8 @@ using protocol::Message;
 
 struct Snapshot
 {
-    std::vector<PropertyDescriptor> Descriptors;
-    std::vector<PropertyValue> Values;
+    Array<PropertyDescriptor> Descriptors;
+    Array<PropertyValue> Values;
 };
 
 [[nodiscard]] bool ValidValue(const PropertyDescriptor& descriptor, const PropertyValue& value) noexcept
@@ -62,6 +64,8 @@ struct Snapshot
     return false;
 }
 
+// False reports an invalid game response or snapshot allocation failure; the
+// caller treats both as a host failure.
 [[nodiscard]] bool ReadSnapshot(const GameApiTable& table, GameInstance* instance, Snapshot& out) noexcept
 {
     usize size = 0;
@@ -71,24 +75,30 @@ struct Snapshot
     {
         return false;
     }
-    out.Descriptors.resize(size / sizeof(PropertyDescriptor));
+    if (out.Descriptors.TryResize(size / sizeof(PropertyDescriptor)) == false)
+    {
+        return false;
+    }
     usize written = 0;
-    if (table.DescribeProperties(instance, {reinterpret_cast<uint8*>(out.Descriptors.data()), size}, &written) !=
+    if (table.DescribeProperties(instance, {reinterpret_cast<uint8*>(out.Descriptors.GetData()), size}, &written) !=
             Status::Ok ||
         written != size)
     {
         return false;
     }
-    out.Values.resize(out.Descriptors.size());
-    const usize valueBytes = out.Values.size() * sizeof(PropertyValue);
-    if (table.ReadProperties(instance, {reinterpret_cast<uint8*>(out.Values.data()), valueBytes}, &written) !=
+    if (out.Values.TryResize(out.Descriptors.GetSize()) == false)
+    {
+        return false;
+    }
+    const usize valueBytes = out.Values.GetSize() * sizeof(PropertyValue);
+    if (table.ReadProperties(instance, {reinterpret_cast<uint8*>(out.Values.GetData()), valueBytes}, &written) !=
             Status::Ok ||
         written != valueBytes)
     {
         return false;
     }
-    std::vector<uint64> objects;
-    for (usize i = 0; i < out.Descriptors.size(); ++i)
+    Array<uint64> objects;
+    for (usize i = 0; i < out.Descriptors.GetSize(); ++i)
     {
         const auto& descriptor = out.Descriptors[i];
         if (descriptor.ObjectId == 0 || descriptor.PropertyId == 0 || descriptor.Writable > 1 ||
@@ -106,10 +116,9 @@ struct Snapshot
         {
             seenObject = seenObject || object == descriptor.ObjectId;
         }
-        if (!seenObject)
+        if (seenObject == false)
         {
-            objects.push_back(descriptor.ObjectId);
-            if (objects.size() > kMaxObjects)
+            if (objects.TryAdd(descriptor.ObjectId) == false || objects.GetSize() > kMaxObjects)
             {
                 return false;
             }
@@ -124,12 +133,12 @@ struct Snapshot
         }
         // Accessors may return values in a different order; copy into schema order.
         usize match = i;
-        while (match < out.Values.size() && (out.Values[match].ObjectId != descriptor.ObjectId ||
-                                             out.Values[match].PropertyId != descriptor.PropertyId))
+        while (match < out.Values.GetSize() && (out.Values[match].ObjectId != descriptor.ObjectId ||
+                                                out.Values[match].PropertyId != descriptor.PropertyId))
         {
             ++match;
         }
-        if (match == out.Values.size())
+        if (match == out.Values.GetSize())
         {
             return false;
         }
@@ -260,12 +269,13 @@ protocol::CommandStatus HostSession::PublishProperties(uint64 requestId) noexcep
     {
         return CommandStatus::HostFailed;
     }
-    std::vector<Message> frames;
+    // Stage every frame before emitting so allocation failure publishes nothing.
+    Array<Message> frames;
     usize total = 0;
-    for (usize begin = 0; begin < snapshot.Values.size(); begin += protocol::kMaxPropertyBatch)
+    for (usize begin = 0; begin < snapshot.Values.GetSize(); begin += protocol::kMaxPropertyBatch)
     {
-        std::vector<Message> records;
-        for (usize i = begin; i < snapshot.Values.size() && i - begin < protocol::kMaxPropertyBatch; ++i)
+        Array<Message> records;
+        for (usize i = begin; i < snapshot.Values.GetSize() && i - begin < protocol::kMaxPropertyBatch; ++i)
         {
             const auto& descriptor = snapshot.Descriptors[i];
             const auto& value = snapshot.Values[i];
@@ -282,7 +292,10 @@ protocol::CommandStatus HostSession::PublishProperties(uint64 requestId) noexcep
             record.SetUint("min_bits", FloatBits(descriptor.MinFloat));
             record.SetUint("max_bits", FloatBits(descriptor.MaxFloat));
             EncodeValue(record, value);
-            records.push_back(std::move(record));
+            if (records.TryAdd(std::move(record)) == false)
+            {
+                return CommandStatus::HostFailed;
+            }
         }
         Message frame;
         frame.SetString("event", protocol::EventKindName(protocol::EventKind::PropertiesChanged));
@@ -294,7 +307,7 @@ protocol::CommandStatus HostSession::PublishProperties(uint64 requestId) noexcep
         frame.SetUint("schema_epoch", SchemaEpoch_);
         frame.SetUint("schema_version", Active_.Metadata().PropertySchemaVersion);
         frame.SetUint("offset", begin);
-        frame.SetUint("count", snapshot.Values.size());
+        frame.SetUint("count", snapshot.Values.GetSize());
         frame.SetRecords("properties", records);
         const usize bytes = frame.Serialize().size();
         if (bytes > protocol::kMaxControlFrameBytes || total + bytes > protocol::kMaxSchemaTransferBytes)
@@ -302,10 +315,13 @@ protocol::CommandStatus HostSession::PublishProperties(uint64 requestId) noexcep
             return CommandStatus::InvalidRequest;
         }
         total += bytes;
-        frames.push_back(std::move(frame));
+        if (frames.TryAdd(std::move(frame)) == false)
+        {
+            return CommandStatus::HostFailed;
+        }
     }
-    if (OutputBytes_ + total + frames.size() * 4 + 4096 > protocol::kMaxCommandQueueBytes ||
-        Output_.size() + frames.size() + 1 > protocol::kMaxPendingCommands)
+    if (OutputBytes_ + total + frames.GetSize() * 4 + 4096 > protocol::kMaxCommandQueueBytes ||
+        Output_.GetSize() + frames.GetSize() + 1 > protocol::kMaxPendingCommands)
     {
         return CommandStatus::Busy;
     }
@@ -335,8 +351,8 @@ protocol::CommandStatus HostSession::ApplyPropertyEdits(const Message& command) 
     {
         return CommandStatus::HostFailed;
     }
-    std::vector<Message> records;
-    if (!command.GetRecords("edits", records) || records.empty())
+    Array<Message> records;
+    if (command.GetRecords("edits", records) == false || records.IsEmpty())
     {
         return CommandStatus::InvalidRequest;
     }
@@ -347,9 +363,9 @@ protocol::CommandStatus HostSession::ApplyPropertyEdits(const Message& command) 
     } batch = {};
     static_assert(sizeof(EditBatchHeader) == 16 && alignof(PropertyEdit) == 8);
     batch.Header.StructSize = sizeof(EditBatchHeader);
-    batch.Header.Count = static_cast<uint32>(records.size());
+    batch.Header.Count = static_cast<uint32>(records.GetSize());
     batch.Header.SchemaVersion = static_cast<uint32>(schema);
-    for (usize i = 0; i < records.size(); ++i)
+    for (usize i = 0; i < records.GetSize(); ++i)
     {
         auto& edit = batch.Edits[i];
         if (!DecodeEdit(records[i], edit))
@@ -358,7 +374,7 @@ protocol::CommandStatus HostSession::ApplyPropertyEdits(const Message& command) 
         }
         const PropertyDescriptor* descriptor = nullptr;
         const PropertyValue* current = nullptr;
-        for (usize j = 0; j < snapshot.Descriptors.size(); ++j)
+        for (usize j = 0; j < snapshot.Descriptors.GetSize(); ++j)
         {
             if (snapshot.Descriptors[j].ObjectId == edit.ObjectId &&
                 snapshot.Descriptors[j].PropertyId == edit.PropertyId)
@@ -400,7 +416,7 @@ protocol::CommandStatus HostSession::ApplyPropertyEdits(const Message& command) 
     const auto& table = Active_.Table();
     const Status prepared = table.PrepareEdits(
         Instance_,
-        {reinterpret_cast<const uint8*>(&batch), sizeof(EditBatchHeader) + records.size() * sizeof(PropertyEdit)},
+        {reinterpret_cast<const uint8*>(&batch), sizeof(EditBatchHeader) + records.GetSize() * sizeof(PropertyEdit)},
         &plan);
     if (prepared != Status::Ok || plan == nullptr)
     {

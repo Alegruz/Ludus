@@ -1,0 +1,16 @@
+{
+  "strategy": "additive",
+  "localeFilter": {
+    "filterType": "locale",
+    "includeChildren": false,
+    "includelist": ["en_US", "fr_FR", "ru_RU", "ar", "ja_JP"]
+  },
+  "featureFilters": {
+    "locales_tree": "include",
+    "curr_tree": "include",
+    "misc": {
+      "filterType": "file-stem",
+      "includelist": ["icuver", "keyTypeData", "langInfo", "metadata", "numberingSystems", "pluralRanges", "plurals"]
+    }
+  }
+}

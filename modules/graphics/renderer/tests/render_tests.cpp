@@ -18,13 +18,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/views.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
-#include <vector>
 namespace rhi = ludus::graphics::rhi;
 namespace rr = ludus::graphics::renderer;
 using namespace ludus::foundation;
@@ -916,7 +916,7 @@ TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and 
     };
     for (uint32 scenario = 0; scenario < 3; ++scenario)
     {
-        std::vector<uint8> images[3];
+        Array<uint8> images[3];
         for (usize reference = 0; reference < 3; ++reference)
         {
             rr::Renderer renderer;
@@ -957,7 +957,7 @@ TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and 
             CHECK(scene.Report.Visible == (reference == 1 ? 256 : 128));
             CHECK(scene.Report.CulledGroups == (reference == 1 ? 0 : 8));
             CHECK(scene.Report.BoundsTests == 0);
-            images[reference].resize(static_cast<usize>(width) * height * 4);
+            images[reference].Resize(static_cast<usize>(width) * height * 4);
             const uint32 frames = benchmark ? 72U : 2U;
             for (uint32 frame = 0; frame < frames; ++frame)
             {
@@ -978,7 +978,7 @@ TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and 
                 REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
                 const auto recordNs = ns(recordStart);
                 const auto waitStart = Clock::now();
-                REQUIRE(rhi::backend::ReadHeadlessPixels({images[reference].data(), images[reference].size()}));
+                REQUIRE(rhi::backend::ReadHeadlessPixels({images[reference].GetData(), images[reference].GetSize()}));
                 const auto waitNs = ns(waitStart);
                 if (benchmark && frame >= 8)
                 {
@@ -1004,9 +1004,9 @@ TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and 
             renderer.Reset();
             REQUIRE(rhi::Destroy(device, scene.Target) == rhi::RasterStatus::Ready);
         }
-        REQUIRE(images[0].size() == images[1].size());
+        REQUIRE(images[0].GetSize() == images[1].GetSize());
         usize colored = 0;
-        for (usize i = 0; i < images[0].size(); ++i)
+        for (usize i = 0; i < images[0].GetSize(); ++i)
         {
             const auto difference = static_cast<int32>(images[0][i]) - static_cast<int32>(images[1][i]);
             const auto clusteredDifference = static_cast<int32>(images[0][i]) - static_cast<int32>(images[2][i]);
@@ -1023,7 +1023,7 @@ TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and 
         if (scenario == 1)
         {
             uint8 maximum = 0;
-            for (usize i = 0; i < images[0].size(); i += 4)
+            for (usize i = 0; i < images[0].GetSize(); i += 4)
             {
                 maximum = images[0][i] > maximum ? images[0][i] : maximum;
             }

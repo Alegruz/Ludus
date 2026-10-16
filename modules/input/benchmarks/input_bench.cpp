@@ -5,6 +5,7 @@
 // whole-engine-determinism claim. Build at the project's Development/Release
 // flags; run manually and paste output into the evidence doc.
 
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/input/input_debug.h>
 #include <ludus/input/keyboard.h>
 
@@ -14,9 +15,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
-#include <vector>
 
 using namespace ludus::input;
+using ludus::foundation::Array;
+using ludus::foundation::float64;
+using ludus::foundation::usize;
 using Clock = std::chrono::steady_clock;
 
 namespace
@@ -31,11 +34,11 @@ inline void doNotOptimize(const T& value)
     asm volatile("" : : "r,m"(value) : "memory");
 }
 
-double percentile(std::vector<double>& samples, double p)
+float64 percentile(Array<float64>& inoutSamples, float64 p)
 {
-    std::sort(samples.begin(), samples.end());
-    const std::size_t index = static_cast<std::size_t>(p * static_cast<double>(samples.size() - 1));
-    return samples[index];
+    std::sort(inoutSamples.begin(), inoutSamples.end());
+    const usize index = static_cast<usize>(p * static_cast<float64>(inoutSamples.GetSize() - 1));
+    return inoutSamples[index];
 }
 
 KeyboardRecord down(Key key) noexcept
@@ -73,14 +76,14 @@ Timing measure(Fn&& batch, MeasureConfig config)
     {
         batch();
     }
-    std::vector<double> samples;
-    samples.reserve(static_cast<std::size_t>(config.iterations));
+    Array<float64> samples;
+    samples.EnsureCapacity(static_cast<usize>(config.iterations));
     for (int i = 0; i < config.iterations; ++i)
     {
         const auto start = Clock::now();
         batch();
         const auto end = Clock::now();
-        samples.push_back(std::chrono::duration<double, std::nano>(end - start).count());
+        samples.Add(std::chrono::duration<float64, std::nano>(end - start).count());
     }
     return Timing{percentile(samples, 0.5), percentile(samples, 0.95)};
 }

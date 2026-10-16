@@ -1,11 +1,11 @@
 #include <ludus/runtime/behavior/behavior.h>
 
 #include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/containers/array.hpp>
 
 #include <cstring>
 #include <fstream>
 #include <iterator>
-#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,10 +15,15 @@ namespace
 {
 using namespace ludus::runtime::behavior;
 using namespace ludus::foundation;
-std::vector<uint8> Package()
+Array<uint8> Package()
 {
     std::ifstream file(LUDUS_BEHAVIOR_PACKAGE, std::ios::binary);
-    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    Array<uint8> bytes;
+    for (std::istreambuf_iterator<char> it(file); it != std::istreambuf_iterator<char>(); ++it)
+    {
+        bytes.Add(static_cast<uint8>(*it));
+    }
+    return bytes;
 }
 Invocation Input(uint64 asset = 0x100)
 {
@@ -275,7 +280,7 @@ TEST_CASE("S4 package metadata rejection preserves the active catalog")
     LuauProvider provider;
     REQUIRE(provider.Load(ludus::sample::SCHEMA, good) == Status::Completed);
     auto bytes = good;
-    bytes.push_back(0);
+    bytes.Add(0);
     REQUIRE(provider.Load(ludus::sample::SCHEMA, bytes) == Status::InvalidPackage);
     bytes = good;
     REQUIRE(TryWriteLittleEndian(uint32{9}, std::span<uint8>{bytes}.subspan(112)));

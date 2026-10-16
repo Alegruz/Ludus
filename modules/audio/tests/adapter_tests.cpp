@@ -5,17 +5,17 @@
 
 #include <ludus/audio/audio_app_adapter.h>
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <vector>
-
 using namespace ludus::audio;
 using ludus::audio::app::EventAdapter;
 using ludus::audio::app::SuppressReason;
 using ludus::audio::app::TriggerRequest;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -39,7 +39,7 @@ ClipHandle PrepareLoopable(AudioSystem& sys, uint32 frames = 480)
 
 void Render(AudioSystem& sys, uint32 frames)
 {
-    std::vector<float32> out(static_cast<std::size_t>(frames) * 2);
+    Array<float32> out(static_cast<usize>(frames) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "domain": "game/ui",
+  "source_locale": "en-US",
+  "profile": "ludus-icu-mf1-v1",
+  "locale": "fr-FR",
+  "messages": [
+    {"key": "chat/player-said", "source_revision": 1, "reviewed_source_digest": "4a144ecf6e568d1566a19d23db6e1fa64878a0e18113ffbc2a81c9deebee6f96", "translation_revision": 1, "status": "approved",
+     "pattern": "{player} a dit : {message}"},
+    {"key": "hud/distance", "source_revision": 1, "reviewed_source_digest": "5e0a7bbb64a32b8249f49ac2425f73549127bb5e1eaed3f1932b738772e84b56", "translation_revision": 1, "status": "approved",
+     "pattern": "Distance : {distance, number, ::.0} km"},
+    {"key": "hud/score", "source_revision": 1, "reviewed_source_digest": "eec9969cde9386e174eec50d922f451d432c33bd37024636f2e07a2db43b3e3d", "translation_revision": 1, "status": "approved",
+     "pattern": "Score : {score, number, integer}"},
+    {"key": "inventory/item-count", "source_revision": 1, "reviewed_source_digest": "78d11959b37212ddb6aa9e399839a8c2b070d765c20f8b0db12f83be68713e84", "translation_revision": 2, "status": "approved",
+     "pattern": "{count, plural, =0 {Votre inventaire est vide.} one {Vous avez # objet.} many {Vous avez # d’objets.} other {Vous avez # objets.}}"},
+    {"key": "literal/braces", "source_revision": 1, "reviewed_source_digest": "2e155ff8a8f28ee2fcd7cb35d7c51587bad8876dc28431af91c0a037f03f1037", "translation_revision": 1, "status": "approved",
+     "pattern": "Tapez '{'name'}' pour insérer un nom. Pas d''inquiétude : c’est littéral."},
+    {"key": "loot/picked-up", "source_revision": 1, "reviewed_source_digest": "bf22aa6cc3699fed41620cee455484b591425f9ccf8a3ae6fbcdcf1406e84473", "translation_revision": 1, "status": "approved",
+     "pattern": "{picker_gender, select, feminine {{count, plural, one {Elle a ramassé # pièce.} many {Elle a ramassé # de pièces.} other {Elle a ramassé # pièces.}}} masculine {{count, plural, one {Il a ramassé # pièce.} many {Il a ramassé # de pièces.} other {Il a ramassé # pièces.}}} other {{count, plural, one {# pièce ramassée.} many {# de pièces ramassées.} other {# pièces ramassées.}}}}"},
+    {"key": "menu/play", "source_revision": 1, "reviewed_source_digest": "a15485fd32003bbd5e27e38ccfbb2add19718724ae1c2cbec44a6af29901bdf5", "translation_revision": 1, "status": "approved",
+     "pattern": "Jouer"},
+    {"key": "menu/subtitle", "source_revision": 1, "reviewed_source_digest": "fa9094e449f7c7913b4dd096c6810bb7f99736b9c8f8ce2f08ab8bb0b11de4d8", "translation_revision": 1, "status": "approved",
+     "pattern": "Édition définitive"},
+    {"key": "party/online", "source_revision": 1, "reviewed_source_digest": "536c9adfe6ded5271665733357e3d88cdad3fb25b1508173ff607f53edbf1dd8", "translation_revision": 1, "status": "approved",
+     "pattern": "{count, plural, offset:1 =0 {Personne n’est en ligne.} =1 {{leader} est en ligne.} one {{leader} et # autre joueur sont en ligne.} many {{leader} et # d’autres joueurs sont en ligne.} other {{leader} et # autres joueurs sont en ligne.}}"},
+    {"key": "quest/companion-joined", "source_revision": 1, "reviewed_source_digest": "6857d3fe5fa33b4b409121c0ad3cd920cb1bada8a14f9e497916711853f9907a", "translation_revision": 1, "status": "approved",
+     "pattern": "{companion_gender, select, feminine {{companion} a rejoint le groupe. Elle est prête.} masculine {{companion} a rejoint le groupe. Il est prêt.} other {{companion} a rejoint le groupe et attend vos ordres.}}"},
+    {"key": "race/place", "source_revision": 1, "reviewed_source_digest": "75258071a1ef61d4f09712c01bfe2f6d1acd5605829f2a0e7214dd025f434810", "translation_revision": 1, "status": "approved",
+     "pattern": "Vous terminez à la {place, selectordinal, one {#re} other {#e}} place."}
+  ]
+}

@@ -7,6 +7,7 @@
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/vector.hpp>
+#include <ludus/foundation/threading/jobs.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/viewport.hpp>
 #include <ludus/graphics/rhi/device.h>
@@ -155,6 +156,10 @@ private:
         return Scene_.Lit == true && mShading != PreviewShading::Albedo;
     }
     PreviewShading mShading = PreviewShading::Solid;
+    // Explicit static-lighting budget, started on the first bake. Declared before
+    // the resources so it outlives every bake that references it.
+    foundation::threading::JobSystem mBakeJobs;
+    bool mHasBakeJobs = false;
     struct GpuResources;
     foundation::UniquePtr<GpuResources> mResources;
     foundation::UniquePtr<GpuResources> mRetiredResources;

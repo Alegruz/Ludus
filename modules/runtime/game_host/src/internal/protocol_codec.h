@@ -11,10 +11,12 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <initializer_list>
+#include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace ludus::runtime::game_host::protocol
 {
@@ -32,7 +34,7 @@ public:
     void SetUint(std::string_view key, uint64 value);
     void SetInt(std::string_view key, int64 value);
     void SetBool(std::string_view key, bool value);
-    void SetRecords(std::string_view key, const std::vector<Message>& records);
+    void SetRecords(std::string_view key, std::span<const Message> records);
     // Hex-encoded 64-bit id (fixed 16 lowercase hex chars) to avoid float loss.
     void SetHexId(std::string_view key, uint64 value);
 
@@ -43,18 +45,21 @@ public:
     [[nodiscard]] bool GetHexId(std::string_view key, uint64& out) const;
     [[nodiscard]] bool Has(std::string_view key) const;
     [[nodiscard]] bool HasOnly(std::initializer_list<std::string_view> keys) const noexcept;
-    [[nodiscard]] bool GetRecords(std::string_view key, std::vector<Message>& out) const;
+    // Replaces outRecords on success. Malformed input or allocation failure
+    // returns false and leaves outRecords unchanged.
+    [[nodiscard]] bool GetRecords(std::string_view key, ludus::foundation::Array<Message>& outRecords) const;
 
     // Serialize to compact UTF-8 JSON (no trailing newline).
     [[nodiscard]] std::string Serialize() const;
 
     // Parse a compact JSON object. Returns false on any malformed input, a
-    // non-object top level, deeper nesting, or more than kMaxFields fields.
+    // non-object top level, deeper nesting, more than kMaxFields fields, or
+    // field-storage allocation failure.
     [[nodiscard]] static bool Parse(std::string_view json, Message& out);
 
     [[nodiscard]] usize FieldCount() const noexcept
     {
-        return Fields_.size();
+        return Fields_.GetSize();
     }
 
 private:
@@ -74,7 +79,7 @@ private:
     static constexpr usize kMaxFields = 32;
     void Set(Field field);
     [[nodiscard]] const Field* Find(std::string_view key) const;
-    std::vector<Field> Fields_;
+    ludus::foundation::Array<Field> Fields_;
 };
 
 // Reject malformed/overlong UTF-8 and surrogate code points. Property strings
@@ -82,12 +87,14 @@ private:
 [[nodiscard]] bool ValidUtf8(std::string_view text, bool allowNul = false) noexcept;
 
 // Frame a serialized message with a 4-byte little-endian length prefix.
-// Returns false if the payload exceeds kMaxControlFrameBytes.
-[[nodiscard]] bool EncodeFrame(std::string_view payload, std::vector<ludus::foundation::uint8>& outFrame);
+// Returns false if the payload exceeds kMaxControlFrameBytes or the frame
+// cannot be allocated; outFrame is unchanged on failure.
+[[nodiscard]] bool EncodeFrame(std::string_view payload, ludus::foundation::Array<ludus::foundation::uint8>& outFrame);
 
 // Incremental frame reader over a byte stream. Appends bytes, then pops whole
-// frames. Enforces the per-frame and backlog bounds; a violation latches an
-// error that the caller treats as a protocol failure (design 10).
+// frames. Enforces the per-frame and backlog bounds; a violation, or failure to
+// allocate the backlog, latches an error that the caller treats as a protocol
+// failure (design 10).
 class FrameReader final
 {
 public:
@@ -100,11 +107,11 @@ public:
     }
     [[nodiscard]] usize Backlog() const noexcept
     {
-        return Buffer_.size();
+        return Buffer_.GetSize();
     }
 
 private:
-    std::vector<ludus::foundation::uint8> Buffer_;
+    ludus::foundation::Array<ludus::foundation::uint8> Buffer_;
     bool Failed_ = false;
 };
 } // namespace ludus::runtime::game_host::protocol

@@ -30,8 +30,8 @@ struct SystemGuard
 
 FontId LoadFixture(FontSystem* system, const char* file)
 {
-    auto bytes = LoadFixtureFont(file);
-    REQUIRE_FALSE(bytes.empty());
+    const ludus::foundation::Array<ludus::foundation::uint8> bytes = LoadFixtureFont(file);
+    REQUIRE(bytes.IsEmpty() == false);
     FontId font;
     REQUIRE(IsOk(LoadFont(system, bytes, 0, &font)));
     return font;
@@ -104,7 +104,8 @@ TEST_CASE("Rasterization is deterministic and size-stable", "[text][audit][raste
 
     GlyphBitmap first;
     REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, glyph, &first)));
-    std::vector<ludus::foundation::uint8> firstCopy(first.Coverage.begin(), first.Coverage.end());
+    const ludus::foundation::Array<ludus::foundation::uint8> firstCopy =
+        ludus::foundation::Array<ludus::foundation::uint8>::FromRange(first.Coverage);
     const ludus::foundation::uint32 w = first.Width;
     const ludus::foundation::uint32 h = first.Height;
 
@@ -116,7 +117,8 @@ TEST_CASE("Rasterization is deterministic and size-stable", "[text][audit][raste
     REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, glyph, &again)));
     REQUIRE(again.Width == w);
     REQUIRE(again.Height == h);
-    std::vector<ludus::foundation::uint8> againCopy(again.Coverage.begin(), again.Coverage.end());
+    const ludus::foundation::Array<ludus::foundation::uint8> againCopy =
+        ludus::foundation::Array<ludus::foundation::uint8>::FromRange(again.Coverage);
     CHECK(againCopy == firstCopy); // byte-identical after the size round trip
 }
 

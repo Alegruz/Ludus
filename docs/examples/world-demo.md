@@ -101,13 +101,23 @@ Commit and publication sequence. Add a component pool's initialization, recipe
 insertion and destruction removal together. Gameplay uses player/enemy/exit
 capabilities rather than branching on recipe kinds after construction.
 
-`RunTick` advances exactly 1/60 second. The driver accepts at most 250 ms per frame,
-runs at most four ticks, counts discarded time and retains fractional debt for
-interpolation. Input edges survive zero-tick frames and apply once during catch-up.
-Cancellation takes priority over presses; the bridge waits for neutral controls
-before rearming. Pause, focus changes, hidden frames and activation reset clock
-debt. Focus changes preserve pause/fault mode. A simulation fault retains the
-previous render frame until restart and never publishes that tick's presentation.
+`RunTick` advances exactly 1/60 second. The application reads one
+FoundationTime timestamp per callback and passes it to `TickDriver::Advance`.
+The driver owns the [FrameClock](../wiki/guides/time.md#keep-frame-stalls-visible):
+it accepts at most 250 ms per frame (`MAXIMUM_FRAME_DELTA`), runs at most four
+ticks, counts discarded time and retains fractional debt for interpolation. The
+FrameClock is the only clamp. Input edges survive zero-tick frames and apply once
+during catch-up. Cancellation takes priority over presses; the bridge waits for
+neutral controls before rearming.
+
+Pause/resume, focus changes, queued browser input resets (hide or blur), hidden
+frames, faults and activation reset debt and the frame baseline, so the next Playing frame is a
+zero-elapsed baseline and never catches up excluded time. Focus changes preserve
+pause/fault mode. Diagnostics separate accepted time, time clamped by the frame
+cap, excluded lifecycle time and clock regressions; for a monotonic sequence the
+three totals equal the observed span. A regressed sample adds no time and cannot
+become a baseline below the highest observed reading. A simulation fault retains
+the previous render frame until restart and never publishes that tick's presentation.
 
 ## Ownership and limits
 

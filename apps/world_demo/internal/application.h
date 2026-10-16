@@ -54,7 +54,6 @@ private:
     graphics::rhi::UniformHandle mUniform;
     graphics::rhi::PipelineHandle mPipeline;
     uint64 mPresentedFrames = 0;
-    uint64 mLastTime = 0;
     uint64 mInputFrame = 0;
     bool mCreated = false;
     bool mRendererReady = false;

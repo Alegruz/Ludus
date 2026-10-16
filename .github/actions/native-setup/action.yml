@@ -64,7 +64,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/ccache
-        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-${{ github.sha }}
+        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-${{ env.LUDUS_CI_COMMIT_SHA || github.sha }}
         restore-keys: |
           ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-
     - name: Restore compiler outputs without saving
@@ -72,7 +72,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ~/.cache/ccache
-        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-${{ github.sha }}
+        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-${{ env.LUDUS_CI_COMMIT_SHA || github.sha }}
         restore-keys: |
           ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-
     - name: Configure compiler caching

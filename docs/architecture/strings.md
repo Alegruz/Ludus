@@ -1,7 +1,8 @@
 # Ludus Strings Architecture
 
-**Status:** Initial foundation implemented; remaining pipeline and performance
-work is proposed. See [implementation status](#implementation-status) for the
+**Status:** Initial foundation and the LUSTR cooked dictionary format, writer and
+reader implemented; content adoption, remaining pipeline and performance work is
+proposed. See [implementation status](#implementation-status) for the
 exact shipped scope, validation and limitations.
 
 **Audience:** Engine, tools, content pipeline, and SDK contributors.
@@ -1000,8 +1001,7 @@ vectors, XXH3 golden vectors, forced collisions, table growth, duplicate admissi
 at capacity, and concurrent mutation / immutable reads. Reduced-width reference
 count tests exercise saturation without attempting 2^64 copies.
 
-Deferred: cooked dictionary production/validation and deterministic serialization,
-content snapshot integration, shared slices, structural hash schema helpers,
+Deferred: content snapshot integration, shared slices, structural hash schema helpers,
 format adapters, SIMD validation, debugger visualizers, and optional suggestion /
 Bloom-filter tools. The minimal allocation seam does not implement the full
 memory architecture's accounting, domain registry, alternate heaps or arenas.
@@ -1015,6 +1015,55 @@ names must bind through the host API. Destruction, move and freeze require calle
 quiescence. Frozen owners must outlive every view/job; `NameId::IsValid` checks
 representation only. The untrusted mode requires caller-supplied secret entropy;
 `HasSecretKey` is a caller declaration, not an entropy-quality test.
+
+### Cooked dictionary format, writer and reader
+
+The LUSTR v1 cooked dictionary implements the
+[cooked dictionary contract](#cooked-dictionaries-and-persistence) as three
+targets. `Ludus::StringDictionaryFormat` is the header-only wire contract owned
+by neither side (`lustr.h`, FoundationBase only). `Ludus::StringDictionaryWriter`
+is the cooker-side writer; `Ludus::StringDictionary` is the runtime reader, which
+never links the writer. All three live under `modules/content` and adopt the
+naming rules.
+
+A dictionary is a 64-byte little-endian header (magic, version, byte policy,
+entry count, directory and blob sizes, a reserved zero word and a 32-byte
+producer-supplied revision digest), then `uint32` offset/length directory pairs,
+then the spelling blob. Version 1 is canonical: entry 0 is empty, spellings are
+unique and strictly increasing in unsigned byte order, each spelling is
+zero-terminated, and entries are packed back to back with no unused blob bytes.
+Equal spelling sets therefore always encode to equal bytes. Byte policy
+`BYTE_POLICY_UTF8` requires strict UTF-8; `BYTE_POLICY_BYTES` admits opaque
+bytes. Both reject embedded zeros so the terminator remains usable.
+Limits are 2^24 entries, 65535-byte spellings and a 256 MiB blob.
+
+The writer deduplicates through a trusted-hash `StringTable` sized by its
+configured budget, returns arrival-order provisional indices, sorts with
+FoundationContainers' `Sort` at `TryFinish` and remaps them. `TryEncode` writes
+into caller storage of exactly `GetEncodedSize()` bytes without allocating.
+Every failure leaves the writer usable and unchanged.
+
+`ReadStringDictionary` validates the header, exact total size, revision, every
+directory entry, terminator, embedded zero, UTF-8 sequence and the strict order
+before publishing a borrowed `StringDictionaryView`. It reports the first
+offending byte offset, does not allocate or copy, and preserves its output on
+failure. A dictionary from another revision is rejected; remapping across
+revisions is not implemented. `TryResolve` is constant time and `TryFind` is a
+binary search over exact bytes. The caller's snapshot or mapping owns the bytes
+and must outlive the view and every resolved spelling.
+
+Tests cover a pinned golden encoding, arrival-order independence, duplicates,
+unsigned/high-bit ordering, both byte policies, configuration and budget limits,
+lifecycle misuse, allocation failure at every writer allocation, every truncation,
+each malformed header field, bad offsets, lengths, terminators, embedded zeros,
+invalid UTF-8, duplicate and unsorted entries, trailing bytes, revision
+mismatches, unaligned input, and three corruption patterns at every byte of a sample. The
+installed SDK consumer cooks and reads a dictionary through the public headers.
+
+No content cooker, Resources decoder or snapshot consumes LUSTR yet, so this is
+not yet dictionary *adoption* in the sense of [migration phases](#migration-phases).
+Pairing it with a real indexed-content reader/cooker, its compatibility decision
+and reload retirement remains the next workstream.
 
 The earlier documentation-only validation paragraph describes the design pass.
 Implementation validation is recorded in the pull request; architecture-wide
@@ -1031,7 +1080,7 @@ not a new build, sanitizer run, or performance result.
 
 | Workstream | Remaining delivery | Contract owner |
 | --- | --- | --- |
-| Cooked dictionaries | Deterministic deduplication and unsigned-byte sorting, packed terminated bytes, fixed-width offset/length directories, remapped record indices, a versioned writer and validating reader, and malformed/revision-mismatch tests | [Cooked dictionaries and persistence](#cooked-dictionaries-and-persistence) |
+| Cooked dictionaries | Implemented as LUSTR v1; see [cooked dictionary format, writer and reader](#cooked-dictionary-format-writer-and-reader). Remaining: adoption by the content consumer below | [Cooked dictionaries and persistence](#cooked-dictionaries-and-persistence) |
 | Content and symbol consumers | Pair the dictionary with a real indexed-content reader/cooker and retained snapshot; define safe reload retirement and compatibility. Bind literals during setup, cache IDs in an actual repeated-name consumer, and validate any generated closed symbol schema for collisions | [Migration phases](#migration-phases) and [literal descriptors](#literal-descriptors) |
 | Mutable and bounded storage | Add explicit shrinking, checked byte-range erase, and named display truncation where required by the initial consumers; enforce their byte limits. Insert/replace and mutable write reservations still require a concrete consumer | [Mutable string storage](#mutable-string-storage) |
 | Text and formatting boundaries | Checked UTF-8 slicing, explicit display repair, counted `char8_t` adapters, strict native UTF-16 conversion at OS boundaries, and exception-free builder/bounded formatting adapters | [Bytes and Unicode](#bytes-and-unicode) and [bounded strings and construction](#bounded-strings-and-construction) |
@@ -1054,9 +1103,9 @@ that separate system is not a prerequisite for the shipped string owners.
 ### Research after the initial architecture
 
 Complete and validate the initial architecture before beginning the broader
-conference/journal review and improvement trials. Start with the cooked
-dictionary writer, validating reader, format/compatibility decision, and one
-content consumer, then finish the required boundary APIs, diagnostics, and
+conference/journal review and improvement trials. The cooked dictionary writer,
+validating reader and v1 format exist; continue with the compatibility decision
+and one content consumer, then finish the required boundary APIs, diagnostics, and
 correctness evidence above. Required specification checks remain part of that
 implementation; optional research is not a prerequisite for delivering it.
 

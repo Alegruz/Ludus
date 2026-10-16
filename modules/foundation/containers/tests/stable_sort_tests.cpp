@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/stable_sort.hpp>
 #include <random>
-#include <vector>
 using namespace ludus::foundation;
 TEST_CASE("Caller-scratch stable sort matches an independent stable oracle", "[containers][sort]")
 {
@@ -15,14 +15,15 @@ TEST_CASE("Caller-scratch stable sort matches an independent stable oracle", "[c
     std::mt19937 random(71);
     for (usize count = 0; count <= 257; ++count)
     {
-        std::vector<Value> values(count), scratch(count);
+        Array<Value> values(count);
+        Array<Value> scratch(count);
         for (usize i = 0; i < count; ++i)
         {
             values[i] = {static_cast<uint32>(random() % 13), static_cast<uint32>(i)};
         }
         auto expected = values;
         std::stable_sort(expected.begin(), expected.end(), less);
-        REQUIRE(StableSort(values.data(), scratch.data(), count, less));
+        REQUIRE(StableSort(values.GetData(), scratch.GetData(), count, less));
         CHECK(values == expected);
     }
     Value value{3, 4}, scratch{};

@@ -6,9 +6,9 @@ This page records phase 0 of the
 [memory management plan](../architecture/memory-management.md#phase-0-establish-trustworthy-correctness-and-baselines).
 Step 0A, the aliased `Array` resize, is recorded in
 [Memory Phase 0A](memory-phase-0a.md). Step 0C, the `UniquePtr` ownership repair,
-lands separately through the
-[smart pointer](../architecture/smart-pointers.md) delivery slice 1; this phase
-does not change `UniquePtr` and has no owner baseline.
+was implemented separately as delivery slice 1 of the
+[smart pointer architecture](../architecture/smart-pointers.md#delivery-slices-and-validation);
+this page does not change `UniquePtr` and records no owner baseline.
 
 No allocator, allocation domain counter, memory recorder or production
 allocation policy is introduced. FoundationProfiling now depends on
@@ -133,7 +133,7 @@ allocator reuses or zeroes a freed large region. No speedup claim is made from i
   own retained memory; the `idle` row is the process baseline to subtract.
 - Logging setup/flood/shutdown and RHI startup baselines in the memory plan's
   workload list are not measured here.
-- The owner churn baseline belongs with the separate `UniquePtr` repair.
+- No owner churn baseline is recorded here; it belongs with the `UniquePtr` repair.
 
 ## Reproducing
 

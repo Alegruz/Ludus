@@ -31,6 +31,13 @@ using core::uint64;
 inline constexpr uint32 RandomKeyDerivationVersion = 1;
 inline constexpr uint32 RandomAddressLayoutVersion = 1;
 inline constexpr uint32 RandomBoundedMappingVersion = 1;
+/// @brief Largest RandomAddress::Dimension in address layout v1 (the field is 16 bits wide).
+///
+/// Multi-sample consumers that compute dimensions must prove or check their range against this value
+/// instead of narrowing a wider value. The GPU port in FoundationMath's math.slang mirrors it.
+inline constexpr uint32 RandomMaxDimension = 0xffffu;
+/// @brief Attempts (0 through 65535) that TrySampleBounded evaluates before returning OutOfRange.
+inline constexpr uint32 RandomBoundedAttemptCount = 0x10000u;
 
 /// @brief Plain replay data; Value may also restore a previously derived key.
 ///
