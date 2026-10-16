@@ -40,3 +40,5 @@ Existing-project Editor setup, browser packaging and CI uploading: see
 
 RG1 shader/schema packages use the same installed backend. See [build sources,
 pinned SDK helper and immutable publication](render-graph-authoring.md#build-explicit-shader-packages-rg1).
+RG3 adds `render-graph cook-runtime`, `schema-diff` and `migrate`, and JSON
+failures carry an authored `location`. See [edit and reload graphs](render-graph-authoring.md#edit-and-reload-graphs-rg3).

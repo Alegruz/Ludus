@@ -38,6 +38,7 @@ class AudioWorkspace;
 class ConfigurationWorkspace;
 class ContentWorkspace;
 class ScriptWorkspace;
+class RendererWorkspace;
 class WorldWorkspace;
 class MainWindow : public QMainWindow
 {
@@ -97,6 +98,8 @@ private:
 
     WorldWorkspace* World_ = nullptr;
     ScriptWorkspace* Scripts_ = nullptr;
+    // Created with the other work tabs in the constructor; never null afterwards.
+    RendererWorkspace* Renderer_;
     ConfigurationWorkspace* Configuration_ = nullptr;
     QWidget* ProjectSettings_ = nullptr;
     AudioWorkspace* Audio_ = nullptr;
