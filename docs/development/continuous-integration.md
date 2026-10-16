@@ -159,6 +159,14 @@ zero. Independent commands still report findings. CI always uploads each shard's
 available evidence with 14-day retention; a missing artifact fails the upload.
 These are Q0 inventory/control records, not the proposed Q2 full run schema.
 
+## Scheduled runtime profiling
+
+The separate `performance` workflow runs runtime profiling scenarios nightly on
+hosted Ubuntu and macOS runners, and on manual dispatch. It is not a pull-request
+or merge-queue check: scenario correctness failures fail that workflow, and
+timings are report-only. Reports, Perfetto traces and logs are kept as artifacts
+for 90 days. See [Runtime profiling](runtime-profiling.md).
+
 ## Sanitizer failure controls
 
 `LUDUS_ENABLE_UBSAN=ON` propagates `-fno-sanitize-recover=undefined` through the

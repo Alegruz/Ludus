@@ -5,8 +5,53 @@
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
+#include <ludus/foundation/profiling/profiling.hpp>
+#include <ludus/foundation/profiling/trace_system.hpp>
 #include <ludus/graphics/rhi/rhi.h>
 #include <string_view>
+namespace
+{
+constexpr ludus::foundation::uint64 HEADLESS_DEFAULT_TICKS = 120;
+constexpr ludus::foundation::usize MAX_TRACE_PATH_BYTES = 4096;
+// --trace-output arms a FoundationProfiling capture for the whole run. A
+// profiling-disabled (Release) build cannot honour it, so the request fails
+// instead of silently producing no trace for automated profiling.
+bool BeginRequestedTrace(std::string_view traceOutput) noexcept
+{
+    if (traceOutput.empty() == true)
+    {
+        return true;
+    }
+    ludus::foundation::profiling::RegisterThreadForTrace("Main");
+    if (ludus::foundation::profiling::BeginCapture() == false)
+    {
+        LUDUS_LOG_ERROR(ludus::foundation::logging::LOG_CORE,
+                        "--trace-output requires a profiling-enabled Debug, Development or Profile build");
+        return false;
+    }
+    return true;
+}
+bool WriteRequestedTrace(std::string_view traceOutput) noexcept
+{
+    if (traceOutput.empty() == true)
+    {
+        return true;
+    }
+    ludus::foundation::profiling::EndCapture();
+    const ludus::foundation::profiling::TraceHealth health = ludus::foundation::profiling::GetTraceHealth();
+    if (ludus::foundation::profiling::ExportPerfettoTrace(traceOutput) == false)
+    {
+        LUDUS_LOG_ERROR(ludus::foundation::logging::LOG_CORE, "Could not write profiling trace {}", traceOutput);
+        return false;
+    }
+    LUDUS_LOG_INFO(ludus::foundation::logging::LOG_CORE,
+                   "Wrote profiling trace {}: events={} dropped={}",
+                   traceOutput,
+                   health.EventsRecorded,
+                   health.EventsDropped);
+    return true;
+}
+} // namespace
 #if LUDUS_TARGET_OS == LUDUS_OS_WEB
 #    include <emscripten.h>
 namespace
@@ -62,6 +107,7 @@ int main(int argc, char** argv)
     bool headless = false;
     bool follow = false;
     uint64 frameLimit = 0;
+    std::string_view traceOutput;
     for (int argument = 1; argument < argc; ++argument)
     {
         const std::string_view flag(argv[argument]);
@@ -77,6 +123,14 @@ int main(int argc, char** argv)
         {
             const std::string_view text(argv[++argument]);
             if (ParseUint64(text.data(), text.size(), frameLimit) != NumberParseStatus::Success || frameLimit == 0)
+            {
+                return 1;
+            }
+        }
+        else if (flag == "--trace-output" && argument + 1 < argc)
+        {
+            traceOutput = std::string_view(argv[++argument]);
+            if (traceOutput.empty() == true || traceOutput.size() > MAX_TRACE_PATH_BYTES)
             {
                 return 1;
             }
@@ -127,6 +181,18 @@ int main(int argc, char** argv)
         }
     }
     const auto source = levelSize != 0 ? std::string_view(levelBytes, levelSize) : ExampleLevel();
+#if LUDUS_TARGET_OS == LUDUS_OS_WEB
+    // A browser trace leaves MEMFS only through an explicit page download
+    // (trace_system.hpp), which this demo does not implement.
+    if (headless == false && traceOutput.empty() == false)
+    {
+        return 1;
+    }
+#endif
+    if (BeginRequestedTrace(traceOutput) == false)
+    {
+        return 1;
+    }
     if (headless)
     {
         Session session;
@@ -145,18 +211,21 @@ int main(int argc, char** argv)
         {
             return 1;
         }
-        for (usize tick = 0; tick < 120; ++tick)
+        // --frames selects the headless tick count; the reference run keeps 120.
+        const uint64 tickCount = frameLimit != 0 ? frameLimit : HEADLESS_DEFAULT_TICKS;
+        for (uint64 tick = 0; tick < tickCount; ++tick)
         {
             if (session.World().RunTick({ .Axis = {0.5F, 0} }) != Status::Success)
             {
                 return 1;
             }
+            LUDUS_PROFILE_FRAME();
         }
         LUDUS_LOG_INFO(ludus::foundation::logging::LOG_CORE,
                        "Headless reference: ticks={} hash={}",
                        session.World().GetTick(),
                        session.World().GetReplayHash());
-        return 0;
+        return WriteRequestedTrace(traceOutput) == true ? 0 : 1;
     }
 #if LUDUS_TARGET_OS == LUDUS_OS_WEB
     (void)follow;
@@ -183,8 +252,9 @@ int main(int argc, char** argv)
     LUDUS_LOG_INFO(ludus::foundation::logging::LOG_CORE,
                    "Reference presented {} frames",
                    application.GetPresentedFrames());
-    const auto state = application.GetState();
+    const AppState state = application.GetState();
     application.Shutdown();
-    return state == AppState::Failed ? 1 : 0;
+    const bool isTraceWritten = WriteRequestedTrace(traceOutput);
+    return state == AppState::Failed || isTraceWritten == false ? 1 : 0;
 #endif
 }
