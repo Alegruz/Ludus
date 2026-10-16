@@ -10,7 +10,7 @@ not a claim of production readiness on every platform.
 | Independent games | Installed CLI, SDK selection, local presets, setup checks and staged creation | Initial native reference toolchain; release identity and SDK compatibility are validated |
 | Audio | Native content definitions, catalog, editing and runtime-backed preview | Check the audio evidence for device and hosted acceptance limits |
 | Configuration | Typed runtime schema, cooked layers, sparse preferences and offline editor preview | Preference edits apply to a future launch, not the running host |
-| Strings and hashing | [Owned/shared bytes, scoped names and lookup hashes](../guides/strings.md) | Explicit lifetimes and failures; cooked dictionaries and editor strings inspection remain future work |
+| Strings and hashing | [Owned/shared bytes, scoped names, cooked dictionaries and lookup hashes](../guides/strings.md) | Explicit lifetimes and failures; dictionary adoption by a content cooker and editor strings inspection remain future work |
 | Filesystem | [Immutable mounts, validated packs and bounded background reads](../guides/filesystem.md) | Native directories on Linux/macOS; async memory/pack workers on native targets; browser async reports Unsupported; persistence/watchers remain F5 |
 | Randomness | [Caller-owned PCG32 streams and addressed Philox samples](../guides/randomness.md) | Deterministic primitives; game-owned identities/state, no automatic replay or editor RNG inspector |
 | Time | [Shared monotonic clock and owner-local stopwatch/deadline/frame helpers](../guides/time.md) | Nanosecond storage; simulation integration, scheduling, pacing and editor timing telemetry remain separate work |

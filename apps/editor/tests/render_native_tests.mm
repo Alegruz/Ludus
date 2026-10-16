@@ -19,6 +19,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QMouseEvent>
 #include <QSize>
 #include <QTemporaryDir>
 #include <QTest>
@@ -256,7 +257,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     viewport.setContentsMargins(7, 11, 13, 17);
     viewport.show();
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(preview.Start());
     const bool presented = Frames(preview, 3);
     INFO(preview.Status().toStdString());
@@ -317,7 +318,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(Frames(preview, 3));
     CHECK(ReadViewport() == embedded);
     CHECK(world.Draft() == original);
-    // Native window events are forwarded to the persistent editor navigation model.
+    // Native child input changes the live extracted World image without editing the document.
+    const QJsonObject authoredNavigation = preview.Navigation();
     for (QWindow* window : QGuiApplication::allWindows())
     {
         if (window->objectName() == QStringLiteral("LudusGpuViewport"))
@@ -325,15 +327,56 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
             QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
             QTest::mouseMove(window, QPoint(145, 120));
             QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(145, 120));
+            CHECK(preview.Navigation() == authoredNavigation);
+            preview.Navigate(-1, {80, 40}, 20, false);
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            CHECK(ReadViewport() == embedded);
+            QTest::mousePress(window, Qt::LeftButton, Qt::AltModifier, QPoint(100, 100));
+            const QPoint orbitPosition(145, 120);
+            QMouseEvent orbitMove(QEvent::MouseMove,
+                                  orbitPosition,
+                                  window->mapToGlobal(orbitPosition),
+                                  Qt::NoButton,
+                                  Qt::LeftButton,
+                                  Qt::AltModifier);
+            QApplication::sendEvent(window, &orbitMove);
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::AltModifier, QPoint(145, 120));
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            const QImage orbited = ReadViewport();
+            CHECK(orbited != embedded);
+            QTest::mousePress(window, Qt::MiddleButton, Qt::NoModifier, QPoint(145, 120));
+            QTest::mouseMove(window, QPoint(170, 130));
+            QTest::mouseRelease(window, Qt::MiddleButton, Qt::NoModifier, QPoint(170, 130));
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            CHECK(ReadViewport() != orbited);
+            const QJsonObject beforeFly = preview.Navigation();
+            QTest::mousePress(window, Qt::RightButton, Qt::NoModifier, QPoint(170, 130));
+            QTest::qWait(20);
+            CHECK(preview.Navigation() == beforeFly);
+            QTest::keyPress(window, Qt::Key_W);
+            QTest::qWait(100);
+            QTest::mouseRelease(window, Qt::RightButton, Qt::NoModifier, QPoint(170, 130));
+            CHECK(preview.Navigation() != beforeFly);
+            const QJsonObject stopped = preview.Navigation();
+            QTest::qWait(60);
+            CHECK(preview.Navigation() == stopped);
+            preview.SetSelection(QStringLiteral("starter.cube"));
+            QTest::keyClick(window, Qt::Key_F);
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            CHECK(preview.Report().Visible == 1);
+            CHECK(ReadViewport() != embedded);
+            if (qEnvironmentVariableIsSet("LUDUS_GPU_NAVIGATION_IMAGE") == true)
+            {
+                REQUIRE(ReadViewport().save(qEnvironmentVariable("LUDUS_GPU_NAVIGATION_IMAGE")));
+            }
         }
     }
-    REQUIRE(Frames(preview, preview.Frames() + 3));
-    CHECK(preview.Navigation().value(QStringLiteral("yaw")).toDouble() != 0);
+    CHECK(world.Draft() == original);
     const QJsonObject navigation = preview.Navigation();
-    preview.Navigate(-1, 70, 30, 4, false);
+    preview.Navigate(-1, {70, 30}, 4, false);
     preview.RestoreNavigation(navigation);
     CHECK(preview.Navigation() == navigation);
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Submitted == 1);
     CHECK(preview.Report().Visible == 1);
@@ -352,7 +395,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(RenderScene::Load(root, world, scene, error));
     CHECK(scene.Surfaces.size() == 1);
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Visible == 12);
     CHECK(preview.Report().Draws == 1);
@@ -362,7 +405,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     }
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK_FALSE(world.Dirty());
     CHECK(preview.WindowInfo().System == ludus::platform::WindowSystem::Headless);
@@ -382,27 +425,28 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
         world.Edit(QStringLiteral("starter.cube"), components, entity.value(QStringLiteral("name")).toString(), error));
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Culled == 1);
     CHECK(preview.Report().Visible == 0);
     embedded = ReadViewport();
     CHECK(embedded.pixelColor(embedded.width() / 2, embedded.height() / 2) == embedded.pixelColor(0, 0));
-    preview.Navigate(0, 0, 0, 3, true);
+    preview.Navigate(0, {0, 0}, 3, true);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
     CHECK(preview.Report().Culled == 0);
     REQUIRE(world.Undo());
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Visible == 1);
     CHECK_FALSE(world.Dirty());
     // Object edits preserve the independent orbit anchor until explicit Frame All.
-    preview.Navigate(-1, 25, 20, 3, false);
+    preview.Navigate(-1, {25, 20}, 3, false);
     REQUIRE(Frames(preview, preview.Frames() + 3));
-    const auto eye = preview.ViewDescription().CameraPosition;
+    const ludus::foundation::math::Vector3 eye = preview.ViewDescription().CameraPosition;
+    const QJsonObject orbitNavigation = preview.Navigation();
     entity = world.Entity(QStringLiteral("starter.cube"));
     components = entity.value(QStringLiteral("components")).toObject();
     transform = components.value(QStringLiteral("transform")).toObject();
@@ -412,7 +456,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
         world.Edit(QStringLiteral("starter.cube"), components, entity.value(QStringLiteral("name")).toString(), error));
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(-1, 25, 20, 3, false);
+    CHECK(preview.Navigation() == orbitNavigation);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.ViewDescription().CameraPosition == eye);
     CHECK(preview.Report().Culled == 1);
@@ -423,7 +467,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
     preview.FrameAll();
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     preview.Stop();
     CHECK_FALSE(preview.Running());

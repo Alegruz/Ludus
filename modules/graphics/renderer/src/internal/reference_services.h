@@ -61,9 +61,10 @@ bool SameReferenceIntegral(const ReferenceJob& a,
 Status ValidateReferenceDescription(const ReferenceCaptureDescription& d, LightSelection& lights) noexcept
 {
     if (d.Width == 0 || d.Height == 0 || d.Width > 16384 || d.Height > 16384 || d.TargetSamples == 0 ||
-        d.TargetSamples >= (uint32{1} << 24) || d.MaxDepth == 0 || d.MaxDepth > 64 || d.RouletteDepth == 0 ||
-        d.RouletteDepth > 64 || !math::IsFinite(d.SecondaryDistance) || d.SecondaryDistance <= 0 ||
-        d.SecondaryDistance > 2000000 || !internal::ReferenceColor(d.Environment, 10000) || d.TextureMip >= 16)
+        d.TargetSamples >= (uint32{1} << 24) || d.MaxDepth == 0 || d.MaxDepth > LUDUS_REFERENCE_MAX_DEPTH ||
+        d.RouletteDepth == 0 || d.RouletteDepth > 64 || math::IsFinite(d.SecondaryDistance) == false ||
+        d.SecondaryDistance <= 0 || d.SecondaryDistance > 2000000 ||
+        internal::ReferenceColor(d.Environment, 10000) == false || d.TextureMip >= 16)
     {
         return Status::InvalidDescription;
     }
@@ -1252,7 +1253,7 @@ Status Renderer::AdvanceReferenceCapture(ReferenceCapture handle) noexcept
         }
         for (usize i = 0; i < job.PathCount; ++i)
         {
-            const auto prepared = internal::PrepareReferenceVertex(job, job.Paths[i], job.Hits[i]);
+            const Status prepared = internal::PrepareReferenceVertex(job, job.Info, job.Paths[i], job.Hits[i]);
             if (prepared != Status::Ready)
             {
                 return fail(prepared);
@@ -1329,7 +1330,7 @@ Status Renderer::AdvanceReferenceCapture(ReferenceCapture handle) noexcept
             if (path.NextQuery != ~usize{0})
             {
                 path.Ray = path.Next;
-                const auto prepared = internal::PrepareReferenceVertex(job, path, job.Hits[path.NextQuery]);
+                const Status prepared = internal::PrepareReferenceVertex(job, job.Info, path, job.Hits[path.NextQuery]);
                 if (prepared != Status::Ready)
                 {
                     return fail(prepared);

@@ -6,10 +6,14 @@ address construction, Philox4x32-10 raw/block/float samples, and bounded samplin
 with a prepared-bound option. Existing PCG32 v1 behavior remains authoritative in
 the [math specification](../../.kiro/specs/math/design.md#11-random-stream-specification).
 The implementation adds reference-answer, boundary, rejection-budget, allocation,
-worker-order, installed-SDK, and pinned WebAssembly corpus checks. It makes no
-throughput or statistical certification claim. Sequential seed factories, wire
-state codecs, probability/weighted distributions, world registries/manifests,
-designer policies, security entropy, and GPU sampling remain future work.
+worker-order, installed-SDK, and pinned WebAssembly corpus checks. FoundationMath's
+shader source `math.slang` carries a bit-exact port of the addressed raw, float
+and bounded samplers for kernels; the renderer's GPU preview path tracer uses it,
+and a GPU test checks it against the pinned known answers and the CPU reference
+(see [GPU addressed sampling](#gpu-addressed-sampling)). It makes no throughput
+or statistical certification claim. Sequential seed factories, wire state codecs,
+probability/weighted distributions, world registries/manifests, designer
+policies, and security entropy remain future work.
 
 The specification below describes the complete target architecture. Code uses
 `TryMakeRandomKey`, `TryMakeRandomAddress`, `SampleUInt32`, `SampleFloat01`,
@@ -442,17 +446,64 @@ Cosmetic particles, audio variation, and rendering have separate domains and
 owners. Changing render rate, visibility, debug draws, or audio completion timing
 must never advance authoritative simulation streams.
 
-For a future GPU consumer, generate Philox samples inside the consuming kernel
-instead of uploading an entire random-number buffer. Shader code belongs to the
-renderer; FoundationMath never depends on RHI or shader tooling. WGSL's ordinary
-integer vocabulary cannot directly reuse C++'s `uint64` multiplication. Verify
-high/low 32-bit product code with 16-bit limbs and exact carries against the
-scalar reference before promising CPU/GPU integer parity. Benchmark the limb
-cost and register pressure. Keep CPU parity required only for consumers that
-actually need it; any alternate cosmetic hash is a separately versioned visual
-algorithm, never an unnoticed replacement for Philox simulation samples.
-Shader integer requirements come from the
-[WGSL specification](https://www.w3.org/TR/WGSL/#integer-types).
+### GPU addressed sampling
+
+Kernels generate Philox samples in place instead of uploading a buffer of random
+numbers. The shared primitive is shader source owned by FoundationMath,
+`modules/foundation/math/shaders/math.slang`, installed beside the other SDK
+shader includes; general GPU math/random primitives belong there rather than in
+each consumer. That ownership adds no C++ dependency: the FoundationMath library
+never depends on RHI or shader tooling. Consumers own everything else: the
+renderer chooses its key, scopes, dimension schema and failure handling, and
+writes its sampling code in its own kernels.
+
+The port implements addressed random layout v1 and bounded mapping v1 exactly:
+
+| Shader | CPU contract |
+| --- | --- |
+| `RandomAddress { uint2 Scope; uint Event; uint Dimension; }` | `RandomAddress`; `Scope` is `(low32, high32)` of the 64-bit scope because WGSL has no `uint64` |
+| `Philox4x32(counter, key)` | Philox4x32-10; `key.x`/`key.y` are the low/high words of `RandomKey::Value` |
+| `SampleRandomUInt32`, `SampleRandomFloat01` | `SampleUInt32`, `SampleFloat01` |
+| `TrySampleRandomBounded(key, address, bound, out value)` | `TrySampleBounded`; returns `false` for bound zero, an out-of-range dimension, or after 65,536 rejected attempts |
+| `RANDOM_MAX_DIMENSION`, `RANDOM_ATTEMPT_COUNT`, version constants | `RandomMaxDimension`, `RandomBoundedAttemptCount`, `RandomAddressLayoutVersion`, `RandomBoundedMappingVersion` |
+
+Shader integers are 32 bits, so the address limits are explicit caller
+contracts. A dimension must not exceed 65,535: check it with
+`IsRandomAddressInRange` or prove it from admitted limits. The packing masks the
+dimension to 16 bits, so a violation aliases `dimension % 65536`, exactly as CPU
+`uint16` narrowing would; it can never spill into the attempt bits and alias
+another address's retry. The bounded sampler rejects out-of-range dimensions.
+Bounded failure is a `bool` result, not a sentinel output value, and callers
+must branch on it. The GPU preview path tracer, for example, fails the sample.
+A 32-bit owner identity uses `uint2(identity, 0)`, as the CPU reference path
+does with its pixel scopes.
+
+WGSL's ordinary integer vocabulary cannot reuse C++'s `uint64` multiplication,
+so `MultiplyWide` forms the 64-bit product from 16-bit limbs. The
+[WGSL specification](https://www.w3.org/TR/WGSL/#integer-types) defines these
+integer types. Each partial sum stays below 2^32. The renderer's GPU test
+`modules/graphics/renderer/tests/gpu_random_tests.cpp` runs a compute kernel
+over the following cases, which every backend must reproduce exactly:
+
+- the three pinned Random123 known answers and the Ludus v1 golden answers,
+  including the forced-rejection address;
+- live parity with `SampleUInt32`, `SampleFloat01` and `TrySampleBounded` across
+  both key and scope words, event extremes, lanes 0-3/4-7, the top of the
+  dimension range, out-of-range dimensions and rejection-heavy, 16-bit-crossing
+  and zero bounds;
+- the production retry loop with injected draws: exhaustion with a source that
+  would accept one extra attempt, acceptance on the last attempt, and a unit bound;
+- endpoint float mappings and the shader's copies of the versions and limits;
+- `MultiplyWide` over every pair of limb-edge values and exhaustive sweeps of
+  each limb against an all-ones operand.
+
+The test runs on Metal (macOS) and Vulkan (Linux GPU CI) and skips only when no
+Metal adapter exists. The kernel also compiles to WGSL in native Linux builds,
+but no browser job executes it yet, so WebGPU parity is not yet claimed.
+Benchmark the limb cost and register pressure before optimizing. Keep CPU parity
+required only for consumers that actually need it; any alternate cosmetic hash
+is a separately versioned visual algorithm, never an unnoticed replacement for
+Philox simulation samples.
 
 ## Replay, persistence, networking, and entropy
 
@@ -535,7 +586,7 @@ prove correctness or cryptographic quality.
 | Isolation | Add cosmetic draws, disable rendering/audio, add a dimension, and change unrelated domain content; existing authoritative choices remain unchanged |
 | Save/rollback/reload | Mid-sequence restore; policy/event/ID allocator restoration; duplicate owners and corrupt/unsupported manifests rejected without partial restore |
 | Weighted/policy | Exact small integer tickets and alias mass checks; zero/overflow weights; deterministic bags and content changes; policy statistical expectations tested separately |
-| Portability | Identical raw/mapping corpus on pinned native toolchain and pinned Emscripten; future ARM/GPU qualification before claiming their parity |
+| Portability | Identical raw/mapping corpus on pinned native toolchain and pinned Emscripten; GPU known-answer, raw/float/bounded parity, retry-loop and limb-product corpus on Metal and Vulkan ([GPU addressed sampling](#gpu-addressed-sampling)); WebGPU execution and ARM qualification before claiming their parity |
 | Integration | Warning-clean builds, unit and ASan/UBSan tests, format/tidy, header/include/build-budget gates, installed SDK consumer |
 | Quality | Offline PractRand/TestU01 and targeted interleaved-domain/nearby-scope patterns, high/low bits, lane patterns; record tool versions, corpora, failures and data volume |
 
@@ -567,8 +618,9 @@ Implement the initial architecture before evaluating the later research below.
 The PCG32 v1 and addressed Philox primitives are the starting point; their
 reference, boundary, rejection-budget, allocation and worker-order fixtures,
 installed-SDK checks and representative WebAssembly corpus are already in the
-repository. A real game/world consumer and its persistence protocol remain to
-be delivered.
+repository. So are the shader port in FoundationMath's `math.slang`, its renderer
+GPU-preview consumer and its Metal/Vulkan parity test. A real game/world consumer
+and its persistence protocol remain to be delivered.
 
 ### Remaining initial implementation
 
@@ -582,6 +634,7 @@ be delivered.
 | Authored policies and planning models | Game/domain and tools | Persist the required bag/no-repeat/pity/cooldown or decision state; let planners read the same immutable outcome model without advancing live RNG; isolate rollout domains. |
 | Optional automatic seed acquisition | Platform and application setup | Add checked OS/browser secure bytes when automatic seeds are required; acquire and record one root seed; report failure without an implicit fallback. Explicit deterministic seeds remain valid. |
 | Observation and qualification | Runtime/tools and validation tooling | Add bounded logical-context tracing and per-owner raw-draw counts where needed; complete consumer save/isolation regressions, native/web acceptance and offline statistical qualification; record representative performance baselines before optimization. |
+| WebGPU parity execution | Graphics validation | Run the GPU addressed-random parity kernel in the browser WebGPU job and record its result before claiming WebGPU parity; the kernel already compiles to WGSL. |
 
 Deliver this work in the following order:
 
@@ -623,7 +676,7 @@ without changing the existing generator or replay contracts.
 
 Start the detailed review with the WSC survey, TestU01 and parallel weighted
 sampling. Treat batching, randomness recycling, cooked alias tables, reservoir
-selection, SIMD blocks, GPU sampling and alternate generators as subsequent
+selection, SIMD blocks, faster GPU products and alternate generators as subsequent
 experiments driven by a real consumer.
 
 For each experiment, pin the source revision, preserve attribution/licensing,
@@ -646,8 +699,9 @@ test results are evidence about the authors' implementations, not Ludus results.
 | OS CSPRNG everywhere | Correct source for security and root entropy. Simulation still needs explicit deterministic ownership and stable replay sampling. |
 | Global or automatic thread-local stream | Hidden coupling and schedule-dependent simulation results; excluded. |
 
-Core primitives and representative native/WebAssembly fixtures are implemented.
-Game/world integration, broader acceptance evidence, performance baselines, GPU
-parity and statistical qualification remain work for the milestones above.
+Core primitives, representative native/WebAssembly fixtures and Metal/Vulkan
+GPU parity are implemented. Game/world integration, broader acceptance evidence,
+performance baselines, WebGPU parity execution and statistical qualification
+remain work for the milestones above.
 Complete the initial implementation before using the research backlog to propose
 measured improvements.

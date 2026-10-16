@@ -1,0 +1,154 @@
+name: Batched integration and promotion
+
+# Thanks to GitHub, "Reuse workflows" and "Events that trigger workflows":
+# the schedule runs trusted workflow definitions on main; reusable jobs check
+# out the frozen develop SHA. New develop pushes never cancel an active candidate.
+# https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows
+# https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
+on:
+  schedule:
+    - cron: '13,43 * * * *'
+  workflow_dispatch:
+    inputs:
+      retry:
+        description: Retry the same develop commit after an infrastructure failure.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ludus-batch-promotion
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    if: github.ref == 'refs/heads/main' && vars.BATCH_CI_ENABLED == 'true'
+    name: Capture develop candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: batch-promotion
+    outputs:
+      should_run: ${{ steps.capture.outputs.should_run }}
+      base_sha: ${{ steps.capture.outputs.base_sha }}
+      candidate_sha: ${{ steps.capture.outputs.candidate_sha }}
+      recovery_required: ${{ steps.capture.outputs.recovery_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Mint repository-scoped attempt credential
+        id: attempt-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.BATCH_PROMOTION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BATCH_PROMOTION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+      - name: Capture exact commit and record this attempt
+        id: capture
+        env:
+          GH_TOKEN: ${{ steps.attempt-token.outputs.token }}
+          SHOULD_RETRY: ${{ inputs.retry }}
+        run: |
+          arguments=()
+          if [ "$SHOULD_RETRY" = true ]; then arguments+=(--retry); fi
+          python3 scripts/python/batch_ci.py snapshot "${arguments[@]}"
+
+  native:
+    needs: snapshot
+    if: needs.snapshot.outputs.should_run == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      batch_sha: ${{ needs.snapshot.outputs.candidate_sha }}
+      batch_base_sha: ${{ needs.snapshot.outputs.base_sha }}
+
+  sdk:
+    needs: snapshot
+    if: needs.snapshot.outputs.should_run == 'true'
+    uses: ./.github/workflows/project-sdk.yml
+    with:
+      batch_sha: ${{ needs.snapshot.outputs.candidate_sha }}
+      batch_base_sha: ${{ needs.snapshot.outputs.base_sha }}
+
+  wiki:
+    needs: snapshot
+    if: needs.snapshot.outputs.should_run == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/wiki.yml
+    with:
+      batch_sha: ${{ needs.snapshot.outputs.candidate_sha }}
+      batch_base_sha: ${{ needs.snapshot.outputs.base_sha }}
+
+  browser:
+    needs: snapshot
+    if: needs.snapshot.outputs.should_run == 'true'
+    uses: ./.github/workflows/webgpu-probe.yml
+    with:
+      batch_sha: ${{ needs.snapshot.outputs.candidate_sha }}
+      batch_base_sha: ${{ needs.snapshot.outputs.base_sha }}
+
+  recovery:
+    needs: snapshot
+    if: needs.snapshot.outputs.should_run == 'true' && needs.snapshot.outputs.recovery_required == 'true'
+    uses: ./.github/workflows/filesystem-recovery.yml
+    with:
+      batch_sha: ${{ needs.snapshot.outputs.candidate_sha }}
+      batch_base_sha: ${{ needs.snapshot.outputs.base_sha }}
+
+  promote:
+    name: Promote validated candidate
+    needs: [snapshot, native, sdk, wiki, browser, recovery]
+    if: >-
+      always() && !cancelled() && needs.snapshot.outputs.should_run == 'true' &&
+      needs.native.result == 'success' && needs.sdk.result == 'success' &&
+      needs.wiki.result == 'success' && needs.browser.result == 'success' &&
+      (needs.recovery.result == 'success' || needs.recovery.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: batch-promotion
+    steps:
+      # This is the scheduler's trusted main revision, never candidate code.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Mint repository-scoped promotion credential
+        id: promotion-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.BATCH_PROMOTION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BATCH_PROMOTION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+      - name: Promote only the tested commit with an explicit main lease
+        env:
+          GH_TOKEN: ${{ steps.promotion-token.outputs.token }}
+          BATCH_BASE_SHA: ${{ needs.snapshot.outputs.base_sha }}
+          BATCH_CANDIDATE_SHA: ${{ needs.snapshot.outputs.candidate_sha }}
+          BATCH_RESULTS: ${{ toJSON(needs) }}
+        run: python3 scripts/python/batch_ci.py promote --base "$BATCH_BASE_SHA" --candidate "$BATCH_CANDIDATE_SHA"
+
+  publish:
+    name: Publish promoted documentation
+    needs: promote
+    # Thanks to GitHub, "Workflow syntax for GitHub Actions", jobs.<job_id>.needs:
+    # skipped optional ancestors must not suppress publication after promotion.
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds
+    if: always() && !cancelled() && needs.promote.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Deploy the already validated candidate artifact
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

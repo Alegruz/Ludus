@@ -446,9 +446,15 @@ TEST_CASE("World layout remains usable in a compact desktop window", "[editor][w
     view.findChild<QListWidget*>(QStringLiteral("worldEntities"))->setCurrentRow(0);
     QTest::qWait(10);
     CHECK(view.minimumSizeHint().width() <= 800);
-    for (auto* field : view.findChildren<QLineEdit*>())
+    for (QLineEdit* field : view.findChildren<QLineEdit*>())
     {
-        CHECK(field->height() >= field->minimumSizeHint().height());
+        // Collapsed camera settings contain a spin-box editor that has not been laid out yet.
+        // Its visible geometry is checked after expanding those settings in render_authoring_tests.
+        if (field->isVisible() == true)
+        {
+            INFO(field->objectName().toStdString());
+            CHECK(field->height() >= field->minimumSizeHint().height());
+        }
     }
     CHECK(view.findChild<QPushButton*>(QStringLiteral("worldApply"))->geometry().bottom() <= view.height());
     // A long entity name plus persisted UUID must not widen the inspector.

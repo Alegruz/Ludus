@@ -30,8 +30,8 @@ struct SystemGuard
 
 FontId LoadFixture(FontSystem* system, const char* file)
 {
-    auto bytes = LoadFixtureFont(file);
-    REQUIRE_FALSE(bytes.empty());
+    const ludus::foundation::Array<ludus::foundation::uint8> bytes = LoadFixtureFont(file);
+    REQUIRE(bytes.IsEmpty() == false);
     FontId font;
     REQUIRE(IsOk(LoadFont(system, bytes, 0, &font)));
     return font;
@@ -114,7 +114,8 @@ TEST_CASE("Scratch is only valid until the next raster call", "[text][raster]")
     GlyphBitmap first;
     REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, a, &first)));
     // Copy immediately, as the contract requires.
-    std::vector<ludus::foundation::uint8> copy(first.Coverage.begin(), first.Coverage.end());
+    const ludus::foundation::Array<ludus::foundation::uint8> copy =
+        ludus::foundation::Array<ludus::foundation::uint8>::FromRange(first.Coverage);
 
     GlyphBitmap second;
     REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, b, &second)));

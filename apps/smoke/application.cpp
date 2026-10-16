@@ -1,8 +1,8 @@
 #include "internal/application.h"
 #include "internal/renderer.h"
 #include <ludus/foundation/logging/log_format.hpp>
-#include <ludus/foundation/profiling/clock.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
+#include <ludus/foundation/time/time.hpp>
 namespace ludus::smoke
 {
 using namespace foundation;
@@ -145,7 +145,7 @@ void Application::Shutdown() noexcept
     LUDUS_REQUIRE(stopped == lifecycle::State::Stopped);
     mState = State::Stopped;
     mError = rhi::StartupError::None;
-    mLastTick = 0;
+    mFrameClock.Reset();
 }
 void Application::Fail(State state, rhi::StartupError error, usize nodeId) noexcept
 {
@@ -184,7 +184,8 @@ bool Application::Start(rhi::BackendSelection selection) noexcept
         return false;
     }
     mState = State::Loading;
-    mLastTick = profiling::NowTicks();
+    // Startup: the first Playing callback establishes a zero-elapsed baseline.
+    mFrameClock.Reset();
     return true;
 }
 State Application::Tick() noexcept
@@ -199,9 +200,8 @@ State Application::Tick() noexcept
         Shutdown();
         return mState;
     }
-    const auto now = profiling::NowTicks();
-    const float64 delta = now >= mLastTick ? static_cast<float64>(now - mLastTick) / 1000000000.0 : 0;
-    mLastTick = now;
+    // The one frame timestamp; suspension resets below apply before it is sampled.
+    const time::Timestamp now = time::Now();
     if (mState == State::Loading)
     {
         const auto state = mLifecycle.Advance(NodeCount);
@@ -243,8 +243,16 @@ State Application::Tick() noexcept
     {
         // Held keys/buttons and pointer positions come from the snapshot,
         // including after queue overflow, blur and visibility transitions.
+        // Platform queues InputReset when the page is hidden or blurred. A
+        // hidden page stops callbacks, so the queued reset marks an interval
+        // spanning hidden time. Visibility events also fire on focus/resize
+        // refreshes and do not distinguish hiding from showing.
+        if (event.Kind == platform::browser::EventKind::InputReset)
+        {
+            mFrameClock.Reset();
+        }
     }
-    Advance(mSimulation, input, delta);
+    Advance(mSimulation, input, SampleFrame(mFrameClock, now, input.Visible));
     const auto rendered = renderer::Render(input, mSimulation);
     if (rendered == rhi::FrameStatus::Failed || rendered == rhi::FrameStatus::InvalidState)
     {

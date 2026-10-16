@@ -4,6 +4,7 @@
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/scalar.hpp>
+#include <ludus/foundation/threading/jobs.hpp>
 #include <ludus/graphics/renderer/lighting.hpp>
 #include <ludus/runtime/resources/scene.h>
 
@@ -114,6 +115,89 @@ math::Vector3 ReadChart(const rr::StaticLightingChart& chart)
     return {float32(chart.Pixels[0]) / 255 * chart.Scale.X,
             float32(chart.Pixels[1]) / 255 * chart.Scale.Y,
             float32(chart.Pixels[2]) / 255 * chart.Scale.Z};
+}
+namespace threading = ludus::foundation::threading;
+constexpr uint32 ORACLE_GRID_CELLS = 6;  // 72 receiver triangles plus emitters and a blocker.
+constexpr uint32 CANCEL_GRID_CELLS = 32; // 2048 receiver triangles; long enough to cancel mid-bake.
+constexpr uint32 CANCEL_SAMPLES = 256;   // Uncancelled, this bake takes seconds.
+constexpr uint32 QUAD_TRIANGLES = 2;
+// The point-lit receiver of MakeBakeScene, retessellated as a cells x cells grid so
+// ranges split real work. Emitters and the blocker keep their single triangles.
+resources::SceneDefinition MakeGridBakeScene(uint32 cells)
+{
+    resources::SceneDefinition scene = MakeBakeScene(true, true, true);
+    resources::SceneMesh& grid = scene.Meshes[0];
+    const usize vertexCount = usize(cells + 1) * (cells + 1);
+    REQUIRE(grid.Positions.TryResize(vertexCount) == true);
+    REQUIRE(grid.Normals.TryResize(vertexCount) == true);
+    REQUIRE(grid.Texcoords.TryResize(vertexCount) == true);
+    REQUIRE(grid.Indices.TryResize(usize(cells) * cells * QUAD_TRIANGLES * TRIANGLE_CORNERS) == true);
+    for (uint32 y = 0; y <= cells; ++y)
+    {
+        for (uint32 x = 0; x <= cells; ++x)
+        {
+            const usize vertex = usize(y) * (cells + 1) + x;
+            const float32 u = float32(x) / float32(cells);
+            const float32 v = float32(y) / float32(cells);
+            grid.Positions[vertex] = {u * 4 - 2, v * 4 - 2, 0};
+            grid.Normals[vertex] = {0, 0, 1};
+            grid.Texcoords[vertex] = {u, v};
+        }
+    }
+    usize index = 0;
+    for (uint32 y = 0; y < cells; ++y)
+    {
+        for (uint32 x = 0; x < cells; ++x)
+        {
+            const uint32 corner = y * (cells + 1) + x;
+            for (const uint32 vertex :
+                 {corner, corner + 1, corner + cells + 2, corner, corner + cells + 2, corner + cells + 1})
+            {
+                grid.Indices[index++] = vertex;
+            }
+        }
+    }
+    // A small blocker above part of the grid so neighbouring triangles differ.
+    resources::SceneObject& blocker = scene.Objects[scene.Objects.GetSize() - 1];
+    blocker.Transform.Columns[0].X = 2;
+    blocker.Transform.Columns[1].Y = 2;
+    blocker.Transform.Translation = {.5F, .5F, .25F};
+    return scene;
+}
+void RequireIdenticalCharts(const rr::StaticLightingBake& oracle,
+                            const rr::StaticLightingBake& candidate,
+                            usize objectCount)
+{
+    for (usize i = 0; i < objectCount; ++i)
+    {
+        rr::StaticLightingChart expected;
+        rr::StaticLightingChart actual;
+        REQUIRE(oracle.GetChart(i, expected) == rhi::RasterStatus::Ready);
+        REQUIRE(candidate.GetChart(i, actual) == rhi::RasterStatus::Ready);
+        REQUIRE(actual.Width == expected.Width);
+        REQUIRE(actual.Height == expected.Height);
+        REQUIRE(actual.SourceId == expected.SourceId);
+        REQUIRE(actual.SceneRevision == expected.SceneRevision);
+        REQUIRE(actual.DependencyRevision == expected.DependencyRevision);
+        REQUIRE(actual.Transform == expected.Transform);
+        // Scales are finite and at least 1e-6, so equality is exact bit equality.
+        REQUIRE(actual.Scale == expected.Scale);
+        REQUIRE(actual.Pixels.GetSize() == expected.Pixels.GetSize());
+        REQUIRE(std::memcmp(actual.Pixels.GetDataOrNull(), expected.Pixels.GetDataOrNull(), actual.Pixels.GetSize()) ==
+                0);
+    }
+}
+// Polls until the first range has published progress, or the bake resolves.
+rhi::RasterStatus WaitForProgress(rr::StaticLightingBake& inoutBake)
+{
+    rhi::RasterStatus status = rhi::RasterStatus::Pending;
+    rr::StaticLightingBakeProgress progress;
+    while (status == rhi::RasterStatus::Pending && progress.CompletedSamples == 0)
+    {
+        inoutBake.GetProgress(progress);
+        status = inoutBake.Poll();
+    }
+    return status;
 }
 } // namespace
 TEST_CASE("Static area bake lights all thirteen emitters, respects blockers and preserves pending charts",
@@ -293,4 +377,175 @@ TEST_CASE("Static chart encoding rejects excess irradiance without publishing pa
     output.SourceId = 999;
     REQUIRE(bake.GetChart(0, output) == rhi::RasterStatus::CapacityExceeded);
     REQUIRE(output.SourceId == 999);
+}
+
+TEST_CASE("Scheduled static bake matches the serial Step oracle bit for bit", "[renderer][static-lighting][threading]")
+{
+    const resources::SceneDefinition scene = MakeGridBakeScene(ORACLE_GRID_CELLS);
+    const rr::StaticLightingBakeDescription description = MakeBakeDescription(16);
+    rr::StaticLightingBake oracle;
+    REQUIRE(oracle.Initialize(scene, description) == rhi::RasterStatus::Pending);
+    static_cast<void>(CompleteBake(oracle, 97));
+    rr::StaticLightingBakeProgress oracleProgress;
+    oracle.GetProgress(oracleProgress);
+    REQUIRE(oracleProgress.TotalSamples != 0);
+    REQUIRE(oracleProgress.CompletedSamples == oracleProgress.TotalSamples);
+    // Zero workers is the serial executor; 1024 ranges exceed the triangle count.
+    for (const uint32 workers : {0U, 1U, 2U, 4U})
+    {
+        threading::JobSystem system;
+        REQUIRE(system.Initialize({ .WorkerCount = workers }) == threading::JobStatus::Ok);
+        for (const uint32 ranges : {1U, 3U, 64U, rr::MAX_STATIC_LIGHTING_RANGES})
+        {
+            CAPTURE(workers, ranges);
+            rr::StaticLightingBake bake;
+            REQUIRE(bake.Submit(system, scene, description, { .RangeCount = ranges }) == rhi::RasterStatus::Pending);
+            REQUIRE(bake.Step(1) == rhi::RasterStatus::InvalidState);
+            REQUIRE(bake.Initialize(scene, description) == rhi::RasterStatus::InvalidState);
+            rhi::RasterStatus status = rhi::RasterStatus::Pending;
+            if (workers == 2)
+            {
+                while (status == rhi::RasterStatus::Pending)
+                {
+                    status = bake.Poll();
+                }
+            }
+            else
+            {
+                status = bake.Finish();
+            }
+            REQUIRE(status == rhi::RasterStatus::Ready);
+            REQUIRE(bake.Poll() == rhi::RasterStatus::Ready);
+            REQUIRE(bake.Finish() == rhi::RasterStatus::Ready);
+            RequireIdenticalCharts(oracle, bake, scene.Objects.GetSize());
+            rr::StaticLightingBakeProgress progress;
+            bake.GetProgress(progress);
+            REQUIRE(progress.TotalSamples == oracleProgress.TotalSamples);
+            REQUIRE(progress.CompletedSamples == progress.TotalSamples);
+            rr::StaticLightingBakeProfile profile;
+            REQUIRE(bake.GetProfile(profile) == rhi::RasterStatus::Ready);
+            REQUIRE(profile.RangeCount == ranges);
+            REQUIRE(profile.ExecutedRangeCount == ranges);
+            REQUIRE(profile.LongestRangeNanoseconds <= profile.RangeNanoseconds);
+        }
+    }
+}
+TEST_CASE("Scheduled static bake reports admission and preparation failures", "[renderer][static-lighting][threading]")
+{
+    const resources::SceneDefinition scene = MakeGridBakeScene(2);
+    rr::StaticLightingBakeDescription description = MakeBakeDescription(4);
+    threading::JobSystem uninitialized;
+    rr::StaticLightingBake bake;
+    REQUIRE(bake.Submit(uninitialized, scene, description) == rhi::RasterStatus::InvalidState);
+    REQUIRE(bake.Poll() == rhi::RasterStatus::InvalidState);
+    REQUIRE(bake.Finish() == rhi::RasterStatus::InvalidState);
+    rr::StaticLightingBakeProfile profile;
+    profile.RangeCount = 77;
+    REQUIRE(bake.GetProfile(profile) == rhi::RasterStatus::InvalidState);
+    REQUIRE(profile.RangeCount == 77);
+    threading::JobSystem system;
+    REQUIRE(system.Initialize({ .WorkerCount = 2 }) == threading::JobStatus::Ok);
+    REQUIRE(bake.Submit(system, scene, description, { .RangeCount = 0 }) == rhi::RasterStatus::InvalidDescription);
+    REQUIRE(bake.Submit(system, scene, description, { .RangeCount = rr::MAX_STATIC_LIGHTING_RANGES + 1 }) ==
+            rhi::RasterStatus::InvalidDescription);
+    // Validation runs in the preparation job; its failure blocks every range.
+    description.SceneRevision = 0;
+    REQUIRE(bake.Submit(system, scene, description) == rhi::RasterStatus::Pending);
+    rr::StaticLightingBake busy;
+    REQUIRE(busy.Submit(system, scene, MakeBakeDescription(4)) == rhi::RasterStatus::InvalidState);
+    REQUIRE(bake.Submit(system, scene, description) == rhi::RasterStatus::InvalidState);
+    REQUIRE(bake.Finish() == rhi::RasterStatus::InvalidDescription);
+    REQUIRE(bake.Poll() == rhi::RasterStatus::InvalidDescription);
+    REQUIRE(bake.GetProfile(profile) == rhi::RasterStatus::Ready);
+    REQUIRE(profile.ExecutedRangeCount == 0);
+    rr::StaticLightingChart chart;
+    chart.SourceId = 999;
+    REQUIRE(bake.GetChart(0, chart) == rhi::RasterStatus::InvalidDescription);
+    REQUIRE(chart.SourceId == 999);
+    // The released system accepts the next bake.
+    REQUIRE(busy.Submit(system, scene, MakeBakeDescription(4)) == rhi::RasterStatus::Pending);
+    REQUIRE(busy.Finish() == rhi::RasterStatus::Ready);
+}
+TEST_CASE("Cancelling a scheduled static bake mid-evaluation stops its ranges",
+          "[renderer][static-lighting][threading]")
+{
+    const resources::SceneDefinition scene = MakeGridBakeScene(CANCEL_GRID_CELLS);
+    threading::JobSystem system;
+    REQUIRE(system.Initialize({ .WorkerCount = 2 }) == threading::JobStatus::Ok);
+    rr::StaticLightingBake bake;
+    REQUIRE(bake.Submit(system, scene, MakeBakeDescription(CANCEL_SAMPLES)) == rhi::RasterStatus::Pending);
+    REQUIRE(WaitForProgress(bake) == rhi::RasterStatus::Pending);
+    bake.Cancel();
+    REQUIRE(bake.Finish() == rhi::RasterStatus::NotReady);
+    REQUIRE(bake.Poll() == rhi::RasterStatus::NotReady);
+    rr::StaticLightingBakeProgress progress;
+    bake.GetProgress(progress);
+    REQUIRE(progress.CompletedSamples > 0);
+    REQUIRE(progress.CompletedSamples < progress.TotalSamples);
+    rr::StaticLightingBakeProfile profile;
+    REQUIRE(bake.GetProfile(profile) == rhi::RasterStatus::Ready);
+    REQUIRE(profile.ExecutedRangeCount < profile.RangeCount);
+    rr::StaticLightingChart chart;
+    chart.SourceId = 999;
+    REQUIRE(bake.GetChart(0, chart) == rhi::RasterStatus::NotReady);
+    REQUIRE(chart.SourceId == 999);
+    bake.Cancel(); // No effect once released.
+    // The cancelled bake released the system; a later bake still matches its oracle.
+    const resources::SceneDefinition small = MakeGridBakeScene(2);
+    rr::StaticLightingBake oracle;
+    REQUIRE(oracle.Initialize(small, MakeBakeDescription(8)) == rhi::RasterStatus::Pending);
+    static_cast<void>(CompleteBake(oracle, 64));
+    rr::StaticLightingBake next;
+    REQUIRE(next.Submit(system, small, MakeBakeDescription(8)) == rhi::RasterStatus::Pending);
+    REQUIRE(next.Finish() == rhi::RasterStatus::Ready);
+    RequireIdenticalCharts(oracle, next, small.Objects.GetSize());
+}
+TEST_CASE("Static bake survives system shutdown and destruction while in flight",
+          "[renderer][static-lighting][threading]")
+{
+    const resources::SceneDefinition large = MakeGridBakeScene(CANCEL_GRID_CELLS);
+    const resources::SceneDefinition small = MakeGridBakeScene(2);
+    SECTION("Cancel then Shutdown drains promptly and reports cancellation")
+    {
+        threading::JobSystem system;
+        REQUIRE(system.Initialize({ .WorkerCount = 2 }) == threading::JobStatus::Ok);
+        rr::StaticLightingBake bake;
+        REQUIRE(bake.Submit(system, large, MakeBakeDescription(CANCEL_SAMPLES)) == rhi::RasterStatus::Pending);
+        REQUIRE(WaitForProgress(bake) == rhi::RasterStatus::Pending);
+        bake.Cancel();
+        REQUIRE(system.Shutdown() == threading::JobStatus::Ok);
+        REQUIRE(bake.Poll() == rhi::RasterStatus::NotReady);
+        REQUIRE(bake.Finish() == rhi::RasterStatus::NotReady);
+    }
+    SECTION("Shutdown without cancellation drains the bake to its oracle result")
+    {
+        rr::StaticLightingBake oracle;
+        REQUIRE(oracle.Initialize(small, MakeBakeDescription(8)) == rhi::RasterStatus::Pending);
+        static_cast<void>(CompleteBake(oracle, 64));
+        threading::JobSystem system;
+        REQUIRE(system.Initialize({ .WorkerCount = 2 }) == threading::JobStatus::Ok);
+        rr::StaticLightingBake bake;
+        REQUIRE(bake.Submit(system, small, MakeBakeDescription(8)) == rhi::RasterStatus::Pending);
+        REQUIRE(system.Shutdown() == threading::JobStatus::Ok);
+        REQUIRE(bake.Poll() == rhi::RasterStatus::Ready);
+        RequireIdenticalCharts(oracle, bake, small.Objects.GetSize());
+    }
+    SECTION("Destroying an in-flight bake cancels and drains it, then releases the system")
+    {
+        threading::JobSystem system;
+        REQUIRE(system.Initialize({ .WorkerCount = 2 }) == threading::JobStatus::Ok);
+        {
+            rr::StaticLightingBake bake;
+            REQUIRE(bake.Submit(system, large, MakeBakeDescription(CANCEL_SAMPLES)) == rhi::RasterStatus::Pending);
+            REQUIRE(WaitForProgress(bake) == rhi::RasterStatus::Pending);
+        }
+        threading::JobSnapshot snapshot;
+        REQUIRE(system.Snapshot(snapshot) == threading::JobStatus::Ok);
+        REQUIRE(snapshot.Running == 0);
+        REQUIRE(snapshot.Pending == 0);
+        rr::StaticLightingBake next;
+        REQUIRE(next.Submit(system, small, MakeBakeDescription(8)) == rhi::RasterStatus::Pending);
+        REQUIRE(next.Finish() == rhi::RasterStatus::Ready);
+        REQUIRE(system.Shutdown() == threading::JobStatus::Ok);
+    }
 }

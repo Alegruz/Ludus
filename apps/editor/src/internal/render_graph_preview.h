@@ -1,0 +1,138 @@
+#pragma once
+
+#include <ludus/foundation/base/types.h>
+
+#include <ludus/foundation/base/pointer.hpp>
+#include <ludus/foundation/containers/borrowed_view.hpp>
+#include <ludus/graphics/renderer/render_graph_activation.hpp>
+#include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/raster.h>
+
+#include "internal/render_scene.h"
+
+#include <QImage>
+#include <QObject>
+#include <QSize>
+#include <QString>
+#include <QVector>
+
+namespace ludus::editor
+{
+/// One World extraction converted to RenderGraph records. Mesh geometry borrows Scene's
+/// storage, which this value keeps alive by implicit sharing until it is replaced.
+struct RenderGraphExtraction final
+{
+    RenderScene Scene;
+    QVector<graphics::renderer::RenderGraphMesh> Meshes;
+    QVector<graphics::renderer::RenderGraphItem> Items;
+    graphics::renderer::ViewDescription View{};
+    /// Nonzero caller revision; a changed revision makes the preview prepare again.
+    foundation::uint64 Revision = 0;
+};
+
+/// Convert the World extraction used by the editor viewport into RenderGraph inputs: one static
+/// mesh per scene mesh and one item per object with its straight RGBA tint (object tint times
+/// surface tint). Translucent tints are declared Transparent, never silently made opaque.
+/// @return False with outError when the scene exceeds the runtime format bounds or is empty;
+/// outExtraction is unchanged on failure.
+[[nodiscard]] bool MakeRenderGraphExtraction(const RenderScene& scene,
+                                             const graphics::renderer::ViewDescription& view,
+                                             foundation::uint64 revision,
+                                             RenderGraphExtraction& outExtraction,
+                                             QString& outError);
+
+/// Result of an explicit request to preview a cooked runtime generation.
+enum class RenderGraphPreviewLoad : foundation::uint8
+{
+    Staged,          ///< The generation is preparing beside the drawing one.
+    Waiting,         ///< Decoded; it stages once a viewport device is attached.
+    Unreadable,      ///< The `.lurgrt` file is missing, unreadable or larger than the runtime bound.
+    Malformed,       ///< RenderGraphPackage::Decode rejected the bytes.
+    Unsupported,     ///< Decoded, but the plan has no exported color result the editor can show.
+    RestartRequired, ///< The CPU interface differs from this editor's compiled interface.
+    Failed,          ///< Staging failed on the device; the drawing generation is unchanged.
+};
+
+// RG3b trusted in-editor preview of a cooked render-graph generation. It owns one
+// RenderGraphActivation on the existing editor viewport device (borrowed from the World
+// RenderPreview), feeds it the World extraction, renders the active generation's exported
+// color and copies it to a QImage without waiting for the GPU. The presented image changes
+// only when a complete copy of an active generation's drawable frame arrives: a pending,
+// failed, coverage-rejected or restart-requiring candidate, a lost device or a failed copy keep
+// the last drawable view. Export consumers (the copy) always finish before a Poll that may
+// activate or a new Render. Owner (GUI) thread only; call Detach before the device is destroyed.
+// See docs/development/render-graph-authoring.md#node-canvas-and-preview-rg3b.
+class RenderGraphPreview final : public QObject
+{
+    Q_OBJECT
+public:
+    /// Maximum `.lurgrt` size read from disk; matches the runtime format's 16 MiB bound.
+    static constexpr qsizetype MAX_PACKAGE_BYTES = qsizetype{16} * 1024 * 1024;
+
+    /// @param interfaceIdentity IDENTITY_BYTES digest of the editor's compiled CPU interface; copied.
+    /// @param compositeVertex Installed renderer_composite recipe; static storage outliving this object.
+    /// @param compositeFragment Installed renderer_composite recipe; same lifetime.
+    RenderGraphPreview(foundation::BorrowedView<const foundation::uint8> interfaceIdentity,
+                       const graphics::rhi::RasterShaderDescription& compositeVertex,
+                       const graphics::rhi::RasterShaderDescription& compositeFragment,
+                       QObject* parentOrNull = nullptr);
+    ~RenderGraphPreview() override;
+    RenderGraphPreview(const RenderGraphPreview&) = delete;
+    RenderGraphPreview& operator=(const RenderGraphPreview&) = delete;
+
+    /// Bind the viewport device and its (headless) surface; stages a waiting generation.
+    /// @return False when already attached or activation initialization fails.
+    [[nodiscard]] bool Attach(graphics::rhi::DeviceHandle device, graphics::rhi::SurfaceHandle surface);
+    /// Release every generation and in-flight copy before the device is destroyed. The last
+    /// presented image stays visible and is reported as stale.
+    void Detach() noexcept;
+    [[nodiscard]] bool IsAttached() const noexcept;
+    /// Explicitly preview one cooked runtime generation; the previous request is superseded.
+    [[nodiscard]] RenderGraphPreviewLoad Load(const QString& runtimePackagePath);
+    /// Replace the World extraction. A new revision is prepared by the active graph and candidate.
+    void SetExtraction(const RenderGraphExtraction& extraction);
+    /// Export extent of the generation the next frame will show (candidate first), or 0x0.
+    [[nodiscard]] QSize GetTargetSize() const noexcept;
+    /// Advance activation, preparation, rendering and the asynchronous copy without waiting.
+    void Tick();
+
+    /// Last complete frame of an active generation; null before the first one.
+    [[nodiscard]] const QImage& GetImage() const noexcept
+    {
+        return mImage;
+    }
+    /// Activation serial whose frame is shown; 0 when nothing was presented.
+    [[nodiscard]] foundation::uint64 GetPresentedGeneration() const noexcept
+    {
+        return mPresentedGeneration;
+    }
+    /// Extraction revision of the shown frame; 0 when nothing was presented.
+    [[nodiscard]] foundation::uint64 GetPresentedRevision() const noexcept
+    {
+        return mPresentedRevision;
+    }
+    [[nodiscard]] graphics::renderer::RenderGraphActivationReport GetReport() const noexcept;
+    /// Human-readable state, distinguishing the shown frame from a pending or failed candidate.
+    [[nodiscard]] QString GetStatus() const;
+
+Q_SIGNALS:
+    /// A new complete frame replaced GetImage.
+    void FramePresented();
+    /// Activation or candidate state changed; the status text may differ.
+    void Changed();
+
+private:
+    struct State;
+    [[nodiscard]] RenderGraphPreviewLoad stage();
+    void advance();
+    void finishCopy();
+    void setStatus(const QString& text);
+
+    foundation::UniquePtr<State> mState;
+    QImage mImage;
+    foundation::uint64 mPresentedGeneration = 0;
+    foundation::uint64 mPresentedRevision = 0;
+    foundation::uint64 mPresentedSession = 0;
+    QString mStatus;
+};
+} // namespace ludus::editor

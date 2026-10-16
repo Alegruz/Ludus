@@ -67,6 +67,8 @@ public:
     {
         return !Busy_ && !Level_.isEmpty();
     }
+    /// Select a stable World/scene object ID for viewport framing; empty clears it.
+    void SetSelection(const QString& id);
     void StopPreview() noexcept;
     void ResumePreview()
     {

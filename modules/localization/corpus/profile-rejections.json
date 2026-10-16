@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "domain": "game/ui",
+  "cases": [
+    {
+      "locale": "en-US",
+      "key": "menu/play",
+      "pattern": "Play {0}",
+      "reason": "NumberedArgument",
+      "note": "Positional arguments are not part of the profile"
+    },
+    {
+      "locale": "en-US",
+      "key": "menu/play",
+      "pattern": "Hello {stranger}",
+      "reason": "UndeclaredArgument",
+      "note": "Translations cannot introduce arguments"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, choice, 0#none|1#one|1<many}",
+      "reason": "UnsupportedArgumentType",
+      "note": "ChoiceFormat is excluded"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, spellout}",
+      "reason": "UnsupportedArgumentType",
+      "note": "Rule-based number formats are excluded"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, date, short}",
+      "reason": "UnsupportedArgumentType",
+      "note": "Dates need a separate typed profile"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "You have {count} items.",
+      "reason": "ArgumentTypeMismatch",
+      "note": "A bare placeholder is reserved for text arguments"
+    },
+    {
+      "locale": "en-US",
+      "key": "chat/player-said",
+      "pattern": "{player, number} said: {message}",
+      "reason": "ArgumentTypeMismatch",
+      "note": "Text cannot be formatted as a number"
+    },
+    {
+      "locale": "en-US",
+      "key": "hud/distance",
+      "pattern": "{distance, plural, other {# km}}",
+      "reason": "ArgumentTypeMismatch",
+      "note": "Binary floating-point values are not plural selectors"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, select, one {x} other {y}}",
+      "reason": "ArgumentTypeMismatch",
+      "note": "Counts select through plural rules"
+    },
+    {
+      "locale": "en-US",
+      "key": "quest/companion-joined",
+      "pattern": "{companion_gender, plural, other {{companion}}}",
+      "reason": "ArgumentTypeMismatch",
+      "note": "Enums select through declared tokens"
+    },
+    {
+      "locale": "en-US",
+      "key": "hud/distance",
+      "pattern": "{distance, number, percent}",
+      "reason": "UnapprovedNumberStyle",
+      "note": "Percentages need a separate typed API"
+    },
+    {
+      "locale": "en-US",
+      "key": "hud/distance",
+      "pattern": "{distance, number, ::currency/EUR}",
+      "reason": "UnapprovedNumberStyle",
+      "note": "Money needs an exact decimal type"
+    },
+    {
+      "locale": "en-US",
+      "key": "hud/distance",
+      "pattern": "{distance, number, #,##0.###}",
+      "reason": "UnapprovedNumberStyle",
+      "note": "Pattern-string styles are excluded"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, plural, few {x} other {y}}",
+      "reason": "DeadPluralKeyword",
+      "note": "English cardinal rules have no few category"
+    },
+    {
+      "locale": "ja-JP",
+      "key": "inventory/item-count",
+      "pattern": "{count, plural, one {x} other {y}}",
+      "reason": "DeadPluralKeyword",
+      "note": "Japanese cardinal rules have only other"
+    },
+    {
+      "locale": "en-US",
+      "key": "race/place",
+      "pattern": "{place, selectordinal, many {x} other {y}}",
+      "reason": "DeadPluralKeyword",
+      "note": "English ordinal rules have no many category"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, plural, =2000000000 {x} other {y}}",
+      "reason": "ExactValueOutOfRange",
+      "note": "Exact selectors must lie inside the schema bounds"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, plural, =1.5 {x} other {y}}",
+      "reason": "NonIntegerExactValue",
+      "note": "Count selectors are integers"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, plural, offset:1.5 other {#}}",
+      "reason": "InvalidPluralOffset",
+      "note": "Offsets are non-negative integers"
+    },
+    {
+      "locale": "en-US",
+      "key": "quest/companion-joined",
+      "pattern": "{companion_gender, select, robot {x} other {{companion}}}",
+      "reason": "UndeclaredEnumValue",
+      "note": "Select keywords must be declared tokens"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, plural, one {x}}",
+      "reason": "SyntaxError",
+      "note": "ICU requires an other branch"
+    },
+    {
+      "locale": "en-US",
+      "key": "inventory/item-count",
+      "pattern": "{count, plural, one {x} other {y}",
+      "reason": "SyntaxError",
+      "note": "Unbalanced braces"
+    },
+    {
+      "locale": "en-US",
+      "key": "quest/companion-joined",
+      "pattern": "{companion_gender, select, other {{companion_gender, select, other {{companion_gender, select, other {{companion_gender, select, other {{companion_gender, select, other {{companion_gender, select, other {{companion_gender, select, other {{companion_gender, select, other {{companion_gender, select, other {{companion}}}}}}}}}}}}}}}}}}}",
+      "reason": "NestingTooDeep",
+      "note": "Nine nested selectors exceed the limit of eight"
+    }
+  ]
+}

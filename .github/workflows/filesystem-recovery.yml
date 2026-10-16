@@ -1,5 +1,15 @@
 name: Filesystem block recovery
 on:
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen develop commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
   workflow_dispatch:
   pull_request:
     paths:
@@ -11,10 +21,14 @@ permissions:
   contents: read
 jobs:
   block-prefix-recovery:
+    if: github.event_name != 'pull_request' || github.base_ref != 'develop'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
