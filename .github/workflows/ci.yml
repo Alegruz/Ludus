@@ -1,41 +1,36 @@
 name: ci
 
 on:
-  # The merge queue already validated each landed commit, so main reruns the
-  # full tier only when shared cache keys change, plus nightly. Caches saved by
-  # pull-request and merge-queue runs are not visible to other branches; these
-  # main runs keep the dependency and compiler caches that every PR restores warm.
-  push:
-    branches: [main]
-    paths:
-      - 'conanfile.py'
-      - 'conan.lock'
-      - 'third_party/**'
-      - 'config/conan/**'
-      - 'config/tool_versions.json'
-      - 'config/luau_toolchain.json'
-      - 'CMakePresets.json'
-      - '.github/workflows/ci.yml'
-      - '.github/actions/**'
-  schedule:
-    - cron: '17 9 * * *'
+  # The batch coordinator owns periodic full validation. Promotion does not
+  # trigger another full build; batch runs on main also warm its shared caches.
   pull_request:
-    # labeled lets the ci:full label rerun the deferred merge-queue jobs on a PR.
+    # Legacy main PRs retain queue validation during the rollout.
     types: [opened, synchronize, reopened, labeled]
   merge_group:
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen dev commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ inputs.batch_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI: "true"
   LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
   CMAKE_BUILD_PARALLEL_LEVEL: "2"
+  LUDUS_CI_COMMIT_SHA: ${{ inputs.batch_sha || github.sha }}
 
 jobs:
   changes:
@@ -47,6 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/change-scope
@@ -62,6 +58,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/macos-setup
         id: setup
         with:
@@ -354,6 +353,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/macos-setup
         id: setup
         with:
@@ -423,6 +425,9 @@ jobs:
       LUDUS_TIDY_JOBS: "2"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/macos-setup
         id: setup
         with:
@@ -455,7 +460,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Install pinned formatter and GUI test dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 clang-tidy-18 python3-venv python3-tk xvfb xauth liblz4-1
       - name: Install pinned CMake and Ninja for live project setup tests
@@ -474,6 +481,8 @@ jobs:
         run: ./scripts/setup-quality-tools
       - name: Test tooling checks and editor preset boundaries
         run: PYTHONPATH=scripts/python python3 -m unittest test_quality_tools test_editor_setup -v
+      - name: Validate workflow syntax before admitting a candidate
+        run: out/host-tools/bin/actionlint -shellcheck= -pyflakes=
       - name: Review Python and workflow correctness baseline
         continue-on-error: true
         run: ./scripts/check --tooling
@@ -496,7 +505,7 @@ jobs:
       - name: Test graphical and CLI initialization routing
         run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init*.py' -v
       - name: Test CI initialization and analysis contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_ci test_quality test_ray_reference test_runtime_profile -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_ci test_batch_ci test_quality test_ray_reference test_runtime_profile -v
       - name: Live reload tooling tests
         run: |
           python3 -m unittest discover -s scripts/python -p 'test_play*.py' -v
@@ -509,8 +518,8 @@ jobs:
         run: ./scripts/check --format
       - name: Enforce review-derived source rules
         env:
-          SOURCE_POLICY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || 'origin/main' }}
-          SOURCE_POLICY_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          SOURCE_POLICY_BASE: ${{ inputs.batch_base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || 'origin/main' }}
+          SOURCE_POLICY_HEAD: ${{ inputs.batch_sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
           python3 scripts/python/source_policy.py --base "$SOURCE_POLICY_BASE" --head "$SOURCE_POLICY_HEAD" --clang-format clang-format-18
           PYTHONPATH=scripts/python python3 -m unittest test_source_policy test_renderer_shader_recipes -v
@@ -521,11 +530,14 @@ jobs:
 
   debug-runtime:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Debug runtime and source debugger
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-debug
@@ -546,11 +558,14 @@ jobs:
 
   development:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Development and SDK
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -835,6 +850,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-asan-ubsan
@@ -905,12 +923,15 @@ jobs:
 
   scripting-qualification:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: S7 reference performance and release acceptance
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-release
@@ -944,12 +965,15 @@ jobs:
 
   filesystem-fuzz:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Filesystem pack fuzzing
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -974,11 +998,14 @@ jobs:
 
   threading-races:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Threading race detection
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1007,7 +1034,7 @@ jobs:
 
   analysis:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Clang static analysis (${{ matrix.shard }})
     strategy:
       fail-fast: false
@@ -1021,6 +1048,9 @@ jobs:
       LUDUS_TIDY_SHARD_INDEX: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1053,6 +1083,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1121,7 +1154,7 @@ jobs:
   # Debug runtime already runs the complete Debug assertion/build contracts.
   assertion-policy:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: Assertion policy (${{ matrix.preset }})
     runs-on: ubuntu-24.04
     strategy:
@@ -1130,6 +1163,9 @@ jobs:
         preset: [linux-clang-profile, linux-clang-release]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: ${{ matrix.preset }}
@@ -1144,11 +1180,14 @@ jobs:
 
   pch:
     needs: [changes, formatting]
-    if: needs.changes.outputs.native_required == 'true'
+    if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'integration'
     name: PCH build (LUDUS_ENABLE_PCH=ON)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1173,6 +1212,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
@@ -1209,6 +1251,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
       - name: Enforce validation for the classified change scope
         env:

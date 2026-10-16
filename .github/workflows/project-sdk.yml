@@ -5,10 +5,18 @@ name: project-sdk
 # Release publication remains in release.yml.
 
 on:
-  push:
-    branches: [main]
   pull_request:
   merge_group:
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen dev commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
@@ -17,7 +25,7 @@ permissions:
 # Thanks to GitHub's "Concurrency" guidance: superseded PR checks can cancel.
 # https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: project-sdk-${{ inputs.batch_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -29,6 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/change-scope
@@ -76,7 +85,7 @@ jobs:
 
   butler-install:
     needs: host-tooling
-    if: needs.host-tooling.outputs.native_required == 'true'
+    if: needs.host-tooling.outputs.native_required == 'true' && (github.event_name != 'pull_request' || github.base_ref != 'dev')
     name: Pinned butler installation (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -89,6 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:

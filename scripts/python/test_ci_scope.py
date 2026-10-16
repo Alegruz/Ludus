@@ -206,17 +206,35 @@ class RequiredGateTests(unittest.TestCase):
                 workflow = (Path(__file__).resolve().parents[2] / ".github/workflows" / name).read_text()
                 self.assertRegex(workflow, r"(?m)^  merge_group:")
 
-    def test_main_reruns_full_ci_only_for_cache_inputs_and_nightly(self):
-        # The queue validates every landed commit; main runs exist to refresh
-        # the caches pull requests restore, so they must cover cache-key inputs.
+    def test_full_validation_is_owned_by_the_batch_scheduler(self):
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        for name in ("ci.yml", "wiki.yml", "project-sdk.yml"):
+            triggers = root.joinpath(name).read_text().split("\npermissions:", 1)[0]
+            self.assertNotRegex(triggers, r"(?m)^  push:")
+            self.assertIn("  workflow_call:", triggers)
+        batch = root.joinpath("batch-ci.yml").read_text()
+        self.assertIn("cron: '13,43 * * * *'", batch)
+        self.assertIn("  cancel-in-progress: false", batch)
+
+    def test_integration_prs_run_only_the_source_and_tooling_native_job(self):
+        event = {"pull_request": {"base": {"ref": "dev"}, "labels": [{"name": "ci:full"}]}}
+        self.assertEqual(ci_scope.validation_tier("pull_request", event), ci_scope.INTEGRATION_TIER)
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
-        triggers = workflow.split("\npermissions:", 1)[0]
-        push = triggers.split("  push:", 1)[1].split("\n  schedule:", 1)[0]
-        for path in ("conanfile.py", "conan.lock", "config/tool_versions.json", "CMakePresets.json",
-                     ".github/actions/**"):
-            with self.subTest(path=path):
-                self.assertIn(f"'{path}'", push)
-        self.assertRegex(triggers, r"(?m)^  schedule:\n    - cron: '[^']+'$")
+        conditions = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n(?:    .*\n)*?    if: (.*)$", workflow, re.MULTILINE))
+        for name in ci_scope.NATIVE_JOBS:
+            condition = conditions.get(name, "")
+            self.assertEqual("validation_tier" in condition, name != "formatting", name)
+        results = self.results()
+        results["changes"]["outputs"]["validation_tier"] = ci_scope.INTEGRATION_TIER
+        for name in ci_scope.INTEGRATION_JOBS:
+            results[name]["result"] = "skipped"
+        self.assertEqual(ci_scope.gate_failures(results), [])
+        for name in ci_scope.INTEGRATION_JOBS:
+            results[name]["result"] = "success"
+            self.assertTrue(ci_scope.gate_failures(results), name)
+            results[name]["result"] = "skipped"
+        results["formatting"]["result"] = "skipped"
+        self.assertTrue(ci_scope.gate_failures(results))
 
     def test_pull_requests_leave_macos_tooling_jobs_to_the_queue(self):
         root = Path(__file__).resolve().parents[2] / ".github/workflows"

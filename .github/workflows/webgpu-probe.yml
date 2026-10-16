@@ -81,10 +81,20 @@ on:
       - 'tools/check_foundational_includes.py'
       - '.clang-format'
       - '.clang-tidy'
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen dev commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: webgpu-probe-${{ inputs.batch_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -95,10 +105,14 @@ env:
 
 jobs:
   compile-and-package:
+    if: github.event_name != 'pull_request' || github.base_ref != 'dev'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - name: Cache pinned browser and shader tools
         uses: actions/cache@v4
         with:
@@ -413,6 +427,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: ludus-web-smoke-release
@@ -488,6 +505,9 @@ jobs:
         suite: [baseline, scaling]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: renderer-web-sdk-consumer

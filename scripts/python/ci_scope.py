@@ -38,6 +38,9 @@ MERGE_QUEUE_JOBS = (
 )
 FULL_TIER = "full"
 PULL_REQUEST_TIER = "pull-request"
+INTEGRATION_TIER = "integration"
+# Integration PRs keep source/tooling checks; every compiled variant runs once per batch.
+INTEGRATION_JOBS = tuple(name for name in NATIVE_JOBS if name != "formatting")
 # A pull request carrying this label runs the full tier before entering the queue.
 FULL_VALIDATION_LABEL = "ci:full"
 
@@ -98,10 +101,12 @@ def classify(event_name: str, event: dict, root: Path) -> tuple[bool, str]:
 
 
 def validation_tier(event_name: str, event: dict) -> str:
-    """Select the pull-request tier only for unlabeled pull requests; anything else is full."""
+    """Use cheap checks for dev PRs, retain legacy main tiers, and fully validate batches."""
     if event_name != "pull_request":
         return FULL_TIER
     try:
+        if event["pull_request"].get("base", {}).get("ref") == "dev":
+            return INTEGRATION_TIER
         names = {label["name"] for label in event["pull_request"].get("labels") or []}
     except (AttributeError, KeyError, TypeError):
         return FULL_TIER
@@ -118,12 +123,13 @@ def gate_failures(results: dict) -> list[str]:
     if required not in {"true", "false"}:
         return ["Change classification did not report a valid native_required output."]
     tier = outputs.get("validation_tier")
-    if tier not in {FULL_TIER, PULL_REQUEST_TIER}:
+    if tier not in {FULL_TIER, PULL_REQUEST_TIER, INTEGRATION_TIER}:
         return ["Change classification did not report a valid validation_tier output."]
     if set(results) != {"changes", *NATIVE_JOBS}:
         failures.append("Required native job inventory is incomplete or unexpected.")
     for name in NATIVE_JOBS:
-        deferred = tier == PULL_REQUEST_TIER and name in MERGE_QUEUE_JOBS
+        deferred = ((tier == PULL_REQUEST_TIER and name in MERGE_QUEUE_JOBS)
+                    or (tier == INTEGRATION_TIER and name in INTEGRATION_JOBS))
         expected = "success" if required == "true" and not deferred else "skipped"
         actual = results.get(name, {}).get("result")
         if actual != expected:
