@@ -1,7 +1,7 @@
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/threading/jobs.hpp>
 
-#if !defined(LUDUS_PLATFORM_WEB) || defined(__EMSCRIPTEN_PTHREADS__)
+#if defined(LUDUS_PLATFORM_WEB) == 0 || defined(__EMSCRIPTEN_PTHREADS__)
 #    error "The threading browser baseline must use the serial backend"
 #endif
 

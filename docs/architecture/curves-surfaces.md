@@ -1,10 +1,11 @@
 # Curves and surfaces architecture
 
-Status: G1 fixed-size math kernel implemented; G2-G6 remain proposed.
-Design baseline: `52e29ce`, inspected on 2026-10-04. Implementation baseline:
-`95683aa`, inspected on 2026-10-05. Validation is recorded in the
-[kernel evidence ledger](math-evidence/curves-surfaces.md). Performance budgets
-for prepared assets and integrated consumers remain unmeasured.
+Status: G0 contracts frozen in [ADR 0024](../decisions/0024-curves-surfaces-contracts.md)
+and the G1 fixed-size math kernel implemented; G2-G6 remain proposed.
+Design baseline: `52e29ce`, inspected on 2026-10-04. Implementation baselines:
+`95683aa` (G1, 2026-10-05) and `5117c8c` (G0, 2026-10-15). Validation is
+recorded in the [evidence ledger](math-evidence/curves-surfaces.md). Performance
+budgets for prepared assets and integrated consumers remain unmeasured.
 
 Ludus should use a small Bezier geometry kernel, immutable prepared assets, and
 separate optional caches for distance, orientation, spatial queries and meshes.
@@ -17,7 +18,8 @@ them.
 This is a production-oriented design judgment, informed by current primary
 sources and the [Gems review](curves-surfaces-gems-review.md). It does not claim
 universal optimality or measured Ludus performance. The kernel, owners, caches,
-codecs and adapters below remain proposed; the fixed-size kernel is implemented.
+codecs and adapters below remain proposed; the fixed-size kernel is implemented
+and their domains, statuses and guarantee classes are frozen.
 The final section preserves the baseline written before the chapter review.
 
 ## Implementation and research sequence
@@ -34,6 +36,25 @@ to review alternatives and run measured trials. Optional G6 acceleration and
 conditional extensions retain their existing consumer, capability and evidence
 gates. The backlog supplies future research context; it does not expand the
 initial delivery scope or establish that a proposed technique has been adopted.
+
+## Frozen contracts (G0)
+
+[ADR 0024](../decisions/0024-curves-surfaces-contracts.md) is the authority for
+names and rules that later phases implement: the four domain values, span
+selection and boundary policies, the `GeometryStatus` enumerators, the Exact,
+Rounded, Certified, Estimated and Approximate guarantee classes for every
+planned result, tolerance profile fields and units, the float32 position floor,
+and the module, header and cooked-format boundaries. This page keeps the
+rationale. Strict profiles stay unavailable until a Certified outward-rounding
+helper exists, so G2 must add and validate one before it advertises a strict
+bound.
+
+The representative fixture corpus lives in `tests/fixtures/curves_surfaces/`.
+A stdlib-only Python generator computes every reference from exact rational or
+50-digit decimal arithmetic without Ludus code. It emits a test-only C++ header
+covering cubic spans, patches, a reversed shared edge, Catmull-Rom waypoints,
+scalar tracks and a far-origin precision case. FoundationMath tests already
+check the G1 kernel against it; later phases consume the same header.
 
 ## Implemented kernel (G1)
 
@@ -118,7 +139,8 @@ capabilities.
 | --- | --- | --- |
 | Implemented G1 additions to `modules/foundation/math`, `Ludus::FoundationMath` | Fixed-size scalar/vector cubic and bicubic values; evaluate, differentiate, split, Hermite conversion; conservative bound helpers remain future work | Base only |
 | Proposed `modules/foundation/geometry`, `Ludus::FoundationGeometry` | Prepared path/patch owners and views, scalar tracks, distance/frame/bounds caches, queries and mesh generation | Base, Math, Containers |
-| Proposed `modules/geometry/content`, `Ludus::GeometryContent` | Authoring codecs, source IDs, import/cook validation, portable cooked format, loading and publication | Content, FoundationGeometry |
+| Proposed `modules/content/geometry_format`, `Ludus::GeometryFormat` | Header-only versioned cooked record layouts, limits and constants shared by cooker and loader | Base only |
+| Proposed `modules/geometry/content`, `Ludus::GeometryContent` | Authoring codecs, source IDs, import/cook validation, loading and publication | Content, FoundationGeometry, GeometryFormat |
 | Editor-private adapters | Document edits, undo, handles, preview, inspection | GeometryContent, editor UI |
 | Consumer-private adapters | Path follower, animation clock, render upload, collision cook | FoundationGeometry and the consumer's own subsystem |
 
@@ -653,7 +675,7 @@ All proposed engine APIs are `noexcept`, fallible operations `[[nodiscard]]`.
 Use MathStatus for fixed-size math and a GeometryStatus for preparation/query
 failures such as InvalidDomain, InvalidTopology, MissingCache, DegenerateFrame,
 UnsupportedRepresentation, UnsupportedPrecision, BudgetExceeded, OutOfMemory
-and Cancelled. Diagnostics carry code, resource/source element, property path,
+and Cancelled; ADR 0024 freezes the complete enumerator list. Diagnostics carry code, resource/source element, property path,
 requested/achieved tolerance and offending range. Bad content is not an assertion.
 
 Owned builders return a complete candidate only on success; failure leaves the
@@ -772,10 +794,11 @@ implementing an adapter.
 
 ## Validation and implementation gates
 
-The G1 implementation and its checks are tracked in the
-[kernel evidence ledger](math-evidence/curves-surfaces.md). Completion of each
+The G0 freeze and G1 implementation and their checks are tracked in the
+[evidence ledger](math-evidence/curves-surfaces.md). Completion of each
 remaining phase below requires its own evidence ledger, numerical limits and
-workload budgets; G1 tests do not validate the proposed owners or services.
+workload budgets; G0 references and G1 tests do not validate the proposed owners
+or services.
 
 | Phase | Deliverable | Acceptance gate |
 | --- | --- | --- |

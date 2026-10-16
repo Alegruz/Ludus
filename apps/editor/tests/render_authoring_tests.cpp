@@ -12,11 +12,13 @@
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/transform.hpp>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDir>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -300,7 +302,11 @@ TEST_CASE("Preview UI validates assets, selects authored cameras and clears stat
     cameras->setCurrentIndex(1);
     CHECK_FALSE(panel.findChild<QSlider*>(QStringLiteral("worldPreviewYaw"))->isEnabled());
     CHECK(panel.findChild<QLabel*>(QStringLiteral("worldPreviewTrace"))->text().contains(QStringLiteral("C0 fixed")));
-    const auto draft = f.World.Draft();
+    const QJsonObject draft = f.World.Draft();
+    panel.Preview().Orbit(0.5F, 0);
+    CHECK(cameras->currentIndex() == 0);
+    CHECK(panel.findChild<QSlider*>(QStringLiteral("worldPreviewYaw"))->isEnabled() == true);
+    CHECK(f.World.Draft() == draft);
     panel.findChild<QPushButton*>(QStringLiteral("worldPreviewFrameAll"))->click();
     CHECK(cameras->currentIndex() == 0);
     CHECK(f.World.Draft() == draft);
@@ -391,6 +397,14 @@ TEST_CASE("Renderer controls and inspector remain reachable in a small styled Wo
     REQUIRE(scroll != nullptr);
     CHECK(scroll->height() <= 120);
     CHECK(scroll->verticalScrollBar()->maximum() > 0);
+    QDoubleSpinBox* distance = world.findChild<QDoubleSpinBox*>(QStringLiteral("worldPreviewZoom"));
+    REQUIRE(distance != nullptr);
+    scroll->ensureWidgetVisible(distance);
+    QApplication::processEvents();
+    QLineEdit* distanceEditor = distance->findChild<QLineEdit*>();
+    REQUIRE(distanceEditor != nullptr);
+    CHECK(distance->isVisible() == true);
+    CHECK(distanceEditor->height() >= distanceEditor->minimumSizeHint().height());
     for (const auto& name : {QStringLiteral("worldPreview3D"),
                              QStringLiteral("worldPreviewReload"),
                              QStringLiteral("worldAdd"),
@@ -962,10 +976,12 @@ TEST_CASE("Deindexed emitter meshes split into connected planar area proxies wit
     CHECK(lights.Count == original.Count);
 }
 
-TEST_CASE("Static lighting worker owns surface overrides until completed chart transfer",
-          "[editor][render-authoring][lighting]")
+namespace
 {
-    Fixture fixture;
+// Lights the starter cube so RenderScene retains the decoded scene a bake needs.
+RenderScene LoadLitStarterScene(Fixture& inoutFixture)
+{
+    Fixture& fixture = inoutFixture;
     QJsonObject entity = fixture.World.Entity(QStringLiteral("starter.cube"));
     QJsonObject components = entity.value(QStringLiteral("components")).toObject();
     components.insert(QStringLiteral("light"),
@@ -983,6 +999,15 @@ TEST_CASE("Static lighting worker owns surface overrides until completed chart t
     REQUIRE(RenderScene::Load(fixture.Root, fixture.World, scene, fixture.Error));
     REQUIRE(scene.Lit == true);
     REQUIRE(scene.Definition.isNull() == false);
+    return scene;
+}
+} // namespace
+
+TEST_CASE("Static lighting worker owns surface overrides until completed chart transfer",
+          "[editor][render-authoring][lighting]")
+{
+    Fixture fixture;
+    RenderScene scene = LoadLitStarterScene(fixture);
     Array<rr::StaticLightingSurfaceDescription> surfaces;
     REQUIRE(surfaces.TryResize(scene.Definition->Objects.GetSize()));
     rr::StaticLightingBakeDescription description;
@@ -995,9 +1020,14 @@ TEST_CASE("Static lighting worker owns surface overrides until completed chart t
     // Invalidating caller storage after construction must not change the job.
     surfaces.Clear();
     surfaces = {};
-    worker.start();
-    REQUIRE(worker.wait(10000));
-    REQUIRE(worker.GetStatus() == ludus::graphics::rhi::RasterStatus::Ready);
+    ludus::foundation::threading::JobSystem jobs;
+    REQUIRE(jobs.Initialize({ .WorkerCount = STATIC_LIGHTING_WORKER_COUNT }) ==
+            ludus::foundation::threading::JobStatus::Ok);
+    REQUIRE(worker.Start(jobs) == ludus::graphics::rhi::RasterStatus::Pending);
+    REQUIRE(worker.Start(jobs) == ludus::graphics::rhi::RasterStatus::InvalidState);
+    REQUIRE(worker.Wait() == ludus::graphics::rhi::RasterStatus::Ready);
+    REQUIRE(worker.Poll() == ludus::graphics::rhi::RasterStatus::Ready);
+    REQUIRE(worker.GetProgressPercent() == 100);
     UniquePtr<rr::StaticLightingBake> bake = worker.TakeBake();
     REQUIRE(bake.Get() != nullptr);
     rr::StaticLightingChart chart;
@@ -1006,6 +1036,38 @@ TEST_CASE("Static lighting worker owns surface overrides until completed chart t
     CHECK(chart.SceneRevision == 11);
     CHECK(chart.DependencyRevision == 22);
     CHECK(chart.Transform == scene.Definition->Objects[0].Transform);
+}
+
+TEST_CASE("Static lighting worker interruption and destruction release the shared job system",
+          "[editor][render-authoring][lighting]")
+{
+    Fixture fixture;
+    RenderScene scene = LoadLitStarterScene(fixture);
+    rr::StaticLightingBakeDescription description;
+    description.SamplesPerTriangle = 65536;
+    description.MaxDepth = 4;
+    description.SceneRevision = 11;
+    description.DependencyRevision = 22;
+    ludus::foundation::threading::JobSystem jobs;
+    REQUIRE(jobs.Initialize({ .WorkerCount = STATIC_LIGHTING_WORKER_COUNT }) ==
+            ludus::foundation::threading::JobStatus::Ok);
+    {
+        StaticLightingJob interrupted(scene, description);
+        REQUIRE(interrupted.Start(jobs) == ludus::graphics::rhi::RasterStatus::Pending);
+        interrupted.RequestInterruption();
+        REQUIRE(interrupted.Wait() == ludus::graphics::rhi::RasterStatus::NotReady);
+        CHECK(interrupted.GetProgressPercent() < 100);
+    }
+    {
+        // Destruction cancels and drains an uninterrupted in-flight bake.
+        StaticLightingJob abandoned(scene, description);
+        REQUIRE(abandoned.Start(jobs) == ludus::graphics::rhi::RasterStatus::Pending);
+    }
+    description.SamplesPerTriangle = 1;
+    description.MaxDepth = 2;
+    StaticLightingJob next(scene, description);
+    REQUIRE(next.Start(jobs) == ludus::graphics::rhi::RasterStatus::Pending);
+    REQUIRE(next.Wait() == ludus::graphics::rhi::RasterStatus::Ready);
 }
 
 TEST_CASE("Qt numeric stream preserves full-width light identity bytes across native integer ABIs",

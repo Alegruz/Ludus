@@ -22,16 +22,16 @@ namespace detail
 constexpr uint32 INVALID_INDEX = static_cast<uint32>(-1);
 constexpr uint32 MAX_WORKERS = 64;
 constexpr uint32 MAX_RECORDS = 1u << 20;
-thread_local bool gInsideJob = false;
+thread_local bool isInsideJob = false;
 
 struct Node
 {
     JobFunction Function = nullptr;
-    void* Context = nullptr;
+    void* ContextOrNull = nullptr;
     uint32 FirstEdge = INVALID_INDEX;
     uint32 Incoming = 0;
     uint32 Remaining = 0;
-    bool PrerequisiteFailed = false;
+    bool HasFailedPrerequisite = false;
     std::atomic<JobOutcome> Outcome{JobOutcome::Pending};
 };
 struct Edge
@@ -41,40 +41,49 @@ struct Edge
 };
 struct GraphState
 {
-    Node* Nodes = nullptr;
-    Edge* Edges = nullptr;
-    uint32* Ready = nullptr;
-    JobGraphConfig Config{};
-    uint64 Id = 0;
-    uint64 Generation = 1;
-    uint32 JobCount = 0;
-    uint32 EdgeCount = 0;
-    uint32 Head = 0;
-    uint32 ReadyCount = 0;
-    uint32 Unfinished = 0;
-    bool Sealed = false;
-    bool CancelRequested = false;
-    bool AnyFailed = false;
-    bool AnyCancelled = false;
-    std::atomic<JobSystem*> Owner{nullptr};
-
+    // Initialize allocates every array, including a zero-length edge array, so
+    // these pointers are nonnull for the state's lifetime.
+    GraphState(Node* nodes, Edge* edges, uint32* ready, JobGraphConfig config, uint64 id) noexcept
+        : Nodes(nodes), Edges(edges), Ready(ready), Config(config), Id(id)
+    {
+    }
     ~GraphState() noexcept
     {
         delete[] Nodes;
         delete[] Edges;
         delete[] Ready;
     }
-    [[nodiscard]] bool Valid(JobHandle handle) const noexcept
+    GraphState(const GraphState&) = delete;
+    GraphState& operator=(const GraphState&) = delete;
+
+    Node* Nodes;
+    Edge* Edges;
+    uint32* Ready;
+    JobGraphConfig Config;
+    uint64 Id;
+    uint64 Generation = 1;
+    uint32 JobCount = 0;
+    uint32 EdgeCount = 0;
+    uint32 Head = 0;
+    uint32 ReadyCount = 0;
+    uint32 Unfinished = 0;
+    bool IsSealed = false;
+    bool IsCancelRequested = false;
+    bool HasFailure = false;
+    bool HasCancellation = false;
+    std::atomic<JobSystem*> OwnerOrNull{nullptr};
+
+    [[nodiscard]] bool IsValid(JobHandle handle) const noexcept
     {
         return handle.GraphId == Id && handle.Generation == Generation && handle.Index < JobCount;
     }
-    void Push(uint32 index) noexcept
+    void PushReady(uint32 index) noexcept
     {
         LUDUS_REQUIRE(ReadyCount < Config.MaxJobs);
         Ready[(Head + ReadyCount) % Config.MaxJobs] = index;
         ++ReadyCount;
     }
-    [[nodiscard]] uint32 Pop() noexcept
+    [[nodiscard]] uint32 PopReady() noexcept
     {
         const uint32 index = Ready[Head];
         Head = (Head + 1) % Config.MaxJobs;
@@ -85,21 +94,24 @@ struct GraphState
 struct SystemState
 {
     NativeGate Gate{};
+    // FoundationThreading depends only on FoundationBase, so the fixed worker
+    // table stays a raw array rather than a Containers StaticArray.
     NativeThread Threads[MAX_WORKERS]{};
     uint32 WorkerCount = 0;
-    GraphState* Active = nullptr;
-    bool Stop = false;
+    GraphState* ActiveOrNull = nullptr;
+    bool ShouldStop = false;
 };
 
 namespace
 {
 std::atomic<uint64> gNextGraphId{1};
-[[nodiscard]] uint64 NewGraphId() noexcept
+// Returns zero once the identity space is exhausted; it never wraps.
+[[nodiscard]] uint64 AllocateGraphId() noexcept
 {
     uint64 id = gNextGraphId.load(std::memory_order_relaxed);
     while (id != static_cast<uint64>(-1))
     {
-        if (gNextGraphId.compare_exchange_weak(id, id + 1, std::memory_order_relaxed))
+        if (gNextGraphId.compare_exchange_weak(id, id + 1, std::memory_order_relaxed) == true)
         {
             return id;
         }
@@ -108,69 +120,81 @@ std::atomic<uint64> gNextGraphId{1};
 }
 
 // Called with the system gate held. Every node enters Ready exactly once.
-void Complete(SystemState& system, uint32 index, JobOutcome outcome) noexcept
+void CompleteJob(SystemState& inoutSystem, uint32 index, JobOutcome outcome) noexcept
 {
-    auto& graph = *system.Active;
-    auto& node = graph.Nodes[index];
+    GraphState& graph = *inoutSystem.ActiveOrNull;
+    Node& node = graph.Nodes[index];
     node.Outcome.store(outcome, std::memory_order_release);
-    graph.AnyFailed |= outcome == JobOutcome::Failed;
-    graph.AnyCancelled |= outcome == JobOutcome::Cancelled;
-    const bool readyWasEmpty = graph.ReadyCount == 0;
+    graph.HasFailure |= outcome == JobOutcome::Failed;
+    graph.HasCancellation |= outcome == JobOutcome::Cancelled;
+    const bool wasReadyEmpty = graph.ReadyCount == 0;
     for (uint32 edge = node.FirstEdge; edge != INVALID_INDEX; edge = graph.Edges[edge].Next)
     {
-        auto& dependent = graph.Nodes[graph.Edges[edge].To];
-        dependent.PrerequisiteFailed |= outcome != JobOutcome::Succeeded;
+        Node& dependent = graph.Nodes[graph.Edges[edge].To];
+        dependent.HasFailedPrerequisite |= outcome != JobOutcome::Succeeded;
         LUDUS_REQUIRE(dependent.Remaining > 0);
         if (--dependent.Remaining == 0)
         {
-            graph.Push(graph.Edges[edge].To);
+            graph.PushReady(graph.Edges[edge].To);
         }
     }
     --graph.Unfinished;
     // One predicate/gate for ready work, completion and stop. Publish while
     // holding the gate so sleepers cannot miss a transition before sleeping.
-    if ((readyWasEmpty && graph.ReadyCount > 0) || graph.Unfinished == 0)
+    if ((wasReadyEmpty == true && graph.ReadyCount > 0) || graph.Unfinished == 0)
     {
-        system.Gate.WakeAll();
+        inoutSystem.Gate.WakeAll();
     }
 }
 
-// The caller holds the gate on entry and return. User code runs outside it.
-bool ExecuteOne(SystemState& system) noexcept
+// Resolves one ready job without calling it: an explicit Cancel takes
+// precedence over a failed prerequisite.
+[[nodiscard]] JobOutcome GetSkippedOutcome(const GraphState& graph, const Node& node) noexcept
 {
-    auto* graph = system.Active;
-    if (graph == nullptr || graph->ReadyCount == 0)
+    if (graph.IsCancelRequested == true)
+    {
+        return JobOutcome::Cancelled;
+    }
+    return node.HasFailedPrerequisite == true ? JobOutcome::Blocked : JobOutcome::Pending;
+}
+
+// The caller holds the gate on entry and return. User code runs outside it.
+bool ExecuteOneJob(SystemState& inoutSystem) noexcept
+{
+    GraphState* graphOrNull = inoutSystem.ActiveOrNull;
+    if (graphOrNull == nullptr || graphOrNull->ReadyCount == 0)
     {
         return false;
     }
-    const uint32 index = graph->Pop();
-    auto& node = graph->Nodes[index];
-    if (graph->CancelRequested || node.PrerequisiteFailed)
+    const uint32 index = graphOrNull->PopReady();
+    Node& node = graphOrNull->Nodes[index];
+    const JobOutcome skippedOutcome = GetSkippedOutcome(*graphOrNull, node);
+    if (skippedOutcome != JobOutcome::Pending)
     {
-        Complete(system, index, graph->CancelRequested ? JobOutcome::Cancelled : JobOutcome::Blocked);
+        CompleteJob(inoutSystem, index, skippedOutcome);
         return true;
     }
     node.Outcome.store(JobOutcome::Running, std::memory_order_release);
-    system.Gate.Unlock();
-    gInsideJob = true;
-    JobOutcome outcome = node.Function(node.Context);
-    gInsideJob = false;
+    inoutSystem.Gate.Unlock();
+    isInsideJob = true;
+    JobOutcome outcome = node.Function(node.ContextOrNull);
+    isInsideJob = false;
     if (outcome != JobOutcome::Succeeded && outcome != JobOutcome::Failed && outcome != JobOutcome::Cancelled)
     {
         outcome = JobOutcome::Failed;
     }
-    system.Gate.Lock();
-    Complete(system, index, outcome);
+    inoutSystem.Gate.Lock();
+    CompleteJob(inoutSystem, index, outcome);
     return true;
 }
 
-void WorkerEntry(void* context) noexcept
+void RunWorker(void* context) noexcept
 {
-    auto& system = *static_cast<SystemState*>(context);
+    SystemState& system = *static_cast<SystemState*>(context);
     GateLock lock(system.Gate);
-    while (!system.Stop)
+    while (system.ShouldStop == false)
     {
-        if (!ExecuteOne(system))
+        if (ExecuteOneJob(system) == false)
         {
             system.Gate.Wait();
         }
@@ -182,25 +206,27 @@ void WorkerEntry(void* context) noexcept
 using detail::GateLock;
 using detail::GraphState;
 using detail::INVALID_INDEX;
+using detail::Node;
 
 JobGraph::~JobGraph() noexcept
 {
-    if (mState != nullptr)
+    if (mStateOrNull != nullptr)
     {
-        if (auto* owner = mState->Owner.load(std::memory_order_acquire))
+        JobSystem* ownerOrNull = mStateOrNull->OwnerOrNull.load(std::memory_order_acquire);
+        if (ownerOrNull != nullptr)
         {
             // Destruction on a callback stack cannot safely drain that callback.
-            LUDUS_REQUIRE(!detail::gInsideJob);
+            LUDUS_REQUIRE(detail::isInsideJob == false);
             JobOutcome outcome{};
-            (void)owner->Wait(outcome);
+            (void)ownerOrNull->Wait(outcome);
         }
-        delete mState;
+        delete mStateOrNull;
     }
 }
 
 JobStatus JobGraph::Initialize(JobGraphConfig config) noexcept
 {
-    if (mState != nullptr)
+    if (mStateOrNull != nullptr)
     {
         return JobStatus::AlreadyInitialized;
     }
@@ -208,42 +234,44 @@ JobStatus JobGraph::Initialize(JobGraphConfig config) noexcept
     {
         return JobStatus::InvalidArgument;
     }
-    auto* state = new (std::nothrow) GraphState{};
-    if (state == nullptr)
+    Node* nodesOrNull = new (std::nothrow) Node[config.MaxJobs];
+    // A zero-length array new still returns a unique nonnull pointer.
+    detail::Edge* edgesOrNull = new (std::nothrow) detail::Edge[config.MaxDependencies];
+    uint32* readyOrNull = new (std::nothrow) uint32[config.MaxJobs];
+    if (nodesOrNull == nullptr || edgesOrNull == nullptr || readyOrNull == nullptr)
     {
+        delete[] nodesOrNull;
+        delete[] edgesOrNull;
+        delete[] readyOrNull;
         return JobStatus::OutOfMemory;
     }
-    state->Config = config;
-    state->Nodes = new (std::nothrow) detail::Node[config.MaxJobs];
-    state->Ready = new (std::nothrow) uint32[config.MaxJobs];
-    if (config.MaxDependencies > 0)
+    GraphState* stateOrNull = new (std::nothrow) GraphState(nodesOrNull, edgesOrNull, readyOrNull, config, 0);
+    if (stateOrNull == nullptr)
     {
-        state->Edges = new (std::nothrow) detail::Edge[config.MaxDependencies];
-    }
-    if (state->Nodes == nullptr || state->Ready == nullptr || (config.MaxDependencies > 0 && state->Edges == nullptr))
-    {
-        delete state;
+        delete[] nodesOrNull;
+        delete[] edgesOrNull;
+        delete[] readyOrNull;
         return JobStatus::OutOfMemory;
     }
-    state->Id = detail::NewGraphId();
-    if (state->Id == 0)
+    stateOrNull->Id = detail::AllocateGraphId();
+    if (stateOrNull->Id == 0)
     {
-        delete state;
+        delete stateOrNull;
         return JobStatus::IdentityExhausted;
     }
-    mState = state;
+    mStateOrNull = stateOrNull;
     return JobStatus::Ok;
 }
 
-JobStatus JobGraph::Add(JobFunction function, void* context, JobHandle& handle) noexcept
+JobStatus JobGraph::Add(JobFunction function, void* contextOrNull, JobHandle& outHandle) noexcept
 {
-    handle = {};
-    if (mState == nullptr)
+    outHandle = {};
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    auto& graph = *mState;
-    if (graph.Owner.load(std::memory_order_acquire) != nullptr || graph.Sealed)
+    GraphState& graph = *mStateOrNull;
+    if (graph.OwnerOrNull.load(std::memory_order_acquire) != nullptr || graph.IsSealed == true)
     {
         return JobStatus::Busy;
     }
@@ -256,25 +284,25 @@ JobStatus JobGraph::Add(JobFunction function, void* context, JobHandle& handle) 
         return JobStatus::CapacityExceeded;
     }
     const uint32 index = graph.JobCount++;
-    auto& node = graph.Nodes[index];
+    Node& node = graph.Nodes[index];
     node.Function = function;
-    node.Context = context;
-    handle = {graph.Id, graph.Generation, index};
+    node.ContextOrNull = contextOrNull;
+    outHandle = { .GraphId = graph.Id, .Generation = graph.Generation, .Index = index };
     return JobStatus::Ok;
 }
 
 JobStatus JobGraph::DependsOn(JobHandle dependent, JobHandle prerequisite) noexcept
 {
-    if (mState == nullptr)
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    auto& graph = *mState;
-    if (graph.Owner.load(std::memory_order_acquire) != nullptr || graph.Sealed)
+    GraphState& graph = *mStateOrNull;
+    if (graph.OwnerOrNull.load(std::memory_order_acquire) != nullptr || graph.IsSealed == true)
     {
         return JobStatus::Busy;
     }
-    if (!graph.Valid(dependent) || !graph.Valid(prerequisite))
+    if (graph.IsValid(dependent) == false || graph.IsValid(prerequisite) == false)
     {
         return JobStatus::InvalidHandle;
     }
@@ -282,7 +310,7 @@ JobStatus JobGraph::DependsOn(JobHandle dependent, JobHandle prerequisite) noexc
     {
         return JobStatus::CycleDetected;
     }
-    auto& from = graph.Nodes[prerequisite.Index];
+    Node& from = graph.Nodes[prerequisite.Index];
     for (uint32 edge = from.FirstEdge; edge != INVALID_INDEX; edge = graph.Edges[edge].Next)
     {
         if (graph.Edges[edge].To == dependent.Index)
@@ -294,7 +322,7 @@ JobStatus JobGraph::DependsOn(JobHandle dependent, JobHandle prerequisite) noexc
     {
         return JobStatus::CapacityExceeded;
     }
-    graph.Edges[graph.EdgeCount] = {dependent.Index, from.FirstEdge};
+    graph.Edges[graph.EdgeCount] = { .To = dependent.Index, .Next = from.FirstEdge };
     from.FirstEdge = graph.EdgeCount++;
     ++graph.Nodes[dependent.Index].Incoming;
     return JobStatus::Ok;
@@ -302,12 +330,12 @@ JobStatus JobGraph::DependsOn(JobHandle dependent, JobHandle prerequisite) noexc
 
 JobStatus JobGraph::Seal() noexcept
 {
-    if (mState == nullptr)
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    auto& graph = *mState;
-    if (graph.Owner.load(std::memory_order_acquire) != nullptr)
+    GraphState& graph = *mStateOrNull;
+    if (graph.OwnerOrNull.load(std::memory_order_acquire) != nullptr)
     {
         return JobStatus::Busy;
     }
@@ -319,34 +347,34 @@ JobStatus JobGraph::Seal() noexcept
         graph.Nodes[index].Remaining = graph.Nodes[index].Incoming;
         if (graph.Nodes[index].Incoming == 0)
         {
-            graph.Push(index);
+            graph.PushReady(index);
         }
     }
     uint32 visited = 0;
     while (graph.ReadyCount > 0)
     {
-        const uint32 index = graph.Pop();
+        const uint32 index = graph.PopReady();
         ++visited;
         for (uint32 edge = graph.Nodes[index].FirstEdge; edge != INVALID_INDEX; edge = graph.Edges[edge].Next)
         {
             if (--graph.Nodes[graph.Edges[edge].To].Remaining == 0)
             {
-                graph.Push(graph.Edges[edge].To);
+                graph.PushReady(graph.Edges[edge].To);
             }
         }
     }
-    graph.Sealed = visited == graph.JobCount;
-    return graph.Sealed ? JobStatus::Ok : JobStatus::CycleDetected;
+    graph.IsSealed = visited == graph.JobCount;
+    return graph.IsSealed == true ? JobStatus::Ok : JobStatus::CycleDetected;
 }
 
 JobStatus JobGraph::Reset() noexcept
 {
-    if (mState == nullptr)
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    auto& graph = *mState;
-    if (graph.Owner.load(std::memory_order_acquire) != nullptr)
+    GraphState& graph = *mStateOrNull;
+    if (graph.OwnerOrNull.load(std::memory_order_acquire) != nullptr)
     {
         return JobStatus::Busy;
     }
@@ -356,9 +384,9 @@ JobStatus JobGraph::Reset() noexcept
     }
     for (uint32 index = 0; index < graph.JobCount; ++index)
     {
-        auto& node = graph.Nodes[index];
+        Node& node = graph.Nodes[index];
         node.Function = nullptr;
-        node.Context = nullptr;
+        node.ContextOrNull = nullptr;
         node.FirstEdge = INVALID_INDEX;
         node.Incoming = 0;
         node.Outcome.store(JobOutcome::Pending, std::memory_order_relaxed);
@@ -366,38 +394,38 @@ JobStatus JobGraph::Reset() noexcept
     ++graph.Generation;
     graph.JobCount = 0;
     graph.EdgeCount = 0;
-    graph.Sealed = false;
+    graph.IsSealed = false;
     return JobStatus::Ok;
 }
 
-JobStatus JobGraph::GetOutcome(JobHandle handle, JobOutcome& outcome) const noexcept
+JobStatus JobGraph::GetOutcome(JobHandle handle, JobOutcome& outOutcome) const noexcept
 {
-    outcome = JobOutcome::Pending;
-    if (mState == nullptr)
+    outOutcome = JobOutcome::Pending;
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    if (!mState->Valid(handle))
+    if (mStateOrNull->IsValid(handle) == false)
     {
         return JobStatus::InvalidHandle;
     }
-    outcome = mState->Nodes[handle.Index].Outcome.load(std::memory_order_acquire);
+    outOutcome = mStateOrNull->Nodes[handle.Index].Outcome.load(std::memory_order_acquire);
     return JobStatus::Ok;
 }
 
 JobSystem::~JobSystem() noexcept
 {
-    LUDUS_REQUIRE(!detail::gInsideJob);
+    LUDUS_REQUIRE(detail::isInsideJob == false);
     (void)Shutdown();
 }
 
 JobStatus JobSystem::Initialize(JobSystemConfig config) noexcept
 {
-    if (detail::gInsideJob)
+    if (detail::isInsideJob == true)
     {
         return JobStatus::InsideJob;
     }
-    if (mState != nullptr)
+    if (mStateOrNull != nullptr)
     {
         return JobStatus::AlreadyInitialized;
     }
@@ -411,163 +439,169 @@ JobStatus JobSystem::Initialize(JobSystemConfig config) noexcept
         return JobStatus::Unsupported;
     }
 #endif
-    auto* state = new (std::nothrow) detail::SystemState{};
-    if (state == nullptr)
+    detail::SystemState* stateOrNull = new (std::nothrow) detail::SystemState{};
+    if (stateOrNull == nullptr)
     {
         return JobStatus::OutOfMemory;
     }
-    if (!state->Gate.Initialize())
+    if (stateOrNull->Gate.Initialize() == false)
     {
-        delete state;
+        delete stateOrNull;
         return JobStatus::ThreadCreationFailed;
     }
-    mState = state;
+    mStateOrNull = stateOrNull;
     for (uint32 index = 0; index < config.WorkerCount; ++index)
     {
-        if (!state->Threads[index].Start(detail::WorkerEntry, state))
+        if (stateOrNull->Threads[index].Start(detail::RunWorker, stateOrNull) == false)
         {
             (void)Shutdown();
             return JobStatus::ThreadCreationFailed;
         }
-        ++state->WorkerCount;
+        ++stateOrNull->WorkerCount;
     }
     return JobStatus::Ok;
 }
 
-JobStatus JobSystem::Submit(JobGraph& graph) noexcept
+JobStatus JobSystem::Submit(JobGraph& inoutGraph) noexcept
 {
-    if (detail::gInsideJob)
+    if (detail::isInsideJob == true)
     {
         return JobStatus::InsideJob;
     }
-    if (mState == nullptr || graph.mState == nullptr)
+    if (mStateOrNull == nullptr || inoutGraph.mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    GateLock lock(mState->Gate);
-    auto& state = *graph.mState;
-    if (mState->Active != nullptr)
+    GateLock lock(mStateOrNull->Gate);
+    GraphState& graph = *inoutGraph.mStateOrNull;
+    if (mStateOrNull->ActiveOrNull != nullptr)
     {
         return JobStatus::Busy;
     }
-    if (!state.Sealed)
+    if (graph.IsSealed == false)
     {
         return JobStatus::NotSealed;
     }
-    JobSystem* expected = nullptr;
-    if (!state.Owner.compare_exchange_strong(expected, this, std::memory_order_acq_rel))
+    JobSystem* expectedOrNull = nullptr;
+    if (graph.OwnerOrNull.compare_exchange_strong(expectedOrNull, this, std::memory_order_acq_rel) == false)
     {
         return JobStatus::Busy;
     }
-    state.Head = 0;
-    state.ReadyCount = 0;
-    state.Unfinished = state.JobCount;
-    state.CancelRequested = false;
-    state.AnyFailed = false;
-    state.AnyCancelled = false;
-    for (uint32 index = 0; index < state.JobCount; ++index)
+    graph.Head = 0;
+    graph.ReadyCount = 0;
+    graph.Unfinished = graph.JobCount;
+    graph.IsCancelRequested = false;
+    graph.HasFailure = false;
+    graph.HasCancellation = false;
+    for (uint32 index = 0; index < graph.JobCount; ++index)
     {
-        auto& node = state.Nodes[index];
+        Node& node = graph.Nodes[index];
         node.Remaining = node.Incoming;
-        node.PrerequisiteFailed = false;
+        node.HasFailedPrerequisite = false;
         node.Outcome.store(JobOutcome::Pending, std::memory_order_relaxed);
         if (node.Remaining == 0)
         {
-            state.Push(index);
+            graph.PushReady(index);
         }
     }
-    mState->Active = &state;
-    mState->Gate.WakeAll();
-    if (mState->WorkerCount == 0)
+    mStateOrNull->ActiveOrNull = &graph;
+    mStateOrNull->Gate.WakeAll();
+    if (mStateOrNull->WorkerCount == 0)
     {
-        while (detail::ExecuteOne(*mState))
+        while (detail::ExecuteOneJob(*mStateOrNull) == true)
         {
         }
     }
     return JobStatus::Ok;
 }
 
-JobStatus JobSystem::Wait(JobOutcome& outcome, bool help) noexcept
+JobStatus JobSystem::Wait(JobOutcome& outOutcome, bool shouldHelp) noexcept
 {
-    outcome = JobOutcome::Pending;
-    if (detail::gInsideJob)
+    outOutcome = JobOutcome::Pending;
+    if (detail::isInsideJob == true)
     {
         return JobStatus::InsideJob;
     }
-    if (mState == nullptr)
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    GateLock lock(mState->Gate);
-    auto* graph = mState->Active;
-    if (graph == nullptr)
+    GateLock lock(mStateOrNull->Gate);
+    GraphState* graphOrNull = mStateOrNull->ActiveOrNull;
+    if (graphOrNull == nullptr)
     {
         return JobStatus::InvalidArgument;
     }
-    while (graph->Unfinished > 0)
+    while (graphOrNull->Unfinished > 0)
     {
-        if (!help || !detail::ExecuteOne(*mState))
+        if (shouldHelp == false || detail::ExecuteOneJob(*mStateOrNull) == false)
         {
-            mState->Gate.Wait();
+            mStateOrNull->Gate.Wait();
         }
     }
-    outcome = graph->AnyFailed      ? JobOutcome::Failed
-              : graph->AnyCancelled ? JobOutcome::Cancelled
-                                    : JobOutcome::Succeeded;
-    mState->Active = nullptr;
-    graph->Owner.store(nullptr, std::memory_order_release);
+    if (graphOrNull->HasFailure == true)
+    {
+        outOutcome = JobOutcome::Failed;
+    }
+    else
+    {
+        outOutcome = graphOrNull->HasCancellation == true ? JobOutcome::Cancelled : JobOutcome::Succeeded;
+    }
+    mStateOrNull->ActiveOrNull = nullptr;
+    graphOrNull->OwnerOrNull.store(nullptr, std::memory_order_release);
     return JobStatus::Ok;
 }
 
 JobStatus JobSystem::Cancel() noexcept
 {
-    if (mState == nullptr)
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    GateLock lock(mState->Gate);
-    if (mState->Active == nullptr)
+    GateLock lock(mStateOrNull->Gate);
+    if (mStateOrNull->ActiveOrNull == nullptr)
     {
         return JobStatus::InvalidArgument;
     }
-    mState->Active->CancelRequested = true;
-    mState->Gate.WakeAll();
+    mStateOrNull->ActiveOrNull->IsCancelRequested = true;
+    mStateOrNull->Gate.WakeAll();
     return JobStatus::Ok;
 }
 
-JobStatus JobSystem::Snapshot(JobSnapshot& snapshot) const noexcept
+JobStatus JobSystem::Snapshot(JobSnapshot& outSnapshot) const noexcept
 {
-    snapshot = {};
-    if (mState == nullptr)
+    outSnapshot = {};
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::NotInitialized;
     }
-    GateLock lock(mState->Gate);
-    if (mState->Active == nullptr)
+    GateLock lock(mStateOrNull->Gate);
+    const GraphState* graphOrNull = mStateOrNull->ActiveOrNull;
+    if (graphOrNull == nullptr)
     {
         return JobStatus::Ok;
     }
-    for (uint32 index = 0; index < mState->Active->JobCount; ++index)
+    for (uint32 index = 0; index < graphOrNull->JobCount; ++index)
     {
-        switch (mState->Active->Nodes[index].Outcome.load(std::memory_order_relaxed))
+        switch (graphOrNull->Nodes[index].Outcome.load(std::memory_order_relaxed))
         {
             case JobOutcome::Pending:
-                ++snapshot.Pending;
+                ++outSnapshot.Pending;
                 break;
             case JobOutcome::Running:
-                ++snapshot.Running;
+                ++outSnapshot.Running;
                 break;
             case JobOutcome::Succeeded:
-                ++snapshot.Succeeded;
+                ++outSnapshot.Succeeded;
                 break;
             case JobOutcome::Failed:
-                ++snapshot.Failed;
+                ++outSnapshot.Failed;
                 break;
             case JobOutcome::Cancelled:
-                ++snapshot.Cancelled;
+                ++outSnapshot.Cancelled;
                 break;
             case JobOutcome::Blocked:
-                ++snapshot.Blocked;
+                ++outSnapshot.Blocked;
                 break;
         }
     }
@@ -576,28 +610,28 @@ JobStatus JobSystem::Snapshot(JobSnapshot& snapshot) const noexcept
 
 JobStatus JobSystem::Shutdown() noexcept
 {
-    if (detail::gInsideJob)
+    if (detail::isInsideJob == true)
     {
         return JobStatus::InsideJob;
     }
-    if (mState == nullptr)
+    if (mStateOrNull == nullptr)
     {
         return JobStatus::Ok;
     }
     JobOutcome outcome{};
     (void)Wait(outcome);
     {
-        GateLock lock(mState->Gate);
-        mState->Stop = true;
-        mState->Gate.WakeAll();
+        GateLock lock(mStateOrNull->Gate);
+        mStateOrNull->ShouldStop = true;
+        mStateOrNull->Gate.WakeAll();
     }
-    for (uint32 index = 0; index < mState->WorkerCount; ++index)
+    for (uint32 index = 0; index < mStateOrNull->WorkerCount; ++index)
     {
-        mState->Threads[index].Join();
+        mStateOrNull->Threads[index].Join();
     }
-    mState->Gate.Destroy();
-    delete mState;
-    mState = nullptr;
+    mStateOrNull->Gate.Destroy();
+    delete mStateOrNull;
+    mStateOrNull = nullptr;
     return JobStatus::Ok;
 }
 } // namespace ludus::foundation::threading

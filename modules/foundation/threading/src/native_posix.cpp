@@ -41,16 +41,16 @@ namespace
 {
 void* ThreadEntry(void* context) noexcept
 {
-    auto& thread = *static_cast<NativeThread*>(context);
-    thread.Function(thread.Context);
+    NativeThread& thread = *static_cast<NativeThread*>(context);
+    thread.Function(thread.ContextOrNull);
     return nullptr;
 }
 } // namespace
 
-bool NativeThread::Start(ThreadFunction function, void* context) noexcept
+bool NativeThread::Start(ThreadFunction function, void* contextOrNull) noexcept
 {
     Function = function;
-    Context = context;
+    ContextOrNull = contextOrNull;
     return pthread_create(&Handle, nullptr, ThreadEntry, this) == 0;
 }
 void NativeThread::Join() noexcept

@@ -12,6 +12,7 @@ class QCheckBox;
 class QLabel;
 class QPushButton;
 class QSlider;
+class QDoubleSpinBox;
 QT_END_NAMESPACE
 namespace ludus::editor
 {
@@ -43,7 +44,8 @@ Q_SIGNALS:
 
 private:
     void Publish(const RenderScene& scene, bool launch);
-    void Navigate(bool controls = true);
+    void navigate();
+    void updateNavigationControls();
     void ShowStatus();
     void UpdateTintAction();
     const WorldDocument* World_ = nullptr;
@@ -67,7 +69,7 @@ private:
     QComboBox* Cameras_;
     QSlider* Yaw_;
     QSlider* Pitch_;
-    QSlider* Zoom_;
+    QDoubleSpinBox* Zoom_;
     QCheckBox* Reference_;
 };
 } // namespace ludus::editor

@@ -2163,12 +2163,16 @@ per-graph pass budget. Other backend failures can still partially encode a
 candidate; discard it and keep the previous published image.
 
 `StaticLightingBake` prepares CPU-only world-space geometry/BVH and immutable
-surface terms on a worker. `Step(maxPathSamples)` advances a bounded number of
-complete paths; initialization and final chart encoding also run on the worker.
+surface terms. Serially, `Initialize` then `Step(maxPathSamples)` advance a bounded
+number of complete paths on one thread. Scheduled, `Submit` runs preparation and
+coarse disjoint triangle ranges on a caller-owned `JobSystem`; the owner's `Poll`
+or `Finish` merges ranges in stable order and encodes the charts after the Wait
+fence. Both modes produce bit-identical charts. `Cancel` stops scheduled ranges at
+the next path sample; destroying an in-flight bake cancels and drains it. See the
+[threading consumer contract](threading.md#first-engine-consumer-static-lighting-bake).
 No renderer registry, native ray-query API, GPU upload, readback or Qt state is
 touched there. Keep the input scene's texture storage immutable and alive until
-the job is destroyed. Serial worker calls may be cancelled by ceasing work and
-destroying the job; composition must discard results with obsolete exact
+the bake is destroyed. Composition must discard results with obsolete exact
 revisions before publication.
 
 The virtual diffuse receiver uses cosine-hemisphere sampling plus the reference

@@ -34,16 +34,16 @@ namespace
 {
 uint32 __stdcall ThreadEntry(void* context) noexcept
 {
-    auto& thread = *static_cast<NativeThread*>(context);
-    thread.Function(thread.Context);
+    NativeThread& thread = *static_cast<NativeThread*>(context);
+    thread.Function(thread.ContextOrNull);
     return 0;
 }
 } // namespace
 
-bool NativeThread::Start(ThreadFunction function, void* context) noexcept
+bool NativeThread::Start(ThreadFunction function, void* contextOrNull) noexcept
 {
     Function = function;
-    Context = context;
+    ContextOrNull = contextOrNull;
     Handle = reinterpret_cast<HANDLE>(_beginthreadex(nullptr, 0, ThreadEntry, this, 0, nullptr));
     return Handle != nullptr;
 }

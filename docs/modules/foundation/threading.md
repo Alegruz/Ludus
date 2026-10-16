@@ -43,8 +43,13 @@ int main()
 The default worker budget is zero. Native consumers explicitly select their CPU
 budget. Browser builds reject a nonzero worker count. One graph remains admitted
 until Wait, even after callbacks finish. Submit of a sealed graph may be repeated;
-Reset invalidates its handles before rebuilding. Cancel skips queued callbacks;
-running callbacks finish. GetOutcome and Snapshot expose progress.
+each job keeps the context pointer given to Add, so update the data it references
+between Wait and the next Submit. Reset invalidates its handles before rebuilding.
+Cancel skips callbacks that have not started and reports them Cancelled, even when
+a failed prerequisite would otherwise report them Blocked; running callbacks finish.
+The graph outcome is Failed if any job failed, otherwise Cancelled if any job was
+cancelled. GetOutcome and Snapshot expose progress; Cancel and Snapshot may also be
+called from callbacks.
 
 Build/reset and pool lifecycle belong to one application owner. Wait may help
 execute CPU work on its caller; use `help=false` to preserve caller responsiveness

@@ -26,7 +26,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: out/ccache
-        key: ccache-macos-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**', 'config/luau_toolchain.json') }}-${{ github.sha }}
+        key: ccache-macos-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**', 'config/luau_toolchain.json') }}-${{ env.LUDUS_CI_COMMIT_SHA || github.sha }}
         restore-keys: |
           ccache-macos-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**', 'config/luau_toolchain.json') }}-
     - name: Configure compiler caching
