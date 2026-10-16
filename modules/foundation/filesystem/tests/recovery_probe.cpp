@@ -1,4 +1,5 @@
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/filesystem/persistence.hpp>
 
 #include "internal/persistence_test_hooks.hpp"
@@ -6,7 +7,6 @@
 #include <cstdio>
 #include <span>
 #include <string_view>
-#include <vector>
 
 #include <fcntl.h>
 #include <sys/file.h>
@@ -153,7 +153,7 @@ int main(int argumentCount, char** arguments)
     {
         return 3;
     }
-    std::vector<uint8> bytes(size);
+    Array<uint8> bytes(size);
     for (usize index = 0; index < size; ++index)
     {
         bytes[index] = static_cast<uint8>((index * 37 + index / 4096) % 251);

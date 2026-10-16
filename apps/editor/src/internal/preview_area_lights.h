@@ -11,7 +11,9 @@ namespace ludus::editor
 {
 // Partition deindexed emitter geometry by shared geometric edges and coplanar
 // outward normals. Append one centroid proxy per connected planar patch.
-// Allocation, topology, identity or capacity failure preserves both outputs.
+// Zero-area triangles carry no emitted power and are skipped; non-finite
+// geometry is rejected. Allocation, topology, identity or capacity failure
+// preserves both outputs.
 [[nodiscard]] graphics::rhi::RasterStatus AppendPreviewAreaLights(const resources::SceneMesh& mesh,
                                                                   const foundation::math::Affine3& meshToWorld,
                                                                   foundation::math::Vector3 resolvedEmission,

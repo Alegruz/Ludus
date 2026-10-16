@@ -7,6 +7,8 @@
 #include "internal/play_process.h"
 #include "internal/tool_process.h"
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
@@ -20,8 +22,6 @@
 #include <QTest>
 #include <QTextStream>
 #include <QTimer>
-
-#include <vector>
 
 using namespace ludus::editor;
 
@@ -190,14 +190,15 @@ QString WriteFakeAdapter(QTemporaryDir& dir, const QString& body)
     return path;
 }
 
-std::vector<ProtocolEvent> RunAdapter(const QString& adapterBody, ToolOperation op = ToolOperation::Configure)
+ludus::foundation::Array<ProtocolEvent> RunAdapter(const QString& adapterBody,
+                                                   ToolOperation op = ToolOperation::Configure)
 {
     QTemporaryDir dir;
     const QString adapter = WriteFakeAdapter(dir, adapterBody);
 
     ToolProcess tool;
-    std::vector<ProtocolEvent> events;
-    QObject::connect(&tool, &ToolProcess::Event, &tool, [&events](const ProtocolEvent& e) { events.push_back(e); });
+    ludus::foundation::Array<ProtocolEvent> events;
+    QObject::connect(&tool, &ToolProcess::Event, &tool, [&events](const ProtocolEvent& e) { events.Add(e); });
 
     ToolLaunch launch;
     launch.PythonPath = QStringLiteral("python3");
@@ -239,8 +240,8 @@ TEST_CASE("Ready then a well-formed result is dispatched in order", "[editor][to
         "'exit_code':0,'signal':None})+'\\n')\n"
         "sys.stdout.flush()\n");
     const auto events = RunAdapter(body);
-    REQUIRE(events.size() >= 3);
-    CHECK(events.front().Kind == ProtocolEvent::Type::Ready);
+    REQUIRE(events.GetSize() >= 3);
+    CHECK(events.GetFirst().Kind == ProtocolEvent::Type::Ready);
     bool sawResult = false;
     for (const ProtocolEvent& e : events)
     {

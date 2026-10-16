@@ -33,8 +33,8 @@ struct SystemGuard
 
 FontId LoadFixture(FontSystem* system, const char* file)
 {
-    auto bytes = LoadFixtureFont(file);
-    REQUIRE_FALSE(bytes.empty());
+    ludus::foundation::Array<ludus::foundation::uint8> bytes = LoadFixtureFont(file);
+    REQUIRE(bytes.IsEmpty() == false);
     FontId font;
     REQUIRE(IsOk(LoadFont(system, bytes, 0, &font)));
     REQUIRE(font.IsValid());

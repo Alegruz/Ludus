@@ -87,7 +87,7 @@ private:
     graphics::rhi::StartupError mError = graphics::rhi::StartupError::None;
     graphics::rhi::StartupError mWebGpuError = graphics::rhi::StartupError::None;
     graphics::rhi::StartupError mWebGl2Error = graphics::rhi::StartupError::None;
-    foundation::uint64 mLastTick = 0;
+    foundation::time::FrameClock mFrameClock{MAXIMUM_FRAME_DELTA};
     foundation::uint32 mFrames = 0;
 };
 } // namespace ludus::smoke

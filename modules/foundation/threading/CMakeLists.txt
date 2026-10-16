@@ -24,7 +24,7 @@ if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_foundation_threading_tests tests/jobs_tests.cpp)
     target_link_libraries(ludus_foundation_threading_tests PRIVATE
-        Ludus::FoundationThreading Catch2::Catch2WithMain)
+        Ludus::FoundationThreading Ludus::FoundationContainers Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_foundation_threading_tests)
     ludus_enable_test_exceptions(ludus_foundation_threading_tests)
     add_test(NAME ludus_foundation_threading_tests COMMAND ludus_foundation_threading_tests)

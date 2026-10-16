@@ -5,14 +5,14 @@
 // the reserved slot. No device/worker/Platform/window.
 
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <vector>
-
 using namespace ludus::audio;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -35,7 +35,7 @@ ClipHandle Prepare(AudioSystem& sys, uint32 frames = 48000)
 
 void Render(AudioSystem& sys, uint32 frames)
 {
-    std::vector<float32> out(static_cast<std::size_t>(frames) * 2);
+    Array<float32> out(static_cast<usize>(frames) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -143,7 +143,7 @@ TEST_CASE("A batch is never split across the 64-command boundary budget", "[audi
     const uint32 kBatch = 25;
     for (int b = 0; b < 3; ++b)
     {
-        std::vector<Command> cmds(kBatch);
+        Array<Command> cmds(kBatch);
         for (auto& c : cmds)
         {
             c.Kind = CommandKind::Play;

@@ -3,6 +3,7 @@
 // Excluded under sanitizers (they intercept the allocator themselves).
 
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
@@ -11,7 +12,6 @@
 #include <atomic>
 #include <cstdlib>
 #include <new>
-#include <vector>
 
 namespace
 {
@@ -65,6 +65,7 @@ void operator delete[](void* p, std::size_t) noexcept
 }
 
 using namespace ludus::audio;
+using ludus::foundation::Array;
 
 TEST_CASE("Warm submit + render performs no allocation or free", "[audio][alloc]")
 {
@@ -82,7 +83,7 @@ TEST_CASE("Warm submit + render performs no allocation or free", "[audio][alloc]
     // Warm up: one play + render so any first-touch lazy state is realized.
     VoiceHandle v{};
     REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, v)));
-    std::vector<float32> out(static_cast<std::size_t>(256) * 2);
+    Array<float32> out(static_cast<usize>(256) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,

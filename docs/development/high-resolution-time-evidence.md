@@ -67,3 +67,43 @@ Native process/socket tests and LeakSanitizer require ordinary OS access.
 The restricted sandbox denied socket operations and LeakSanitizer process
 inspection; rerunning the full native suites and SDK workflow with that access
 passed. Display-dependent Wayland tests remain skipped on this headless host.
+
+## Frame integration
+
+October 16, 2026. Scope: the [frame integration stage](../architecture/high-resolution-time.md#implementation-before-research)
+for the world reference and smoke application loops. Each callback reads one
+FoundationTime timestamp. The world reference `TickDriver` owns the 250 ms
+FrameClock; the smoke application owns a 100 ms FrameClock. Neither driver
+applies a second clamp. The float64 tick accumulator is unchanged; the rational
+integer driver is the next stage.
+
+Integration tests in `apps/world_demo/tests/simulation_tests.cpp` (`[frame]`)
+drive synthetic timestamps at a 2^62 ns epoch without OS sleeps or a mock clock:
+
+| Behavior | Evidence |
+| --- | --- |
+| Startup | First Advance is a zero-elapsed baseline and runs no tick. Uneven integer partitions of one second accept exactly 1,000,000,000 ns; equal readings are valid zero frames. |
+| Accepted/discarded time, no duplicate clamp | A 2 s stall accepts exactly 250 ms and clamps exactly 1.75 s. Catch-up trimming adds less than the accepted 250 ms to the discard total. The next frame measures from the stalled sample. |
+| Pause/resume | Paused frames accept nothing; resuming yields a baseline, so paused time is never caught up. Single step still runs exactly one tick. |
+| Visibility | Hidden frames and an `Interrupt()` (the input reset a browser queues when a page is hidden while callbacks are suspended) exclude 89.99 s of hidden time with no catch-up tick. |
+| Session replacement | Frames during a long load are excluded; activation resets the driver, and the replacement world starts from a baseline at tick zero. |
+| Clock regression | A backwards sample adds no time and increments a counter. Recovery measures from the high-water mark. After a lifecycle reset, a regressed sample cannot become a baseline below it. |
+
+For each monotonic sequence, accepted, clamped and lifecycle-excluded totals equal
+the observed span exactly. Smoke tests cover its startup baseline, single 100 ms
+clamp, hidden reset, return-to-visible baseline and regression.
+
+| Validation (macOS arm64 host, pinned Clang 18, warnings as errors) | Result |
+| --- | --- |
+| `./scripts/build macos-clang-development` | Passed. |
+| `./scripts/test macos-clang-development` | 82 of 85 passed. The Cocoa window suite skips every case without `LUDUS_TEST_COCOA=1` in a WindowServer session, so its runner reports failure. The header self-sufficiency gate exceeded its fixed 120 s timeout under a host load average above 100. Run directly, it passed all 153 public headers in 1 min 42 s. `ludus_target_detection` passed on rerun. |
+| World reference with `-DLUDUS_BUILD_WORLD_DEMO=ON` | `ludus_world_demo_tests` (22 cases), allocation, shader layout, smoke simulation and FoundationTime tests passed. `--headless` completed 120 ticks; `--frames 3` presented three native frames through the migrated loop. |
+| `python3 scripts/python/source_policy.py --base HEAD` | Passed. |
+| `./scripts/check --format` | Passed, including the foundational include boundary and naming scopes. |
+| clang-tidy 18 on the changed world reference and smoke sources | No findings. |
+| `./scripts/build macos-clang-asan-ubsan` | Passed. |
+| ASan/UBSan test execution | Not completed locally. On this macOS 26.6 host the Clang 18 ASan runtime deadlocks in its initializer (`AsanInitFromRtl` spin lock during dyld shared-cache iteration) before `main`, for every sanitized binary. |
+| Documentation: `check-docs`, strict MkDocs build | Passed. `check-wiki --documentation-only` reported only the absent generated API reference, which requires the Doxygen bootstrap. |
+
+The Linux reference profile, sanitizer execution, browser presets and build budget
+are validated by the pull request's CI tiers.

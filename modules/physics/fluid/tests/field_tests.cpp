@@ -1,3 +1,4 @@
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/physics/fluid/field.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -6,9 +7,9 @@
 #include <cmath>
 #include <limits>
 #include <utility>
-#include <vector>
 
 using namespace ludus::physics::fluid;
+using ludus::foundation::Array;
 using ludus::foundation::float64;
 using ludus::foundation::usize;
 
@@ -31,8 +32,8 @@ TEST_CASE("Fluid initialization and invalid mutations preserve live state", "[fl
     CHECK(field.GetDiagnostics().Energy == before.Energy);
     std::array<CellState, 1> shortState{};
     CHECK(field.TryReset({}, shortState) == Status::InvalidArgument);
-    std::vector<float64> pressure(usize{48} * 64);
-    pressure.back() = std::numeric_limits<float64>::infinity();
+    Array<float64> pressure(usize{48} * 64);
+    pressure.GetLast() = std::numeric_limits<float64>::infinity();
     CHECK(field.TrySetPressure(pressure) == Status::InvalidArgument);
     CHECK(field.TryAddStroke({{0, 0}, {0, 0}}) == Status::InvalidArgument);
     CHECK(field.TryAddStroke({{-30, 0}, {0, 0}}) == Status::OutsideDomain);
@@ -86,14 +87,14 @@ TEST_CASE("Closed basin conserves integrated height without clipping under stron
     config.Depth = 0.1;
     Field field;
     REQUIRE(field.TryInitialize(config) == Status::Success);
-    std::vector<CellState> initial(config.Width * config.Height);
+    Array<CellState> initial(config.Width * config.Height);
     for (auto& cell : initial)
     {
         cell.Height = 0.05;
     }
     REQUIRE(field.TryReset({}, initial) == Status::Success);
     const auto mass = field.GetDiagnostics().IntegratedHeight;
-    std::vector<float64> pressure(initial.size());
+    Array<float64> pressure(initial.GetSize());
     pressure[6 * config.Width + 8] = 900.0;
     REQUIRE(field.TrySetPressure(pressure) == Status::Success);
     StepInfo info;
@@ -122,7 +123,7 @@ TEST_CASE("Solid masks isolate basins and reject a stroke before any partial for
     config.HalfExtent = {8, 6};
     Field field;
     REQUIRE(field.TryInitialize(config) == Status::Success);
-    std::vector<ludus::foundation::uint8> solid(config.Width * config.Height);
+    Array<ludus::foundation::uint8> solid(config.Width * config.Height);
     for (usize y = 0; y < config.Height; ++y)
     {
         solid[y * config.Width + 8] = 1;
@@ -172,7 +173,7 @@ TEST_CASE("Resolution and step budget are explicit and adaptive", "[fluid]")
     CHECK(info.AdvancedSeconds < 0.1);
     config.MaxSubsteps = 4096;
     REQUIRE(field.TryInitialize(config) == Status::Success);
-    std::vector<CellState> initial(48);
+    Array<CellState> initial(48);
     initial[3 * config.Width + 4].Height = 0.1;
     REQUIRE(field.TryReset({}, initial) == Status::Success);
     REQUIRE(field.TryAdvance(0.05, info) == Status::Success);

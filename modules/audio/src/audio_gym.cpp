@@ -4,6 +4,32 @@
 
 namespace ludus::audio::gym
 {
+namespace
+{
+using ludus::foundation::Array;
+
+// Copies matching voices from the most recent capture into staging, then swaps
+// it into the output so allocation failure leaves outVoices unchanged.
+template <typename MatchFunction>
+[[nodiscard]] Status
+FilterLatest(const Array<Capture>& captures, const MatchFunction& isMatch, Array<VoiceInfo>& outVoices) noexcept
+{
+    Array<VoiceInfo> matches;
+    if (captures.IsEmpty() == false)
+    {
+        for (const VoiceInfo& voice : captures.GetLast().Voices)
+        {
+            if (isMatch(voice) == true && matches.TryAdd(voice) == false)
+            {
+                return Status::OutOfMemory;
+            }
+        }
+    }
+    outVoices.Swap(matches);
+    return Status::Ok;
+}
+} // namespace
+
 Scenario::Scenario(std::string name, const SystemConfig& config) noexcept : mName(std::move(name))
 {
     (void)mSystem.Initialize(config);
@@ -16,88 +42,68 @@ Status Scenario::PrepareClip(std::span<const uint8> encoded, const ClipDescripto
     return mSystem.PrepareClip(encoded, descriptor, out);
 }
 
-void Scenario::Track(VoiceHandle voice) noexcept
+Status Scenario::Track(VoiceHandle voice) noexcept
 {
-    mTracked.push_back(voice);
+    return mTracked.TryAdd(voice) == true ? Status::Ok : Status::OutOfMemory;
 }
 
 Status Scenario::Advance(uint32 frames) noexcept
 {
-    const std::size_t needed = static_cast<std::size_t>(frames) * 2;
-    if (mScratch.size() < needed)
+    // Allocate all gym storage before rendering so OutOfMemory changes nothing
+    // (cold gym allocations, outside the renderer).
+    const usize needed = static_cast<usize>(frames) * 2;
+    if (mScratch.GetSize() < needed && mScratch.TryResize(needed) == false)
     {
-        mScratch.resize(needed); // cold gym allocation (outside the renderer)
+        return Status::OutOfMemory;
     }
-    const Status r = mSystem.RenderOffline(std::span<float32>(mScratch.data(), needed),
-                                           ChannelLayout::Stereo,
-                                           BufferLayout::Interleaved,
-                                           frames);
+    Capture capture{};
+    if (capture.Voices.TryEnsureCapacity(mTracked.GetSize()) == false ||
+        mCaptures.TryEnsureCapacity(mCaptures.GetSize() + 1) == false)
+    {
+        return Status::OutOfMemory;
+    }
+    const Status rendered = mSystem.RenderOffline(std::span<float32>(mScratch.GetData(), needed),
+                                                  ChannelLayout::Stereo,
+                                                  BufferLayout::Interleaved,
+                                                  frames);
     mSystem.Service();
 
-    Capture cap{};
-    mSystem.GetSystemSnapshot(cap.System);
-    cap.RenderFrame = cap.System.RenderFrame;
-    for (VoiceHandle v : mTracked)
+    mSystem.GetSystemSnapshot(capture.System);
+    capture.RenderFrame = capture.System.RenderFrame;
+    for (const VoiceHandle voice : mTracked)
     {
         VoiceInfo info{};
-        if (IsOk(mSystem.GetVoiceInfo(v, info)))
+        if (IsOk(mSystem.GetVoiceInfo(voice, info)) == true)
         {
-            cap.Voices.push_back(info);
+            capture.Voices.Add(info); // within the reserved capacity
         }
     }
-    mCaptures.push_back(std::move(cap));
-    return r;
+    mCaptures.Add(std::move(capture)); // within the reserved capacity
+    return rendered;
 }
 
-std::vector<VoiceInfo> Scenario::FilterByGroup(uint32 groupIndex) const noexcept
+Status Scenario::FilterByGroup(uint32 groupIndex, Array<VoiceInfo>& outVoices) const noexcept
 {
-    std::vector<VoiceInfo> out;
-    if (mCaptures.empty())
-    {
-        return out;
-    }
-    for (const VoiceInfo& v : mCaptures.back().Voices)
-    {
-        if (v.GroupIndex == groupIndex)
-        {
-            out.push_back(v);
-        }
-    }
-    return out;
+    return FilterLatest(
+        mCaptures,
+        [groupIndex](const VoiceInfo& voice) { return voice.GroupIndex == groupIndex; },
+        outVoices);
 }
 
-std::vector<VoiceInfo> Scenario::FilterByBus(uint32 busIndex) const noexcept
+Status Scenario::FilterByBus(uint32 busIndex, Array<VoiceInfo>& outVoices) const noexcept
 {
-    std::vector<VoiceInfo> out;
-    if (mCaptures.empty())
-    {
-        return out;
-    }
-    for (const VoiceInfo& v : mCaptures.back().Voices)
-    {
-        if (v.BusIndex == busIndex)
-        {
-            out.push_back(v);
-        }
-    }
-    return out;
+    return FilterLatest(
+        mCaptures,
+        [busIndex](const VoiceInfo& voice) { return voice.BusIndex == busIndex; },
+        outVoices);
 }
 
-std::vector<VoiceInfo> Scenario::FilterByTag(uint32 policyTag) const noexcept
+Status Scenario::FilterByTag(uint32 policyTag, Array<VoiceInfo>& outVoices) const noexcept
 {
-    std::vector<VoiceInfo> out;
-    if (mCaptures.empty())
-    {
-        return out;
-    }
-    for (const VoiceInfo& v : mCaptures.back().Voices)
-    {
-        if (v.PolicyTag == policyTag)
-        {
-            out.push_back(v);
-        }
-    }
-    return out;
+    return FilterLatest(
+        mCaptures,
+        [policyTag](const VoiceInfo& voice) { return voice.PolicyTag == policyTag; },
+        outVoices);
 }
 
 } // namespace ludus::audio::gym

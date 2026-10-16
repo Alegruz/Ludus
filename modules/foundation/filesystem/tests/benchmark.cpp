@@ -1,5 +1,6 @@
 #include "streaming_benchmark.hpp"
 
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/filesystem/async.hpp>
 #include <ludus/foundation/filesystem/pack.hpp>
 
@@ -12,7 +13,6 @@
 #include <filesystem>
 #include <new>
 #include <thread>
-#include <vector>
 
 using namespace ludus::foundation;
 using namespace ludus::foundation::filesystem;
@@ -164,7 +164,7 @@ int main(int argc, char** argv)
     }
     const auto openNs = AsyncNow() - beforeOpen;
     const auto descriptors = Descriptors();
-    std::vector<uint8> buffers(WINDOW * LARGE);
+    Array<uint8> buffers(WINDOW * LARGE);
     Sample samples[SAMPLES]{};
     Sample ordered[SAMPLES]{};
     for (const char* pass : {"first", "warm"})
@@ -188,7 +188,7 @@ int main(int argc, char** argv)
                 const usize fileIndex = large ? 64 + (index / 8) % 8 : index % 64;
                 const uint64 offset = large ? ((index / 64) % 16) * 65536 : 0;
                 const auto begin = AsyncNow();
-                const auto result = files[fileIndex].ReadAt(offset, {buffers.data(), length});
+                const ReadResult result = files[fileIndex].ReadAt(offset, {buffers.GetData(), length});
                 samples[index] = {AsyncNow() - begin, 0, AsyncNow() - begin};
                 if (!result.Outcome.Succeeded() || result.BytesRead != length)
                 {
@@ -221,7 +221,7 @@ int main(int argc, char** argv)
                     RequestHandle handle;
                     if (reader.Submit(files[fileIndex],
                                       offset,
-                                      {buffers.data() + slot * LARGE, length},
+                                      {buffers.GetData() + slot * LARGE, length},
                                       handle,
                                       {0, 0, submitted * WINDOW + slot, nullptr}) != AsyncStatus::Ok)
                     {
@@ -310,7 +310,7 @@ int main(int argc, char** argv)
         for (usize index = 0; index < 128; ++index)
         {
             RequestHandle handle;
-            if (reader.Submit(files[64], 0, {buffers.data(), LARGE}, handle) != AsyncStatus::Ok ||
+            if (reader.Submit(files[64], 0, {buffers.GetData(), LARGE}, handle) != AsyncStatus::Ok ||
                 reader.Cancel(handle) != AsyncStatus::Ok)
             {
                 return 12;

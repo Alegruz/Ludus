@@ -34,6 +34,7 @@ int ExerciseInstalledPack() noexcept;
 int ExerciseInstalledAsync() noexcept;
 int ExerciseInstalledPersistence() noexcept;
 bool ExerciseInstalledStrings() noexcept;
+bool ExerciseInstalledStringDictionary() noexcept;
 bool ExerciseInstalledParsing() noexcept;
 bool ExerciseInstalledConfiguration() noexcept;
 bool ExerciseInstalledReflection() noexcept;
@@ -269,6 +270,10 @@ int main()
     if (!ExerciseInstalledStrings())
     {
         return 9;
+    }
+    if (ExerciseInstalledStringDictionary() == false)
+    {
+        return 13;
     }
     if (!PrimitiveContract())
     {

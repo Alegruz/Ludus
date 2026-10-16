@@ -60,8 +60,9 @@ target_link_libraries(
     ludus_audio
     PUBLIC
         Ludus::FoundationBase
-    PRIVATE
+        # audio_gym.h exposes Ludus Array in the public Gym API.
         Ludus::FoundationContainers
+    PRIVATE
         Ludus::FoundationMath
         Ludus::FoundationLogging
         Ludus::Miniaudio
