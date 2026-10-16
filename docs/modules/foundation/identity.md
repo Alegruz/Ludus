@@ -86,10 +86,11 @@ canonical bytes with FoundationHash; exact byte equality decides identity.
 
 ### Generating UUIDs with platform entropy
 
-`Ludus::Platform` provides the production source in
-`<ludus/platform/entropy.h>`. Link `Ludus::Platform` (it links
-FoundationIdentity publicly) and pass `GetSystemEntropySource()` to
-`TryGenerateUuidV4`:
+`Ludus::PlatformEntropy` provides the production source in
+`<ludus/platform/entropy.h>`. It links only FoundationBase and
+FoundationIdentity (publicly), so tools can use it without Platform's window
+backends; `Ludus::Platform` re-exports it. Link either target and pass
+`GetSystemEntropySource()` to `TryGenerateUuidV4`:
 
 ```cpp
 #include <ludus/foundation/identity/uuid.hpp>
@@ -129,5 +130,8 @@ This is the first stage of the
 [implementation sequence](../../architecture/object-handles-uuid.md#implementation-sequence).
 Existing `EntityId`, audio and RHI handles, and current content formats, are
 unchanged. The native and browser platform entropy adapters are implemented in
-`Ludus::Platform`. Registry alignment and UUID authoring records are later
-stages; the private SceneCook UUID helper still calls `getentropy` directly.
+`Ludus::PlatformEntropy`. SceneCook generates its UUIDv4 values with
+`TryGenerateUuidV4` from an entropy source its callers inject
+(`AssetOptions::EntropyOrNull`; see the
+[architecture decision](../../architecture/object-handles-uuid.md#implementation-sequence)).
+Registry alignment and UUID authoring records are later stages.

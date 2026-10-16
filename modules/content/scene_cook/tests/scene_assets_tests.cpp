@@ -5,6 +5,7 @@
 #include <ludus/content/scene_cook/scene_cook.h>
 #include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/identity/uuid.hpp>
 #include <ludus/runtime/resources/scene.h>
 
 #include "python_json.h"
@@ -148,6 +149,35 @@ struct SequentialUuids
     }
 };
 
+/// Controlled entropy: bytes 0, 1, 2, ... in request order, failing every request
+/// after AllowedCalls successful ones.
+struct CountingEntropy
+{
+    usize AllowedCalls = ~usize{0};
+    usize Calls = 0;
+    uint8 Next = 0;
+
+    static bool Fill(void* contextOrNull, uint8* outBytes, usize size) noexcept
+    {
+        CountingEntropy* self = static_cast<CountingEntropy*>(contextOrNull);
+        ++self->Calls;
+        if (self->Calls > self->AllowedCalls)
+        {
+            return false;
+        }
+        for (usize i = 0; i < size; ++i)
+        {
+            outBytes[i] = self->Next++;
+        }
+        return true;
+    }
+
+    [[nodiscard]] identity::EntropySource GetSource() noexcept
+    {
+        return identity::EntropySource{ .FillBytesOrNull = &Fill, .ContextOrNull = this };
+    }
+};
+
 std::filesystem::path MakeWorkDirectory()
 {
     char directory[] = "/tmp/ludus-scene-assets-XXXXXX";
@@ -269,6 +299,74 @@ TEST_CASE("New levels match the reference document", "[scene_assets]")
           "\"id\":\"00000000-0000-0000-0000-000000000001\",\"imports\":[],\"name\":\"Golden\",\"objects\":[],"
           "\"profile\":\"resident-reference-v1\",\"version\":1}\n");
     CHECK(ValidateLevel(ToSpan(level), error));
+}
+
+TEST_CASE("New identities are FoundationIdentity UUIDv4 values from the injected entropy", "[scene_assets]")
+{
+    CountingEntropy entropy;
+    const identity::EntropySource entropySource = entropy.GetSource();
+    AssetOptions options;
+    options.EntropyOrNull = &entropySource;
+    Array<uint8> level;
+    AssetError error;
+    REQUIRE(CreateLevel("Fresh", options, level, error));
+    CHECK(entropy.Calls == 1);
+    // Bytes 00..0f with the version nibble (byte 6) and variant bits (byte 8) applied.
+    CHECK(ToText(level).find("\"id\":\"00010203-0405-4607-8809-0a0b0c0d0e0f\"") != std::string::npos);
+    CHECK(ValidateLevel(ToSpan(level), error));
+}
+
+TEST_CASE("Entropy failure propagates without partial output", "[scene_assets]")
+{
+    SECTION("CreateLevel keeps its output when no source is supplied or the source fails")
+    {
+        CountingEntropy entropy;
+        const identity::EntropySource entropySource = entropy.GetSource();
+        AssetOptions options;
+        options.EntropyOrNull = &entropySource;
+        Array<uint8> level;
+        AssetError error;
+        REQUIRE(CreateLevel("Kept", options, level, error));
+        const std::string before = ToText(level);
+
+        AssetOptions missing;
+        CHECK_FALSE(CreateLevel("Missing", missing, level, error));
+        CHECK(error.Code == AssetErrorCode::MissingTools);
+        CHECK(error.Message.View() == "No entropy source for UUIDs");
+        CHECK(ToText(level) == before);
+
+        entropy.AllowedCalls = entropy.Calls;
+        error = AssetError{};
+        CHECK_FALSE(CreateLevel("Failing", options, level, error));
+        CHECK(error.Code == AssetErrorCode::MissingTools);
+        CHECK(entropy.Calls == 2);
+        CHECK(ToText(level) == before);
+    }
+
+    SECTION("Import fails at the namespace or at an object UUID and publishes nothing")
+    {
+        GoldenProject golden;
+        const std::string before = ReadWhole(golden.Project / "assets/catalog.json");
+        // Zero successful requests fail the import namespace; one fails the first object UUID.
+        for (const usize allowedCalls : {usize{0}, usize{1}})
+        {
+            INFO(allowedCalls);
+            CountingEntropy entropy;
+            entropy.AllowedCalls = allowedCalls;
+            const identity::EntropySource entropySource = entropy.GetSource();
+            AssetOptions options = golden.Options;
+            options.UuidsOrNull = nullptr;
+            options.EntropyOrNull = &entropySource;
+            AssetError error;
+            Array<uint8> level;
+            CHECK_FALSE(
+                ImportScene(golden.Project.string(), golden.Source, ToSpan(golden.Level), options, level, error));
+            CHECK(error.Code == AssetErrorCode::MissingTools);
+            CHECK(entropy.Calls == allowedCalls + 1);
+            CHECK(level.GetSize() == 0);
+            CHECK(ReadWhole(golden.Project / "assets/catalog.json") == before);
+        }
+    }
 }
 
 TEST_CASE("Scene asset pipeline is byte-identical to the Python goldens", "[scene_assets][goldens]")
@@ -735,7 +833,10 @@ TEST_CASE("A confirmed import must match the approved preview", "[scene_assets]"
     WriteBestEffortSource(source, "room.pbrt");
     const std::string root = project.string();
     const std::string sourceText = source.string();
+    CountingEntropy entropy;
+    const identity::EntropySource entropySource = entropy.GetSource();
     AssetOptions options;
+    options.EntropyOrNull = &entropySource;
     options.SourceOrigin = VIRTUAL_ORIGIN;
     options.SourceEntry = "room.pbrt";
     AssetError error;

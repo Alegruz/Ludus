@@ -24,6 +24,8 @@
 #include <QUuid>
 #include <QVBoxLayout>
 #include <ludus/content/scene_cook/scene_assets.h>
+#include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
 
 #include <span>
 #include <string_view>
@@ -570,8 +572,10 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
         Cancellation cancel;
         cancel.Requested = &IsCancelRequested;
         cancel.ContextOrNull = &CancelRequested_;
+        const foundation::identity::EntropySource entropy = platform::GetSystemEntropySource();
         AssetOptions options;
         options.CancelOrNull = &cancel;
+        options.EntropyOrNull = &entropy;
         options.SourceEntry = ToView(entry);
         options.ExpectedSourceDigest = ToView(expectedSource);
         EditorSceneRequest request;
