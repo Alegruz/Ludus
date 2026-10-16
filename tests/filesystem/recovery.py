@@ -79,6 +79,21 @@ def check_directory(entries, policy, boundary, model):
             raise AssertionError("acknowledged rename retained a temporary or lost its destination entry")
 
 
+def read_destination_inode(root):
+    try:
+        return (root / "nested/data").stat(follow_symlinks=False).st_ino
+    except FileNotFoundError:
+        return None
+
+
+def check_seeded_revision(data, seed_inode, recovered_inode):
+    # The Linux replay candidate copies the same seeded ext4/XFS image. A new
+    # temporary cannot reuse the still-linked old inode in this bounded workload.
+    # Device numbers may change across loop attachments, so compare inode only.
+    if seed_inode is not None and recovered_inode == seed_inode and data != OLD:
+        raise AssertionError("durably seeded old inode was corrupted")
+
+
 def check_process(data, replace, shape, boundary):
     # Process kill leaves the kernel/filesystem alive: rename is already visible.
     published = boundary in ("replaced", "directory-synced", "complete")

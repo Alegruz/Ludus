@@ -158,7 +158,7 @@ a 256 MiB log per active case, plus retained successful logs. The root runner
 cleans up only its own mounts, mappings and loops; images remain for inspection.
 
 Local validation on Apple M5 (16 GiB), macOS 26.6, Clang 18.1.8 Development:
-84 process cuts and republications passed; all six oracle/orchestration regressions
+84 process cuts and republications passed; all oracle/orchestration regressions
 passed. The existing filesystem and persistence-fault suites also passed. Commands:
 `ctest --test-dir out/build/macos-clang-development -R 'filesystem_(tests|persistence_fault_tests|process_recovery_tests|recovery_oracle_tests)' --output-on-failure`.
 Linux block-recovery results are supplied by the separate workflow, not inferred

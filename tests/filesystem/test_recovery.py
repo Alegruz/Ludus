@@ -1,6 +1,6 @@
 """Independent negative tests for the declared crash-state oracle."""
 import unittest
-from recovery import OLD, boundaries, check_directory, check_process, check_storage, payload
+from recovery import OLD, boundaries, check_directory, check_process, check_seeded_revision, check_storage, payload
 
 
 class RecoveryOracleTests(unittest.TestCase):
@@ -37,6 +37,13 @@ class RecoveryOracleTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 check_directory(entries, "directory", boundary, model)
             check_directory([{"name": "data"}], "directory", boundary, model)
+
+    def test_publish_only_cannot_hide_corruption_of_the_seeded_inode(self):
+        check_seeded_revision(OLD, 42, 42)
+        check_seeded_revision(b"unsynced new data", 42, 43)
+        check_seeded_revision(None, 42, None)
+        with self.assertRaises(AssertionError):
+            check_seeded_revision(b"corrupt old data", 42, 42)
 
     def test_weak_policies_do_not_hide_corruption_of_synced_data(self):
         for policy in ("file", "directory"):
@@ -98,6 +105,7 @@ class BlockReplayIsolationTests(unittest.TestCase):
                  patch.object(recovery_block, "make_image", side_effect=lambda path, size: path.write_bytes(b"seed")), \
                  patch.object(recovery_block, "copy_image", side_effect=fake_copy), \
                  patch.object(recovery_block, "seed"), \
+                 patch.object(recovery_block, "read_destination_inode", return_value=42), \
                  patch.object(recovery_block, "drive", side_effect=fake_drive), \
                  patch.object(recovery_block, "find_mark", side_effect=lambda tool, log, mark: marks[mark]), \
                  patch.object(recovery_block, "inspect_directory", return_value=[{"name": "data"}]), \
@@ -108,6 +116,32 @@ class BlockReplayIsolationTests(unittest.TestCase):
             self.assertTrue((directory / "baseline.img").exists())
             self.assertTrue((directory / "writes.log").exists())
             self.assertTrue((directory / "replay.img").exists())
+
+
+class RecoveryMountCleanupTests(unittest.TestCase):
+    def test_transient_busy_unmount_is_retried_without_force(self):
+        from subprocess import CalledProcessError
+        from unittest.mock import patch
+        import recovery_block
+        busy = CalledProcessError(32, ["umount", "owned"], stderr="target is busy")
+        with patch.object(recovery_block, "command", side_effect=[busy, busy, ""]) as native, \
+             patch.object(recovery_block.time, "sleep") as pause:
+            recovery_block.unmount_owned("owned")
+        self.assertEqual(native.call_count, 3)
+        self.assertTrue(all(call.args == ("umount", "owned") for call in native.call_args_list))
+        self.assertEqual(pause.call_count, 2)
+
+    def test_persistent_busy_and_other_errors_remain_failures(self):
+        from subprocess import CalledProcessError
+        from unittest.mock import patch
+        import recovery_block
+        for status, message, attempts in ((32, "target is busy", 20), (32, "not mounted", 1), (1, "denied", 1)):
+            error = CalledProcessError(status, ["umount", "owned"], stderr=message)
+            with patch.object(recovery_block, "command", side_effect=error) as native, \
+                 patch.object(recovery_block.time, "sleep"):
+                with self.assertRaises(CalledProcessError):
+                    recovery_block.unmount_owned("owned")
+            self.assertEqual(native.call_count, attempts)
 
 
 if __name__ == "__main__":

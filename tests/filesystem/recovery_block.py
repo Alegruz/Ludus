@@ -16,9 +16,10 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 
-from recovery import POLICIES, SHAPES, check_directory, check_storage, describe, drive, inspect_directory, observe, seed
+from recovery import POLICIES, SHAPES, check_directory, check_seeded_revision, check_storage, describe, drive, inspect_directory, observe, read_destination_inode, seed
 
 
 def command(*arguments):
@@ -35,13 +36,27 @@ def loop(image):
         command("losetup", "--detach", device)
 
 
+def unmount_owned(destination):
+    # udev/host scanners can briefly retain a freshly mounted loop filesystem.
+    # Retry only that reported condition; never force/lazy-unmount a candidate
+    # or treat an unmount failure as successful storage-recovery evidence.
+    for attempt in range(20):
+        try:
+            command("umount", destination)
+            return
+        except subprocess.CalledProcessError as error:
+            if error.returncode != 32 or "target is busy" not in (error.stderr or "") or attempt == 19:
+                raise
+            time.sleep(0.1)
+
+
 @contextmanager
 def mounted(device, destination):
     command("mount", "-o", "noatime,nodiscard", device, destination)
     try:
         yield destination
     finally:
-        command("umount", destination)
+        unmount_owned(destination)
 
 
 def copy_image(source, destination):
@@ -73,6 +88,7 @@ def storage_case(args, directory, filesystem, replace, shape, policy):
     with loop(baseline) as device:
         with mounted(device, mountpoint):
             seed(mountpoint, replace)
+            seed_inode = read_destination_inode(mountpoint)
     copy_image(baseline, recorded)
     make_image(log, 256 * 1024 * 1024)
     mapping = "ludus-recovery-" + uuid.uuid4().hex
@@ -104,7 +120,7 @@ def storage_case(args, directory, filesystem, replace, shape, policy):
         raise RuntimeError(f"{end-start+1} prefixes exceed declared bound {args.max_prefixes}; increase it explicitly")
     result = {"model": "dm-log-writes completion/flush-ordered prefixes; no sector tearing or permutation",
               "filesystem": filesystem, "mount_options": "noatime,nodiscard (other defaults recorded in commands.log)",
-              "replace": replace, "shape": shape, "policy": policy, "marks": marks, "prefixes": []}
+              "replace": replace, "shape": shape, "policy": policy, "seed_inode": seed_inode, "marks": marks, "prefixes": []}
     (directory / "case.json").write_text(json.dumps(result, indent=2) + "\n")
     for entry in range(start, end + 1):
         copy_image(baseline, replay)
@@ -121,11 +137,13 @@ def storage_case(args, directory, filesystem, replace, shape, policy):
             with mounted(device, mountpoint):
                 data = observe(mountpoint)
                 entries = inspect_directory(mountpoint)
-                record = dict(entry=entry, boundary=boundary, recovered=describe(data), directory_entries=entries)
+                recovered_inode = read_destination_inode(mountpoint)
+                record = dict(entry=entry, boundary=boundary, recovered=describe(data), directory_entries=entries, recovered_inode=recovered_inode)
                 result["prefixes"].append(record)
                 # Write evidence before the oracle; failing replay.img/log/seed
                 # remain available for exact reproduction.
                 (directory / "case.json").write_text(json.dumps(result, indent=2) + "\n")
+                check_seeded_revision(data, seed_inode, recovered_inode)
                 check_storage(data, replace, shape, policy, boundary)
                 check_directory(entries, policy, boundary, "storage")
     result["log_sha256"] = hash_file(log)
