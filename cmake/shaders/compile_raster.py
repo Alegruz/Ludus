@@ -9,9 +9,11 @@ import struct
 # https://docs.shader-slang.org/en/latest/external/slang/docs/user-guide/09-reflection.html
 # Reflect each target independently. No cross-target CPU packing is inferred.
 # Raster rejects storage; compute accepts bounded structured buffers. Both reject
-# resource arrays, extra groups and unsupported inputs.
+# extra groups and unsupported inputs. Native descriptor arrays use explicit profiles.
 # Must match rhi::RASTER_BINDING_COUNT in profile.h; regression-checked.
 RASTER_BINDING_COUNT = 16
+RUNTIME_BINDING_LENGTH_SLOT = RASTER_BINDING_COUNT - 2
+RUNTIME_BINDING_ARRAY_SLOT = RASTER_BINDING_COUNT - 1
 
 def uniform_shape(value):
     kind = value.get('kind')
@@ -41,7 +43,7 @@ def external_text_source(namespace, label, data):
     return declaration, definition
 
 
-def raster_interface(document, stage, metal=False, native_arrays=False):
+def raster_interface(document, stage, metal=False, native_arrays=False, runtime_arrays=False):
     points = [x for x in document['entryPoints'] if x['stage'] == stage]
     if len(points) != 1:
         raise RuntimeError('Expected one entry per raster stage')
@@ -68,13 +70,17 @@ def raster_interface(document, stage, metal=False, native_arrays=False):
             raise RuntimeError('Raster binding is duplicated or outside the bounded profile')
         resource_type = resource['type']
         count = 1
+        is_runtime = False
         if resource_type['kind'] == 'array':
             count = resource_type.get('elementCount')
-            if not native_arrays or type(count) is not int or not 2 <= count < 0xffffffff:
-                raise RuntimeError('Fixed resource arrays require the native binding array profile with a bounded fixed count')
+            is_runtime = count == 0
+            if is_runtime:
+                if metal or not runtime_arrays or index != RUNTIME_BINDING_ARRAY_SLOT:
+                    raise RuntimeError('Runtime descriptor arrays require the explicit Vulkan runtime profile and reserved table slot')
+                count = 1
+            if not native_arrays or type(count) is not int or not (1 if is_runtime else 2) <= count < 0xffffffff:
+                raise RuntimeError('Resource arrays require the native binding array profile with a bounded count')
             resource_type = resource_type.get('elementType', {})
-            if resource_type.get('kind') != 'resource' or resource_type.get('baseShape') != 'texture2D' or resource_type.get('array', False):
-                raise RuntimeError('Native binding arrays require sampled color Texture2D elements')
         kind = resource_type['kind']
         size = 0
         if kind == 'constantBuffer':
@@ -123,10 +129,14 @@ def raster_interface(document, stage, metal=False, native_arrays=False):
             if len(native) != 1 or native[0]['index'] != index:
                 raise RuntimeError('Metal binding remapping is outside this raster profile')
         value = {'binding': index, 'kind': kind, 'size': size, 'name': resource['name']}
-        if count > 1:
-            if kind != 'Texture2D':
-                raise RuntimeError('Native binding arrays require sampled color Texture2D elements')
+        if is_runtime and kind not in ('Texture2D', 'Texture2DArray', 'TextureCube', 'Texture3D'):
+            raise RuntimeError('Runtime arrays require sampled color texture descriptors')
+        if count > 1 or is_runtime:
+            if kind in ('TextureDepth2D', 'TextureStencil2D'):
+                raise RuntimeError('Depth/stencil descriptor arrays are outside this profile')
             value['count'] = count
+        if is_runtime:
+            value['runtime_sized'] = True
         if kind in ('StorageRead', 'StorageReadWrite'):
             value['scalar'] = scalar['scalarType']
             value['width'] = width
@@ -389,6 +399,8 @@ def spirv_array_indexing(data, reflected):
     # SPIR-V / GLSL.std.450 enumerants used by this deliberately bounded verifier.
     op_ext_import, op_ext_inst, op_type_int = 11, 12, 21
     op_type_pointer, op_constant, op_variable = 32, 43, 59
+    op_type_vector, op_type_struct, op_member_decorate = 23, 30, 72
+    op_integer_subtract = 130
     op_access_chain, op_in_bounds_access_chain = 65, 66
     op_decorate, op_copy_object = 71, 83
     decoration_binding, decoration_non_uniform = 33, 5300
@@ -429,9 +441,28 @@ def spirv_array_indexing(data, reflected):
                 standard_sets.add(values[0])
         if operation == op_constant and len(values) == 3:
             constants[values[1]] = (values[0], values[2])
-        if operation in (op_ext_inst, op_copy_object) and len(values) >= 3:
+        if operation in (op_ext_inst, op_copy_object, op_load, op_access_chain, op_in_bounds_access_chain, op_composite_extract, op_integer_subtract) and len(values) >= 3:
             definitions[values[1]] = (operation, values)
-    def is_bounded(identifier, count, visited=None):
+    def is_length_pointer(identifier):
+        operation, values = definitions.get(identifier, (0, ()))
+        return (operation in (op_access_chain, op_in_bounds_access_chain) and len(values) == 5
+                and values[2] == control_variable
+                and all(constants.get(index, (None, None))[1] == 0 for index in values[3:]))
+
+    def is_length_word(identifier):
+        operation, values = definitions.get(identifier, (0, ()))
+        if operation == op_load and len(values) == 3 and integer_types.get(values[0]) == (32, 0):
+            return is_length_pointer(values[2])
+        # Some targets load the whole uint4 then extract x.
+        if operation == op_composite_extract and len(values) == 4 and values[3] == 0 and integer_types.get(values[0]) == (32, 0):
+            load_operation, load_values = definitions.get(values[2], (0, ()))
+            pointer_operation, pointer_values = definitions.get(load_values[2], (0, ())) if load_operation == op_load and len(load_values) == 3 else (0, ())
+            return (pointer_operation in (op_access_chain, op_in_bounds_access_chain) and len(pointer_values) == 4
+                    and pointer_values[2] == control_variable
+                    and constants.get(pointer_values[3], (None, None))[1] == 0)
+        return False
+
+    def is_bounded(identifier, count, visited=None, runtime=False):
         visited = set() if visited is None else visited
         if identifier in visited:
             return False
@@ -440,11 +471,13 @@ def spirv_array_indexing(data, reflected):
             kind, value = constants[identifier]
             return integer_types.get(kind) in ((32, 0), (32, 1)) and value < count
         operation, values = definitions.get(identifier, (0, ()))
+        if runtime and operation == op_integer_subtract and len(values) == 4 and integer_types.get(values[0]) == (32, 0):
+            return is_length_word(values[2]) and constants.get(values[3], (None, None))[1] == 1
         if operation == op_copy_object and integer_types.get(values[0]) == (32, 0):
-            return is_bounded(values[2], count, visited)
+            return is_bounded(values[2], count, visited, runtime)
         if operation == op_ext_inst and len(values) >= 4 and integer_types.get(values[0]) == (32, 0) and values[2] in standard_sets:
             if values[3] == glsl_unsigned_min and len(values) == 6:  # unsigned min
-                return any(is_bounded(value, count, visited.copy()) for value in values[4:])
+                return any(is_bounded(value, count, visited.copy(), runtime) for value in values[4:])
             if values[3] == glsl_unsigned_clamp and len(values) == 7:  # unsigned clamp
                 lower, upper = constants.get(values[5]), constants.get(values[6])
                 return lower is not None and upper is not None and integer_types.get(lower[0]) == (32, 0) and integer_types.get(upper[0]) == (32, 0) and lower[1] <= upper[1] < count
@@ -452,7 +485,29 @@ def spirv_array_indexing(data, reflected):
     pointer_types = {values[0]: values[2] for operation, values in instructions
                      if operation == op_type_pointer and len(values) == 3}
     variables = {values[1]: values[0] for operation, values in instructions if operation == op_variable and len(values) >= 3}
-    arrays = {entry['binding']: entry for entry in reflected['entries'] if entry.get('count', 1) > 1}
+    control_variable = None
+    if any(entry.get('runtime_sized', False) for entry in reflected['entries']):
+        controls = [entry for entry in reflected['entries'] if entry['binding'] == RUNTIME_BINDING_LENGTH_SLOT]
+        if len(controls) > 1 or (controls and (controls[0]['kind'] != 'UniformBuffer' or controls[0]['size'] != 16)):
+            raise RuntimeError('Runtime descriptor arrays require the RHI-owned uint4 length record')
+        if controls:
+            control_variables = [identifier for identifier, binding in bindings.items()
+                                 if binding == RUNTIME_BINDING_LENGTH_SLOT and identifier in variables]
+            vectors = {values[0]: (values[1], values[2]) for operation, values in instructions
+                       if operation == op_type_vector and len(values) == 3}
+            structures = {values[0]: values[1:] for operation, values in instructions
+                          if operation == op_type_struct and len(values) >= 1}
+            offsets = {(values[0], values[1]): values[3] for operation, values in instructions
+                       if operation == op_member_decorate and len(values) == 4 and values[2] == 35}
+            if len(control_variables) != 1:
+                raise RuntimeError('Runtime array length must have one immutable control binding')
+            control_variable = control_variables[0]
+            structure = pointer_types.get(variables[control_variable])
+            fields = structures.get(structure, ())
+            vector = vectors.get(fields[0]) if len(fields) == 1 else None
+            if vector is None or vector[1] != 4 or integer_types.get(vector[0]) != (32, 0) or offsets.get((structure, 0)) != 0:
+                raise RuntimeError('Runtime length target differs from the RHI-owned uint4 ABI')
+    arrays = {entry['binding']: entry for entry in reflected['entries'] if entry.get('count', 1) > 1 or entry.get('runtime_sized', False)}
     for entry in arrays.values():
         entry['indexing'] = 'Constant'
     array_types = {pointer_types[variables[identifier]] for identifier, binding in bindings.items()
@@ -469,7 +524,7 @@ def spirv_array_indexing(data, reflected):
             binding = bindings[values[2]]
             entry = arrays[binding]
             accessed.add(binding)
-            if is_bounded(values[3], entry['count']) is False:
+            if is_bounded(values[3], entry['count'], runtime=entry.get('runtime_sized', False)) is False:
                 raise RuntimeError('Native descriptor index lacks a verified fixed-array bound; use unsigned min/clamp')
             # A resource array is one-dimensional in this profile. The first
             # pointer index selects its descriptor, independently of texture layers.
@@ -487,7 +542,14 @@ def verify_native_metal_arrays(code, interface):
         index = binding['binding']
         count = binding.get('count', 1)
         if count > 1:
-            pattern = r'array<\s*texture2d<\s*float\s*>\s*,\s*' + str(count) + r'\s*>\s+\w+\s*\[\[texture\(' + str(index) + r'\)\]\]'
+            if binding['kind'] == 'Sampler':
+                element, register = r'sampler', 'sampler'
+            elif binding['kind'] in ('Texture2D', 'Texture2DArray', 'TextureCube', 'Texture3D'):
+                shape = {'Texture2D': 'texture2d', 'Texture2DArray': 'texture2d_array', 'TextureCube': 'texturecube', 'Texture3D': 'texture3d'}[binding['kind']]
+                element, register = shape + r'<\s*float\s*>', 'texture'
+            else:
+                raise RuntimeError('Metal buffer descriptor arrays are outside this profile')
+            pattern = r'array<\s*' + element + r'\s*,\s*' + str(count) + r'\s*>\s+\w+\s*\[\[' + register + r'\(' + str(index) + r'\)\]\]'
             if re.search(pattern, code) is None:
                 raise RuntimeError('MSL array count/register differs from target reflection')
         else:
@@ -505,8 +567,14 @@ def compile_raster(args, lock):
     stages = [('compute', args.compute)] if getattr(args, 'compute', None) else [('vertex', args.vertex), ('fragment', args.fragment)]
     compute = stages[0][0] == 'compute'
     native_arrays = getattr(args, 'native_binding_arrays', False)
-    if native_arrays and (compute or args.spirv_cross is None):
-        raise RuntimeError('Native binding arrays require raster stages and the pinned SPIRV-Cross tool')
+    runtime_arrays = getattr(args, 'runtime_binding_arrays', False)
+    if runtime_arrays and (not native_arrays or args.metal or compute):
+        raise RuntimeError('Runtime descriptor arrays require the native Vulkan raster profile')
+    if runtime_arrays:
+        extra += ['-DLUDUS_RUNTIME_BINDING_LENGTH_SLOT=' + str(RUNTIME_BINDING_LENGTH_SLOT),
+                  '-DLUDUS_RUNTIME_BINDING_ARRAY_SLOT=' + str(RUNTIME_BINDING_ARRAY_SLOT)]
+    if native_arrays and args.metal and (compute or args.spirv_cross is None):
+        raise RuntimeError('Metal native arrays require raster stages and the pinned SPIRV-Cross tool')
     if not args.metal:
         if not args.validator or hashlib.sha256(Path(args.validator).read_bytes()).hexdigest() != lock['spirv_tools']['val_sha256']:
             raise RuntimeError('Raster SPIR-V validator differs from SDK pin')
@@ -524,9 +592,12 @@ def compile_raster(args, lock):
                    '-entry', name, '-stage', stage, '-o', str(artifact), '-reflection-json', str(reflection), '-depfile', str(depfile), *extra]
         commands.append(command); run(command)
         dependencies.append(depfile.read_text().split(':', 1)[1].strip())
-        interfaces[(target, stage)] = raster_interface(json.loads(reflection.read_text()), stage, target == 'metal', native_arrays)
+        interfaces[(target, stage)] = raster_interface(json.loads(reflection.read_text()), stage, target == 'metal', native_arrays, runtime_arrays)
         if native_arrays:
             spirv_array_indexing(artifact.read_bytes(), interfaces[(target, stage)])
+            for binding in interfaces[(target, stage)]['entries']:
+                if binding.get('kind') in ('UniformBuffer', 'StorageRead', 'StorageReadWrite', 'Sampler') and binding.get('indexing', 'Constant') != 'Constant':
+                    raise RuntimeError('Buffer and sampler descriptor arrays require constant selection')
         if args.metal and native_arrays:
             emitted = output / f'{args.name}.{stage}.metal'
             command = [args.spirv_cross, str(artifact), '--msl', '--msl-version', '24000', '--msl-decoration-binding', '--output', str(emitted)]
@@ -633,7 +704,7 @@ def compile_raster(args, lock):
         if interface['entries']:
             header += f'inline constexpr graphics::rhi::RasterBinding {label}_BINDINGS[] = {{\n'
             for binding in interface['entries']:
-                header += '{' + f'.Binding={binding["binding"]},.Kind=graphics::rhi::RasterBindingKind::{binding["kind"]},.Visibility=graphics::rhi::RasterVisibility::{stage.title()},.MinSize={binding["size"]},.Count={binding.get("count",1)},.Indexing=graphics::rhi::RasterBindingIndexing::{binding.get("indexing","Constant")}' + '},\n'
+                header += '{' + f'.Binding={binding["binding"]},.Kind=graphics::rhi::RasterBindingKind::{binding["kind"]},.Visibility=graphics::rhi::RasterVisibility::{stage.title()},.MinSize={binding["size"]},.Count={binding.get("count",1)},.Indexing=graphics::rhi::RasterBindingIndexing::{binding.get("indexing","Constant")},.IsRuntimeSized={str(binding.get("runtime_sized",False)).lower()}' + '},\n'
             header += '};\n'
         members = [(entry['binding'], name, offset, entry['shapes'][name]) for entry in interface['entries']
                    for name, offset in entry.get('offsets', {}).items()]
@@ -667,7 +738,7 @@ def compile_raster(args, lock):
             header += f' result.TextureNames[{binding}] = "{texture["name"]}"; result.TextureSamplers[{binding}] = {texture["sampler"]};\n'
         for axis, size in enumerate(interface.get('workgroup', [])):
             header += f' result.WorkgroupSize[{axis}] = {size};\n'
-        if any(entry.get('count', 1) > 1 for entry in interface['entries']):
+        if any(entry.get('count', 1) > 1 or entry.get('runtime_sized', False) for entry in interface['entries']):
             header += ' result.HasVerifiedArrayBounds = true;\n'
         header += ' return result;\n}\n'
     for stage, _ in stages:

@@ -46,6 +46,16 @@ inline constexpr ludus::foundation::usize RASTER_FORMAT_COUNT =
 /// Maximum group-zero binding numbers and copied shader/layout metadata entries.
 /// Enabled per-stage descriptor counts may be lower; query DeviceProfile before authoring layouts.
 inline constexpr ludus::foundation::usize RASTER_BINDING_COUNT = 16;
+/// Reserved uniform binding for an RHI-owned immutable runtime table length.
+/// Runtime layouts reserve this slot; callers never supply or mutate its buffer.
+inline constexpr ludus::foundation::uint32 RUNTIME_BINDING_LENGTH_SLOT = RASTER_BINDING_COUNT - 2;
+/// Vulkan's variable-count sampled table occupies the highest group-zero binding.
+inline constexpr ludus::foundation::uint32 RUNTIME_BINDING_ARRAY_SLOT = RASTER_BINDING_COUNT - 1;
+/// One uint4 constant-buffer record; its first word is the allocated table length.
+inline constexpr ludus::foundation::usize RUNTIME_BINDING_LENGTH_WORDS = 4;
+/// Native shader bytes of the immutable length record, excluding allocation padding.
+inline constexpr ludus::foundation::usize RUNTIME_BINDING_LENGTH_BYTES =
+    sizeof(ludus::foundation::uint32) * RUNTIME_BINDING_LENGTH_WORDS;
 /// Copied R6 storage maxima and explicit byte budgets. Configure before startup.
 /// Counts are limits, not reservations; creation may fail under byte/allocation pressure.
 /// Defaults preserve the original general profiles. The fullscreen facade is separate.
@@ -56,10 +66,10 @@ struct StorageLimits final
 {
     /// Maximum live/pending/retained records of each general raster/compute resource kind.
     ludus::foundation::uint32 ResourcesPerKind = 64;
-    /// Maximum populated binding descriptors across live, pending and retained snapshots.
+    /// Maximum allocated binding descriptors across live, pending and retained snapshots.
     /// Independent of set-record capacity; exhausted creation publishes no ownership.
     ludus::foundation::uint32 BindingDescriptors = 512;
-    /// Requested maximum populated descriptors per snapshot, backend-clamped at admission.
+    /// Requested maximum allocated descriptors per snapshot, backend-clamped at admission.
     /// Payload storage grows only during creation and consumes HostBytes; no draw allocation.
     ludus::foundation::uint32 DescriptorsPerSet = 256;
     /// Maximum live/pending/retained records of each optional RT0 resource kind.
@@ -141,7 +151,7 @@ struct ComputeCapabilities final
     ludus::foundation::uint32 MaxWorkgroupInvocations = 0;
     /// Maximum dispatched workgroups along each axis.
     ludus::foundation::uint32 MaxDispatch[3]{};
-    /// Maximum scalar storage buffer descriptors in a compute layout; zero disables storage.
+    /// Maximum storage buffer descriptors in a compute layout, including array elements; zero disables storage.
     ludus::foundation::uint32 MaxStorageBindings = 0;
 };
 /// Implemented texture operations; native support alone never enables an engine API.
@@ -228,15 +238,17 @@ struct BindingCapabilities final
     ludus::foundation::uint32 MaxDynamicUniformBuffers = 0;
     /// Maximum dynamic storage bindings per compute pipeline layout.
     ludus::foundation::uint32 MaxDynamicStorageBuffers = 0;
-    /// Maximum fixed sampled color texture descriptors per binding; one means scalar only.
+    /// Maximum sampled color texture descriptors per binding; one means scalar only.
+    /// Runtime allocation remains separately negotiated.
     ludus::foundation::uint32 MaxTextureArrayElements = 0;
-    /// Maximum populated descriptors in one snapshot, including scalar buffers/samplers.
+    /// Maximum allocated descriptors in one snapshot, including buffers/samplers
+    /// and fallback-filled logical holes.
     ludus::foundation::uint32 MaxDescriptorsPerSet = 0;
     /// Dynamically uniform selection of fixed sampled texture arrays is enabled.
     bool HasUniformTextureIndexing = false;
     /// Non-uniform selection of fixed sampled texture arrays was explicitly requested
-    /// and enabled. Every element must be declared reachable and fully populated.
-    /// Does not enable runtime-sized arrays, sparse tables or update-after-bind.
+    /// and enabled. Every populated element must be declared reachable.
+    /// Does not independently enable runtime-sized arrays or native descriptor mutation.
     bool HasBindlessTextureIndexing = false;
     /// Maximum group-zero entries; binding numbers must also be below this bound.
     ludus::foundation::uint32 MaxBindings = 0;
@@ -250,6 +262,18 @@ struct BindingCapabilities final
     ludus::foundation::uint32 MaxUniformBuffersPerSet = 0;
     /// Maximum sampler descriptors across every stage in one group-zero layout.
     ludus::foundation::uint32 MaxSamplersPerSet = 0;
+    /// Fixed uniform/compute-storage descriptor arrays with constant selection.
+    /// Dynamic offsets and non-constant buffer array indices are excluded.
+    bool HasBufferDescriptorArrays = false;
+    /// Fixed sampler descriptor arrays with constant selection.
+    bool HasSamplerDescriptorArrays = false;
+    /// Explicitly requested native unsized sampled color arrays with bounded
+    /// per-snapshot allocation. Independent of non-uniform descriptor indexing.
+    bool HasRuntimeTextureArrays = false;
+    /// Logical holes in native descriptor arrays use a retained element-zero
+    /// fallback. Physical descriptor budgets include every hole; no sparse-memory
+    /// or native partially-bound descriptor feature is implied.
+    bool HasPartiallyBoundArrays = false;
 };
 /// Immutable effective profile snapshot while the device is ready; zero otherwise.
 /// Formats are indexed by RasterFormat's underlying value, in declaration order.

@@ -1691,7 +1691,82 @@ owns the assignment; the API comments own its detailed caller contracts.
 | Fixed color texture descriptor arrays | Enabled up to configured/native limits | Enabled within 31 texture registers; array ranges cannot overlap | Unsupported | Unsupported |
 | Dynamically uniform array selection | Enabled only with the actual device feature | Enabled | Unsupported | Unsupported |
 | Non-uniform fixed array selection | Explicit request, Vulkan 1.2 and enabled sampled-image indexing feature | Explicit request and verified native lowering | Unsupported | Unsupported |
-| Runtime-sized arrays, holes, update-after-bind, sampler/buffer descriptor arrays | Unsupported | Unsupported | Unsupported | Unsupported |
+| Fixed color array/cube/volume descriptor arrays | Enabled within sampled-image limits | Enabled within texture register limits | Unsupported | Unsupported |
+| Fixed sampler descriptor arrays, constant selection | Enabled within sampler limits | Enabled within sampler register limits | Unsupported | Unsupported |
+| Fixed uniform/compute-storage descriptor arrays, constant selection | Enabled within each buffer limit; no dynamic offsets | Unsupported | Unsupported | Unsupported |
+| Unsized sampled color descriptor arrays | Explicit independent request; Vulkan 1.2 runtime and variable-count features | Unsupported | Unsupported | Unsupported |
+| Logical partially populated arrays | Explicit layout flag; retained element-zero fallback fills holes | Same fallback contract | Unsupported | Unsupported |
+| Publish replacement after prior binding/submission | Immutable snapshot publication | Immutable snapshot publication | Publish after asynchronous replacement reaches Ready | Immutable snapshot publication |
+
+### R11c table allocation and publication
+
+`RasterBinding::IsRuntimeSized` admits an unsized sampled color shader array.
+Request `DeviceDescription::Required.HasRuntimeTextureArrays` or its preferred
+counterpart independently of `BindlessTextureIndexing`. Vulkan enables both
+`runtimeDescriptorArray` and `descriptorBindingVariableDescriptorCount` only
+when requested and available. The table occupies `RUNTIME_BINDING_ARRAY_SLOT`
+(binding 15); `RUNTIME_BINDING_LENGTH_SLOT` (14) is reserved for RHI-owned length
+metadata. Other consumer bindings remain available. The layout `Count` is the
+allocation ceiling; `CreateRuntimeBindingSet` chooses a positive actual length
+up to that ceiling. Fixed bindings retain their original lengths. Native layout
+support and variable-count limits are checked before layout publication.
+
+Cook with `NATIVE_BINDING_ARRAYS RUNTIME_BINDING_ARRAYS` and include the installed
+`runtime_bindings.slang`. Declare the unsized texture array at the reserved table
+slot, and use `BoundRuntimeBindingIndex(index)` before indexing. Per-invocation
+indices additionally need the existing `NonUniformResourceIndex` annotation and
+independent indexing capability. The helper clamps against an immutable uint4
+length buffer belonging to the bound snapshot. The emitted SPIR-V verifier checks
+the exact unsigned-vector layout, byte offset and first-component load; ordinary
+caller uniforms cannot substitute for the owned length. Unbounded access, wrong
+control layouts and unknown pointer paths reject. Generated shader `Count` is
+one, the verified minimum safe allocation. A single artifact can therefore grow
+or shrink between any positive admitted lengths without compilation or CPU
+readback. Hand-authored fixed bounds still impose their declared minimum.
+
+Do not supply the length entry in `CreateBindingSet` or
+`CreateRuntimeBindingSet`. RHI creates and initializes its immutable uniform
+buffer during snapshot preparation and retains it with that snapshot. It
+consumes one buffer record, one uniform descriptor, and its checked host/resource
+bytes. Descriptor budgets charge the actual allocated table length, including
+fallback holes, plus this control descriptor and ordinary bindings. Replacements
+need overlap capacity until previous work completes. The owned control buffer
+has no public resource identity to import into GDI; its immutable read and
+lifetime follow the retained binding snapshot. All consumer resources still
+require ordinary graph declarations.
+
+Runtime arrays require an authored fixed-array/scalar alternative on Metal and
+browser targets; no toolchain pins change. The existing texture-indexing limits
+remain independent of runtime allocation support.
+
+`RasterBinding::HasPartialBinding` allows omitted array entries. Element zero
+must be supplied and is copied into every hole as a retained fallback. Therefore
+even a shader branch accessing a logical hole has a valid descriptor. Host
+`GetBindingIndex` rejects holes; non-uniform reachability declarations enumerate
+populated elements. GDI continues to require all physical resources, including
+fallbacks. This is logical partial population, not sparse descriptor allocation:
+the full allocated length consumes native and engine descriptor budgets. Native
+`PARTIALLY_BOUND` is not enabled or claimed.
+
+`PublishBindingSetUpdate(device, current, replacement)` publishes a separately
+prepared Ready snapshot with the exact same layout. Call it on the owner thread,
+including after an earlier draw in an open frame; prepare replacements before
+beginning the frame. Publication performs no allocation, collection or native
+descriptor mutation. Success consumes `replacement`, invalidates the old public
+identity and its host index tokens, and makes subsequent work use the replacement.
+Previously retained graphs, batches and submissions keep the old snapshot and
+all its resources through completion. Failed or pending publication preserves
+both handles. This supports safe updates after earlier binds/submissions through
+snapshot replacement; it does not mutate a recorded command's descriptors or
+promise Vulkan's native `UPDATE_AFTER_BIND` most-recent-before-submit semantics.
+No native mutable-descriptor feature is inferred from this API.
+
+Fixed sampler and buffer descriptor arrays use constant selection verified in
+the emitted target. Buffer arrays exclude dynamic offsets. Vulkan accepts
+uniform buffers and the existing compute storage kinds; storage textures and
+raster storage access remain R12. Metal supports fixed sampler and sampled
+color descriptor arrays, with separate nonoverlapping sampler/texture register
+ranges; buffer descriptor arrays remain explicitly unsupported.
 
 Inspect `DeviceInfo::Profile.Binding`. Array count never implies non-uniform
 selection. Set `DeviceDescription::Required.BindlessTextureIndexing` when the
@@ -1743,23 +1818,25 @@ runtime unsigned index before access, for example
 `Images[NonUniformResourceIndex(min(index, 3U))]` for four elements. The cooker
 reflects counts and derives Constant/Uniform/NonUniform access from emitted
 SPIR-V. It admits constant in-range indices and verified unsigned min/clamp
-bounds; runtime-sized arrays, unknown pointer/access paths and unbounded indices
-reject. Metal uses the existing pinned SPIRV-Cross MSL 2.4 lowering for this
+bounds; unsized arrays additionally require the explicit R11c allocation bound
+described above. Unknown pointer/access paths and unbounded indices reject.
+Metal uses the existing pinned SPIRV-Cross MSL 2.4 lowering for this
 profile, with independently checked emitted registers/counts and runtime Metal
 pipeline reflection. Direct Slang Metal lowering does not admit the pinned
 `NonUniformResourceIndex` operation. Pins are unchanged. This helper profile
 requires the pinned translator and an authored browser alternative.
 
-`CreateBindingSet` requires exactly one entry for every `(Binding, ArrayElement)`;
-holes, duplicates, wrong views and out-of-range elements reject. The immutable
+`CreateBindingSet` requires exactly one entry for every `(Binding, ArrayElement)`
+unless `HasPartialBinding` supplies the R11c fallback contract above. Duplicates,
+wrong views and out-of-range elements reject. The immutable
 snapshot is the exhaustive reachable-resource table. Every resource stays
 retained, including array entries whose branches are inactive. Obtain a borrowed
 `RasterBindingIndex` with `GetBindingIndex`, and resolve it against that exact
 snapshot with `GetBindingArrayElement`. Destruction/replacement invalidates host
 index resolution; numerical shader indices are not transferable ownership.
 
-For NonUniform arrays, `RasterDraw::ReachableBindings` must declare each array
-element exactly once using tokens from the bound snapshot. Missing, duplicate,
+For NonUniform arrays, `RasterDraw::ReachableBindings` must declare each populated
+array element exactly once using tokens from the bound snapshot. Missing, duplicate,
 stale or foreign declarations reject before encoding. GDI additionally requires
 sampled use declarations for every reachable physical texture, and retains the
 whole table through completion. Hazards remain conservative for complete

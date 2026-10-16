@@ -174,6 +174,8 @@ BindingCapabilities BindingLimits() noexcept
         .MaxSamplersPerStage = 16,
         .MaxUniformBuffersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
         .MaxSamplersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .HasSamplerDescriptorArrays = true,
+        .HasPartiallyBoundArrays = true,
     };
 }
 RasterCapabilities RasterLimits() noexcept
@@ -243,7 +245,7 @@ RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
     }
     [encoder setComputePipelineState:gComputePipelines[packet.Pipeline]];
     const auto& set = gRasterSets[packet.Set];
-    const auto& layout = gRasterLayouts[set.Layout];
+    const internal::RasterLayout& layout = set.Description;
     for (usize i = 0; i < layout.Count; ++i)
     {
         [encoder setBuffer:gRasterBuffers[set.Slots[i]]
@@ -618,7 +620,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
 {
     const auto& pipeline = gRasterPipelines[packet.Pipeline];
     const auto& set = gRasterSets[packet.Set];
-    const auto& layout = gRasterLayouts[set.Layout];
+    const internal::RasterLayout& layout = set.Description;
     [gEncoder setRenderPipelineState:pipeline.Object];
     [gEncoder setDepthStencilState:pipeline.Depth];
     [gEncoder setStencilReferenceValue:pipeline.Info.StencilReference];
@@ -635,13 +637,13 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
             {
                 [gEncoder setVertexBuffer:gRasterBuffers[set.Slots[i]]
                                    offset:set.Offsets[i] + packet.BindingOffsets.Bytes[entry.Binding]
-                                  atIndex:entry.Binding];
+                                  atIndex:textureIndex];
             }
             if (fragment)
             {
                 [gEncoder setFragmentBuffer:gRasterBuffers[set.Slots[i]]
                                      offset:set.Offsets[i] + packet.BindingOffsets.Bytes[entry.Binding]
-                                    atIndex:entry.Binding];
+                                    atIndex:textureIndex];
             }
         }
         else if (internal::TextureBinding(entry.Kind))
@@ -659,11 +661,11 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
         {
             if (vertex)
             {
-                [gEncoder setVertexSamplerState:gRasterSamplers[set.Slots[i]] atIndex:entry.Binding];
+                [gEncoder setVertexSamplerState:gRasterSamplers[set.Slots[i]] atIndex:textureIndex];
             }
             if (fragment)
             {
-                [gEncoder setFragmentSamplerState:gRasterSamplers[set.Slots[i]] atIndex:entry.Binding];
+                [gEncoder setFragmentSamplerState:gRasterSamplers[set.Slots[i]] atIndex:textureIndex];
             }
         }
     }
