@@ -7,12 +7,20 @@ inputs:
   cache-variant:
     description: Compiler and dependency cache owner (native or sanitizers)
     default: native
+  editor:
+    description: Prepare optional editor dependencies and configuration
+    default: 'true'
 runs:
   using: composite
   steps:
     - name: Install upstream Clang 18 and native prerequisites
       shell: bash
-      run: brew install llvm@18 qtbase qtdeclarative ccache
+      env:
+        WITH_EDITOR: ${{ inputs.editor }}
+      run: |
+        packages=(llvm@18 ccache)
+        if [[ "$WITH_EDITOR" == true ]]; then packages+=(qtbase qtdeclarative); fi
+        brew install "${packages[@]}"
     # Match Linux cache policy: locked dependency identities and rolling compiler
     # snapshots. Do not cache CMake trees, SDKs, shims or generated preset files.
     - name: Restore locked macOS dependencies
@@ -46,8 +54,11 @@ runs:
       shell: bash
       env:
         PRESET: ${{ inputs.preset }}
+        WITH_EDITOR: ${{ inputs.editor }}
       run: |
-        ./init.sh --cli --preset "$PRESET" --preset-only --locked --with-tests --with-editor --no-system-install
+        arguments=(--cli --preset "$PRESET" --preset-only --locked --with-tests --no-system-install)
+        if [[ "$WITH_EDITOR" == true ]]; then arguments+=(--with-editor); fi
+        ./init.sh "${arguments[@]}"
         git diff --exit-code -- conan.lock
     - name: Prepare pinned Metal shader compiler and Behavior tools
       shell: bash
