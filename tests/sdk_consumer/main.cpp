@@ -40,6 +40,7 @@ bool ExerciseInstalledReflection() noexcept;
 int ExerciseInstalledTime() noexcept;
 bool ExerciseInstalledFluid() noexcept;
 bool ExerciseInstalledCurves() noexcept;
+bool ExerciseInstalledGeometry() noexcept;
 bool ExerciseInstalledCamera() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
@@ -247,6 +248,10 @@ int main()
     if (!ExerciseInstalledCurves())
     {
         return 31;
+    }
+    if (ExerciseInstalledGeometry() == false)
+    {
+        return 32;
     }
     if (!ExerciseInstalledConfiguration())
     {
