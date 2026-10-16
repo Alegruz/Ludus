@@ -48,6 +48,7 @@ RenderScene MakeNavigationScene()
     PreviewCamera authored;
     authored.Id = QStringLiteral("authored-camera");
     authored.Sample.Pose.Position = {0, 1, 6};
+    REQUIRE(math::TryFromAxisAngle({0, 0, 1}, 0.3F, authored.Sample.Pose.Orientation) == math::MathStatus::Success);
     authored.Sample.Lens.Projection = camera::CameraProjection::PerspectiveInfinite;
     authored.Sample.Lens.NearPlane = 0.01F;
     scene.Cameras.push_back(authored);
@@ -171,6 +172,18 @@ TEST_CASE("Fly displacement is stable across presentation rates and persists as 
     restored.RestoreNavigation(first.Navigation());
     REQUIRE(restored.SetScene(MakeNavigationScene()) == true);
     CHECK(restored.Navigation() == first.Navigation());
+    const QJsonObject legacy{{QStringLiteral("yaw"), 45},
+                             {QStringLiteral("pitch"), 30},
+                             {QStringLiteral("zoom"), 0.002},
+                             {QStringLiteral("radius"), 1000},
+                             {QStringLiteral("x"), 1},
+                             {QStringLiteral("y"), 2},
+                             {QStringLiteral("z"), 3}};
+    restored.RestoreNavigation(legacy);
+    CHECK(restored.GetFocusDistance() == Catch::Approx(2));
+    CHECK(restored.Navigation().value(QStringLiteral("x")).toDouble() == Catch::Approx(1));
+    CHECK(restored.Navigation().value(QStringLiteral("y")).toDouble() == Catch::Approx(2));
+    CHECK(restored.Navigation().value(QStringLiteral("z")).toDouble() == Catch::Approx(3));
 }
 TEST_CASE("Viewport input frames selection, consumes fractional scrolling and stops fly on focus loss",
           "[editor][navigation]")
@@ -180,6 +193,9 @@ TEST_CASE("Viewport input frames selection, consumes fractional scrolling and st
     PreviewViewport viewport(&preview);
     viewport.resize(800, 600);
     viewport.show();
+    viewport.activateWindow();
+    viewport.setFocus();
+    QApplication::processEvents();
     preview.SetSelection(QStringLiteral("selected-cube"));
     QTest::keyClick(&viewport, Qt::Key_F);
     CHECK(preview.GetFocusDistance() < 10);
@@ -202,7 +218,12 @@ TEST_CASE("Viewport input frames selection, consumes fractional scrolling and st
     const QJsonObject beforeFly = preview.Navigation();
     QTest::mousePress(&viewport, Qt::RightButton);
     QTest::keyPress(&viewport, Qt::Key_W);
-    QTest::qWait(60);
+    REQUIRE(QTest::qWaitFor(
+                [&preview, &beforeFly]() {
+                    return preview.Navigation().value(QStringLiteral("eyeZ")) !=
+                           beforeFly.value(QStringLiteral("eyeZ"));
+                },
+                2000) == true);
     const QJsonObject moving = preview.Navigation();
     CHECK(moving.value(QStringLiteral("eyeZ")) != beforeFly.value(QStringLiteral("eyeZ")));
     QFocusEvent lostFocus(QEvent::FocusOut);

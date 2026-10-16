@@ -350,6 +350,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
             CHECK(ReadViewport() != orbited);
             const QJsonObject beforeFly = preview.Navigation();
             QTest::mousePress(window, Qt::RightButton, Qt::NoModifier, QPoint(170, 130));
+            QTest::qWait(20);
+            CHECK(preview.Navigation() == beforeFly);
             QTest::keyPress(window, Qt::Key_W);
             QTest::qWait(100);
             QTest::mouseRelease(window, Qt::RightButton, Qt::NoModifier, QPoint(170, 130));
@@ -439,7 +441,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     // Object edits preserve the independent orbit anchor until explicit Frame All.
     preview.Navigate(-1, 25, 20, 3, false);
     REQUIRE(Frames(preview, preview.Frames() + 3));
-    const auto eye = preview.ViewDescription().CameraPosition;
+    const ludus::foundation::math::Vector3 eye = preview.ViewDescription().CameraPosition;
+    const QJsonObject orbitNavigation = preview.Navigation();
     entity = world.Entity(QStringLiteral("starter.cube"));
     components = entity.value(QStringLiteral("components")).toObject();
     transform = components.value(QStringLiteral("transform")).toObject();
@@ -449,7 +452,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
         world.Edit(QStringLiteral("starter.cube"), components, entity.value(QStringLiteral("name")).toString(), error));
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(-1, 25, 20, 3, false);
+    CHECK(preview.Navigation() == orbitNavigation);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.ViewDescription().CameraPosition == eye);
     CHECK(preview.Report().Culled == 1);
