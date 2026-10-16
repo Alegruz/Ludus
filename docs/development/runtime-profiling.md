@@ -123,7 +123,7 @@ change to the workflow takes effect after it lands.
 | Lane | Runner | Preset | Declared capabilities |
 | --- | --- | --- | --- |
 | `ubuntu` | `ubuntu-24.04` | `linux-clang-profile` | none (headless) |
-| `macos` | `macos-14` | `macos-clang-profile` | `presentation` (hosted macOS already presents Metal frames in CI) |
+| `macos` | `macos-15` | `macos-clang-profile` | `presentation` (hosted macOS already presents Metal frames in CI) |
 
 Each lane:
 
