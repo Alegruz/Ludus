@@ -915,6 +915,10 @@ not establish behavior or gains on our current Linux/macOS targets.
 
 ### Immediate reading sequence and translation into experiments
 
+FS-R2 now has an implemented replay harness; its evidence and remaining
+qualification gaps are recorded in the
+[measurement owner](../development/filesystem-benchmark.md#fs-r2-representative-streaming-trace-replay).
+
 Read the full SYSTOR API comparison first to build FS-R2's experimental matrix:
 worker count, admitted queue depth, request size/locality, completion collection
 cadence, cold/warm cache and spare versus contended CPU. Compare the existing

@@ -612,6 +612,16 @@ jobs:
               -o "out/filesystem-benchmark/syscalls-$layout.txt" \
               out/build/linux-clang-development/modules/foundation/filesystem/ludus_filesystem_benchmark "$corpus" "$layout" 4
           done
+      - name: Measure representative streaming traces with periodic collection
+        run: |
+          python3 tests/filesystem/streaming.py generate out/filesystem-streaming --count 128
+          python3 tests/filesystem/streaming.py measure out/filesystem-streaming \
+            --benchmark out/build/linux-clang-development/modules/foundation/filesystem/ludus_filesystem_benchmark \
+            --output out/filesystem-streaming/results --repetitions 3 --contention 0 \
+            --open-modes shared --tracing 0 --cache warm \
+            --compiler-description 'CI pinned Clang 18 Development O2' \
+            --storage-description 'disposable Ubuntu runner, see environment.json mount/df'
+          out/host-tools/venv/bin/ctest --preset linux-clang-development -R 'filesystem_streaming_' --no-tests=error
       - name: Preserve filesystem measurements
         if: always()
         uses: actions/upload-artifact@v4
@@ -620,6 +630,9 @@ jobs:
           path: |
             out/filesystem-benchmark/measurements.txt
             out/filesystem-benchmark/syscalls-*.txt
+            out/filesystem-streaming/manifest.json
+            out/filesystem-streaming/*.trace
+            out/filesystem-streaming/results/
       - name: Validate installed SDK and consumer
         run: ./scripts/install-sdk linux-clang-development
       - name: Cook and execute an independent project with the relocated Behavior SDK
