@@ -2,9 +2,11 @@
 #include "random_parity_layout.h"
 #include "raster_bindings.slang"
 
-// Test-only kernel for gpu_random_tests.cpp: evaluates FoundationMath's shader
+// Test-only kernel for the native renderer test (gpu_random_tests.cpp) and the
+// WebGPU browser fixture (random_parity.cpp): evaluates FoundationMath's shader
 // addressed-random port for host-supplied cases so the host can compare every
-// word with the CPU reference. random_parity_layout.h owns the case ABI.
+// word with the CPU reference. random_parity_layout.h owns the case ABI and
+// random_parity_corpus.h the cases.
 
 LUDUS_SHADER_BINDING(0) StructuredBuffer<uint4> Cases;
 LUDUS_SHADER_BINDING(1) RWStructuredBuffer<uint4> Results;
