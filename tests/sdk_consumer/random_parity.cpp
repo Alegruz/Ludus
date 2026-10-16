@@ -36,7 +36,9 @@ constexpr logging::LogCategory LOG_RANDOM_PARITY{"Random-Parity-Fixture"};
 constexpr usize BINDING_COUNT = 2;
 // Per-request readback limit; well below the default 256 KiB transfer profile.
 constexpr usize READBACK_CHUNK_BYTES = usize{64} * 1024;
+#if !defined(LUDUS_PLATFORM_WEB)
 constexpr uint64 NATIVE_TIMEOUT_NANOSECONDS = 60 * time::NANOSECONDS_PER_SECOND;
+#endif
 
 enum class Stage : uint32
 {
