@@ -200,5 +200,7 @@ private:
     bool AssetsCreated_ = false;
     QTimer Timer_;
     QString Status_;
+    /// Reason recorded by the preparation stage that rejected the current generation, if any.
+    QString mPreparationFailure;
 };
 } // namespace ludus::editor

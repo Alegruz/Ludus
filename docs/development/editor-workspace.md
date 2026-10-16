@@ -742,6 +742,8 @@ with black authored albedo remain black in this view.
 shadowed area-light proxies and the completed static diffuse/indirect bake. During resource preparation, the viewport retains its last drawable GPU
 image until Qt presents the replacement. A failed replacement reports its error
 without clearing that image; a later scene or shading change can retry preparation.
+When no image remains to retain, the viewport itself shows the failure reason,
+including the preparation stage's specific error, instead of its empty-viewport hint.
 Switching modes keeps the World, camera and layout; the shading choice
 is restored with the project's viewport preferences. Older preferences without a
 shading choice open in Solid mode. These visualization overrides do not change
@@ -770,7 +772,10 @@ planar emitter patch and hard cube-map shadows. It supports up to 128 admitted
 lights and 80 shadow regions: point/area lights consume six faces, while
 spot/directional lights consume one. The 2048-pixel atlas packs guttered cells;
 capacity, malformed or unsupported source topology rejects rather than dropping
-illumination. Curved or concave sources can exceed this proxy profile. The
+illumination. Zero-area emitter triangles, common in imported meshes, carry no
+power and form no proxy. The static bake still rejects any instance with a
+zero-area triangle (for example the staircase2 reference scene); Lit then keeps
+its shadowed direct lighting and reports the bake failure. Curved or concave sources can exceed this proxy profile. The
 static bake uses 64 cosine samples per triangle, depth four, and separate
 4×4 guttered triangle tiles; it can show spatial discontinuities and sampling
 noise. It includes diffuse bounces, with finite-depth bias, rather than glossy
@@ -797,7 +802,9 @@ latest completed image back to the CPU in bands that each fit one RHI transfer
 slice. A plain widget paints that `QImage`. The renderer keeps drawing into the
 other image while one is being copied, and the GUI thread only polls, so no call
 waits for the GPU. Orbit, pan, zoom and double-click framing work as in the shared
-path; resizing recreates the offscreen targets. The copy costs some latency and
+path; resizing recreates the offscreen targets. The headless device admits the
+same storage budgets and raster profile as the shared device, so Lit shadow atlases
+fit on both paths. The copy costs some latency and
 bandwidth, and the frame is capped at 1024 pixels on its long side, the same as
 the shared path. Set `LUDUS_EDITOR_VIEWPORT=offscreen` to force this path on any
 Linux build (useful for testing it on newer Qt). Qt 6.6+ keeps the shared path
