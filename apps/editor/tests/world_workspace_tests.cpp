@@ -1,4 +1,6 @@
+#include "entropy_fixture.h"
 #include "internal/controller.h"
+#include "internal/editor_identity.h"
 #include "internal/level_workspace.h"
 #include "internal/main_window.h"
 #include "internal/preview_viewport.h"
@@ -29,6 +31,8 @@
 #include <QTest>
 #include <QTimer>
 #include <catch2/catch_test_macros.hpp>
+
+#include <ludus/platform/entropy.h>
 
 using namespace ludus::editor;
 namespace
@@ -124,10 +128,13 @@ TEST_CASE("World entity and component transactions retain stable identity and un
 {
     auto document = Document();
     QString error, id = QStringLiteral("unchanged");
-    CHECK_FALSE(document.CreateEntity(error, QString(), id));
+    CHECK_FALSE(document.CreateEntity(ludus::platform::GetSystemEntropySource(), error, QString(), id));
     CHECK(id == QStringLiteral("unchanged"));
     CHECK_FALSE(document.CanUndo());
-    REQUIRE(document.CreateEntity(error, QStringLiteral("灯光 — Éclairage"), id));
+    REQUIRE(document.CreateEntity(ludus::platform::GetSystemEntropySource(),
+                                  error,
+                                  QStringLiteral("灯光 — Éclairage"),
+                                  id));
     const auto original = id;
     REQUIRE(document.Attach(id, error, QStringLiteral("presentation")));
     CHECK_FALSE(document.Attach(id, error, QStringLiteral("presentation")));
@@ -153,6 +160,65 @@ TEST_CASE("World entity and component transactions retain stable identity and un
     REQUIRE(document.Undo());
     CHECK_FALSE(document.Entity(id).isEmpty());
 }
+TEST_CASE("World entity IDs come from FoundationIdentity and fail without entropy", "[editor][world][identity]")
+{
+    namespace fixture = ludus::editor::tests;
+    WorldDocument document = Document();
+    const QJsonObject before = document.Draft();
+    QString error;
+    QString id = QStringLiteral("unchanged");
+    CHECK_FALSE(document.CreateEntity(fixture::MakeUnavailableEntropySource(), error, QStringLiteral("Entity"), id));
+    CHECK(error == DescribeEntropyUnavailable());
+    CHECK(id == QStringLiteral("unchanged"));
+    CHECK(document.Draft() == before);
+    CHECK_FALSE(document.CanUndo());
+    error.clear();
+    CHECK_FALSE(
+        document.DuplicateEntity(fixture::MakeUnavailableEntropySource(), error, QStringLiteral("starter.target"), id));
+    CHECK(error == DescribeEntropyUnavailable());
+    CHECK(id == QStringLiteral("unchanged"));
+    CHECK(document.Draft() == before);
+    CHECK_FALSE(document.CanUndo());
+    // A null source is unavailable too; there is no fallback.
+    CHECK_FALSE(
+        document.CreateEntity(ludus::foundation::identity::EntropySource{}, error, QStringLiteral("Entity"), id));
+    CHECK(id == QStringLiteral("unchanged"));
+    CHECK(document.Draft() == before);
+
+    REQUIRE(document.CreateEntity(fixture::MakeFixedEntropySource(), error, QStringLiteral("Entity"), id));
+    CHECK(id == QLatin1String(fixture::FIXED_UUID_TEXT));
+    QString copy;
+    REQUIRE(document.DuplicateEntity(ludus::platform::GetSystemEntropySource(), error, id, copy));
+    CHECK(copy.size() == 36);
+    CHECK(copy != id);
+    CHECK(copy == copy.toLower());
+    CHECK(copy.at(14) == QLatin1Char('4'));
+}
+TEST_CASE("World scene import reports unavailable entropy before changing the World", "[editor][world][identity]")
+{
+    QTemporaryDir directory;
+    WorldWorkspace workspace;
+    workspace.SetProject(directory.path(), 1);
+    const QString path =
+        QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("main.world.json"));
+    REQUIRE(workspace.Create(path));
+    REQUIRE(workspace.Document().SceneLevel().isEmpty());
+    const QJsonObject before = workspace.Document().Draft();
+    workspace.SetEntropySource(ludus::editor::tests::MakeUnavailableEntropySource());
+    CHECK_FALSE(workspace.ImportScene(directory.path()));
+    CHECK(workspace.findChild<QLabel*>(QStringLiteral("worldStatus"))->text() == DescribeEntropyUnavailable());
+    CHECK(workspace.Document().Draft() == before);
+    LevelWorkspace* scene = workspace.findChild<LevelWorkspace*>();
+    REQUIRE(scene != nullptr);
+    CHECK_FALSE(scene->Busy());
+    QPushButton* add = workspace.findChild<QPushButton*>(QStringLiteral("worldAdd"));
+    REQUIRE(add != nullptr);
+    REQUIRE(add->isEnabled());
+    add->click();
+    CHECK(workspace.findChild<QLabel*>(QStringLiteral("worldStatus"))->text() == DescribeEntropyUnavailable());
+    CHECK(workspace.Document().Draft() == before);
+    CHECK_FALSE(workspace.CanUndo());
+}
 TEST_CASE("World duplication remaps self references and preserves other references", "[editor][world]")
 {
     auto document = Document();
@@ -164,7 +230,10 @@ TEST_CASE("World duplication remaps self references and preserves other referenc
     components.insert(QStringLiteral("behavior"), behavior);
     REQUIRE(document.Edit(QStringLiteral("starter.target"), components, QStringLiteral("Self"), error));
     QString copy;
-    REQUIRE(document.DuplicateEntity(error, QStringLiteral("starter.target"), copy));
+    REQUIRE(document.DuplicateEntity(ludus::platform::GetSystemEntropySource(),
+                                     error,
+                                     QStringLiteral("starter.target"),
+                                     copy));
     CHECK(copy != QStringLiteral("starter.target"));
     CHECK(document.Entity(copy)
               .value(QStringLiteral("components"))
@@ -174,7 +243,10 @@ TEST_CASE("World duplication remaps self references and preserves other referenc
               .value(QStringLiteral("target")) == QJsonValue(copy));
     REQUIRE(document.Undo());
     REQUIRE(document.Undo());
-    REQUIRE(document.DuplicateEntity(error, QStringLiteral("starter.target"), copy));
+    REQUIRE(document.DuplicateEntity(ludus::platform::GetSystemEntropySource(),
+                                     error,
+                                     QStringLiteral("starter.target"),
+                                     copy));
     CHECK(document.Entity(copy)
               .value(QStringLiteral("components"))
               .toObject()
@@ -350,10 +422,11 @@ TEST_CASE("World schema and document resource limits are enforced", "[editor][wo
     QString id;
     for (ludus::foundation::uint32 i = 2; i < 128; ++i)
     {
-        REQUIRE(document.CreateEntity(error, QStringLiteral("Entity"), id));
+        REQUIRE(document.CreateEntity(ludus::platform::GetSystemEntropySource(), error, QStringLiteral("Entity"), id));
     }
     const auto before = document.Draft();
-    CHECK_FALSE(document.CreateEntity(error, QStringLiteral("Overflow"), id));
+    CHECK_FALSE(
+        document.CreateEntity(ludus::platform::GetSystemEntropySource(), error, QStringLiteral("Overflow"), id));
     CHECK(document.Draft() == before);
     CHECK_FALSE(document.Load(QByteArray(524289, ' '), error));
     CHECK(document.Draft() == before);
@@ -607,7 +680,7 @@ TEST_CASE("Imported scene instances share entity components placement persistenc
     CHECK(reopened.Draft() == document.Draft());
     CHECK(reopened.SceneLevel() == document.SceneLevel());
     QString copy;
-    REQUIRE(document.DuplicateEntity(error, id, copy));
+    REQUIRE(document.DuplicateEntity(ludus::platform::GetSystemEntropySource(), error, id, copy));
     CHECK(document.Entity(copy).value(QStringLiteral("scene")) == document.Entity(id).value(QStringLiteral("scene")));
     CHECK(document.SceneLevel().value(QStringLiteral("objects")).toArray().size() == 2);
     REQUIRE(document.RemoveEntity(copy, error));

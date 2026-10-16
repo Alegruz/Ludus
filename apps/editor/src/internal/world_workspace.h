@@ -2,6 +2,9 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
+
 #include "internal/scene_preview.h"
 #include "internal/world_document.h"
 
@@ -84,6 +87,11 @@ public:
     {
         return Document_;
     }
+    /// Replace the entropy source that mints World, entity and scene-level IDs,
+    /// including the embedded 3D level workspace's. Production keeps
+    /// platform::GetSystemEntropySource(); tests inject a controlled or failing source.
+    /// @pre No scene operation is running.
+    void SetEntropySource(const foundation::identity::EntropySource& entropy) noexcept;
 Q_SIGNALS:
     void DocumentChanged();
     void PreviewStarting();
@@ -108,6 +116,7 @@ private:
     void Snapshot();
     [[nodiscard]] QByteArray RecoveryHeader() const;
     WorldDocument Document_;
+    foundation::identity::EntropySource mEntropy = platform::GetSystemEntropySource();
     SceneDocument DemoDocument_;
     ScenePreview DemoPreview_;
     QPushButton* PreviewButton_ = nullptr;

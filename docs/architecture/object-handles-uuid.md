@@ -611,6 +611,21 @@ and reserved capacity on each target before optimizing them.
    Editor already links Platform and passes the same source, which also replaces
    the cooker's unguarded `getentropy` call in browser builds.
 
+   **Editor entropy decision.** The Editor mints World entity IDs, world-demo
+   settings-entity IDs and new 3D-level IDs through the same `TryGenerateUuidV4`
+   path; Qt's `QUuid::createUuid()` is no longer a parallel generator. The World
+   and level workspaces hold an `EntropySource`, defaulting to
+   `GetSystemEntropySource()`, and pass it to `WorldDocument` entity creation and
+   duplication and to every SceneCook operation; Editor tests inject failing or
+   fixed sources through the same seam. Existing text forms are unchanged:
+   canonical lowercase UUID text for live-edit entities and level IDs, and the
+   world-demo sample's truncated `entity-` (24 UUID characters) and `settings-`
+   (22) forms, which fit its 32-byte name field. Those truncated forms are
+   legacy sample identifiers, not UUIDs, and remain so until the stage 3 authoring
+   records replace them. When entropy is unavailable, the operation fails before
+   the document, history or workspace changes and shows that reason in the status
+   line; there is no fallback.
+
    Alternatives considered: linking SceneCook to `Ludus::Platform` would make a
    content library depend on windowing. A tools-owned copy of the adapter would
    duplicate the browser guard. A default system source inside SceneCook would
