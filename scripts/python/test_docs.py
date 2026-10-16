@@ -81,10 +81,14 @@ class SourceParityTests(unittest.TestCase):
         failures = CHECK_DOCS.check(self.root, fix=True)
         self.assertIn("missing local Markdown anchor", " ".join(failures))
         self.assertNotIn("missing.md", " ".join(failures))
-        self.source.write_text("# Example\n\n[Local][doc]\n\n[doc]: https://github.com/Alegruz/Ludus/blob/main/docs/example.md\n")
+        self.source.write_text("# Example\n\n[Local][doc]\n\n[doc]: https://github.com/The-Ludus-Project/Ludus/blob/main/docs/example.md\n")
         self.assertIn("use relative links", " ".join(CHECK_DOCS.check(self.root, fix=True)))
-        self.source.write_text("# Example\n\n[Guide](https://github.com/Alegruz/Ludus/blob/main/modules/demo/README.md)\n")
+        self.source.write_text("# Example\n\n[Guide](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/demo/README.md)\n")
         self.assertIn("use relative links", " ".join(CHECK_DOCS.check(self.root, fix=True)))
+        for owner in ("Alegruz", "the-ludus-project"):
+            with self.subTest(owner=owner):
+                self.source.write_text(f"# Example\n\n[Guide](https://github.com/{owner}/Ludus/tree/main/docs/)\n")
+                self.assertIn("use relative links", " ".join(CHECK_DOCS.check(self.root, fix=True)))
 
     def test_setup_examples_use_the_real_parser_without_running_setup(self):
         valid = "```sh\n./init.sh --cli linux-clang-development --preset-only --locked --with-tests\n```\n"
@@ -142,7 +146,7 @@ class DocumentationBuildTests(unittest.TestCase):
         (cls.root / "docs/README.md").write_text(index_text(cls.root))
         (cls.root / "mkdocs.yml").write_text(
             "site_name: Test\nsite_url: https://example.test/Ludus/\n"
-            "repo_url: https://github.com/Alegruz/Ludus\nedit_uri: edit/main/docs/\n"
+            "repo_url: https://github.com/The-Ludus-Project/Ludus\nedit_uri: edit/main/docs/\n"
             "docs_dir: docs\nsite_dir: out/wiki\nexclude_docs: /api-main.md\n"
             "theme:\n  name: material\n  font: false\n  features:\n    - content.action.edit\nplugins:\n  - search\n"
             "markdown_extensions:\n  - fenced_code\n  - toc\n"

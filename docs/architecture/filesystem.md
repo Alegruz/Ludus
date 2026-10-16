@@ -2,7 +2,7 @@
 
 Status: F0 design and reference review complete; F1 through F5 implemented.
 The delivery plan below records the completed baseline; F5 validation is recorded
-in [PR #146](https://github.com/Alegruz/Ludus/pull/146), and F4 measurements in the
+in [PR #146](https://github.com/The-Ludus-Project/Ludus/pull/146), and F4 measurements in the
 [benchmark evidence](../development/filesystem-benchmark.md).
 The [post-baseline improvement plan](#post-baseline-research-and-improvement-plan)
 tracks proposed experiments separately from implemented contracts. The

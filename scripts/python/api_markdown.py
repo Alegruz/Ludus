@@ -191,7 +191,7 @@ def render_reference(root, xml, output, inputs):
             return ""
         path = location.get("file")
         line = location.get("line")
-        url = "https://github.com/Alegruz/Ludus/blob/main/" + quote(path)
+        url = "https://github.com/The-Ludus-Project/Ludus/blob/main/" + quote(path)
         if line:
             url += "#L" + line
         return "\n" + link(url, "Declared in " + path) + "\n"

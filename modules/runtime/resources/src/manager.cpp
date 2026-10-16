@@ -66,7 +66,8 @@ void Append(FailureInfo& failure, const content::ResourceId& id) noexcept
 // full-closure admission and callback-free atomic binding publication; workers never
 // wait on other resources. Parent holds end at physical acknowledgment, not logical
 // completion. No reference implementation is copied.
-// Review: https://github.com/Alegruz/Ludus/blob/main/docs/architecture/resource-management-reference-review.md
+// Review:
+// https://github.com/The-Ludus-Project/Ludus/blob/main/docs/architecture/resource-management-reference-review.md
 struct Manager::Impl final
 {
     Config Limits;

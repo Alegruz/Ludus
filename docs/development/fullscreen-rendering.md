@@ -1316,7 +1316,7 @@ zero-timeout polls. A post-command GL error closes the session before unsafe
 reuse. Native teardown may wait; requests and polls do not issue blocking GPU
 waits. Driver calls can still incur host cost.
 
-[R8 implementation, PR 219](https://github.com/Alegruz/Ludus/pull/219), starts from
+[R8 implementation, PR 219](https://github.com/The-Ludus-Project/Ludus/pull/219), starts from
 merged R7 revision `6828502`. The R8 reference tests cover output preservation, checked ranges/pitches,
 initialized sampling, copied source bytes, retained bindings/batches/graphs,
 unfinished frame ordinals, copy-source destruction, cancellation, pressure,
@@ -1798,9 +1798,9 @@ chosen binding workload, not GPU duration, display latency or universal speedup.
 Named physical GPU qualification remains an R7b gate; optional bindless never
 becomes the default merely because it is implemented.
 
-R11a/R11b implementation is recorded in [PR #239](https://github.com/Alegruz/Ludus/pull/239).
+R11a/R11b implementation is recorded in [PR #239](https://github.com/The-Ludus-Project/Ludus/pull/239).
 At code revision `3dace88df9db11a0126fae3d7e2ae7241e5bf01b`, the
-[Linux Development and SDK gate](https://github.com/Alegruz/Ludus/actions/runs/38376845936/job/115228342822)
+[Linux Development and SDK gate](https://github.com/The-Ludus-Project/Ludus/actions/runs/38376845936/job/115228342822)
 passed source and installed R11 Vulkan execution under validation layers with no
 validation errors. Both constant and optional non-uniform arrays ran. The installed
 fixture reported 1,412,602 ns to create 32 static snapshots versus 41,968 ns for one
@@ -1808,9 +1808,9 @@ dynamic snapshot, 33 populated descriptors and 3 native pools reserving 48 slots
 Host metadata grew by 165,656 bytes for the static snapshots (including cold
 page/pool growth), then 24 bytes for the additional dynamic snapshot. This is one
 software-driver observation, not a repeated benchmark or physical-GPU qualification.
-The [macOS native gate](https://github.com/Alegruz/Ludus/actions/runs/38376845936/job/115227742875)
+The [macOS native gate](https://github.com/The-Ludus-Project/Ludus/actions/runs/38376845936/job/115227742875)
 passed its installed Metal shader/consumer step, and the
-[packaged browser gate](https://github.com/Alegruz/Ludus/actions/runs/38376846022/job/115234164137)
+[packaged browser gate](https://github.com/The-Ludus-Project/Ludus/actions/runs/38376846022/job/115234164137)
 passed the installed SDK's forced WebGPU/WebGL 2 pixel and dynamic-offset journeys.
 Pinned formatting, native/browser analysis, Linux/macOS sanitizers and API
 coverage gates also passed for that code revision.

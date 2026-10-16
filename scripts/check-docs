@@ -16,6 +16,10 @@ import markdown
 sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
 from documentation import index_text, sources
 
+# GitHub owner names are case-insensitive. The previous owner still redirects,
+# so its links are internal too.
+REPOSITORY_PATH = r"/(?:The-Ludus-Project|Alegruz)/Ludus/"
+
 
 class Document(HTMLParser):
     def __init__(self, text):
@@ -86,8 +90,10 @@ def check(root, fix=False):
         failures.extend(check_init_examples(texts[path], label, presets))
         for value in document.links:
             parts = urlsplit(value)
-            internal_doc = re.match(r"/Alegruz/Ludus/(?:blob|tree)/main/docs/", parts.path)
-            internal_readme = re.match(r"/Alegruz/Ludus/blob/main/(?:modules|apps|tools|examples|scripts/python)/.*/README\.md$", parts.path)
+            internal_doc = re.match(REPOSITORY_PATH + r"(?:blob|tree)/main/docs/", parts.path, re.IGNORECASE)
+            internal_readme = re.match(
+                REPOSITORY_PATH + r"blob/main/(?:modules|apps|tools|examples|scripts/python)/.*/README\.md$",
+                parts.path, re.IGNORECASE)
             if parts.netloc == "github.com" and (internal_doc or internal_readme):
                 failures.append(f"{label}: use relative links to local documentation: {value}")
             if parts.scheme or parts.netloc:

@@ -46,7 +46,7 @@ jobs:
           ref=$(cat config/ludus-tools-revision.txt)
           [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
           /tmp/ludus-release-tools/bin/pip install cmake==3.29.6 ninja==1.11.1.3
-          /tmp/ludus-release-tools/bin/pip install "ludus-tools @ git+https://github.com/Alegruz/Ludus.git@$ref#subdirectory=scripts/python"
+          /tmp/ludus-release-tools/bin/pip install "ludus-tools @ git+https://github.com/The-Ludus-Project/Ludus.git@$ref#subdirectory=scripts/python"
           echo /tmp/ludus-release-tools/bin >> "$GITHUB_PATH"
       - name: Prepare project build inputs (no upload credentials)
         run: |
@@ -109,7 +109,7 @@ NATIVE_SDK_STEP
           ref=$(cat config/ludus-tools-revision.txt)
           [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
           /tmp/ludus-release-tools/bin/pip install cmake==3.29.6 ninja==1.11.1.3
-          /tmp/ludus-release-tools/bin/pip install "ludus-tools @ git+https://github.com/Alegruz/Ludus.git@$ref#subdirectory=scripts/python"
+          /tmp/ludus-release-tools/bin/pip install "ludus-tools @ git+https://github.com/The-Ludus-Project/Ludus.git@$ref#subdirectory=scripts/python"
           echo /tmp/ludus-release-tools/bin >> "$GITHUB_PATH"
       - name: Verify downloaded package
         run: ludus project package verify out/verified-release

@@ -103,9 +103,9 @@ PRF*, for the keyed algorithm. Thanks to **Eastlake, Hansen, Noll and Vo**,
 *The FNV Non-Cryptographic Hash Algorithm*, RFC 9923, §§2/5, for FNV-1a.
 The implementation comments identify these sources and adaptations.
 
-- [Public hash API and source credits](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/hash/include/ludus/foundation/hash/hash.hpp)
-- [xxHash v0.8.3 source and license](https://github.com/Alegruz/Ludus/tree/main/third_party/xxhash)
-- [Private implementation and SipHash reference](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/hash/src/hash.cpp)
+- [Public hash API and source credits](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/foundation/hash/include/ludus/foundation/hash/hash.hpp)
+- [xxHash v0.8.3 source and license](https://github.com/The-Ludus-Project/Ludus/tree/main/third_party/xxhash)
+- [Private implementation and SipHash reference](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/foundation/hash/src/hash.cpp)
 - [Architecture and consulted chapter review](../../architecture/strings-gems-review.md)
 
 An opt-in `ludus_strings_benchmark` exists when configured with

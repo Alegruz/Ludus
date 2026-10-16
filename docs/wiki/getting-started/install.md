@@ -7,7 +7,7 @@ C++23 with Clang/LLVM 18 and LLD; Qt stays outside the engine SDK.
 ## 1. Get the source
 
 ```bash
-git clone https://github.com/Alegruz/Ludus.git
+git clone https://github.com/The-Ludus-Project/Ludus.git
 cd Ludus
 ```
 

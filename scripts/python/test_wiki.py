@@ -19,12 +19,12 @@ class WikiArtifactTests(unittest.TestCase):
         (self.site / "search").mkdir()
         (self.site / "assets").mkdir()
         (self.root / "mkdocs.yml").write_text(
-            "site_url: https://example.test/Ludus/\nrepo_url: https://github.com/Alegruz/Ludus\nsite_dir: out/wiki\n")
+            "site_url: https://example.test/Ludus/\nrepo_url: https://github.com/The-Ludus-Project/Ludus\nsite_dir: out/wiki\n")
         (self.root / "source.md").write_text("source")
         (self.site / "assets/style.css").write_text("body {}")
         (self.site / "index.html").write_text(
             '<link href="assets/style.css"><a href="guide/#next">Guide</a>'
-            '<a href="https://github.com/Alegruz/Ludus/blob/main/source.md">Source</a>')
+            '<a href="https://github.com/The-Ludus-Project/Ludus/blob/main/source.md">Source</a>')
         (self.site / "guide/index.html").write_text('<h1 id="next">Guide</h1><a href="../">Home</a>')
         self.search("guide/#next")
 
