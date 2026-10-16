@@ -56,6 +56,11 @@ on:
       - 'scripts/localization'
       - 'scripts/python/localization.py'
       - 'scripts/python/test_localization.py'
+      - 'scripts/icu-probe'
+      - 'scripts/localization-corpus'
+      - 'scripts/python/localization_corpus.py'
+      - 'tools/icu-probe/**'
+      - 'config/icu_toolchain.json'
       - 'modules/physics/fluid/**'
       - 'tools/web-fluid-probe/**'
       - 'modules/foundation/containers/**'
@@ -329,6 +334,23 @@ jobs:
           ./scripts/luau-probe run --preset web-emscripten-release
           ./scripts/luau-probe check --preset web-emscripten-development
           ./scripts/luau-probe check --preset web-emscripten-release
+      - name: Cache pinned L0 ICU archives, host data tools and sliced data
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/icu-probe/icu4c-sources.tgz
+            out/icu-probe/icu4c-data.zip
+            out/icu-probe/source
+            out/icu-probe/host-build
+            out/icu-probe/data
+          key: icu-probe-v1-${{ runner.os }}-${{ hashFiles('config/icu_toolchain.json', 'tools/icu-probe/data-filter.json', 'scripts/icu-probe') }}
+      - name: Validate L0 ICU backend, corpus and allocation-failure sweep in wasm
+        run: |
+          ./scripts/icu-probe bootstrap
+          ./scripts/icu-probe cook
+          ./scripts/icu-probe run --preset web-emscripten-development
+          ./scripts/icu-probe run --preset web-emscripten-release
+          ./scripts/icu-probe check --preset web-emscripten-release
       - name: Validate S1 native/Luau interaction in wasm
         run: |
           ./scripts/script-interaction bootstrap
@@ -399,6 +421,14 @@ jobs:
             out/build/web-emscripten-release/tools/luau-probe/*LICENSE.txt
             out/build/web-emscripten-development/tools/luau-probe/evidence.json
             out/build/web-emscripten-release/tools/luau-probe/evidence.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: localization-l0-web-evidence
+          path: |
+            out/build/web-emscripten-development/tools/icu-probe/evidence.json
+            out/build/web-emscripten-release/tools/icu-probe/evidence.json
+            out/build/web-emscripten-release/tools/icu-probe/ICU-LICENSE.txt
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:

@@ -495,6 +495,10 @@ jobs:
           PYTHONPATH=scripts/python python3 -m unittest test_source_policy test_renderer_shader_recipes -v
       - name: Test S0 Luau source and bytecode integrity contracts
         run: python3 -m unittest discover -s tools/luau-probe -p 'test_*.py' -v
+      - name: Test L0 localization document, receipt and manifest contracts
+        run: |
+          python3 -m unittest discover -s scripts/python -p 'test_localization_corpus.py' -v
+          ./scripts/localization-corpus validate --manifest modules/localization/corpus/release.json
       - name: Test S1 manifest and cook admission contracts
         run: python3 -m unittest discover -s tools/script-cook -p 'test_*.py' -v
 
@@ -848,6 +852,27 @@ jobs:
         run: ./scripts/visual-sequence run --preset linux-clang-asan-ubsan
       - name: Validate S4 provider transactions and state under sanitizers
         run: ./scripts/script-provider run --preset linux-clang-asan-ubsan
+      - name: Cache pinned L0 ICU archives, host data tools and sliced data
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/icu-probe/icu4c-sources.tgz
+            out/icu-probe/icu4c-data.zip
+            out/icu-probe/source
+            out/icu-probe/host-build
+            out/icu-probe/data
+          key: icu-probe-v1-${{ runner.os }}-${{ hashFiles('config/icu_toolchain.json', 'tools/icu-probe/data-filter.json', 'scripts/icu-probe') }}
+      - name: Validate L0 ICU backend, corpus and isolated allocation-failure sweep with sanitizers
+        run: |
+          ./scripts/icu-probe bootstrap
+          ./scripts/icu-probe cook
+          ./scripts/icu-probe run --preset linux-clang-asan-ubsan
+          ./scripts/icu-probe check --preset linux-clang-asan-ubsan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: localization-l0-linux-sanitized-evidence
+          path: out/build/linux-clang-asan-ubsan/tools/icu-probe/evidence.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: behavior-s6-linux-sanitized-evidence
