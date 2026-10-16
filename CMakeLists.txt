@@ -182,6 +182,9 @@ add_subdirectory(modules/content)
 # LUSCN cooked scene format contract shared by SceneCook, the Editor and Resources.
 add_subdirectory(modules/content/scene_format)
 add_subdirectory(modules/content/render_graph_format)
+# LUSTR cooked string dictionary contract, validating reader and deterministic writer.
+add_subdirectory(modules/content/string_dictionary_format)
+add_subdirectory(modules/content/string_dictionary)
 # Scene cooker (pbrt-reference-v1). The library builds for every target; its
 # file I/O reports Unsupported where Ludus::Content has no native file access,
 # and the ludus-cook CLI plus golden tests are native-host only.
@@ -324,7 +327,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
+    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat StringDictionaryFormat StringDictionary StringDictionaryWriter SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()

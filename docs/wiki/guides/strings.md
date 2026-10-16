@@ -176,6 +176,89 @@ indices as durable identity. Static SDK plugins bind names through the host's
 table API so the token issuer exists once. Keep C++ owners and allocation-domain
 pointers outside the existing plain game-module ABI.
 
+## Cook and read an indexed dictionary
+
+Cooked content can replace repeated spellings with a `StringIndex` into one
+LUSTR dictionary. A cooker links `Ludus::StringDictionaryWriter`; runtime code
+links only the validating reader, `Ludus::StringDictionary`. Both share the
+header-only wire contract in `Ludus::StringDictionaryFormat`.
+
+The writer deduplicates spellings and returns *provisional* indices in arrival
+order. `TryFinish` sorts the unique spellings by unsigned byte order, so the
+encoded bytes are identical for the same set of spellings regardless of worker
+order or hash seeds. Rewrite every stored provisional index with `TryRemap`
+before writing your records. This complete function cooks two names and returns
+the final index of the second:
+
+```cpp
+#include <ludus/content/string_dictionary/string_dictionary_writer.h>
+#include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/memory/allocation_domain.hpp>
+
+#include <string_view>
+
+namespace dictionary = ludus::content::string_dictionary;
+
+[[nodiscard]] dictionary::StringDictionaryStatus CookNames(std::string_view first,
+                                                           std::string_view second,
+                                                           const dictionary::RevisionDigest& revision,
+                                                           ludus::foundation::Array<ludus::foundation::uint8>& outBytes,
+                                                           ludus::foundation::StringIndex& outSecond) noexcept
+{
+    using dictionary::StringDictionaryStatus;
+    dictionary::StringDictionaryWriter writer;
+    StringDictionaryStatus status =
+        dictionary::CreateStringDictionaryWriter({}, ludus::foundation::GetSystemAllocationDomain(), writer);
+    ludus::foundation::StringIndex provisional;
+    if (status == StringDictionaryStatus::Ok)
+    {
+        status = writer.TryAdd(first, provisional);
+    }
+    if (status == StringDictionaryStatus::Ok)
+    {
+        status = writer.TryAdd(second, provisional);
+    }
+    if (status == StringDictionaryStatus::Ok)
+    {
+        status = writer.TryFinish();
+    }
+    ludus::foundation::StringIndex remapped;
+    if (status == StringDictionaryStatus::Ok)
+    {
+        status = writer.TryRemap(provisional, remapped);
+    }
+    if (status != StringDictionaryStatus::Ok)
+    {
+        return status;
+    }
+    if (outBytes.TryResize(writer.GetEncodedSize()) == false)
+    {
+        return StringDictionaryStatus::OutOfMemory;
+    }
+    status = writer.TryEncode(revision, {outBytes.GetData(), outBytes.GetSize()});
+    if (status == StringDictionaryStatus::Ok)
+    {
+        outSecond = remapped;
+    }
+    return status;
+}
+```
+
+`ReadStringDictionary(bytes, expectedRevision, view, diagnostic)` checks the
+header, exact size, every offset and terminator, the byte policy and the strict
+sort order before publishing a `StringDictionaryView`. It reports the first bad
+byte offset, rejects a dictionary from another revision, and never allocates or
+copies. The view borrows the caller's bytes: keep the owning snapshot or mapping
+alive and unchanged while the view or any resolved spelling is in use.
+`TryResolve` is constant time; `TryFind` is a binary search over exact bytes.
+
+Index 0 is always the empty spelling. Indices change whenever the spelling set
+changes, so they are meaningful only with the dictionary whose revision digest
+the records were cooked against. Version 1 limits a dictionary to 2^24 entries,
+65535-byte spellings and a 256 MiB blob; the
+[format header](https://github.com/Alegruz/Ludus/blob/main/modules/content/string_dictionary_format/include/ludus/content/string_dictionary_format/lustr.h)
+records the exact layout.
+
 ## Validate at the boundary
 
 `ValidateUtf8(bytes, view, errorOffset)` rejects malformed sequences and reports
@@ -197,9 +280,10 @@ checked text slicing, normalization and SIMD validation are separate future APIs
 
 The file logger shares its base/active path allocation until rotation. The
 [SDK example](https://github.com/Alegruz/Ludus/blob/main/tests/sdk_consumer/strings.cpp)
-and native/browser tests exercise the public contracts. Cooked deterministic
-dictionaries, content snapshot integration, format adapters, debugger printers
-and an editor strings inspector remain follow-on work.
+and native/browser tests exercise the public contracts. The cooked dictionary
+reader and writer are not yet adopted by a content cooker or snapshot; that
+integration, format adapters, debugger printers and an editor strings inspector
+remain follow-on work.
 
 See the [implementation status](../../architecture/strings.md#implementation-status),
 [public headers](https://github.com/Alegruz/Ludus/tree/main/modules/foundation/strings/include/ludus/foundation/strings),
