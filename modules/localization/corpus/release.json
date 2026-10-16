@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "source_locale": "en-US",
+  "profiles": ["ludus-icu-mf1-v1"],
+  "linguistic_data": {
+    "backend": "icu4c",
+    "icu": "78.3",
+    "cldr": "48",
+    "unicode": "17.0"
+  },
+  "locales": [
+    {"locale": "en-US", "parent": null},
+    {"locale": "fr-FR", "parent": "en-US"},
+    {"locale": "ru-RU", "parent": "en-US"},
+    {"locale": "ar", "parent": "en-US"},
+    {"locale": "ja-JP", "parent": "en-US"}
+  ],
+  "domains": [
+    {
+      "domain": "game/ui",
+      "source": "game-ui.source.json",
+      "translations": {
+        "ar": "game-ui.ar.json",
+        "fr-FR": "game-ui.fr-FR.json",
+        "ja-JP": "game-ui.ja-JP.json",
+        "ru-RU": "game-ui.ru-RU.json"
+      },
+      "allow_required_fallback": []
+    }
+  ]
+}

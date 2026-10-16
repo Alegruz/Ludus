@@ -62,8 +62,8 @@ normal Debug/Development, sanitizers, PCH, public-header and build-time-budget g
 
 Windows uses a private native backend but has not been compiled or executed by
 this Linux validation. It requires validation on a supported Windows toolchain
-before shipping there. No real engine workload has been migrated in this slice.
-See [the architecture](../architecture/threading.md) for the staged measurement
+before shipping there. The first real engine workload, the static-lighting bake,
+is recorded [below](#static-lighting-bake-t1). See [the architecture](../architecture/threading.md) for the staged measurement
 and consumer-integration plan.
 
 ## macOS ARM64 validation (T0)
@@ -91,3 +91,88 @@ the one-minute load average was 24.8-25.2.
 The Linux-only startup-failure tests (`--wrap` linker injection), a completed
 macOS TSan run and any Windows execution remain open under milestone T3 of
 [the architecture](../architecture/threading.md#milestones).
+
+## Static-lighting bake (T1)
+
+Measured on 2026-10-16 on the same Apple M5 (4 performance and 6 efficiency cores,
+16 GiB, macOS 26.6), with the pinned Clang 18.1.8 Development build (optimized,
+assertions enabled), no affinity or frequency pinning. Other sessions share this
+machine, so the benchmark started only once the one-minute load average fell below 4.
+The reported sweep ran at a load of 3.8-4.2.
+
+`ludus_static_lighting_benchmark` bakes a 2,062-triangle scene: a point-lit
+32×32-cell receiver grid under 13 area emitters and a partial blocker, at the
+editor's quality of 64 samples per triangle and depth 4. Scheduled bakes use the
+default 64 triangle ranges plus one preparation job. Each configuration runs one
+warm-up and 21 measured bakes, and every run (warm-up included) compared every chart
+byte for byte with the serial `Step` oracle. All runs matched. Worker counts exclude the
+caller, which helps in `Finish`, so *N* workers execute on *N*+1 threads. Times are
+milliseconds unless marked. Percentiles are nearest-rank over the 21 runs.
+
+| Configuration | Bake p50 | p95 | p99 | Critical path p50 | Callback work p50 | Dispatch to first range p50 | Overhead p50 | Speedup p50 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Former editor path: `Initialize` + `Step(256)` on one thread | 135.18 | 136.46 | 141.14 | — | — | — | — | — |
+| Serial executor (0 workers) | 121.16 | 126.90 | 130.95 | 3.79 | 121.15 | 0.2 µs | 0.02 | 1.00 |
+| 1 worker | 76.35 | 84.89 | 85.39 | 4.69 | 149.80 | 2.2 µs | 1.45 | 1.59 |
+| 2 workers | 56.81 | 57.82 | 58.46 | 5.17 | 164.96 | 4.5 µs | 1.82 | 2.13 |
+| 4 workers | 40.00 | 41.29 | 42.06 | 6.51 | 189.95 | 9.8 µs | 2.01 | 3.03 |
+| 8 workers | 28.80 | 39.39 | 42.64 | 7.38 | 230.53 | 28.2 µs | 3.19 | 4.21 |
+
+Definitions, from `StaticLightingBakeProfile`:
+
+- *Bake* is the owner's wall time from `Submit` until `Finish` returns, including
+  allocation, graph construction and the owner merge.
+- *Critical path* is preparation + dispatch to the first range + the longest range
+  + the owner merge. That is the span of this two-level graph. Serially it is 3.8 ms:
+  preparation (BVH and surface terms) plus one range of about 1.9 ms (121 ms / 64).
+- *Callback work* sums every job callback's wall time plus the merge. The owner merge
+  (status merge and chart encoding) took 0.05-0.09 ms at p50.
+- *Overhead* is bake time minus the lower bound max(critical path, callback work /
+  executing threads). On the serial executor that is pure scheduling cost: 0.02 ms
+  for 65 jobs, about 0.3 µs per job. With workers it also includes load imbalance,
+  wake latency and the 64-range tail. That totals 1.4-3.2 ms, or 2-11% of the bake.
+
+Interpretation:
+
+- The serial executor costs nothing measurable compared with the former single-thread
+  loop. The two differ by about 10% between sweeps in both directions (a second sweep at
+  load 4.2-5.5 measured 119.90 and 122.51 ms). This is the oracle configuration.
+- Callback work grows from 121 ms serial to 231 ms with 8 workers. Once
+  more than four threads run, the efficiency cores and shared caches make each path
+  slower, so throughput scales sublinearly: 4.2× on nine threads. The critical path
+  (7.4 ms) is not the limit at this size. Dispatch to the first range grows with the
+  wake herd (28 µs at eight workers), but it stays well under 1% of the bake.
+- The editor runs three workers and polls without helping, which also means three
+  executing threads, so it is comparable to the 2-worker row. That moves the former
+  135 ms bake to about 57 ms of background latency while keeping cores free for Qt and
+  the RHI. The second sweep's 2-worker row measured 75.31 ms. Run-to-run variance on
+  this shared machine is therefore around ±30% at a given budget, and these figures
+  are not latency guarantees.
+- A third sweep was discarded: another session's build raised the load to 21 during
+  it, and its serial executor median rose to 328 ms.
+
+Correctness evidence for the consumer, in the `[static-lighting][threading]` renderer
+tests:
+
+- Charts equal the serial `Step` oracle bit for bit for 0/1/2/4 workers × 1/3/64/1024
+  ranges, including more ranges than triangles, through both `Poll` and `Finish`.
+- Admission and preparation failures (uninitialized or busy system, invalid range
+  count, preparation-time validation failure) leave outputs and profiles preserved.
+- Cancelling mid-evaluation stops ranges, reports `NotReady` and releases the system.
+- `Cancel` followed by `Shutdown` reports cancellation, `Shutdown` without `Cancel`
+  drains the bake to its oracle result, and destroying an in-flight bake cancels and
+  drains it before the next bake reuses the system.
+
+These cases passed 200 consecutive runs. The full renderer suite passed (96 cases),
+and so did the editor suite (185 passed, 6 skipped), including the `StaticLightingJob`
+interruption and destruction test. ASan/UBSan and TSan for this consumer must come
+from CI for the reason given in the T0 section.
+
+Reproduce with:
+
+```sh
+out/host-tools/venv/bin/cmake --preset macos-clang-development -B out/build/t1-benchmark \
+  -DLUDUS_BUILD_THREADING_BENCHMARK=ON -DLUDUS_BUILD_EDITOR=OFF
+out/host-tools/venv/bin/cmake --build out/build/t1-benchmark --target ludus_static_lighting_benchmark
+out/build/t1-benchmark/modules/graphics/renderer/ludus_static_lighting_benchmark
+```

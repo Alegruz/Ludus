@@ -1,0 +1,651 @@
+#include <ludus/graphics/renderer/render_graph_activation.hpp>
+
+#include <ludus/foundation/base/byte_order.hpp>
+
+#include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
+
+#include <new>
+#include <span>
+#include <string_view>
+
+// RG3 staging/activation follows the reload contract in
+// docs/architecture/render-graph-authoring.md ("Editor interaction, diagnostics
+// and hot reload"). Thanks to Christopher Maughan, "The Design of FX Composer",
+// GPU Gems, chapter 30, sections 30.6.2-30.6.4, for separating device-independent
+// compilation from device instantiation; Ludus prewarms a complete candidate and
+// publishes it between frames instead of applying effects lazily to the device.
+namespace ludus::graphics::renderer
+{
+using namespace foundation;
+namespace format = content::render_graph_format;
+using Status = rhi::RasterStatus;
+namespace
+{
+constexpr uint32 MAX_ASPECT = static_cast<uint32>(format::Aspect::Depth);
+constexpr uint32 MAX_TECHNIQUE = static_cast<uint32>(format::Technique::DepthOnly);
+constexpr uint32 MAX_LOAD = static_cast<uint32>(format::Load::Discard);
+constexpr uint32 MAX_STORE = static_cast<uint32>(format::Store::Discard);
+constexpr uint32 FIRST_ENTRY_CHARACTER = 0x21;
+constexpr uint32 LAST_ENTRY_CHARACTER = 0x7E;
+bool IsAccepted(Status status) noexcept
+{
+    return status == Status::Ready || status == Status::Pending;
+}
+/// Bounded little-endian cursor; any short read latches failure.
+class ByteReader final
+{
+public:
+    explicit ByteReader(std::span<const uint8> bytes) noexcept : mBytes(bytes) {}
+    [[nodiscard]] uint32 ReadWord() noexcept
+    {
+        uint32 value = 0;
+        if (mIsOk == false || mBytes.size() - mOffset < sizeof(uint32) ||
+            TryReadLittleEndian(mBytes.subspan(mOffset, sizeof(uint32)), value) == false)
+        {
+            mIsOk = false;
+            return 0;
+        }
+        mOffset += sizeof(uint32);
+        return value;
+    }
+    /// Read count bytes followed by zero padding to a four-byte boundary.
+    [[nodiscard]] std::span<const uint8> ReadPadded(usize count) noexcept
+    {
+        const usize padding = (sizeof(uint32) - count % sizeof(uint32)) % sizeof(uint32);
+        if (mIsOk == false || mBytes.size() - mOffset < count || mBytes.size() - mOffset - count < padding)
+        {
+            mIsOk = false;
+            return {};
+        }
+        const std::span<const uint8> result = mBytes.subspan(mOffset, count);
+        for (usize i = 0; i < padding; ++i)
+        {
+            mIsOk = mIsOk == true && mBytes[mOffset + count + i] == 0;
+        }
+        mOffset += count + padding;
+        return result;
+    }
+    [[nodiscard]] std::span<const uint8> ReadIdentity() noexcept
+    {
+        if (mIsOk == false || mBytes.size() - mOffset < format::IDENTITY_BYTES)
+        {
+            mIsOk = false;
+            return {};
+        }
+        const std::span<const uint8> result = mBytes.subspan(mOffset, format::IDENTITY_BYTES);
+        mOffset += format::IDENTITY_BYTES;
+        return result;
+    }
+    [[nodiscard]] bool IsOk() const noexcept
+    {
+        return mIsOk;
+    }
+    [[nodiscard]] bool IsComplete() const noexcept
+    {
+        return mIsOk == true && mOffset == mBytes.size();
+    }
+
+private:
+    std::span<const uint8> mBytes;
+    usize mOffset = 0;
+    bool mIsOk = true;
+};
+bool IsEntryName(std::span<const uint8> entry) noexcept
+{
+    bool isValid = entry.empty() == false && entry.size() <= format::MAX_ENTRY_BYTES;
+    for (const uint8 character : entry)
+    {
+        isValid = isValid == true && character >= FIRST_ENTRY_CHARACTER && character <= LAST_ENTRY_CHARACTER;
+    }
+    return isValid;
+}
+} // namespace
+
+struct RenderGraphPackage::State final
+{
+    /// One decoded artifact; text views borrow Bytes, SPIR-V words are copied aligned.
+    struct StageView final
+    {
+        bool IsPresent = false;
+        std::string_view Entry;
+        std::string_view Text;
+        Array<uint32> Words;
+    };
+    Array<uint8> Bytes;
+    format::Header Header{};
+    StaticArray<format::Resource, format::MAX_RESOURCES> Resources{};
+    StaticArray<format::Camera, format::MAX_CAMERAS> Cameras{};
+    StaticArray<format::Pass, format::MAX_PASSES> Passes{};
+    StaticArray<uint8, format::IDENTITY_BYTES> InterfaceIdentity{};
+    StaticArray<uint8, format::IDENTITY_BYTES> GenerationIdentity{};
+    StaticArray<rhi::RasterShaderInput, format::STATIC_INPUT_COUNT> Inputs{};
+    StaticArray<StaticArray<StageView, format::SHADER_TARGET_COUNT>, format::STAGE_ROLE_COUNT> Stages{};
+    RenderGraphPackageStatus DecodeRecords(ByteReader& inoutReader) noexcept;
+    RenderGraphPackageStatus DecodeStages(ByteReader& inoutReader, uint32 stageCount) noexcept;
+};
+RenderGraphPackageStatus RenderGraphPackage::State::DecodeStages(ByteReader& inoutReader, uint32 stageCount) noexcept
+{
+    for (uint32 stage = 0; stage < stageCount; ++stage)
+    {
+        const uint32 role = inoutReader.ReadWord();
+        const uint32 target = inoutReader.ReadWord();
+        const uint32 inputCount = inoutReader.ReadWord();
+        const uint32 entryBytes = inoutReader.ReadWord();
+        const uint32 artifactBytes = inoutReader.ReadWord();
+        if (inoutReader.IsOk() == false || role >= format::STAGE_ROLE_COUNT || target >= format::SHADER_TARGET_COUNT)
+        {
+            return RenderGraphPackageStatus::Malformed;
+        }
+        const bool isVertex = role == static_cast<uint32>(format::StageRole::ColorVertex) ||
+                              role == static_cast<uint32>(format::StageRole::DepthVertex);
+        if (inputCount != (isVertex == true ? format::STATIC_INPUT_COUNT : 0))
+        {
+            return RenderGraphPackageStatus::Malformed;
+        }
+        for (uint32 input = 0; input < inputCount; ++input)
+        {
+            const uint32 location = inoutReader.ReadWord();
+            const uint32 inputFormat = inoutReader.ReadWord();
+            const format::InputFormat expected = input == 0 ? format::InputFormat::Float3 : format::InputFormat::Float4;
+            if (location != input || inputFormat != static_cast<uint32>(expected))
+            {
+                return RenderGraphPackageStatus::Malformed;
+            }
+        }
+        if (artifactBytes > format::MAX_ARTIFACT_BYTES)
+        {
+            return RenderGraphPackageStatus::CapacityExceeded;
+        }
+        const std::span<const uint8> entry = inoutReader.ReadPadded(entryBytes);
+        const std::span<const uint8> artifact = inoutReader.ReadPadded(artifactBytes);
+        StageView& view = Stages[role][target];
+        if (inoutReader.IsOk() == false || IsEntryName(entry) == false || artifact.empty() == true ||
+            view.IsPresent == true)
+        {
+            return RenderGraphPackageStatus::Malformed;
+        }
+        view.IsPresent = true;
+        view.Entry = {reinterpret_cast<const char*>(entry.data()), entry.size()};
+        if (target == static_cast<uint32>(format::ShaderTarget::Spirv))
+        {
+            if (artifact.size() % sizeof(uint32) != 0)
+            {
+                return RenderGraphPackageStatus::Malformed;
+            }
+            if (view.Words.TryResize(artifact.size() / sizeof(uint32)) == false)
+            {
+                return RenderGraphPackageStatus::OutOfMemory;
+            }
+            for (usize word = 0; word < view.Words.GetSize(); ++word)
+            {
+                static_cast<void>(TryReadLittleEndian(artifact.subspan(word * sizeof(uint32)), view.Words[word]));
+            }
+        }
+        else
+        {
+            view.Text = {reinterpret_cast<const char*>(artifact.data()), artifact.size()};
+        }
+    }
+    // Each technique needs its vertex and fragment stage for exactly the same targets.
+    for (usize technique = 0; technique < format::TECHNIQUE_COUNT; ++technique)
+    {
+        for (usize target = 0; target < format::SHADER_TARGET_COUNT; ++target)
+        {
+            if (Stages[technique * 2][target].IsPresent != Stages[technique * 2 + 1][target].IsPresent)
+            {
+                return RenderGraphPackageStatus::Malformed;
+            }
+        }
+    }
+    return RenderGraphPackageStatus::Ready;
+}
+RenderGraphPackageStatus RenderGraphPackage::State::DecodeRecords(ByteReader& inoutReader) noexcept
+{
+    for (uint32 i = 0; i < Header.ResourceCount; ++i)
+    {
+        format::Resource& resource = Resources[i];
+        resource.Width = inoutReader.ReadWord();
+        resource.Height = inoutReader.ReadWord();
+        const uint32 aspect = inoutReader.ReadWord();
+        resource.Backing = inoutReader.ReadWord();
+        resource.IsSurface = inoutReader.ReadWord();
+        resource.IsExported = inoutReader.ReadWord();
+        if (aspect > MAX_ASPECT)
+        {
+            return RenderGraphPackageStatus::Malformed;
+        }
+        resource.Kind = static_cast<format::Aspect>(aspect);
+    }
+    for (uint32 i = 0; i < Header.CameraCount; ++i)
+    {
+        Cameras[i].Target = inoutReader.ReadWord();
+    }
+    for (uint32 i = 0; i < Header.PassCount; ++i)
+    {
+        format::Pass& pass = Passes[i];
+        const uint32 program = inoutReader.ReadWord();
+        pass.Camera = inoutReader.ReadWord();
+        pass.Color = inoutReader.ReadWord();
+        pass.Depth = inoutReader.ReadWord();
+        const uint32 colorLoad = inoutReader.ReadWord();
+        const uint32 colorStore = inoutReader.ReadWord();
+        const uint32 depthLoad = inoutReader.ReadWord();
+        const uint32 depthStore = inoutReader.ReadWord();
+        pass.AllowsRepeatedCoverage = inoutReader.ReadWord();
+        if (program > MAX_TECHNIQUE || colorLoad > MAX_LOAD || depthLoad > MAX_LOAD || colorStore > MAX_STORE ||
+            depthStore > MAX_STORE)
+        {
+            return RenderGraphPackageStatus::Malformed;
+        }
+        pass.Program = static_cast<format::Technique>(program);
+        pass.ColorLoad = static_cast<format::Load>(colorLoad);
+        pass.ColorStore = static_cast<format::Store>(colorStore);
+        pass.DepthLoad = static_cast<format::Load>(depthLoad);
+        pass.DepthStore = static_cast<format::Store>(depthStore);
+    }
+    return inoutReader.IsOk() == true ? RenderGraphPackageStatus::Ready : RenderGraphPackageStatus::Malformed;
+}
+
+RenderGraphPackage::RenderGraphPackage() noexcept = default;
+RenderGraphPackage::~RenderGraphPackage() noexcept = default;
+RenderGraphPackageStatus RenderGraphPackage::Decode(BorrowedView<const uint8> bytes) noexcept
+{
+    if (mState.Get() != nullptr)
+    {
+        return RenderGraphPackageStatus::InvalidState;
+    }
+    if (bytes.IsValid() == false || bytes.GetSize() < format::HEADER_BYTES)
+    {
+        return RenderGraphPackageStatus::Malformed;
+    }
+    if (bytes.GetSize() > format::MAX_PACKAGE_BYTES)
+    {
+        return RenderGraphPackageStatus::CapacityExceeded;
+    }
+    State* allocationOrNull = new (std::nothrow) State;
+    core::UniquePtr<State> candidate{allocationOrNull};
+    if (candidate.Get() == nullptr || candidate->Bytes.TryResize(bytes.GetSize()) == false)
+    {
+        return RenderGraphPackageStatus::OutOfMemory;
+    }
+    // Copy first: every later view borrows owned storage, never the caller's buffer.
+    const uint8* source = bytes.GetDataOrNull();
+    for (usize i = 0; i < bytes.GetSize(); ++i)
+    {
+        candidate->Bytes[i] = source[i];
+    }
+    ByteReader reader{candidate->Bytes.AsSpan()};
+    const uint32 magic = reader.ReadWord();
+    const uint32 version = reader.ReadWord();
+    if (magic != format::PACKAGE_MAGIC || version != format::PACKAGE_VERSION)
+    {
+        return RenderGraphPackageStatus::UnsupportedVersion;
+    }
+    candidate->Header.Version = format::VERSION;
+    candidate->Header.ResourceCount = reader.ReadWord();
+    candidate->Header.PassCount = reader.ReadWord();
+    candidate->Header.CameraCount = reader.ReadWord();
+    const uint32 stageCount = reader.ReadWord();
+    if (candidate->Header.ResourceCount > format::MAX_RESOURCES || candidate->Header.PassCount > format::MAX_PASSES ||
+        candidate->Header.CameraCount > format::MAX_CAMERAS || stageCount > format::MAX_STAGES)
+    {
+        return RenderGraphPackageStatus::CapacityExceeded;
+    }
+    const std::span<const uint8> interfaceIdentity = reader.ReadIdentity();
+    const std::span<const uint8> generationIdentity = reader.ReadIdentity();
+    if (reader.IsOk() == false)
+    {
+        return RenderGraphPackageStatus::Malformed;
+    }
+    for (usize i = 0; i < format::IDENTITY_BYTES; ++i)
+    {
+        candidate->InterfaceIdentity[i] = interfaceIdentity[i];
+        candidate->GenerationIdentity[i] = generationIdentity[i];
+    }
+    RenderGraphPackageStatus status = candidate->DecodeRecords(reader);
+    if (status != RenderGraphPackageStatus::Ready)
+    {
+        return status;
+    }
+    status = candidate->DecodeStages(reader, stageCount);
+    if (status != RenderGraphPackageStatus::Ready)
+    {
+        return status;
+    }
+    if (reader.IsComplete() == false)
+    {
+        return RenderGraphPackageStatus::Malformed;
+    }
+    for (uint32 i = 0; i < format::STATIC_INPUT_COUNT; ++i)
+    {
+        candidate->Inputs[i] = {i, i == 0 ? rhi::RasterVertexFormat::Float3 : rhi::RasterVertexFormat::Float4};
+    }
+    mState.Swap(candidate);
+    return RenderGraphPackageStatus::Ready;
+}
+bool RenderGraphPackage::IsLoaded() const noexcept
+{
+    return mState.Get() != nullptr;
+}
+RenderGraphPlan RenderGraphPackage::GetPlan() const noexcept
+{
+    if (mState.Get() == nullptr)
+    {
+        return {};
+    }
+    const State& state = *mState;
+    return {state.Header,
+            {state.Resources.GetData(), state.Header.ResourceCount},
+            {state.Cameras.GetData(), state.Header.CameraCount},
+            {state.Passes.GetData(), state.Header.PassCount}};
+}
+RenderGraphPrograms
+RenderGraphPackage::GetPrograms(const rhi::RasterShaderDescription& compositeVertex,
+                                const rhi::RasterShaderDescription& compositeFragment) const noexcept
+{
+    RenderGraphPrograms result;
+    result.CompositeVertex = compositeVertex;
+    result.CompositeFragment = compositeFragment;
+    if (mState.Get() == nullptr)
+    {
+        return result;
+    }
+    const State& state = *mState;
+    StaticArray<rhi::RasterShaderDescription*, format::STAGE_ROLE_COUNT> members{
+        {&result.ColorVertex, &result.ColorFragment, &result.DepthVertex, &result.DepthFragment}};
+    for (usize role = 0; role < format::STAGE_ROLE_COUNT; ++role)
+    {
+        rhi::RasterShaderDescription& description = *members[role];
+        const bool isVertex = role == static_cast<usize>(format::StageRole::ColorVertex) ||
+                              role == static_cast<usize>(format::StageRole::DepthVertex);
+        description.Artifact.Stage = isVertex == true ? rhi::ShaderStage::Vertex : rhi::ShaderStage::Fragment;
+        if (isVertex == true)
+        {
+            description.Inputs = state.Inputs.AsSpan();
+        }
+        const StaticArray<State::StageView, format::SHADER_TARGET_COUNT>& views = state.Stages[role];
+        const State::StageView& metal = views[static_cast<usize>(format::ShaderTarget::Metal)];
+        const State::StageView& spirv = views[static_cast<usize>(format::ShaderTarget::Spirv)];
+        const State::StageView& wgsl = views[static_cast<usize>(format::ShaderTarget::Wgsl)];
+        const State::StageView& glsl = views[static_cast<usize>(format::ShaderTarget::GlslEs)];
+        if (metal.IsPresent == true)
+        {
+            description.Artifact.Msl = metal.Text;
+            description.Artifact.MslEntry = metal.Entry;
+        }
+        if (spirv.IsPresent == true)
+        {
+            description.Artifact.Spirv = spirv.Words.AsSpan();
+            description.Artifact.SpirvEntry = spirv.Entry;
+        }
+        if (wgsl.IsPresent == true)
+        {
+            description.Artifact.Wgsl = wgsl.Text;
+            description.Artifact.WgslEntry = wgsl.Entry;
+        }
+        if (glsl.IsPresent == true)
+        {
+            description.Artifact.GlslEs = glsl.Text;
+            description.Artifact.GlslEsEntry = glsl.Entry;
+        }
+    }
+    return result;
+}
+BorrowedView<const uint8> RenderGraphPackage::GetInterfaceIdentity() const noexcept
+{
+    return mState.Get() == nullptr
+               ? BorrowedView<const uint8>{}
+               : BorrowedView<const uint8>{mState->InterfaceIdentity.GetData(), format::IDENTITY_BYTES};
+}
+BorrowedView<const uint8> RenderGraphPackage::GetGenerationIdentity() const noexcept
+{
+    return mState.Get() == nullptr
+               ? BorrowedView<const uint8>{}
+               : BorrowedView<const uint8>{mState->GenerationIdentity.GetData(), format::IDENTITY_BYTES};
+}
+void RenderGraphPackage::Reset() noexcept
+{
+    mState.Reset();
+}
+
+namespace
+{
+/// One staged or active generation. Graph is declared after Package, so it is
+/// destroyed first and never outlives the artifacts it was initialized from.
+struct Generation final
+{
+    core::UniquePtr<RenderGraphPackage> Package;
+    RenderGraph Graph;
+    uint64 Serial = 0;
+    uint64 SceneRevision = 0;
+    bool IsSetupReady = false;
+};
+bool AreIdentitiesEqual(BorrowedView<const uint8> left,
+                        const StaticArray<uint8, format::IDENTITY_BYTES>& right) noexcept
+{
+    bool isEqual = left.GetSize() == format::IDENTITY_BYTES;
+    for (usize i = 0; isEqual == true && i < format::IDENTITY_BYTES; ++i)
+    {
+        isEqual = left[i] == right[i];
+    }
+    return isEqual;
+}
+} // namespace
+
+struct RenderGraphActivation::State final
+{
+    rhi::DeviceHandle Device{};
+    StaticArray<uint8, format::IDENTITY_BYTES> Interface{};
+    rhi::RasterShaderDescription CompositeVertex{};
+    rhi::RasterShaderDescription CompositeFragment{};
+    core::UniquePtr<Generation> Active;
+    core::UniquePtr<Generation> Candidate;
+    uint64 NextSerial = 0;
+    RenderGraphActivationReport Report{};
+    void FailCandidate(Status status) noexcept
+    {
+        Candidate.Reset();
+        Report.Candidate = RenderGraphCandidateState::Failed;
+        Report.LastFailure = status;
+    }
+    /// Publish the complete candidate; the replaced graph retires through RHI completion.
+    void Activate() noexcept
+    {
+        core::UniquePtr<Generation> retired;
+        retired.Swap(Active);
+        Active.Swap(Candidate);
+        Report.ActiveGeneration = Active->Serial;
+        Report.Candidate = RenderGraphCandidateState::None;
+        retired.Reset();
+    }
+};
+RenderGraphActivation::RenderGraphActivation() noexcept = default;
+RenderGraphActivation::~RenderGraphActivation() noexcept
+{
+    Reset();
+}
+Status RenderGraphActivation::Initialize(rhi::DeviceHandle device,
+                                         BorrowedView<const uint8> interfaceIdentity,
+                                         const rhi::RasterShaderDescription& compositeVertex,
+                                         const rhi::RasterShaderDescription& compositeFragment) noexcept
+{
+    if (mState.Get() != nullptr)
+    {
+        return Status::InvalidState;
+    }
+    if (interfaceIdentity.IsValid() == false || interfaceIdentity.GetSize() != format::IDENTITY_BYTES)
+    {
+        return Status::InvalidDescription;
+    }
+    State* allocationOrNull = new (std::nothrow) State;
+    core::UniquePtr<State> candidate{allocationOrNull};
+    if (candidate.Get() == nullptr)
+    {
+        return Status::OutOfMemory;
+    }
+    candidate->Device = device;
+    for (usize i = 0; i < format::IDENTITY_BYTES; ++i)
+    {
+        candidate->Interface[i] = interfaceIdentity[i];
+    }
+    candidate->CompositeVertex = compositeVertex;
+    candidate->CompositeFragment = compositeFragment;
+    mState.Swap(candidate);
+    return Status::Ready;
+}
+Status RenderGraphActivation::Stage(core::UniquePtr<RenderGraphPackage> package) noexcept
+{
+    if (mState.Get() == nullptr)
+    {
+        return Status::InvalidState;
+    }
+    State& state = *mState;
+    if (package.Get() == nullptr || package->IsLoaded() == false)
+    {
+        return Status::InvalidDescription;
+    }
+    // A newer request supersedes any unactivated candidate, whatever its outcome.
+    state.Candidate.Reset();
+    state.Report.CandidateGeneration = ++state.NextSerial;
+    if (AreIdentitiesEqual(package->GetInterfaceIdentity(), state.Interface) == false)
+    {
+        state.Report.Candidate = RenderGraphCandidateState::RestartRequired;
+        state.Report.LastFailure = Status::Unsupported;
+        return Status::Unsupported;
+    }
+    Generation* allocationOrNull = new (std::nothrow) Generation;
+    core::UniquePtr<Generation> generation{allocationOrNull};
+    if (generation.Get() == nullptr)
+    {
+        state.FailCandidate(Status::OutOfMemory);
+        return Status::OutOfMemory;
+    }
+    generation->Package.Swap(package);
+    generation->Serial = state.Report.CandidateGeneration;
+    const Status status =
+        generation->Graph.Initialize(state.Device,
+                                     generation->Package->GetPlan(),
+                                     generation->Package->GetPrograms(state.CompositeVertex, state.CompositeFragment));
+    if (IsAccepted(status) == false)
+    {
+        state.FailCandidate(status);
+        return status;
+    }
+    state.Candidate.Swap(generation);
+    state.Report.Candidate = RenderGraphCandidateState::Preparing;
+    return status;
+}
+Status RenderGraphActivation::Poll() noexcept
+{
+    if (mState.Get() == nullptr)
+    {
+        return Status::InvalidState;
+    }
+    State& state = *mState;
+    Status activeStatus = Status::NotReady;
+    if (state.Active.Get() != nullptr)
+    {
+        activeStatus = state.Active->Graph.Poll();
+    }
+    if (state.Candidate.Get() == nullptr)
+    {
+        return activeStatus;
+    }
+    if (state.Active.Get() != nullptr && state.Active->Graph.HasUnconfirmedEncoding() == true)
+    {
+        return activeStatus;
+    }
+    Generation& candidate = *state.Candidate;
+    const Status candidateStatus = candidate.Graph.Poll();
+    if (IsAccepted(candidateStatus) == false)
+    {
+        state.FailCandidate(candidateStatus);
+        return state.Active.Get() != nullptr ? activeStatus : candidateStatus;
+    }
+    if (candidateStatus == Status::Pending)
+    {
+        state.Report.Candidate = RenderGraphCandidateState::Preparing;
+        return state.Active.Get() != nullptr ? activeStatus : candidateStatus;
+    }
+    candidate.IsSetupReady = true;
+    const uint64 latest = state.Report.LatestSceneRevision;
+    if (latest != 0 && candidate.Graph.GetDrawableSceneRevision() != latest)
+    {
+        state.Report.Candidate = candidate.SceneRevision == latest ? RenderGraphCandidateState::Preparing
+                                                                   : RenderGraphCandidateState::NeedsUpdate;
+        return state.Active.Get() != nullptr ? activeStatus : Status::Pending;
+    }
+    state.Activate();
+    return Status::Ready;
+}
+Status RenderGraphActivation::Update(BorrowedView<const RenderGraphMesh> meshes,
+                                     BorrowedView<const RenderGraphItem> items,
+                                     BorrowedView<const ViewDescription> cameras,
+                                     uint64 sceneRevision,
+                                     RenderGraphCoveragePolicy policy,
+                                     RenderGraphReport& outReport) noexcept
+{
+    if (mState.Get() == nullptr)
+    {
+        return Status::InvalidState;
+    }
+    State& state = *mState;
+    Status activeStatus = Status::NotReady;
+    bool isActiveAccepting = false;
+    if (state.Active.Get() != nullptr)
+    {
+        activeStatus = state.Active->Graph.Update(meshes, items, cameras, sceneRevision, policy, outReport);
+        isActiveAccepting = IsAccepted(activeStatus);
+        if (isActiveAccepting == true)
+        {
+            state.Report.LatestSceneRevision = sceneRevision;
+        }
+    }
+    if (state.Candidate.Get() == nullptr || state.Candidate->IsSetupReady == false)
+    {
+        return activeStatus;
+    }
+    Generation& candidate = *state.Candidate;
+    RenderGraphReport candidateReport;
+    const Status candidateStatus =
+        candidate.Graph.Update(meshes, items, cameras, sceneRevision, policy, candidateReport);
+    if (IsAccepted(candidateStatus) == true)
+    {
+        candidate.SceneRevision = sceneRevision;
+        state.Report.Candidate = RenderGraphCandidateState::Preparing;
+    }
+    else if (isActiveAccepting == true)
+    {
+        // The new generation cannot cover what the drawing generation accepts.
+        state.FailCandidate(candidateStatus);
+    }
+    if (state.Active.Get() != nullptr)
+    {
+        return activeStatus;
+    }
+    outReport = candidateReport;
+    if (IsAccepted(candidateStatus) == true)
+    {
+        state.Report.LatestSceneRevision = sceneRevision;
+    }
+    return candidateStatus;
+}
+RenderGraph* RenderGraphActivation::GetActiveOrNull() noexcept
+{
+    return mState.Get() != nullptr && mState->Active.Get() != nullptr ? &mState->Active->Graph : nullptr;
+}
+RenderGraphActivationReport RenderGraphActivation::GetReport() const noexcept
+{
+    return mState.Get() != nullptr ? mState->Report : RenderGraphActivationReport{};
+}
+void RenderGraphActivation::Reset() noexcept
+{
+    if (mState.Get() != nullptr)
+    {
+        mState->Candidate.Reset();
+        mState->Active.Reset();
+    }
+    mState.Reset();
+}
+} // namespace ludus::graphics::renderer

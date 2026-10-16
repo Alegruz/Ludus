@@ -104,11 +104,11 @@ inspection boundary those phases consume.
 
 ## Initial CI result
 
-The host-tooling job in [project-sdk run 37091095268](https://github.com/Alegruz/Ludus/actions/runs/37091095268)
+The host-tooling job in [project-sdk run 37091095268](https://github.com/The-Ludus-Project/Ludus/actions/runs/37091095268)
 passed for the first PR commit, including the installed release backend. The SDK
 candidate relocation job was skipped by the pre-existing feature-branch policy.
 This result predates the additional loader-rewrite regression; CI must validate
-the updated PR head independently. The initial [ci run 37091095312](https://github.com/Alegruz/Ludus/actions/runs/37091095312)
+the updated PR head independently. The initial [ci run 37091095312](https://github.com/The-Ludus-Project/Ludus/actions/runs/37091095312)
 also passed source formatting, Development/SDK validation, Clang static analysis,
 ASan/UBSan, Optional Editor, build budget, PCH and assertion-policy variants.
 These are results for the initial commit, not the later loader-rewrite fix.

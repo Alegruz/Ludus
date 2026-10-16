@@ -765,15 +765,15 @@ that every broader target contract in this document is available.
 
 ### Baseline and evidence record
 
-The initial milestone series ends with [R5, PR 189](https://github.com/Alegruz/Ludus/pull/189),
+The initial milestone series ends with [R5, PR 189](https://github.com/The-Ludus-Project/Ludus/pull/189),
 merged at `859d02d`; its evidence reconciliation used repository revision `5659894`.
-[R0 negotiation, PR 201](https://github.com/Alegruz/Ludus/pull/201), subsequently
+[R0 negotiation, PR 201](https://github.com/The-Ludus-Project/Ludus/pull/201), subsequently
 merged at `fb6842c`, adds copied enabled limits, format/use constraints and
 required/preferred admission. The follow-up roadmap was assigned against comparison revision `0344d67`;
 current statuses and evidence are recorded below. R6 was merged in
-[PR 215](https://github.com/Alegruz/Ludus/pull/215); R7 in
-[PR 216](https://github.com/Alegruz/Ludus/pull/216). R8 is submitted in
-[PR 219](https://github.com/Alegruz/Ludus/pull/219).
+[PR 215](https://github.com/The-Ludus-Project/Ludus/pull/215); R7 in
+[PR 216](https://github.com/The-Ludus-Project/Ludus/pull/216). R8 is submitted in
+[PR 219](https://github.com/The-Ludus-Project/Ludus/pull/219).
 R5 source revision `e4a6b7a83ef9a1572e77c92af55ca57c681c5b98` passed all 28
 executed CI checks, including native/browser builds, sanitizer and static-analysis
 checks, installed/relocated SDK consumers and packaged browser rendering tests.
@@ -812,8 +812,9 @@ assigned below. R6 implements configurable, budgeted storage, and R7 provides
 measurement and qualification tooling with explicitly open host acceptance.
 R8 adds mutable transfers and incremental initialized mip primitives; partial
 sampling is supplied by implemented R9a; R9 also supplies its documented texture
-types and formats. R11 adds the bounded binding profiles below; its R11c extension and R12–R18 retain their separately tracked subprofiles. They extend the
-shipped R0–R5 profiles rather than reopening their original acceptance.
+types and formats. R11 adds the bounded binding and table profiles below; R12–R17 retain their
+separately tracked subprofiles, and R18 is implemented. They extend the shipped
+R0–R5 profiles rather than reopening their original acceptance.
 
 <a id="follow-up-milestones-r6r17"></a>
 
@@ -833,7 +834,7 @@ requiring those higher-level systems to be implemented first.
 | **R8: mutable transfers and residency primitives (Implemented, RGBA8 transfer profile)** | R8a: existing-buffer updates and bounded 2D texture upload/update/copy/readback. R8b: incremental initialized mip residency and staging budgets with explicit source ownership, completion and cancellation. | R8a: R6 plus existing R2/R3; R8b initialization: R8a; sampling partial residency: R9a initialized-view contracts; use R7 evidence | Round trips, offset/pitch/range checks, partial initialization, RAW/WAR/WAW and cancellation/pressure/loss tests. Mutation must reject, order or rename around retained/in-flight uses; never overwrite host-visible GPU data still in use. Reuse staging only after actual completion. Later texture types/block formats extend these checks in R9. Residency here does not promise sparse GPU memory or consumer eviction policy. |
 | **R9: texture types, formats and views (Implemented, sampled color/BC profiles)** | R9a: partial sampled views/mip/layer/aspect ranges and uploaded HDR formats. R9b: arrays/cubemaps. R9c: 3D textures and compressed formats, each with explicit enabled format/use support and target reflection. | R6/R8a; partial views initially use conservative R3 hazards | Validate block-edge layouts, mip/slice bounds, cube orientation, 3D addressing, initialized sampling and retained view lifetimes. Installed SDK pixels/readback qualify every claimed backend/profile. Unsupported format/use combinations reject explicitly; array/cube/3D and compression capabilities are independent. |
 | **R10: attachment extensions (Implemented, bounded offscreen profiles)** | R10a: multiple color attachments, sampled depth and stencil. R10b: MSAA/resolve. R10c: partial attachment views and extended GDI load/store declarations. | Existing R1/R3 plus R6; R9a/view aspects for sampled depth and R10c; no dependency on all texture types or transfers | Validate per-format/sample limits, attachment compatibility, resolves, depth/stencil behavior, feedback and undefined loads. Prove graph/direct image agreement, loss/resize retirement and authored alternatives. Conservatively track full-resource hazards until R13a; stencil, attachment counts and MSAA are separate capabilities. |
-| **R11: scalable binding and optional bindless (Implemented, bounded binding profiles)** | R11a: descriptor arenas and dynamic offsets. R11b: reflected binding arrays and separately enabled descriptor indexing/bindless, with explicit reachable-resource declarations and completion-gated reuse. R11c (Planned): wider descriptor kinds, runtime-sized tables, partially populated tables and safe update-after-bind, each independently enabled; the current fixed color Texture2D arrays retain their stated backend ceilings. | R11a: R6 and existing R1/R2; R11b: R11a plus verified target reflection/capabilities; R9 only for new texture types/views | Alignment/range checks, descriptor exhaustion/rollback, in-flight replacement and stale index tests. Arrays do not imply runtime-sized/non-uniform indexing or update-after-bind. Retain all declared reachable resources; unsafe or undeclared access rejects. Compare binding CPU cost and retained memory through R7. Bindless is optional and does not remove table/memory budgets. |
+| **R11: scalable binding and optional bindless (Implemented, bounded binding and table profiles)** | R11a: descriptor arenas and dynamic offsets. R11b: reflected binding arrays and separately enabled descriptor indexing/bindless, with explicit reachable-resource declarations and completion-gated reuse. R11c (Implemented): wider fixed color texture/sampler/buffer descriptor kinds, separately enabled bounded runtime texture arrays, logical partially populated tables with retained fallback descriptors, and safe publication of replacement snapshots after earlier binds/submissions. Native in-place UPDATE_AFTER_BIND semantics are not claimed by this immutable snapshot profile. Each operation retains its documented backend and descriptor budgets. | R11a: R6 and existing R1/R2; R11b: R11a plus verified target reflection/capabilities; R9 only for new texture types/views | Alignment/range checks, descriptor exhaustion/rollback, in-flight replacement and stale index tests. Arrays do not imply runtime-sized/non-uniform indexing or update-after-bind. Retain all declared reachable resources; unsafe or undeclared access rejects. Compare binding CPU cost and retained memory through R7. Bindless is optional and does not remove table/memory budgets. |
 | **R12: expanded compute and indirect commands** | R12a: broader indexed/non-indexed indirect arguments and indirect dispatch. R12b: raster-stage storage buffers and storage textures. R12c: optional native multi-draw/GPU-provided draw counts. Preserve R4's bounded indexed-indirect path. | R12a/R12c: R6 and existing R4/R3; R12b: R6 and target shader reflection, plus R9 only for new texture/view types; bindless and mutable transfers are not prerequisites | Validate argument ABI/alignment/count/stride and enabled offsets, producer-to-command/shader dependencies, zero work and overflow. GPU-produced command fixtures match direct draws without reading counts back to the CPU. R12c reports native support separately from CPU loops over indirect commands. Retain a bounded single-command path and authored WebGL CPU/direct alternative. Visibility/compaction algorithms remain renderer policy. |
 | **R13: finer GDI hazards and transient aliasing** | R13a: buffer ranges and texture mip/layer/aspect tracking. R13b: transient backing/heap aliasing with explicit initialization and lifetime intervals. | R13a: R6 and existing R3; incorporate R8–R10/R12 uses when those profiles exist. R13b: R13a plus RHI allocation/alias capabilities and R7 memory evidence | Adversarial overlapping ranges/views, cross-frame imports, alias transitions/reuse, RAW/WAR/WAW, feedback and undefined loads. Aliasing excludes imported/persistent/in-flight backing unless ownership and last use explicitly permit it. Reject invalid plans before side effects. Compare images/synchronization with whole-resource, non-aliased execution and measure peak API-allocated memory. |
 | **R14: independent devices and surfaces** | Multiple device/surface owners, raw adapter catalogs separated from enabled profiles, per-owner registries/completion and independent loss/presentation retirement. | R6 plus existing R0/R2 ownership; independent of aliasing, bindless and GPU-driven commands | Concurrent owners, stale/cross-owner rejection, independently resized/lost surfaces, pending browser callbacks and separate render/present completion. One owner's failure must not corrupt another. Preserve the single-owner facade. A separate GraphicsDevice module remains an ownership decision, not a duplicate registry. |
@@ -851,7 +852,7 @@ are implemented for the RGBA8 transfer profile. R8b initializes mips incremental
 and gates the existing full-resource view until all mips are defined. R9a adds sampling of initialized subsets through partial color views; its
 [texture contract and SDK journey](../development/fullscreen-rendering.md#texture-types-formats-and-views-r9)
 record the enabled dimensions, compression profile and backend limitations. R10 adds [bounded attachment extensions](../development/fullscreen-rendering.md#attachment-extensions-r10).
-R11a/R11b are Implemented in [PR #239](https://github.com/Alegruz/Ludus/pull/239), with the
+R11a/R11b are Implemented in [PR #239](https://github.com/The-Ludus-Project/Ludus/pull/239), with the
 [binding profile and SDK/CI evidence](../development/fullscreen-rendering.md#scalable-bindings-and-optional-bindless-r11)
 recording dynamic offsets, fixed native texture arrays and independently enabled non-uniform indexing.
 R12a reuses R4 and R15a reuses R3 without waiting for the texture/attachment
@@ -879,13 +880,15 @@ R9a/R9b/R9c and R10a/R10b/R10c are Implemented with explicit backend profiles;
 [the R10 contract and SDK journey](../development/fullscreen-rendering.md#attachment-extensions-r10)
 record MRT, private aspect loads, stencil, color resolves and selected attachment initialization.
 R11a/R11b are Implemented with the bounded backend matrix and correctness evidence
-linked above; physical-host qualification remains R7b/R7c. R11c and R12–R17 subprofiles remain
-Planned, except for the existing
+linked above. R11c is Implemented in [PR #266](https://github.com/The-Ludus-Project/Ludus/pull/266)
+with the independently enabled table profiles documented in that same contract;
+physical-host qualification remains R7b/R7c. R12–R17 subprofiles remain Planned,
+except for the existing
 [RT0 static native-query profile](renderer-systems.md#l6-implemented-scope-rt0-and-rt1)
 overlapping R16a/R17a. That immutable native build/query path is implemented;
 it does not complete their broader GDI build/read declarations or R16b/R17b's
 refit/compaction and dedicated ray-pipeline scope, nor R16c/R17c motion/procedural extensions.
-R18a/R18b are Implemented in [PR #242](https://github.com/Alegruz/Ludus/pull/242); R18c is Implemented in [PR #246](https://github.com/Alegruz/Ludus/pull/246). The [R18 texture contract and SDK fixture](../development/fullscreen-rendering.md#reference-scene-texture-profiles-r18) record the scoped format, dimension and byte-budget behavior. BC5 addresses ATI2 DDS data in the
+R18a/R18b are Implemented in [PR #242](https://github.com/The-Ludus-Project/Ludus/pull/242); R18c is Implemented in [PR #246](https://github.com/The-Ludus-Project/Ludus/pull/246). The [R18 texture contract and SDK fixture](../development/fullscreen-rendering.md#reference-scene-texture-profiles-r18) record the scoped format, dimension and byte-budget behavior. BC5 addresses ATI2 DDS data in the
 reference sets; width/height negotiation addresses images as large as 8240 by
 8200. R18c removes the former 64 MiB allocation/complete-upload ceiling, 16 MiB compute
 storage-range ceiling and four-storage/eight-total binding profile. Enabled limits

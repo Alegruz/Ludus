@@ -224,7 +224,7 @@ Bolton**, *A Basic Scheduler*, Game Engine Gems 1, chapter 25, pp. 409–414, fo
 ideas informing the planned scheduling contract. Historical chapter code was
 not copied; local reference PDFs are outside the public wiki.
 
-See the [time API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/include/ludus/foundation/time/time.hpp),
-[timer API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/include/ludus/foundation/time/timers.hpp),
-and [boundary tests](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/tests/time_tests.cpp)
+See the [time API](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/foundation/time/include/ludus/foundation/time/time.hpp),
+[timer API](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/foundation/time/include/ludus/foundation/time/timers.hpp),
+and [boundary tests](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/foundation/time/tests/time_tests.cpp)
 for exact implementation behavior.

@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "description": "Runtime profiling scenarios run by ./scripts/profile-engine and the scheduled performance workflow. Timings are report-only; see docs/development/runtime-profiling.md.",
+  "scenarios": [
+    {
+      "id": "world-headless",
+      "owner": "apps/world_demo",
+      "description": "World demo simulation without a window: 2000 deterministic ticks with a Perfetto capture of the world tick phases.",
+      "target": "ludus_world_demo",
+      "executable": "apps/world_demo/ludus_world_demo",
+      "arguments": ["--headless", "--frames", "2000"],
+      "cmake_options": {"LUDUS_BUILD_WORLD_DEMO": "ON"},
+      "environment": {},
+      "requires": ["shader-tools"],
+      "trace": true,
+      "parser": {"kind": "perfetto-scopes"},
+      "warmup": 1,
+      "repetitions": 5,
+      "timeout_seconds": 120
+    },
+    {
+      "id": "world-presented",
+      "owner": "apps/world_demo",
+      "description": "World demo presenting 240 native frames with a Perfetto capture; needs a window server and GPU device.",
+      "target": "ludus_world_demo",
+      "executable": "apps/world_demo/ludus_world_demo",
+      "arguments": ["--frames", "240"],
+      "cmake_options": {"LUDUS_BUILD_WORLD_DEMO": "ON"},
+      "environment": {},
+      "requires": ["shader-tools", "presentation"],
+      "trace": true,
+      "parser": {"kind": "perfetto-scopes"},
+      "warmup": 1,
+      "repetitions": 3,
+      "timeout_seconds": 180
+    },
+    {
+      "id": "threading-jobs",
+      "owner": "modules/foundation/threading",
+      "description": "Job graph submit-to-completion median over worker counts and per-job work sizes.",
+      "target": "ludus_threading_benchmark",
+      "executable": "modules/foundation/threading/ludus_threading_benchmark",
+      "arguments": [],
+      "cmake_options": {"LUDUS_BUILD_THREADING_BENCHMARK": "ON"},
+      "environment": {},
+      "requires": [],
+      "trace": false,
+      "parser": {"kind": "key-value", "identity": ["iterations", "workers"], "metrics": ["median_ns"]},
+      "warmup": 0,
+      "repetitions": 5,
+      "timeout_seconds": 120
+    },
+    {
+      "id": "strings-corpus",
+      "owner": "modules/foundation/strings",
+      "description": "String construction, sharing, hashing and table lookup cost per operation.",
+      "target": "ludus_strings_benchmark",
+      "executable": "modules/foundation/strings/ludus_strings_benchmark",
+      "arguments": [],
+      "cmake_options": {"LUDUS_BUILD_STRING_BENCHMARKS": "ON"},
+      "environment": {},
+      "requires": [],
+      "trace": false,
+      "parser": {"kind": "csv", "header": "case,ns_per_operation", "key": ["case"], "metrics": ["ns_per_operation"], "ignore": ["checksum"]},
+      "warmup": 0,
+      "repetitions": 5,
+      "timeout_seconds": 60
+    },
+    {
+      "id": "input-reducer",
+      "owner": "modules/input",
+      "description": "Keyboard reducer step and batch latency distributions.",
+      "target": "ludus_input_bench",
+      "executable": "modules/input/ludus_input_bench",
+      "arguments": [],
+      "cmake_options": {},
+      "environment": {},
+      "requires": [],
+      "trace": false,
+      "parser": {"kind": "regex", "pattern": "^(?P<label>[^:]+):\\s+median=(?P<median_ns>[0-9.]+) ns\\s+p95=(?P<p95_ns>[0-9.]+) ns$"},
+      "warmup": 0,
+      "repetitions": 5,
+      "timeout_seconds": 60
+    },
+    {
+      "id": "containers-associative",
+      "owner": "modules/foundation/containers",
+      "description": "Sorted, hash and tree associative container lookup and insertion cost by element count.",
+      "target": "ludus_container_bench",
+      "executable": "tools/container-bench/ludus_container_bench",
+      "arguments": [],
+      "cmake_options": {"LUDUS_BUILD_CONTAINER_BENCHMARKS": "ON"},
+      "environment": {},
+      "requires": [],
+      "trace": false,
+      "parser": {"kind": "csv", "header": "count,sorted_lookup_ns,hash_lookup_ns,tree_lookup_ns,sorted_insert_ns,hash_insert_ns,sorted_storage_bytes", "key": ["count"], "metrics": ["sorted_lookup_ns", "hash_lookup_ns", "tree_lookup_ns", "sorted_insert_ns", "hash_insert_ns"], "ignore": []},
+      "warmup": 0,
+      "repetitions": 5,
+      "timeout_seconds": 60
+    },
+    {
+      "id": "rhi-ordered-graph",
+      "owner": "modules/graphics/rhi",
+      "description": "Paired merged/unmerged ordered raster graph at 1/8/16/31 layers on the selected adapter: CPU setup, execute and readback-wait distributions over 128 samples per workload, with every image checked against the unmerged oracle. Uninstrumented control for rhi-ordered-graph-gpu-timing.",
+      "target": "ludus_rhi_render_tests",
+      "executable": "modules/graphics/rhi/ludus_rhi_render_tests",
+      "arguments": ["Portable indexed*", "--section", "R5 merged painter order matches unmerged complete image"],
+      "cmake_options": {},
+      "environment": {"LUDUS_RHI_BENCHMARK": "1"},
+      "requires": ["shader-tools", "gpu"],
+      "trace": false,
+      "parser": {
+        "kind": "tagged-rows",
+        "tables": [
+          {"tag": "R5", "columns": ["layers", "sample", "merge", "setup_cpu_ns", "execute_cpu_ns", "readback_wait_cpu_ns", "raster_passes", "draws", "plan_bytes", "buffer_bytes", "texture_bytes"], "key": ["layers", "merge"], "metrics": ["setup_cpu_ns", "execute_cpu_ns", "readback_wait_cpu_ns"], "where": {}, "rows": 1024}
+        ],
+        "observe": ["R7ADAPTER", "R7PROFILE", "R5BACKEND"]
+      },
+      "warmup": 1,
+      "repetitions": 3,
+      "timeout_seconds": 300
+    },
+    {
+      "id": "rhi-ordered-graph-gpu-timing",
+      "owner": "modules/graphics/rhi",
+      "description": "The rhi-ordered-graph workload with R7 GPU timestamp probes armed: device-clock GPU duration of each available sample plus instrumented CPU timings. Compare CPU metrics with the uninstrumented control to see probe cost.",
+      "target": "ludus_rhi_render_tests",
+      "executable": "modules/graphics/rhi/ludus_rhi_render_tests",
+      "arguments": ["Portable indexed*", "--section", "R5 merged painter order matches unmerged complete image"],
+      "cmake_options": {},
+      "environment": {"LUDUS_RHI_BENCHMARK": "1", "LUDUS_RHI_GPU_TIMING": "1"},
+      "requires": ["shader-tools", "gpu"],
+      "trace": false,
+      "parser": {
+        "kind": "tagged-rows",
+        "tables": [
+          {"tag": "R7", "columns": ["layers", "sample", "merge", "state", "gpu_duration_ns", "tick_ns", "valid_bits", "logical_bytes", "api_bytes_available", "api_bytes", "peak_api_bytes", "arm_cpu_ns", "poll_and_memory_cpu_ns", "allocator_blocks_available", "allocator_block_bytes", "peak_allocator_block_bytes"], "key": ["layers", "merge"], "metrics": ["gpu_duration_ns"], "where": {"state": "3"}, "rows": 1024},
+          {"tag": "R5", "columns": ["layers", "sample", "merge", "setup_cpu_ns", "execute_cpu_ns", "readback_wait_cpu_ns", "raster_passes", "draws", "plan_bytes", "buffer_bytes", "texture_bytes"], "key": ["layers", "merge"], "metrics": ["setup_cpu_ns", "execute_cpu_ns", "readback_wait_cpu_ns"], "where": {}, "rows": 1024}
+        ],
+        "observe": ["R7ADAPTER", "R7PROFILE", "R5BACKEND"]
+      },
+      "warmup": 1,
+      "repetitions": 3,
+      "timeout_seconds": 300
+    },
+    {
+      "id": "renderer-clustered-lighting",
+      "owner": "modules/graphics/renderer",
+      "description": "L5 640x360 clustered, direct-reference and direct-optimized lighting over localized, overflow and outside-grid scenes: cold setup, view preparation, recording and serialized completion/readback CPU latency over 64 samples per variant, with paired image checks.",
+      "target": "ludus_renderer_render_tests",
+      "executable": "modules/graphics/renderer/ludus_renderer_render_tests",
+      "arguments": ["[l5]"],
+      "cmake_options": {},
+      "environment": {"LUDUS_RENDERER_BENCHMARK": "1"},
+      "requires": ["shader-tools", "gpu"],
+      "trace": false,
+      "parser": {
+        "kind": "tagged-rows",
+        "tables": [
+          {"tag": "L5", "columns": ["scenario", "variant", "sample", "cold_scene_setup_cpu_ns", "prepare_cpu_ns", "record_cpu_ns", "completion_readback_cpu_ns", "width", "height", "visible", "culled", "draws", "bounds_tests", "known_scene_gpu_bytes"], "key": ["scenario", "variant"], "metrics": ["prepare_cpu_ns", "record_cpu_ns", "completion_readback_cpu_ns"], "where": {}, "rows": 576}
+        ],
+        "observe": ["L5BACKEND"]
+      },
+      "warmup": 0,
+      "repetitions": 3,
+      "timeout_seconds": 600
+    }
+  ]
+}

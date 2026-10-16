@@ -41,6 +41,7 @@ option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
 option(LUDUS_BUILD_WORLD_DEMO "Build the graphical game world reference (requires shader tools)" OFF)
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 option(LUDUS_BUILD_LUAU_PROBE "Build the private S0 Luau feasibility probe (requires scripts/luau-probe bootstrap)" OFF)
+option(LUDUS_BUILD_ICU_PROBE "Build the private L0 ICU4C localization backend probe (requires scripts/icu-probe bootstrap)" OFF)
 option(LUDUS_BUILD_SCRIPT_SESSION "Build the experimental S2 Luau debug/replacement session" OFF)
 option(LUDUS_BUILD_VISUAL_SEQUENCE "Build the private S3 visual sequence authoring bridge" OFF)
 option(LUDUS_BUILD_BEHAVIOR "Build and install the opt-in S4 C++/Luau behavior provider" OFF)
@@ -269,6 +270,10 @@ if(LUDUS_BUILD_LUAU_PROBE)
     add_subdirectory(tools/luau-probe)
 endif()
 
+if(LUDUS_BUILD_ICU_PROBE)
+    add_subdirectory(tools/icu-probe)
+endif()
+
 if(LUDUS_BUILD_SCRIPT_INTERACTION OR LUDUS_BUILD_SCRIPT_SESSION OR LUDUS_BUILD_VISUAL_SEQUENCE OR LUDUS_BUILD_BEHAVIOR)
     add_subdirectory(modules/runtime/scripting)
 endif()
@@ -445,7 +450,7 @@ if(NOT EMSCRIPTEN)
     install(FILES apps/game_host/main.cpp
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus" RENAME LudusGameHostMain.cpp)
 endif()
-install(FILES modules/graphics/rhi/shaders/raster_bindings.slang modules/graphics/rhi/shaders/ray_query.slang cmake/shaders/compile_ray.py cmake/shaders/compile_shader.py cmake/shaders/compile_raster.py cmake/shaders/compile_graph_stage.py cmake/shaders/cook_texture.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+install(FILES modules/graphics/rhi/shaders/raster_bindings.slang modules/graphics/rhi/shaders/runtime_bindings.slang modules/graphics/rhi/shaders/ray_query.slang cmake/shaders/compile_ray.py cmake/shaders/compile_shader.py cmake/shaders/compile_raster.py cmake/shaders/compile_graph_stage.py cmake/shaders/cook_texture.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 
 install(FILES third_party/xxhash/LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses" RENAME xxhash-LICENSE)
 

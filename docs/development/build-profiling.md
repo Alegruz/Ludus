@@ -61,7 +61,7 @@ stable when summing elapsed frontend timings. Reproduce that job locally with:
 CMAKE_BUILD_PARALLEL_LEVEL=2 ./scripts/check-build-budget --profile
 ```
 
-The previous unrestricted CI profile in [run 36767757513](https://github.com/Alegruz/Ludus/actions/runs/36767757513)
+The previous unrestricted CI profile in [run 36767757513](https://github.com/The-Ludus-Project/Ludus/actions/runs/36767757513)
 reported 129.2 s frontend time, 32.98 s build wall time, and 5.71 effective
 parallelism. All reported project headers passed their existing limits. The
 aggregate limit remains 120 s; compare future profiles at the same concurrency
@@ -221,8 +221,8 @@ Development preset and two-job concurrency as main:
 | `audio_system.h` average/include | 134 ms | 150 ms |
 | `core.h` average/include | 29 ms | 42 ms |
 
-Sources: [main CI profile](https://github.com/Alegruz/Ludus/actions/runs/37128917880/job/111221053785)
-and [audio CI profile](https://github.com/Alegruz/Ludus/actions/runs/37129607360/job/111222059306).
+Sources: [main CI profile](https://github.com/The-Ludus-Project/Ludus/actions/runs/37128917880/job/111221053785)
+and [audio CI profile](https://github.com/The-Ludus-Project/Ludus/actions/runs/37129607360/job/111222059306).
 These run on separate hosts; their difference is not an exact attribution of
 feature cost. The audio run fails only the aggregate 170 s limit. All ranked
 project headers pass, including `audio_source.h` at 123 ms. New content public
@@ -241,7 +241,7 @@ measurements justify doing so.
 The full PR #82 graph at `79ab51b` measured **214.6 s summed frontend parsing**
 over **419 compilation events**, with **59.4 s backend time** and **162.21 s build
 wall time** on ubuntu-24.04, pinned Clang 18, and two uncached jobs. The evidence
-is [CI run 37256537947, Build-time budget job](https://github.com/Alegruz/Ludus/actions/runs/37256537947/job/111594875472);
+is [CI run 37256537947, Build-time budget job](https://github.com/The-Ludus-Project/Ludus/actions/runs/37256537947/job/111594875472);
 its `native-build-profile` artifact retains the raw traces and report. Only the
 aggregate 210 s limit failed. The preceding audio-content calibration measured
 174.3 s over 336 events. These are separate runners and different complete build
@@ -266,10 +266,10 @@ in CI and tighten it when repeated comparable profiles support doing so.
 PR #114's full native profile at `cb697f2` measured **267.2 s summed frontend
 parsing over 502 compilation events**, with **76.7 s backend time**, on the
 ubuntu-24.04 runner, pinned Clang 18, Development preset, two uncached jobs.
-The [CI profile job](https://github.com/Alegruz/Ludus/actions/runs/37555651368/job/112581449768)
+The [CI profile job](https://github.com/The-Ludus-Project/Ludus/actions/runs/37555651368/job/112581449768)
 failed only the aggregate 260 s limit; its `native-build-profile` artifact retains
 the complete report. The preceding
-[F3 profile](https://github.com/Alegruz/Ludus/actions/runs/37548495788/job/112558762024)
+[F3 profile](https://github.com/The-Ludus-Project/Ludus/actions/runs/37548495788/job/112558762024)
 measured **251.4 s over 493 events**, leaving just **3.4% headroom** at 260 s.
 These are separate hosts and different complete graphs; the difference does not
 isolate Content overhead or establish an optimization measurement.
@@ -292,7 +292,7 @@ support doing so.
 
 ## PR 204 standard-format dependency cleanup
 
-The [PR 204 build-budget job](https://github.com/Alegruz/Ludus/actions/runs/38178357133/job/114585651898)
+The [PR 204 build-budget job](https://github.com/The-Ludus-Project/Ludus/actions/runs/38178357133/job/114585651898)
 measured 343.9 seconds of summed frontend parsing against the unchanged 320-second
 budget, with 1376 compile edges and two uncached jobs. Ranked project headers
 passed; the aggregate failed. Catch2's unconditional chrono stringification

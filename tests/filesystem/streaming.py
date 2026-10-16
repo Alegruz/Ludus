@@ -1,0 +1,212 @@
+"""Deterministic FS-R2 fixtures and repeated real-SDK streaming measurements.
+
+Fixture workload families are synthetic, not captured gameplay traces. All byte
+validation happens in the native harness. No runtime backend is replaced here.
+"""
+import argparse
+import hashlib
+import itertools
+import json
+from pathlib import Path
+import platform
+import random
+import subprocess
+import statistics
+import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts/python"))
+from pack_builder import StableSource, build_stream, source_paths
+
+SEED = 16302
+
+
+def word_hash(value):
+    value ^= value >> 16
+    value = (value * 0x7FEB352D) & 0xFFFFFFFF
+    value ^= value >> 15
+    value = (value * 0x846CA68B) & 0xFFFFFFFF
+    return value ^ (value >> 16)
+
+
+def make_bytes(file_index, size):
+    data = bytearray(size)
+    for offset in range(0, size, 4):
+        word = word_hash((offset // 4) ^ ((file_index * 0x9E3779B9) & 0xFFFFFFFF))
+        random_bytes = word.to_bytes(4, "little")
+        for byte in range(4):
+            position = offset + byte
+            if position >= size:
+                break
+            compressible = file_index % 3 == 0 or (file_index % 3 == 2 and position % 4096 < 2048)
+            data[position] = (position + file_index) % 256 if compressible else random_bytes[byte]
+    return data
+
+
+def make_trace(family, count=256):
+    if family not in ("startup", "transition", "background") or not 16 <= count <= 4096:
+        raise ValueError("unknown family or count outside 16..4096")
+    generator = random.Random(SEED)
+    requests = []
+    for index in range(count):
+        is_large = index % 8 == 0
+        file_index = 64 + generator.randrange(8) if is_large else generator.randrange(64)
+        length = (256 * 1024 if family == "background" else 1024 * 1024) if is_large else 4096
+        offset = generator.randrange((2 * 1024 * 1024 - length) // 4096 + 1) * 4096 if is_large else 0
+        release = 0 if family == "startup" else (index // 32) * 4_000_000 if family == "transition" else index * 1_000_000
+        priority = 0 if is_large else 2
+        should_cancel = int(family == "transition" and index % 11 == 0)
+        requests.append((release, file_index, offset, length, priority, should_cancel))
+    return requests
+
+
+def generate(directory, count):
+    directory.mkdir(parents=True, exist_ok=True)
+    corpus = directory / "loose"
+    manifest = {"schema": 1, "seed": SEED, "kind": "synthetic-mixed-compressibility", "files": {}, "traces": {}}
+    for file_index in range(72):
+        kind = "small" if file_index < 64 else "large"
+        index = file_index if file_index < 64 else file_index - 64
+        path = corpus / kind / f"{index:02d}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = make_bytes(file_index, 4096 if file_index < 64 else 2 * 1024 * 1024)
+        path.write_bytes(data)
+        manifest["files"][path.relative_to(corpus).as_posix()] = hashlib.sha256(data).hexdigest()
+    for layout, compress in (("raw.pack", False), ("lz4.pack", True)):
+        with (directory / layout).open("wb") as destination:
+            build_stream(source_paths(corpus), lambda path: StableSource(corpus / path), destination, compress=compress)
+        manifest[layout] = {"bytes": (directory / layout).stat().st_size, "sha256": file_hash(directory / layout)}
+    for family in ("startup", "transition", "background"):
+        path = directory / f"{family}.trace"
+        rows = make_trace(family, count)
+        path.write_text(f"fs-r2 1 {len(rows)}\n" + "".join(" ".join(map(str, row)) + "\n" for row in rows))
+        manifest["traces"][family] = file_hash(path)
+    (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def file_hash(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def environment():
+    result = {"platform": platform.platform(), "machine": platform.machine(), "python": sys.version,
+              "frame_impact": "NOT MEASURED: standalone byte-delivery harness",
+              "content_decode_upload": "NOT MEASURED", "contention_kind": "integer-mix CPU load"}
+    commands = [["git", "rev-parse", "HEAD"], ["uname", "-a"], ["df", "-T", "."] if sys.platform == "linux" else ["df", "."],
+                ["lscpu"] if sys.platform == "linux" else ["sysctl", "-n", "machdep.cpu.brand_string"],
+                ["mount"]]
+    result["source_sha256"] = {str(path): file_hash(path) for path in (
+        Path("modules/foundation/filesystem/tests/benchmark.cpp"),
+        Path("modules/foundation/filesystem/tests/streaming_benchmark.cpp"),
+        Path("modules/foundation/filesystem/src/async.cpp"), Path("modules/foundation/filesystem/src/pack.cpp"))}
+    result["commands"] = []
+    for command in commands:
+        completed = subprocess.run(command, text=True, capture_output=True, check=False)
+        result["commands"].append({"command": command, "status": completed.returncode,
+                                    "stdout": completed.stdout, "stderr": completed.stderr})
+    return result
+
+
+def measure(args):
+    directory = args.directory.resolve(strict=True)
+    manifest_path = directory / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for layout in args.layouts:
+        if layout != "loose" and file_hash(directory / layout) != manifest[layout]["sha256"]:
+            raise ValueError(f"fixture hash mismatch: {layout}")
+    # Validate every loose file before warming/cold-start setup. This intentionally
+    # warms files unless the caller requests the explicit reset below.
+    for name, expected in manifest["files"].items():
+        if file_hash(directory / "loose" / name) != expected:
+            raise ValueError(f"fixture hash mismatch: {name}")
+    args.output.mkdir(parents=True, exist_ok=True)
+    metadata = environment()
+    metadata.update(manifest_sha256=file_hash(manifest_path), binary_sha256=file_hash(args.benchmark),
+                    cache_method=args.cache, compiler=args.compiler_description, storage=args.storage_description,
+                    repetitions=args.repetitions, order_seed=SEED, poll_us=args.poll_us,
+                    sample_quantiles="nearest-rank, no interpolation; per run, never pooled")
+    (args.output / "environment.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    matrix = list(itertools.product(args.families, args.layouts, args.workers, args.contention,
+                                    args.open_modes, args.tracing, range(args.repetitions)))
+    random.Random(SEED).shuffle(matrix)
+    with (args.output / "runs.jsonl").open("w", buffering=1) as destination:
+        for family, layout, workers, contention, open_mode, tracing, repetition in matrix:
+            trace = directory / f"{family}.trace"
+            if file_hash(trace) != manifest["traces"][family]:
+                raise ValueError(f"trace hash mismatch: {family}")
+            if args.cache == "cold-start":
+                if sys.platform != "linux":
+                    raise ValueError("cold-start requires explicit Linux cache reset in a disposable runner")
+                subprocess.run(["sync"], check=True)
+                Path("/proc/sys/vm/drop_caches").write_text("3\n")
+            command = [str(args.benchmark.resolve()), "--stream", str(directory / "loose" if layout == "loose" else directory),
+                       layout, str(workers), str(trace), str(args.poll_us), str(contention), open_mode,
+                       str(tracing), "v1", args.cache]
+            started = time.time()
+            completed = subprocess.run(command, text=True, capture_output=True, timeout=90)
+            record = dict(family=family, layout=layout, open_mode=open_mode, cache=args.cache,
+                          repetition=repetition, command=command, started_unix=started,
+                          status=completed.returncode, stderr=completed.stderr, raw_stdout=completed.stdout)
+            if completed.returncode == 0:
+                record["result"] = json.loads(completed.stdout)
+            destination.write(json.dumps(record) + "\n")
+            if completed.returncode != 0:
+                raise RuntimeError(f"benchmark failed ({completed.returncode}); evidence retained in {args.output}")
+    groups = {}
+    for line in (args.output / "runs.jsonl").read_text().splitlines():
+        record = json.loads(line)
+        result = record["result"]
+        key = json.dumps(dict(family=record["family"], layout=record["layout"], workers=result["workers"],
+                              open_mode=record["open_mode"], contention_threads=result["contention_threads"],
+                              trace_capacity=result["trace_capacity"]), sort_keys=True)
+        values = groups.setdefault(key, {"p99_completion_ns": [], "p99_service_ns": [], "cpu_ms": [], "mib_per_sec": []})
+        for metric, value in (("p99_completion_ns", result["completion"]["p99_ns"]),
+                              ("p99_service_ns", result["service"]["p99_ns"]),
+                              ("cpu_ms", result["cpu_ms"]), ("mib_per_sec", result["mib_per_sec"])):
+            values[metric].append(value)
+    summary = [{"configuration": json.loads(key), "metrics": {
+        metric: {"runs": len(values), "min": min(values), "median": statistics.median(values), "max": max(values)}
+        for metric, values in metrics.items()}} for key, metrics in sorted(groups.items())]
+    (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    print(f"{len(matrix)} repeated streaming runs saved to {args.output / 'runs.jsonl'}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="operation", required=True)
+    build = subparsers.add_parser("generate")
+    build.add_argument("directory", type=Path)
+    build.add_argument("--count", type=int, default=256)
+    run = subparsers.add_parser("measure")
+    run.add_argument("directory", type=Path)
+    run.add_argument("--benchmark", type=Path, required=True)
+    run.add_argument("--output", type=Path, required=True)
+    run.add_argument("--repetitions", type=int, default=3)
+    run.add_argument("--families", nargs="+", choices=("startup", "transition", "background"), default=["startup", "transition", "background"])
+    run.add_argument("--layouts", nargs="+", choices=("loose", "raw.pack", "lz4.pack"), default=["loose", "raw.pack", "lz4.pack"])
+    run.add_argument("--workers", nargs="+", type=int, choices=(0, 1, 4), default=[0, 1, 4])
+    run.add_argument("--contention", nargs="+", type=int, choices=range(9), default=[0, 2])
+    run.add_argument("--open-modes", nargs="+", choices=("shared", "independent"), default=["shared", "independent"])
+    run.add_argument("--tracing", nargs="+", type=int, choices=(0, 256, 4096), default=[0, 4096])
+    run.add_argument("--poll-us", type=int, default=1000)
+    run.add_argument("--cache", choices=("uncontrolled", "warm", "cold-start"), default="warm")
+    run.add_argument("--disposable-runner", action="store_true")
+    run.add_argument("--compiler-description", required=True)
+    run.add_argument("--storage-description", required=True)
+    args = parser.parse_args()
+    if args.operation == "generate":
+        generate(args.directory, args.count)
+    else:
+        if not 1 <= args.repetitions <= 30 or not 1 <= args.poll_us <= 1_000_000:
+            parser.error("repetitions must be 1..30 and poll-us 1..1000000")
+        if args.cache == "cold-start" and not args.disposable_runner:
+            parser.error("global Linux cache reset requires --disposable-runner")
+        measure(args)
+
+
+if __name__ == "__main__":
+    main()

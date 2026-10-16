@@ -119,6 +119,14 @@ Add functions to existing scripts rather than a new all-purpose CI executor.
 | Hardware/performance | Scheduled and explicit runs on controlled devices | Backend/device tests, frame/audio budgets, benchmark repetitions | Report until calibrated; release candidate acceptance for declared devices |
 | Release acceptance | Candidate/tag | Locked build, relocated installed SDK, package verification, symbols, smoke journeys and notices | Required before publication |
 
+The hardware/performance lane is implemented as the nightly `performance`
+workflow ([Runtime profiling](../development/runtime-profiling.md)). It records
+report-only timings and traces on GitHub-hosted runners and on opt-in
+self-hosted device lanes. Device lanes declare a GPU class and identity, run the
+RHI and renderer GPU scenarios, and admit only scheduled or dispatched `main`
+runs through a runner-side hook. Base/head repetitions and calibrated timing
+gates remain proposed; the guide describes the calibration that comes first.
+
 Documentation-only exemptions remain the existing conservative allowlist. Unknown
 paths, malformed comparisons, policy/toolchain changes and mixed changes run full
 validation. Preserve deleted/renamed source paths in classification. Do not add

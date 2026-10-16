@@ -40,7 +40,7 @@ the final instrumentation and fault-trace test edits; CI measures the submitted
 commit on the calibrated runner. No budget or warning rule was relaxed.
 The calibrated CI job subsequently passed on PR commit `caab92eb3f74`: 142.4
 seconds of frontend parsing against the unchanged 170-second limit. See the
-[CI budget log](https://github.com/Alegruz/Ludus/actions/runs/37109322822/job/111164101732).
+[CI budget log](https://github.com/The-Ludus-Project/Ludus/actions/runs/37109322822/job/111164101732).
 The local result demonstrates why these absolute budgets must be interpreted on
 the calibrated runner. Each later PR commit still requires its own CI pass.
 

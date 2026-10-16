@@ -2,119 +2,176 @@
 
 This guide records the implemented workflows. The proposed
 [engineering quality architecture](../architecture/engineering-quality.md) defines
-the next tooling, evidence and platform improvements; its
+additional tooling and evidence improvements; its
 [reference review](../architecture/engineering-quality-gems-review.md) records
 the Game Programming Gems ideas incorporated after the initial design.
-Q0 failure semantics are implemented below; later phases remain proposals.
+Q0 failure semantics and Q1 analysis remain described below.
 
-Native CI runs on pull requests, the `main` merge queue, pushes to `main`, and
-manual dispatches. Feature branches are validated through their pull requests,
-avoiding a duplicate full run for every branch push. Superseded pull-request
-runs are cancelled; merge-queue and `main` validation is allowed to finish.
+## Integrate changes and promote a validated batch
 
-## Landing changes through the merge queue
+`develop` is the integration branch. `main` is the last completely validated commit.
+Keep `main` as the default branch: the scheduler and promotion code run from its
+trusted workflow revision. Task branches and pull requests target `develop` after
+activation. Review changes and resolve review threads before accepting a PR.
+Acceptance into `develop` does not establish full platform qualification.
 
-Changes land on `main` only through GitHub's merge queue. A pull request is
-validated twice:
+Pull requests targeting `develop` run source formatting, source-policy and workflow
+syntax checks, tooling regressions, the installed host-tooling tests, and public
+API/documentation validation. Drafts retain these inexpensive checks. Native
+build variants, full analysis, sanitizers, browser builds, SDK qualification,
+editor journeys and build budgets run on the combined batch. The `ci:full` label
+does not expand an integration PR into a full run.
 
-1. **Pull-request tier** — fast feedback while the author (human or agent)
-   iterates. It runs every native job except the slow ones listed in
-   `MERGE_QUEUE_JOBS` in `scripts/python/ci_scope.py`: the macOS compile,
-   sanitizer and analyzer jobs, Linux ASan/UBSan, the optional editor and the
-   uncached build-time budget.
-2. **Merge-queue tier** — the full set of jobs on the queue's candidate commit,
-   which is the pull request merged on top of `main` and every pull request
-   ahead of it in the queue. Only a passing candidate is pushed to `main`, so two
-   pull requests that pass separately but conflict semantically cannot both land.
+`.github/workflows/batch-ci.yml` wakes at minutes 13 and 43 of each hour. When
+`BATCH_CI_ENABLED` is `true`, it captures the current `main` and `develop` commit SHAs.
+If they differ and `develop` descends from `main`, it records the candidate in
+`ci/last-batch-attempt` and invokes the existing validation workflows with that
+exact SHA. The original workflow definitions come from `main`; source, local
+build actions and tests come from the captured candidate. Changed workflows are
+syntax-checked before admission and take effect as coordinator definitions after
+promotion. Periodic workflows can start late when GitHub is busy; 30 minutes is
+the intended cadence, not a completion deadline.
 
-When a pull request is ready (checks green, review threads resolved), add it to
-the queue with **Merge when ready** and move on; nobody has to watch it. If the
-queued candidate fails, GitHub removes only that pull request from the queue and
-the others continue. Fix it and enqueue it again.
+Only one batch is active. New `develop` commits do not cancel it or change its input.
+Concurrent scheduler ticks coalesce into at most one pending run. A tick captured
+before `main` advanced skips, letting the next tick use the new stable revision.
+Native, SDK, wiki and browser workflows must all succeed. Filesystem block-prefix
+recovery additionally runs when its workflow, persistence implementation, recovery
+probe or recovery drivers changed anywhere in the complete batch diff. Invalid
+metadata, failed/cancelled checks and unexpectedly skipped required jobs cannot
+promote. No new changes means no full run.
 
-Add the `ci:full` label to a pull request to run the merge-queue tier on the
-pull request itself, for example when it changes the editor, macOS or sanitizer
-paths and you want that feedback before queueing. Adding the label starts a
-new run.
+After validation, a separate job checks out the original trusted `main` revision
+and mints a fresh repository-scoped GitHub App credential. The trusted snapshot
+job uses a separate short-lived App token only to read refs and record the attempt.
+Test jobs receive no App credential or inherited secrets. Promotion rechecks that `main` is unchanged,
+that the candidate descends from it, and that the candidate remains in `develop`'s
+history. Git verifies ancestry again and pushes exactly that commit with an
+explicit expected-old-SHA lease. A concurrent `main` update rejects the push;
+there is no rebase, squash, new merge commit or non-fast-forward promotion.
 
-Pushes to `main` still run the full tier. They warm the dependency and compiler
-caches that pull requests restore, because caches saved by merge-queue runs are
-not visible to other branches.
+The validated wiki/embedded editor artifact is published after promotion, without
+rebuilding it. A publication failure leaves the promoted source intact and the
+previous website available; rerun the publication job. Promotion does not trigger
+another native, SDK or wiki build on `main`. Batches run in the `main` cache scope
+and save compiler entries under the candidate SHA, warming caches visible to PRs.
+The separate performance and release workflows retain their existing schedules
+and explicit publication policies. Standalone nightly native/browser runs retain
+Q1 advisory analyzer coverage. Batches skip the advisory macOS analyzer job and
+advisory analyzer steps; required inventories and clang-tidy remain mandatory.
+Linux builds/tidy use four workers and native macOS jobs use three. The uncached
+build-time budget retains two workers for comparable measurements.
 
-### Repository settings
+## Activate the process once
 
-The queue is configured in a ruleset that targets the default branch
-(**Settings → Rules → Rulesets**). Merge queues are only available for
-organization-owned repositories.
+The coordinator is disabled until `BATCH_CI_ENABLED=true`. These settings need a
+repository/organization administrator; no credential belongs in Git or chat.
+Finish them after the migration PR lands, before accepting ordinary PRs into develop.
 
-- **Require merge queue** with the squash merge method, a build concurrency of
-  5, a minimum group size of 1, a maximum group size of 5, and a 5-minute wait
-  for a minimum group size. The status check timeout must exceed the slowest
-  full-tier run; 90 minutes leaves room.
-- **Require status checks to pass**: `Ubuntu Clang`, `Host tooling (ludus_tools)
-  unit tests`, `Public API documentation`, `Build or reuse browser editor`,
-  `Playable web samples (software GPU)` and `Build and check wiki`. Leave
-  "Require branches to be up to date" off; the merge queue provides that
-  guarantee without forcing every open pull request to rerun after each merge.
-- Keep the existing Copilot review, deletion and non-fast-forward rules.
+1. Land the migration PR through the existing `main` merge queue. Legacy PRs
+   targeting `main` and `merge_group` checks remain supported for this transition.
+   Drain or remove the remaining old queue entries before switching processes.
+2. Use the existing `develop` branch. After landing, fast-forward it to main if
+   it is behind; if it contains unique commits, merge main through a reviewed PR
+   so those commits are preserved. Keep `main` the default branch.
+   Protect `develop` against deletion and non-fast-forward updates; require PRs,
+   existing review requirements, and these GitHub Actions checks: `Ubuntu Clang`,
+   `Host tooling (ludus_tools) unit tests`, and `Public API documentation`.
+   Do not require the skipped browser/wiki packaging checks on develop. Apply the
+   Copilot review rule to develop as well. An integration merge queue is unnecessary;
+   do not require every develop PR to rebase whenever develop advances.
+3. Create a dedicated GitHub App and install it on this repository only. Grant
+   **Contents: read/write**, **Workflows: read/write** and the automatic Metadata
+   read permission. Workflow permission lets promotion include reviewed commits
+   that change workflow files; no Administration, Actions or secret permission
+   is needed. Disable webhooks if the App does not use them. Add its client ID
+   as repository variable `BATCH_PROMOTION_APP_CLIENT_ID`.
+4. Create the `batch-promotion` Actions environment, allow deployment from
+   **main only**, and store the App private key there as environment secret
+   `BATCH_PROMOTION_APP_PRIVATE_KEY`. Use no required reviewer for unattended
+   promotion. The environment restriction is part of the credential boundary;
+   do not put this key in an unrestricted repository secret. Keep the
+   `github-pages` environment restricted to main too.
+5. Replace the main merge-queue rule with promotion-only protection. Keep
+   deletion and non-fast-forward rules in an invariants ruleset without an App
+   bypass. Use a separate main ruleset with
+   **Restrict updates**, allowing only the promotion App to bypass it, and main
+   PR/status requirements with that same App as an **Always** bypass actor.
+   Remove **Require merge queue**. Ordinary users and Actions' default token
+   must not update main. Keep protections on develop and the marker independent so
+   a main-only App bypass does not grant access to them.
+6. Give `ci/last-batch-attempt` its own ruleset restricting creation, updates and
+   deletion to the same App, with non-fast-forward protection. This ref records
+   attempts, including failures, not successful qualification. The trusted snapshot
+   job uses the main-only environment to mint its own short-lived App token; the
+   default `GITHUB_TOKEN` needs only read permission throughout the coordinator.
+7. Set repository variable `BATCH_CI_ENABLED=true`. Retarget remaining feature
+   PRs to develop. The next real develop change starts full validation at the next tick;
+   use **Actions → Batched integration and promotion → Run workflow**, selecting
+   main, to start sooner. Confirm the first candidate, all required suites, exact
+   promoted SHA and Pages deployment in that run before declaring rollout proven.
 
-A required check must report on `merge_group` events, or queued pull requests
-wait until the timeout. `ci.yml`, `project-sdk.yml` and `wiki.yml` therefore
-trigger on `merge_group`, and `test_ci_scope.py` checks this. The path-filtered
-browser package and release workflows stay advisory pull-request checks outside
-the queue.
+GitHub's [scheduled workflow contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule),
+[reusable workflow contract](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
+[App-token action](https://github.com/actions/create-github-app-token), and
+[Git push lease contract](https://git-scm.com/docs/git-push) inform this workflow.
+The administrator must verify ruleset interactions before enabling promotion;
+a missing permission or denied push fails rather than weakening the protections.
+
+## Recover a failed batch
+
+Validation failures or cancellation before promotion keep main and its deployed
+documentation unchanged. Cancellation does not undo a promotion already in flight
+or completed. Inspect the failing suite and its artifacts. Fix or revert the offending change
+through a develop PR; split or bisect a large batch when the source is unclear.
+Changes accepted while the run was active remain eligible for the next snapshot.
+
+The scheduler will not repeatedly run heavy CI for an unchanged attempted SHA.
+After an infrastructure failure, dispatch the coordinator on main with **retry**
+enabled. This reruns every required suite before another promotion attempt;
+never push main manually or mark failed checks successful. If main moved during
+validation, retry against its new base. If develop diverged, reconcile it through
+reviewed merges; do not reset either branch or rewrite other contributors' work.
+Set `BATCH_CI_ENABLED=false` to stop new snapshots. An already active batch is
+unaffected; cancel that run explicitly if it must not promote.
 
 ## Change routing
 
-Every run first tests the CI routing policy and compares the complete change.
-Pull requests are compared from the merge base to their head; merge-queue runs
-compare the queue's base commit with its candidate; pushes to `main`
-compare the previous and new commit. A documentation-only change skips native
-engine and installed host-tooling validation, while the wiki workflow still
-builds the complete site, generates the API reference, checks documentation
-coverage, and validates links and search.
+The shared change-scope action tests routing before classifying the complete
+change. PRs compare the merge base with their head; legacy queue runs compare the
+queue base and candidate. Integration PRs select the cheap `integration` tier;
+legacy main PRs keep their earlier fast tier, and legacy queue/manual/batch runs
+select `full`. Standalone scheduled/manual native runs select `nightly`, including
+the advisory analysis. Scheduled and manually dispatched batches always run full native
+validation, including a documentation-only batch.
 
-The exemption is an explicit allowlist in `scripts/python/ci_scope.py`: `docs/`,
-`README.md`, MkDocs configuration, the wiki workflow, the pinned Doxygen
-configuration, and the API/wiki generation and validation scripts and tests.
-Engine, build, dependency, general Python tooling, and CI routing policy changes
-always require full validation. Mixed changes also require it. Manual runs,
-empty comparisons, and unavailable or invalid comparison metadata default to
-full validation. Rename detection is disabled so moving a file into the docs
-folder still checks its original path.
+The documentation exemption for individual PRs is an explicit allowlist in
+`scripts/python/ci_scope.py`: docs, the README, MkDocs and pinned Doxygen inputs,
+and owning API/wiki tools. Unknown paths, mixed changes, malformed metadata and
+missing comparisons require native routing. Rename detection is disabled so a
+move into docs does not hide an engine change. The `Ubuntu Clang` gate checks the
+complete job inventory and requires exactly the successes/skips selected by the
+tier. Missing outputs or failed/cancelled dependencies fail the gate.
 
-For changes requiring native validation, source formatting, foundational include
-boundaries, and Python tooling tests run first. Independent jobs then validate:
+Required checks use job conditions instead of workflow-level path filtering, so
+branch protection receives a result even when expensive jobs are intentionally
+skipped. The full batch retains native Debug/Development/Profile/Release, SDK
+relocation, ASan/UBSan and TSan controls, static analysis, editor journeys, PCH,
+uncached build budgets, browser backends and documentation tooling on both macOS
+architectures. The independent public API check still enforces the shrink-only
+legacy baseline against the captured main SHA.
 
-- Development builds, all native tests, and the installed SDK consumer, without PCH;
-- ASan/UBSan builds and tests, with clean-startup and known-defect controls;
-- ThreadSanitizer concurrency tests and a known-race control;
-- macOS platform builds, Cocoa tests, static analysis, and sanitizers;
-- full Clang static analysis, including test translation units;
-- optional editor initialization and offscreen tests;
-- Debug, Profile, and Release assertion policies;
-- PCH builds and runtime tests;
-- clean build-time profiles and the existing header/aggregate budgets.
+`.github/actions/native-setup` prepares only the job's selected preset. `CI=true`
+enables warnings as errors without invoking the full `init.sh --ci` validation.
+The profiling job disables compiler caching and retains its existing measurement
+concurrency for comparable uncached profiles.
 
-The final `Ubuntu Clang` check always runs. It requires successful classification
-and every native job to succeed for full validation, or every native job to be
-skipped for documentation-only changes. In the pull-request tier the deferred
-merge-queue jobs must be skipped and every other native job must succeed.
-Failed or cancelled dependencies and missing classification or tier outputs
-fail this gate; malformed pull-request metadata selects the full tier. The installed host-tooling check
-also retains its name and reports success after routing tests for docs-only
-changes, without installing compilers or SDK dependencies.
+### macOS runner images
 
-These workflows use job/step conditions rather than workflow-level path filters
-so their existing required checks remain available to branch protection. See
-GitHub's [job condition guidance](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions)
-and [workflow path-filter behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onpushpull_requestpull_request_targetpathspaths-ignore).
-
-`.github/actions/native-setup` installs prerequisites and prepares only the
-job's selected preset. `CI=true` enables warnings as errors without invoking
-`init.sh --ci`, which performs full validation. The profiling job uses setup
-only and disables compiler caching explicitly, so it does not duplicate native
-validation before measuring a clean build.
+Native jobs use `macos-15` arm64. Host and documentation tooling separately check
+`macos-15-intel`. The SDK deployment target remains `14.0`; a macOS 15 runner does
+not establish macOS 14 runtime qualification. See GitHub's
+[macOS 14 deprecation notice](https://github.com/actions/runner-images/issues/13518).
 
 ## Dependencies and caches
 
@@ -134,7 +191,7 @@ keep their separate cache policy. The native setup action installs ccache.
 ## Analysis and timing
 
 `LUDUS_TIDY_JOBS` sets the maximum number of concurrent native clang-tidy
-processes. The local default is one; CI uses two. Diagnostics are saved per
+processes. The local default is one; CI uses four on Linux and three on macOS. Diagnostics are saved per
 compile command and printed in source/variant order.
 The selected preset's CMake File API codemodel is reconciled with its compilation
 database. All compiled first-party C, C++, Objective-C and Objective-C++ sources
@@ -158,6 +215,24 @@ missing log, launch failure or omitted result fails even if the process returns
 zero. Independent commands still report findings. CI always uploads each shard's
 available evidence with 14-day retention; a missing artifact fails the upload.
 These are Q0 inventory/control records, not the proposed Q2 full run schema.
+
+## Scheduled runtime profiling
+
+The separate `performance` workflow runs runtime profiling scenarios nightly on
+hosted Ubuntu and macOS runners, and on manual dispatch. It is not a pull-request
+or batch check: scenario correctness failures fail that workflow, and
+timings are report-only. Reports, Perfetto traces and logs are kept as artifacts
+for 90 days. See [Runtime profiling](runtime-profiling.md).
+
+Its opt-in `device` job adds self-hosted machines with a declared physical GPU,
+where the RHI and renderer GPU scenarios run. Lanes are listed in the
+`LUDUS_PERF_DEVICE_LANES` repository variable; without it the job is skipped.
+The job runs only scheduled or manually dispatched `main` code, never pull
+requests or forks. Each device runner's job-started hook
+(`tools/ci/perf-runner-job-started.sh`, installed outside the workspace) refuses
+any other job before it runs, so admission does not depend on pull-request YAML.
+Registration steps and the trust boundary are in
+[Controlled device lane](runtime-profiling.md#controlled-device-lane).
 
 ## Sanitizer failure controls
 

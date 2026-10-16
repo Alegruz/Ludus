@@ -849,6 +849,10 @@ BindingCapabilities BindingLimits() noexcept
         .MaxSamplersPerSet = limits.maxDescriptorSetSamplers < internal::RASTER_BINDINGS
                                  ? limits.maxDescriptorSetSamplers
                                  : static_cast<uint32>(internal::RASTER_BINDINGS),
+        .HasBufferDescriptorArrays = true,
+        .HasSamplerDescriptorArrays = true,
+        .HasRuntimeTextureArrays = gHasRuntimeTextureArrays,
+        .HasPartiallyBoundArrays = true,
     };
 }
 RasterCapabilities RasterLimits() noexcept
@@ -1381,6 +1385,8 @@ RasterStatus RasterCreateShader(usize slot,
 RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, uint32) noexcept
 {
     foundation::StaticArray<VkDescriptorSetLayoutBinding, internal::RASTER_BINDINGS> entries{};
+    foundation::StaticArray<VkDescriptorBindingFlags, internal::RASTER_BINDINGS> flags{};
+    uint32 runtimeCapacity = 0;
     for (usize index = 0; index < info.Count; ++index)
     {
         const RasterBinding& entry = info.Entries[index];
@@ -1397,6 +1403,11 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
         {
             visibility |= VK_SHADER_STAGE_FRAGMENT_BIT;
         }
+        if (entry.IsRuntimeSized == true)
+        {
+            flags[index] = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+            runtimeCapacity = entry.Count;
+        }
         entries[index] =
         {
             .binding = entry.Binding,
@@ -1405,12 +1416,41 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
             .stageFlags = visibility,
         };
     }
+    // Thanks to Khronos Group, Vulkan Guide, "Descriptor Arrays", and
+    // VkDescriptorBindingFlagBits, for the independent runtime array/allocation
+    // features and highest-binding rule. Sparse logical slots use valid fallback
+    // descriptors; immutable replacement never enables native UPDATE_AFTER_BIND.
+    // https://docs.vulkan.org/guide/latest/descriptor_arrays.html
+    const VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlags
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+        .bindingCount = static_cast<uint32>(info.Count),
+        .pBindingFlags = flags.GetData(),
+    };
     const VkDescriptorSetLayoutCreateInfo create
     {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = runtimeCapacity == 0 ? nullptr : &bindingFlags,
         .bindingCount = static_cast<uint32>(info.Count),
         .pBindings = entries.GetData(),
     };
+    if (runtimeCapacity != 0)
+    {
+        VkDescriptorSetVariableDescriptorCountLayoutSupport variable
+        {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT,
+        };
+        VkDescriptorSetLayoutSupport support
+        {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT,
+            .pNext = &variable,
+        };
+        vkGetDescriptorSetLayoutSupport(gDevice, &create, &support);
+        if (support.supported == VK_FALSE || runtimeCapacity > variable.maxVariableDescriptorCount)
+        {
+            return RasterStatus::Unsupported;
+        }
+    }
     return RasterError(vkCreateDescriptorSetLayout(gDevice, &create, nullptr, &gRasterLayouts[slot]));
 }
 RasterStatus
@@ -1515,9 +1555,24 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
         arenaSlot = emptySlot;
     }
     RasterDescriptorArena& arena = gRasterDescriptorArenas[arenaSlot];
+    uint32 runtimeCount = 0;
+    for (usize entry = 0; entry < layout.Count; ++entry)
+    {
+        if (layout.Entries[entry].IsRuntimeSized == true)
+        {
+            runtimeCount = layout.Entries[entry].Count;
+        }
+    }
+    const VkDescriptorSetVariableDescriptorCountAllocateInfo variable
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
+        .descriptorSetCount = 1,
+        .pDescriptorCounts = &runtimeCount,
+    };
     const VkDescriptorSetAllocateInfo allocate
     {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = runtimeCount == 0 ? nullptr : &variable,
         .descriptorPool = arena.Pool,
         .descriptorSetCount = 1,
         .pSetLayouts = &gRasterLayouts[info.Layout],

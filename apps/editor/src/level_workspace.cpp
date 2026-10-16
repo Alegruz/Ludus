@@ -352,6 +352,13 @@ QWidget* LevelWorkspace::TakeViewport(QWidget* parent)
     Viewport_->setParent(parent);
     return Viewport_;
 }
+void LevelWorkspace::ShowSceneFailure(const QString& error)
+{
+    if (Preview_.FrameAvailable() == false)
+    {
+        Viewport_->ClearFrame(QStringLiteral("Scene unavailable: ") + error);
+    }
+}
 QString LevelWorkspace::StatusText() const
 {
     return Status_->text();
@@ -955,6 +962,10 @@ bool LevelWorkspace::ConfirmDiscard()
                                              QMessageBox::Discard | QMessageBox::Cancel,
                                              QMessageBox::Cancel);
     return choice == QMessageBox::Discard;
+}
+void LevelWorkspace::SetSelection(const QString& id)
+{
+    Preview_.SetSelection(id);
 }
 void LevelWorkspace::StopPreview() noexcept
 {

@@ -36,7 +36,7 @@ The missing Duquette chapter is a specific literature coverage gap. Section 4.3 
 
 ### 2.1 Public surface and call sites
 
-[log.hpp](https://github.com/Alegruz/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/include/ludus/foundation/logging/log.hpp) exposes `Log(...)`, `LogSystem`, thread naming, and `LUDUS_LOG_TRACE/DEBUG/INFO/WARN/ERROR/FATAL`.
+[log.hpp](https://github.com/The-Ludus-Project/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/include/ludus/foundation/logging/log.hpp) exposes `Log(...)`, `LogSystem`, thread naming, and `LUDUS_LOG_TRACE/DEBUG/INFO/WARN/ERROR/FATAL`.
 
 - The six levels run from Trace through Fatal. A record passes when its level is at least the configured threshold. Fatal always passes the macro predicate and is never compiled out; it **does not terminate** the process.
 - A category contains a 32-bit FNV-1a ID and `std::string_view` name. Namespace-scope constant categories need no runtime registration. A second constructor permits arbitrary IDs and borrowed runtime names.
@@ -48,11 +48,11 @@ The missing Duquette chapter is a specific literature coverage gap. Section 4.3 
 
 ### 2.2 Formatting, representations, and ownership
 
-The call-site template uses `std::format_string<Args...>` for compile-time checking and `std::make_format_args` to erase arguments. [VLog](https://github.com/Alegruz/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/logger.cpp#L281) calls `std::vformat` into a temporary `std::string`, then immediately dispatches a borrowed view. Argument references do not escape the call today.
+The call-site template uses `std::format_string<Args...>` for compile-time checking and `std::make_format_args` to erase arguments. [VLog](https://github.com/The-Ludus-Project/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/logger.cpp#L281) calls `std::vformat` into a temporary `std::string`, then immediately dispatches a borrowed view. Argument references do not escape the call today.
 
 Zero-argument calls skip formatting and forward the literal. This makes `"{{braces}}"` incorrectly remain `"{{braces}}"`, even though it is a valid format string whose formatted result is `"{braces}"`.
 
-[LogRecordView](https://github.com/Alegruz/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/internal/log_record.hpp) borrows message, category name, source strings, and TLS thread name. This is valid only during synchronous `Write()`. The declared compact `LogRecordHeader` is unused: there is no queue serialization, file interning, or ownership protocol implementing its comments. Its clock comment also conflates steady and wall time.
+[LogRecordView](https://github.com/The-Ludus-Project/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/internal/log_record.hpp) borrows message, category name, source strings, and TLS thread name. This is valid only during synchronous `Write()`. The declared compact `LogRecordHeader` is unused: there is no queue serialization, file interning, or ownership protocol implementing its comments. Its clock comment also conflates steady and wall time.
 
 Every active textual sink independently builds a line in a sink-owned `std::string`, initially reserved to 256 bytes. Longer lines grow it. Source-line conversion uses another `std::format` call. Small-string optimization may avoid some allocations, but the implementation provides no common-path allocation bound, no message length limit, and no explicit truncation behavior. Custom standard formatters can execute arbitrary code.
 
@@ -60,7 +60,7 @@ There is no engine-native general string or allocator available to justify a bro
 
 ### 2.3 Threading and synchronization
 
-[LoggerState](https://github.com/Alegruz/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/logger.cpp#L29) is a function-local static containing a shared mutex, atomics, a category override hash map, and a vector of owning sink pointers.
+[LoggerState](https://github.com/The-Ludus-Project/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/logger.cpp#L29) is a function-local static containing a shared mutex, atomics, a category override hash map, and a vector of owning sink pointers.
 
 `ShouldLog()` checks initialization and takes a **shared lock plus hash lookup** for initialized non-Fatal calls. It is not just an ID and integer comparison as the header says. Filtering holds no lock while caller expressions and formatting execute.
 
@@ -83,9 +83,9 @@ There is **no background thread, MPSC queue, per-thread staging queue, wakeup me
 
 ### 2.5 Files, configuration, and lifecycle
 
-[LogConfig](https://github.com/Alegruz/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/include/ludus/foundation/logging/config.hpp) contains a global level, reserved mode, three sink toggles, injected `std::filesystem::path`, 1,000 ms flush interval, 32 MiB file threshold, and ten retained sessions. No environment, command-line, editor or configuration-file adapter exists in the logger. An empty directory disables file output with an emergency note. The smoke app explicitly disables file output; no production user-log-directory resolver was found.
+[LogConfig](https://github.com/The-Ludus-Project/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/include/ludus/foundation/logging/config.hpp) contains a global level, reserved mode, three sink toggles, injected `std::filesystem::path`, 1,000 ms flush interval, 32 MiB file threshold, and ten retained sessions. No environment, command-line, editor or configuration-file adapter exists in the logger. An empty directory disables file output with an emergency note. The smoke app explicitly disables file output; no production user-log-directory resolver was found.
 
-[FileSink](https://github.com/Alegruz/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/sinks/file_sink.cpp) creates directories, prunes matching files, then opens a fresh file in `wb` mode. Names have local time to the second and PID. Rotation closes the current file and opens numbered segments. There is no append recovery, exclusive-create collision handling, session manifest, process ownership marker, or total byte/age cap.
+[FileSink](https://github.com/The-Ludus-Project/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/sinks/file_sink.cpp) creates directories, prunes matching files, then opens a fresh file in `wb` mode. Names have local time to the second and PID. Rotation closes the current file and opens numbered segments. There is no append recovery, exclusive-create collision handling, session manifest, process ownership marker, or total byte/age cap.
 
 The retention matcher accepts any filename containing `_pid-` and ending `.log`. It counts segments as sessions and can remove another running process's file. Reinitialization within the same second/PID can reopen and truncate the same path. A message larger than the segment threshold can still create an oversized segment; rotation is a trigger, not a hard storage bound.
 
@@ -95,7 +95,7 @@ Warning+ before initialization/after shutdown uses emergency output, subject to 
 
 ### 2.6 Failure and assertion behavior
 
-[EmergencyLog](https://github.com/Alegruz/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/emergency_logger.cpp#L35) builds at most 511 bytes in a stack buffer, uses `snprintf` for the line number, then `fwrite`/`fflush(stderr)` and optional Windows debugger output. Truncation can remove source information and the newline without marking it.
+[EmergencyLog](https://github.com/The-Ludus-Project/Ludus/blob/269b6118a6aeacdc229bf9ba6ee04839bc69f838/modules/foundation/logging/src/emergency_logger.cpp#L35) builds at most 511 bytes in a stack buffer, uses `snprintf` for the line number, then `fwrite`/`fflush(stderr)` and optional Windows debugger output. Truncation can remove source information and the newline without marking it.
 
 This is a useful fallback when ordinary lifecycle state is unavailable. It is **not a signal-safe crash writer**: stdio has locks and internal state, and a write can block. Linux's [signal-safety documentation](https://man7.org/linux/man-pages/man7/signal-safety.7.html) explicitly explains why stdio cannot be assumed safe in a signal handler.
 

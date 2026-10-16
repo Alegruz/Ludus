@@ -398,6 +398,37 @@ def tool_identity(helper, compiler, validator, cross):
         fail('Tools', 'toolchain', str(error))
 
 
+SHADER_DIAGNOSTIC = re.compile(
+    r'^(?P<file>[^\s()+][^()\n]*?)\((?P<line>\d+)(?:,\s*(?P<column>\d+))?\):\s*'
+    r'(?P<severity>error|warning)\b[^:\n]*:\s*(?P<message>[^\n]*)$', re.M)
+MAX_SHADER_DIAGNOSTICS = 32
+
+
+def map_shader_diagnostics(output, program, target, closure):
+    """Map compiler file(line) messages to captured authored sources (RG3).
+
+    Captured function/include files map to their package-relative source and
+    line. Generated wrapper lines map to the owning program record, because the
+    wrapper is a read-only build product regenerated from the manifest. Unknown
+    files keep only their message. Bounded to 32 records; no absolute paths.
+    """
+    diagnostics = []
+    for match in SHADER_DIAGNOSTIC.finditer(output):
+        if len(diagnostics) == MAX_SHADER_DIAGNOSTICS:
+            break
+        record = {'severity': match['severity'], 'message': match['message'][:512],
+                  'program': program['id'], 'target': target}
+        line = int(match['line'])
+        if match['file'] in closure:
+            record['location'] = {'source': match['file'], 'line': line}
+        elif match['file'] == 'wrapper.slang':
+            record['location'] = {'generated': 'wrapper.slang', 'program': program['id'], 'line': line}
+        if 'location' in record and match['column'] is not None:
+            record['location']['column'] = int(match['column'])
+        diagnostics.append(record)
+    return diagnostics
+
+
 def checked_cache(path, expected):
     """A cache hit compares full identity and hashes every retained artifact."""
     try:
@@ -497,7 +528,15 @@ def compile_program(program, schemas, closure, snapshot, work, helper, tools, ta
         command += ['--validator', str(tools['tool/spirv-val'])]
     if target == 'glsl':
         command += ['--spirv-cross', str(tools['tool/spirv-cross']), '--spirv-cross-lock', str(helper / 'spirv_cross_toolchain.json')]
-    run_stage(command, cancel)
+    try:
+        run_stage(command, cancel)
+    except ToolingError as error:
+        if error.code == 'RenderGraphBuildShader':
+            output = error.message.removeprefix('shader helper: ')
+            error.diagnostics = map_shader_diagnostics(output, program, target, closure)
+            located = [d['location'] for d in error.diagnostics if 'location' in d]
+            error.location = located[0] if located else {'program': program['id']}
+        raise
     result = document(read(output / 'stage.json'), 'stage result')
     raw = document(read(output / 'reflection.json'), 'target reflection')
     result['layouts'] = check_layout(program, schemas, result, raw)

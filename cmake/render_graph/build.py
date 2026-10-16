@@ -12,12 +12,16 @@ def main():
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--validator')
     parser.add_argument('--spirv-cross')
+    parser.add_argument('--runtime-package')
     args = parser.parse_args()
     try:
         report = render_graph_build.build_package(args.manifest, args.output, root=args.root,
                     helper=args.helper, compiler=args.compiler, validator=args.validator, spirv_cross=args.spirv_cross)
         render_graph_execution.emit_runtime(report['package'], args.header,
                     configuration=args.configuration, name=args.name)
+        if args.runtime_package:
+            render_graph_execution.cook_runtime(report['package'], args.runtime_package,
+                    configuration=args.configuration)
     except (ToolingError, OSError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1

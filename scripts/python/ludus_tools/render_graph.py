@@ -42,7 +42,10 @@ def _fail(code, where, message):
     diagnostic = f"{where}: {message}".encode("utf-8", errors="backslashreplace")
     if len(diagnostic) > 4096:
         diagnostic = diagnostic[:4080].decode("utf-8", errors="ignore").encode() + b"... (truncated)"
-    raise ToolingError("RenderGraph" + code, diagnostic.decode("utf-8"))
+    error = ToolingError("RenderGraph" + code, diagnostic.decode("utf-8"))
+    # Raw location text is mapped to authored records by _locate at the API boundary.
+    error.where = where
+    raise error
 
 
 def _require(condition, code, where, message):
@@ -260,6 +263,55 @@ def _configuration(asset, identity, where):
     _fail("Configuration", where, f"configuration {identity} is not declared by {asset['id']}")
 
 
+def _locate(error, library, instances=None):
+    """Map a validator location to its authored package-relative owner.
+
+    Locations are package-relative source labels optionally followed by
+    `#configuration` and `/node`, or expanded instance paths recorded by the
+    compiler. The result names the source, configuration, node and nested
+    instance path when known; absolute machine paths are never returned.
+    """
+    if getattr(error, "location", None) is not None:
+        return error
+    where = getattr(error, "where", None)
+    if type(where) is not str:
+        return error
+    location = {}
+    labels = sorted({library.label(p) for p in library.attempted}, key=len, reverse=True)
+    if instances:
+        prefix = max((key for key in instances if where == key or where.startswith(key + "/")),
+                     key=len, default=None)
+        if prefix is not None:
+            source, configuration, nodes = instances[prefix]
+            location = {"source": source, "configuration": configuration, "instance": where}
+            remainder = where[len(prefix) + 1:].split("/")[0] if where != prefix else ""
+            if remainder in nodes:
+                location["node"] = remainder
+    if not location:
+        candidate = where
+        try:
+            path = Path(where)
+            if path.is_absolute() and path.resolve().is_relative_to(library.root):
+                candidate = library.label(path.resolve())
+        except (OSError, RuntimeError, ValueError):
+            pass
+        for label in labels:
+            if candidate == label or candidate.startswith(label + "#") or candidate.startswith(label + "/"):
+                location["source"] = label
+                remainder = candidate[len(label):]
+                if remainder.startswith("#"):
+                    configuration, _, node = remainder[1:].partition("/")
+                    location["configuration"] = configuration
+                else:
+                    node = remainder[1:]
+                if node:
+                    location["node"] = node.split("/")[0]
+                break
+    if location:
+        error.location = location
+    return error
+
+
 class _Library:
     def __init__(self, root):
         self.root = _resolve(root, str(root))
@@ -267,6 +319,7 @@ class _Library:
         self.bytes = {}
         self.identities = {}
         self.active = []
+        self.attempted = set()
         self.total = 0
 
     def inside(self, relative, where):
@@ -291,6 +344,7 @@ class _Library:
             return self.assets[path]
         _require(len(self.active) < MAX_DEPTH and len(self.assets) < MAX_ASSETS,
                  "Capacity", where, "import depth/file capacity exceeded")
+        self.attempted.add(path)
         data = _read(path)
         self.total += len(data)
         _require(self.total <= MAX_TOTAL_BYTES, "Capacity", where, "package exceeds 2 MiB of graph sources")
@@ -416,6 +470,7 @@ class _Compiler:
         self.cameras = []
         self.techniques = set()
         self.expanded = 0
+        self.instances = {}
 
     def add_pass(self, entry):
         _require(len(self.passes) < MAX_PASSES, "Capacity", entry["id"], "serial pass capacity exceeded")
@@ -437,6 +492,7 @@ class _Compiler:
 
     def expand(self, path, config, prefix, bindings, depth=0):
         _require(depth < MAX_DEPTH, "Capacity", prefix, "expanded subgraph depth exceeded")
+        self.instances[prefix] = (self.library.label(path), config["id"], {n["id"] for n in config["nodes"]})
         order, incoming = self.library.order(path, config)
         values = {"input." + key: value for key, value in bindings.items()}
         for node in order:
@@ -526,7 +582,10 @@ class _Compiler:
 def _library(path, root):
     path = _resolve(path, str(path))
     library = _Library(Path(root) if root is not None else path.parent)
-    library.load(path)
+    try:
+        library.load(path)
+    except ToolingError as error:
+        raise _locate(error, library)
     return library, path
 
 
@@ -540,7 +599,10 @@ def load_library(path, *, root=None):
     """
     library, path = _library(path, root)
     asset = library.assets[path]
-    library.verify_snapshot()
+    try:
+        library.verify_snapshot()
+    except ToolingError as error:
+        raise _locate(error, library)
     return {"version": 1, "stage": "RG0", "asset": asset["id"], "default": asset["default"],
             "validation": "InterfacesOnly", "configurations": [
                 {"id": c["id"], "inputs": c["inputs"], "outputs": c["outputs"]}
@@ -560,16 +622,19 @@ def compile_graph(path, *, configuration=None, root=None):
     library, path = _library(path, root)
     asset = library.assets[path]
     selected = asset["default"] if configuration is None else configuration
-    _identifier(selected, str(path))
-    config = _configuration(asset, selected, library.label(path))
-    _require(not config["inputs"], "UnboundInput", library.label(path),
-             "root interface inputs require a containing graph; use --library to inspect the interface")
     compiler = _Compiler(library)
-    outputs = compiler.expand(path, config, asset["id"], {})
-    for key, value in outputs.items():
-        compiler.root(asset["id"] + "/output/" + key, "Export", value)
-    compiler.finish()
-    library.verify_snapshot()
+    try:
+        _identifier(selected, library.label(path))
+        config = _configuration(asset, selected, library.label(path))
+        _require(not config["inputs"], "UnboundInput", library.label(path),
+                 "root interface inputs require a containing graph; use --library to inspect the interface")
+        outputs = compiler.expand(path, config, asset["id"], {})
+        for key, value in outputs.items():
+            compiler.root(asset["id"] + "/output/" + key, "Export", value)
+        compiler.finish()
+        library.verify_snapshot()
+    except ToolingError as error:
+        raise _locate(error, library, compiler.instances)
     semantic = []
     for source in sorted(library.assets, key=library.label):
         document = library.assets[source]

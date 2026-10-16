@@ -57,18 +57,39 @@ endif()
 
 set(editor_viewport_sources
     src/preview_viewport.cpp
+    src/viewport_navigation.cpp
     src/internal/software_viewport.h
     src/software_viewport.cpp)
 if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
     # The readback fallback is selected only on Linux, but the shared viewport code references it.
     list(APPEND editor_viewport_sources src/internal/offscreen_frame_reader.h src/offscreen_frame_reader.cpp)
+    # RG3b trusted render-graph preview reads exported color back through the same frame reader.
+    list(APPEND editor_viewport_sources src/internal/render_graph_preview.h src/render_graph_preview.cpp)
     if(APPLE)
         list(APPEND editor_viewport_sources src/qt_viewport_device_metal.mm)
     else()
         list(APPEND editor_viewport_sources src/qt_viewport_device_vulkan.cpp)
     endif()
 endif()
+
+# RG3b: the editor host compiles the checked-in RendererStatic offscreen fixture.
+# Its generated header supplies the CPU interface identity every previewed runtime
+# generation must match, and the same frozen fixture (header and .lurgrt) is the
+# preview/live parity input of the editor tests. Profiles follow the host device.
+function(ludus_editor_compile_render_graph_host target)
+    set(input "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/rg2/offscreen")
+    set(staged "${CMAKE_CURRENT_BINARY_DIR}/render-graph-host/${target}")
+    set(RG2_TEST_PROFILES "[\"spirv\", \"wgsl\"]")
+    if(APPLE)
+        set(RG2_TEST_PROFILES "[\"metal\", \"wgsl\"]")
+    endif()
+    file(COPY "${input}/" DESTINATION "${staged}" PATTERN "*.in" EXCLUDE)
+    configure_file("${input}/main.lushader.json.in" "${staged}/main.lushader.json" @ONLY)
+    ludus_compile_render_graph(TARGET ${target} NAME editor_renderer_static
+        MANIFEST "${staged}/main.lushader.json" RUNTIME_PACKAGE)
+    set(editor_renderer_static_RUNTIME_PACKAGE "${editor_renderer_static_RUNTIME_PACKAGE}" PARENT_SCOPE)
+endfunction()
 
 # --- Shared editor logic library ---------------------------------------------
 # The transition function, project store, tool-process protocol framing and log
@@ -116,6 +137,7 @@ qt_add_executable(ludus_editor
     ${editor_viewport_sources}
     src/render_scene.cpp
     src/render_preview.cpp
+    src/editor_camera_controller.cpp
     src/static_lighting_job.cpp
     src/internal/static_lighting_job.h
     src/preview_area_lights.cpp
@@ -142,6 +164,14 @@ qt_add_executable(ludus_editor
     src/content_workspace.cpp
     src/internal/script_workspace.h
     src/script_workspace.cpp
+    src/internal/render_graph_document.h
+    src/render_graph_document.cpp
+    src/internal/render_graph_job.h
+    src/render_graph_job.cpp
+    src/internal/render_graph_canvas.h
+    src/render_graph_canvas.cpp
+    src/internal/renderer_workspace.h
+    src/renderer_workspace.cpp
     src/configuration_workspace.cpp
     src/editor_files.cpp
     src/internal/scene_archive.h
@@ -225,6 +255,7 @@ if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
         renderer_lit_shadow renderer_clustered renderer_clustered_shadow
         renderer_clustered_authored renderer_clustered_authored_shadow)
     ludus_compile_shader(TARGET ludus_editor NAME editor_scene SOURCE "${PROJECT_SOURCE_DIR}/apps/world_demo/shaders/world_scene.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    ludus_editor_compile_render_graph_host(ludus_editor)
 endif()
 
 # The editor is a developer tool, never part of the installed SDK: no install()
@@ -246,6 +277,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         ${editor_viewport_sources}
         src/render_scene.cpp
         src/render_preview.cpp
+        src/editor_camera_controller.cpp
         src/static_lighting_job.cpp
         src/internal/static_lighting_job.h
         src/preview_area_lights.cpp
@@ -264,6 +296,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/world_workspace_tests.cpp
         tests/level_workspace_tests.cpp
         tests/render_authoring_tests.cpp
+        tests/viewport_navigation_tests.cpp
         tests/world_demo_workspace_tests.cpp
         src/internal/controller.h
         src/internal/configuration_workspace.h
@@ -277,6 +310,14 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/content_workspace.cpp
         src/internal/script_workspace.h
         src/script_workspace.cpp
+        src/internal/render_graph_document.h
+        src/render_graph_document.cpp
+        src/internal/render_graph_job.h
+        src/render_graph_job.cpp
+        src/internal/render_graph_canvas.h
+        src/render_graph_canvas.cpp
+        src/internal/renderer_workspace.h
+        src/renderer_workspace.cpp
         src/configuration_workspace.cpp
         src/editor_files.cpp
         src/internal/scene_archive.h
@@ -303,6 +344,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/recent_projects_tests.cpp
         tests/source_watch_tests.cpp
         tests/script_workspace_tests.cpp
+        tests/renderer_workspace_tests.cpp
+        tests/render_graph_canvas_tests.cpp
         tests/live_journey_tests.cpp
         tests/macos_journey_tests.cpp
     )
@@ -363,6 +406,10 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
             renderer_lit_shadow renderer_clustered renderer_clustered_shadow
             renderer_clustered_authored renderer_clustered_authored_shadow)
         ludus_compile_shader(TARGET ludus_editor_tests NAME editor_scene SOURCE "${PROJECT_SOURCE_DIR}/apps/world_demo/shaders/world_scene.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+        ludus_editor_compile_render_graph_host(ludus_editor_tests)
+        target_sources(ludus_editor_tests PRIVATE tests/render_graph_preview_tests.cpp)
+        target_compile_definitions(ludus_editor_tests PRIVATE
+            "LUDUS_EDITOR_RENDER_GRAPH_FIXTURE=\"${editor_renderer_static_RUNTIME_PACKAGE}\"")
     endif()
     if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT APPLE)
         target_sources(ludus_editor_tests PRIVATE tests/offscreen_viewport_tests.cpp)

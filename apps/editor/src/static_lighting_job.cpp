@@ -21,61 +21,76 @@ StaticLightingJob::StaticLightingJob(const RenderScene& scene, const rr::StaticL
         mStatus = rhi::RasterStatus::OutOfMemory;
     }
     mDescription.Surfaces = {};
-    if (mScene.Definition.isNull() == false)
-    {
-        for (const resources::SceneObject& object : mScene.Definition->Objects)
-        {
-            mTotalSamples += static_cast<uint64>(mScene.Definition->Meshes[object.Mesh].Indices.GetSize() / 3) *
-                             mDescription.SamplesPerTriangle;
-        }
-    }
 }
-StaticLightingJob::~StaticLightingJob()
+StaticLightingJob::~StaticLightingJob() noexcept
 {
-    requestInterruption();
-    static_cast<void>(wait());
+    // The bake destructor cancels and drains its submission before freeing contexts.
+    mBake.Reset();
+}
+rhi::RasterStatus StaticLightingJob::Start(threading::JobSystem& inoutSystem) noexcept
+{
+    if (mHasStarted == true)
+    {
+        return rhi::RasterStatus::InvalidState;
+    }
+    mHasStarted = true;
+    if (mStatus != rhi::RasterStatus::Pending)
+    {
+        return mStatus;
+    }
+    mBake.Reset(new (std::nothrow) rr::StaticLightingBake);
+    if (mBake.Get() == nullptr || mScene.Definition.isNull() == true)
+    {
+        mStatus = rhi::RasterStatus::OutOfMemory;
+        return mStatus;
+    }
+    mDescription.Surfaces = {mSurfaces.GetData(), mSurfaces.GetSize()};
+    // Submit copies the overrides, so the job's array need not stay borrowed.
+    mStatus = mBake->Submit(inoutSystem,
+                            *mScene.Definition,
+                            mDescription,
+                            {
+                                .RangeCount = STATIC_LIGHTING_RANGE_COUNT,
+                            });
+    mDescription.Surfaces = {};
+    return mStatus;
+}
+rhi::RasterStatus StaticLightingJob::Poll() noexcept
+{
+    if (mStatus == rhi::RasterStatus::Pending && mBake.Get() != nullptr)
+    {
+        mStatus = mBake->Poll();
+    }
+    return mHasStarted == true ? mStatus : rhi::RasterStatus::InvalidState;
+}
+rhi::RasterStatus StaticLightingJob::Wait() noexcept
+{
+    if (mStatus == rhi::RasterStatus::Pending && mBake.Get() != nullptr)
+    {
+        mStatus = mBake->Finish();
+    }
+    return mHasStarted == true ? mStatus : rhi::RasterStatus::InvalidState;
+}
+void StaticLightingJob::RequestInterruption() noexcept
+{
+    if (mBake.Get() != nullptr)
+    {
+        mBake->Cancel();
+    }
 }
 uint32 StaticLightingJob::GetProgressPercent() const noexcept
 {
-    const uint64 completed = mCompletedSamples.load(std::memory_order_relaxed);
-    return mTotalSamples == 0 ? 0 : static_cast<uint32>(completed * 100 / mTotalSamples);
+    rr::StaticLightingBakeProgress progress;
+    if (mBake.Get() != nullptr)
+    {
+        mBake->GetProgress(progress);
+    }
+    return progress.TotalSamples == 0 ? 0
+                                      : static_cast<uint32>(progress.CompletedSamples * 100 / progress.TotalSamples);
 }
 UniquePtr<rr::StaticLightingBake> StaticLightingJob::TakeBake() noexcept
 {
-    LUDUS_REQUIRE(isFinished() == true);
+    LUDUS_REQUIRE(mStatus == rhi::RasterStatus::Ready);
     return Move(mBake);
-}
-void StaticLightingJob::run()
-{
-    if (mStatus != rhi::RasterStatus::Pending)
-    {
-        return;
-    }
-    mDescription.Surfaces = {mSurfaces.GetData(), mSurfaces.GetSize()};
-    UniquePtr<rr::StaticLightingBake> candidate;
-    candidate.Reset(new (std::nothrow) rr::StaticLightingBake);
-    if (candidate.Get() == nullptr || mScene.Definition.isNull() == true)
-    {
-        mStatus = rhi::RasterStatus::OutOfMemory;
-        return;
-    }
-    mStatus = candidate->Initialize(*mScene.Definition, mDescription);
-    constexpr uint32 PATHS_PER_STEP = 256;
-    uint64 completed = 0;
-    while (mStatus == rhi::RasterStatus::Pending && isInterruptionRequested() == false)
-    {
-        mStatus = candidate->Step(PATHS_PER_STEP);
-        completed += PATHS_PER_STEP;
-        mCompletedSamples.store(completed < mTotalSamples ? completed : mTotalSamples, std::memory_order_relaxed);
-    }
-    if (isInterruptionRequested() == true)
-    {
-        mStatus = rhi::RasterStatus::NotReady;
-        return;
-    }
-    if (mStatus == rhi::RasterStatus::Ready)
-    {
-        mBake = Move(candidate);
-    }
 }
 } // namespace ludus::editor

@@ -62,6 +62,8 @@ public:
     {
         return !Busy_ && !Level_.isEmpty();
     }
+    /// Select a stable World/scene object ID for viewport framing; empty clears it.
+    void SetSelection(const QString& id);
     void StopPreview() noexcept;
     void ResumePreview()
     {
@@ -101,6 +103,8 @@ public:
     /// Forget the previewed import and the shown import reports (document replaced).
     void ClearImportState();
     [[nodiscard]] QString StatusText() const;
+    /// Shows why the scene could not be assembled when no previous frame is retained.
+    void ShowSceneFailure(const QString& error);
     [[nodiscard]] bool PreviewRunning() const noexcept
     {
         return Preview_.Running();

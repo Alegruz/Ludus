@@ -1,0 +1,67 @@
+name: Filesystem block recovery
+on:
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen develop commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/filesystem-recovery.yml'
+      - 'modules/foundation/filesystem/src/persistence_posix.cpp'
+      - 'modules/foundation/filesystem/tests/recovery_probe.cpp'
+      - 'tests/filesystem/recovery*.py'
+permissions:
+  contents: read
+jobs:
+  block-prefix-recovery:
+    if: github.event_name != 'pull_request' || github.base_ref != 'develop'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-development
+          conan-cache-writer: 'false'
+          compiler-cache-writer: 'false'
+      - name: Build the production publication probe
+        run: |
+          out/host-tools/venv/bin/cmake --preset linux-clang-development
+          out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_filesystem_recovery_probe --parallel 2
+      - name: Prepare replay tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xfsprogs e2fsprogs dmsetup build-essential
+          sudo modprobe dm-log-writes
+          git clone https://github.com/josefbacik/log-writes.git out/replay-log-source
+          git -C out/replay-log-source checkout --detach 7b70d8a6863c5de30933d42a7672d35d01d2dc6c
+          make -C out/replay-log-source
+      - name: Explore disposable ext4 and XFS block prefixes
+        run: |
+          sudo out/host-tools/venv/bin/python tests/filesystem/recovery_block.py \
+            --probe out/build/linux-clang-development/modules/foundation/filesystem/ludus_filesystem_recovery_probe \
+            --replay-log out/replay-log-source/replay-log --filesystem both \
+            --output out/filesystem-recovery --max-prefixes 256 --disposable-vm
+      - name: Make root-created evidence readable by artifact upload
+        if: always()
+        run: |
+          if [ -d out/filesystem-recovery ]; then
+            sudo chown -R "$(id -u):$(id -g)" out/filesystem-recovery
+          fi
+      - name: Preserve recovery evidence including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: filesystem-block-recovery
+          path: out/filesystem-recovery
+          if-no-files-found: warn

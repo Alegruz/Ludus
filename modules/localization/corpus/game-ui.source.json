@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "domain": "game/ui",
+  "source_locale": "en-US",
+  "profile": "ludus-icu-mf1-v1",
+  "messages": [
+    {
+      "key": "chat/player-said",
+      "source_revision": 1,
+      "pattern": "{player} said: {message}",
+      "arguments": [
+        {"name": "player", "type": "text", "origin": "user", "max_bytes": 64},
+        {"name": "message", "type": "text", "origin": "user", "max_bytes": 512}
+      ],
+      "context": "Chat log line. Both values are typed by players and may be in any script."
+    },
+    {
+      "key": "hud/distance",
+      "source_revision": 1,
+      "pattern": "Distance: {distance, number, ::.0} km",
+      "arguments": [
+        {"name": "distance", "type": "number", "min": 0, "max": 100000}
+      ],
+      "context": "Approximate distance to the selected waypoint, in kilometres, shown with one decimal."
+    },
+    {
+      "key": "hud/score",
+      "source_revision": 1,
+      "pattern": "Score: {score, number, integer}",
+      "arguments": [
+        {"name": "score", "type": "count", "min": 0, "max": 1000000000}
+      ],
+      "context": "Running score in the top-right HUD corner."
+    },
+    {
+      "key": "inventory/item-count",
+      "source_revision": 1,
+      "pattern": "{count, plural, =0 {Your inventory is empty.} one {You have # item.} other {You have # items.}}",
+      "arguments": [
+        {"name": "count", "type": "count", "min": 0, "max": 1000000000}
+      ],
+      "context": "Inventory panel summary; count includes equipped items."
+    },
+    {
+      "key": "literal/braces",
+      "source_revision": 1,
+      "pattern": "Type '{'name'}' to insert a name. Don't worry: it''s literal.",
+      "arguments": [],
+      "context": "Help text. The braces and the word name are shown to the player literally."
+    },
+    {
+      "key": "loot/picked-up",
+      "source_revision": 1,
+      "pattern": "{picker_gender, select, feminine {{count, plural, one {She picked up # coin.} other {She picked up # coins.}}} masculine {{count, plural, one {He picked up # coin.} other {He picked up # coins.}}} other {{count, plural, one {They picked up # coin.} other {They picked up # coins.}}}}",
+      "arguments": [
+        {"name": "picker_gender", "type": "enum", "values": ["feminine", "masculine", "neutral"], "unknown": "reject"},
+        {"name": "count", "type": "count", "min": 1, "max": 100000}
+      ],
+      "context": "Loot feed entry for a party member. picker_gender is the character's authored grammatical gender."
+    },
+    {
+      "key": "menu/play",
+      "source_revision": 1,
+      "pattern": "Play",
+      "arguments": [],
+      "context": "Main menu button that starts or resumes the game."
+    },
+    {
+      "key": "menu/subtitle",
+      "source_revision": 1,
+      "pattern": "Definitive Edition",
+      "arguments": [],
+      "context": "Title-screen edition subtitle. Markets may intentionally leave it empty.",
+      "required": false
+    },
+    {
+      "key": "party/online",
+      "source_revision": 1,
+      "pattern": "{count, plural, offset:1 =0 {Nobody is online.} =1 {{leader} is online.} one {{leader} and # other player are online.} other {{leader} and # other players are online.}}",
+      "arguments": [
+        {"name": "count", "type": "count", "min": 0, "max": 1000},
+        {"name": "leader", "type": "text", "origin": "user", "max_bytes": 64}
+      ],
+      "context": "Friends panel. count includes the party leader; # shows the number of other players."
+    },
+    {
+      "key": "quest/companion-joined",
+      "source_revision": 1,
+      "pattern": "{companion_gender, select, feminine {{companion} joined the party. She is ready.} masculine {{companion} joined the party. He is ready.} other {{companion} joined the party. They are ready.}}",
+      "arguments": [
+        {"name": "companion", "type": "text", "origin": "game", "max_bytes": 128},
+        {"name": "companion_gender", "type": "enum", "values": ["feminine", "masculine", "neutral"], "unknown": "other"}
+      ],
+      "context": "Quest log entry. companion is an authored character name; companion_gender is its authored grammatical gender."
+    },
+    {
+      "key": "race/place",
+      "source_revision": 1,
+      "pattern": "You finished {place, selectordinal, one {#st} two {#nd} few {#rd} other {#th}}.",
+      "arguments": [
+        {"name": "place", "type": "count", "min": 1, "max": 1000}
+      ],
+      "context": "Race results banner with the player's finishing position."
+    }
+  ]
+}

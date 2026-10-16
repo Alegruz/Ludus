@@ -119,6 +119,8 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     connect(CancelScene_, &QPushButton::clicked, this, [this]() {
         DemoPreview_.Stop();
         Scene_->CancelOperation();
+        // The Level status label is hidden inside the World workspace; mirror the cancel state here.
+        Changed(Scene_->StatusText());
     });
 #if defined(Q_OS_WASM)
     // Browser: copy the chosen scene into MEMFS first; the session copy is then cooked in process.
@@ -812,6 +814,15 @@ void WorldWorkspace::SceneCompleted(bool accepted)
     {
         SceneError_ = Scene_->StatusText();
         Render();
+        // Without a previous frame to retain, show why in whichever viewport the World displays.
+        if (Document_.Draft().contains(QStringLiteral("scene")) == false)
+        {
+            Render_->ShowSceneFailure(SceneError_);
+        }
+        else
+        {
+            Scene_->ShowSceneFailure(SceneError_);
+        }
         Changed(SceneError_);
         if (SavePending_)
         {
@@ -922,6 +933,8 @@ void WorldWorkspace::Render()
 }
 void WorldWorkspace::RenderInspector()
 {
+    Scene_->SetSelection(Selected_);
+    Render_->SetSelection(Selected_, Pending_);
     world_demo::Name selected;
     const auto selectedBytes = Selected_.toLatin1();
     if (selectedBytes.size() < 32)
@@ -1667,6 +1680,10 @@ bool WorldWorkspace::ConfirmDiscard()
     Render();
     Changed(QStringLiteral("Changes discarded."));
     return true;
+}
+RenderPreview& WorldWorkspace::GetRenderPreview() noexcept
+{
+    return Render_->Preview();
 }
 bool WorldWorkspace::StartPreview()
 {
