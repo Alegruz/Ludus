@@ -172,14 +172,26 @@ class GitComparisonTests(unittest.TestCase):
         head = self.commit()
         event = self.root / "event.json"
         output, summary = self.root / "output", self.root / "summary"
-        event.write_text(json.dumps(self.pull_request(head)), encoding="utf-8")
-        subprocess.run(
-            [sys.executable, ci_scope.__file__, "classify"], cwd=self.root, check=True, capture_output=True,
-            env={**os.environ, "GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event),
-                 "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary)},
+        cases = (
+            ("pull_request", self.pull_request(head), "", "false", ci_scope.PULL_REQUEST_TIER),
+            ("workflow_dispatch", {}, "", "true", ci_scope.NIGHTLY_TIER),
+            ("workflow_dispatch", {}, head, "true", ci_scope.FULL_TIER),
+            ("schedule", {}, head, "true", ci_scope.FULL_TIER),
         )
-        self.assertEqual(output.read_text(), "native_required=false\nvalidation_tier=pull-request\n")
-        self.assertIn("Native validation required: false. Validation tier: pull-request.", summary.read_text())
+        for event_name, payload, batch_sha, required, tier in cases:
+            with self.subTest(event_name=event_name, batch_sha=batch_sha):
+                event.write_text(json.dumps(payload), encoding="utf-8")
+                output.unlink(missing_ok=True)
+                summary.unlink(missing_ok=True)
+                subprocess.run(
+                    [sys.executable, ci_scope.__file__, "classify"], cwd=self.root, check=True, capture_output=True,
+                    env={**os.environ, "GITHUB_EVENT_NAME": event_name, "GITHUB_EVENT_PATH": str(event),
+                         "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary),
+                         # Model this invocation explicitly, even inside a batch runner.
+                         "LUDUS_CI_BATCH_SHA": batch_sha},
+                )
+                self.assertEqual(output.read_text(), f"native_required={required}\nvalidation_tier={tier}\n")
+                self.assertIn(f"Native validation required: {required}. Validation tier: {tier}.", summary.read_text())
 
 
 class RequiredGateTests(unittest.TestCase):
