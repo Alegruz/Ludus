@@ -1253,7 +1253,7 @@ Status Renderer::AdvanceReferenceCapture(ReferenceCapture handle) noexcept
         }
         for (usize i = 0; i < job.PathCount; ++i)
         {
-            const auto prepared = internal::PrepareReferenceVertex(job, job.Paths[i], job.Hits[i]);
+            const Status prepared = internal::PrepareReferenceVertex(job, job.Info, job.Paths[i], job.Hits[i]);
             if (prepared != Status::Ready)
             {
                 return fail(prepared);
@@ -1330,7 +1330,7 @@ Status Renderer::AdvanceReferenceCapture(ReferenceCapture handle) noexcept
             if (path.NextQuery != ~usize{0})
             {
                 path.Ray = path.Next;
-                const auto prepared = internal::PrepareReferenceVertex(job, path, job.Hits[path.NextQuery]);
+                const Status prepared = internal::PrepareReferenceVertex(job, job.Info, path, job.Hits[path.NextQuery]);
                 if (prepared != Status::Ready)
                 {
                     return fail(prepared);

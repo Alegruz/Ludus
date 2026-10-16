@@ -10,6 +10,7 @@
 #include <QMap>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace ludus::editor
 {
@@ -18,6 +19,14 @@ struct RenderGraphSnapshot final
 {
     QMap<QString, QByteArray> Files;
     [[nodiscard]] bool operator==(const RenderGraphSnapshot& other) const = default;
+};
+
+/// Layout position of one node, in canvas units (presentation only; never compiled).
+struct RenderGraphNodePosition final
+{
+    QString Node;
+    foundation::int32 X = 0;
+    foundation::int32 Y = 0;
 };
 
 enum class RenderGraphDocumentStatus : foundation::uint8
@@ -97,6 +106,10 @@ public:
                                                      const QString& node,
                                                      foundation::int32 x,
                                                      foundation::int32 y);
+    /// Layout-only edit of several nodes as one undo step, for one canvas drag gesture.
+    /// Every node must exist; otherwise nothing changes. Never merges with another edit.
+    [[nodiscard]] RenderGraphDocumentStatus
+    MoveNodes(const QString& file, const QString& configuration, const QVector<RenderGraphNodePosition>& positions);
     /// Replace an existing source's draft bytes (shader function, build manifest or graph text).
     [[nodiscard]] RenderGraphDocumentStatus SetText(const QString& file, const QByteArray& bytes);
 

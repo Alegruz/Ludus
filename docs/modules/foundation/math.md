@@ -186,8 +186,9 @@ partials are singular, and a caller can reject short or nearly parallel partials
 Subdivision produces two/four rounded children in their own normalized domains,
 with matching stored split controls. Prepared paths, distance lookup, transported
 frames, adjacency, meshes and editor documents remain future work. See the
-[architecture](../../architecture/curves-surfaces.md) and
-[kernel evidence](../../architecture/math-evidence/curves-surfaces.md).
+[architecture](../../architecture/curves-surfaces.md),
+[frozen G0 contracts](../../decisions/0024-curves-surfaces-contracts.md) and
+[evidence](../../architecture/math-evidence/curves-surfaces.md).
 
 ## GPU transfer
 

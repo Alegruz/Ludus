@@ -496,7 +496,7 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
         return RasterStatus::InvalidDescription;
     }
     const auto& set = At(RasterKind::Set, packet.Set).Set;
-    const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+    const RasterLayout& layout = set.Description;
     for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
         if (internal::TextureBinding(layout.GetDescriptorBinding(i).Kind) == false)
@@ -548,7 +548,7 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
 void RetainPacketTextures(const RasterPacket& packet) noexcept
 {
     const auto& set = At(RasterKind::Set, packet.Set).Set;
-    const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+    const RasterLayout& layout = set.Description;
     for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
         if (internal::TextureBinding(layout.GetDescriptorBinding(i).Kind) == false)
@@ -1269,11 +1269,19 @@ CheckDeclaredPacket(const GraphRecord& graph, const GraphPassRecord& pass, const
         return RasterStatus::InvalidDescription;
     }
     const auto& set = At(RasterKind::Set, packet.Set).Set;
-    const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+    const RasterLayout& layout = set.Description;
+    bool hasRuntimeBinding = false;
+    for (usize entry = 0; entry < layout.Count; ++entry)
+    {
+        hasRuntimeBinding = hasRuntimeBinding == true || layout.Entries[entry].IsRuntimeSized == true;
+    }
     for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
         const RasterBinding& binding = layout.GetDescriptorBinding(i);
-        if (binding.Kind == RasterBindingKind::Sampler)
+        // Runtime length is immutable RHI-owned state, retained by the snapshot.
+        // It has no public handle and cannot be a consumer-authored graph import.
+        if (binding.Kind == RasterBindingKind::Sampler ||
+            (binding.Binding == RUNTIME_BINDING_LENGTH_SLOT && hasRuntimeBinding == true))
         {
             continue;
         }
@@ -1645,7 +1653,7 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
         for (usize d = 0; d < pass.DrawCount; ++d)
         {
             const auto& set = At(RasterKind::Set, graph.Draws[pass.FirstDraw + d].Set).Set;
-            const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+            const RasterLayout& layout = set.Description;
             for (usize b = 0; b < layout.DescriptorCount; ++b)
             {
                 if (TextureBinding(layout.GetDescriptorBinding(b).Kind))
@@ -1675,7 +1683,7 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
         if (pass.IsCompute)
         {
             const auto& set = At(RasterKind::Set, pass.Dispatch.Set).Set;
-            const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+            const RasterLayout& layout = set.Description;
             for (usize i = 0; i < layout.DescriptorCount; ++i)
             {
                 const RasterBinding& binding = layout.GetDescriptorBinding(i);

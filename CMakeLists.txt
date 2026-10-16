@@ -41,6 +41,7 @@ option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
 option(LUDUS_BUILD_WORLD_DEMO "Build the graphical game world reference (requires shader tools)" OFF)
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 option(LUDUS_BUILD_LUAU_PROBE "Build the private S0 Luau feasibility probe (requires scripts/luau-probe bootstrap)" OFF)
+option(LUDUS_BUILD_ICU_PROBE "Build the private L0 ICU4C localization backend probe (requires scripts/icu-probe bootstrap)" OFF)
 option(LUDUS_BUILD_SCRIPT_SESSION "Build the experimental S2 Luau debug/replacement session" OFF)
 option(LUDUS_BUILD_VISUAL_SEQUENCE "Build the private S3 visual sequence authoring bridge" OFF)
 option(LUDUS_BUILD_BEHAVIOR "Build and install the opt-in S4 C++/Luau behavior provider" OFF)
@@ -182,6 +183,9 @@ add_subdirectory(modules/content)
 # LUSCN cooked scene format contract shared by SceneCook, the Editor and Resources.
 add_subdirectory(modules/content/scene_format)
 add_subdirectory(modules/content/render_graph_format)
+# LUSTR cooked string dictionary contract, validating reader and deterministic writer.
+add_subdirectory(modules/content/string_dictionary_format)
+add_subdirectory(modules/content/string_dictionary)
 # Scene cooker (pbrt-reference-v1). The library builds for every target; its
 # file I/O reports Unsupported where Ludus::Content has no native file access,
 # and the ludus-cook CLI plus golden tests are native-host only.
@@ -269,6 +273,10 @@ if(LUDUS_BUILD_LUAU_PROBE)
     add_subdirectory(tools/luau-probe)
 endif()
 
+if(LUDUS_BUILD_ICU_PROBE)
+    add_subdirectory(tools/icu-probe)
+endif()
+
 if(LUDUS_BUILD_SCRIPT_INTERACTION OR LUDUS_BUILD_SCRIPT_SESSION OR LUDUS_BUILD_VISUAL_SEQUENCE OR LUDUS_BUILD_BEHAVIOR)
     add_subdirectory(modules/runtime/scripting)
 endif()
@@ -324,7 +332,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
+    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat StringDictionaryFormat StringDictionary StringDictionaryWriter SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
@@ -445,7 +453,7 @@ if(NOT EMSCRIPTEN)
     install(FILES apps/game_host/main.cpp
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus" RENAME LudusGameHostMain.cpp)
 endif()
-install(FILES modules/graphics/rhi/shaders/raster_bindings.slang modules/graphics/rhi/shaders/ray_query.slang cmake/shaders/compile_ray.py cmake/shaders/compile_shader.py cmake/shaders/compile_raster.py cmake/shaders/compile_graph_stage.py cmake/shaders/cook_texture.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+install(FILES modules/graphics/rhi/shaders/raster_bindings.slang modules/graphics/rhi/shaders/runtime_bindings.slang modules/graphics/rhi/shaders/ray_query.slang cmake/shaders/compile_ray.py cmake/shaders/compile_shader.py cmake/shaders/compile_raster.py cmake/shaders/compile_graph_stage.py cmake/shaders/cook_texture.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 
 install(FILES third_party/xxhash/LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses" RENAME xxhash-LICENSE)
 

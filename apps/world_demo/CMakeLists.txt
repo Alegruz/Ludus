@@ -33,7 +33,7 @@ target_link_libraries(ludus_world_level PUBLIC Ludus::FoundationContainers PRIVA
 ludus_apply_project_defaults(ludus_world_level)
 add_library(ludus_world_demo_model STATIC world.cpp)
 target_include_directories(ludus_world_demo_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(ludus_world_demo_model PUBLIC ludus_world_level Ludus::GameplayWorld Ludus::GameplayCamera PRIVATE Ludus::FoundationProfiling Ludus::FoundationMath)
+target_link_libraries(ludus_world_demo_model PUBLIC ludus_world_level Ludus::GameplayWorld Ludus::GameplayCamera Ludus::FoundationTime PRIVATE Ludus::FoundationProfiling Ludus::FoundationMath)
 ludus_apply_project_defaults(ludus_world_demo_model)
 if(LUDUS_BUILD_TESTS)
     find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)

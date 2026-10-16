@@ -97,7 +97,7 @@ RasterStatus EncodeCompute(const ComputePacket& packet) noexcept
     FrameRetain(RasterKind::ComputePipeline, packet.Pipeline);
     FrameRetain(RasterKind::Set, packet.Set);
     const auto& set = At(RasterKind::Set, packet.Set).Set;
-    const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+    const RasterLayout& layout = set.Description;
     for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
         FrameRetain(RasterKind::Buffer, set.Slots[i]);

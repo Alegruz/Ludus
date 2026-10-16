@@ -963,6 +963,10 @@ bool LevelWorkspace::ConfirmDiscard()
                                              QMessageBox::Cancel);
     return choice == QMessageBox::Discard;
 }
+void LevelWorkspace::SetSelection(const QString& id)
+{
+    Preview_.SetSelection(id);
+}
 void LevelWorkspace::StopPreview() noexcept
 {
     Preview_.Stop();

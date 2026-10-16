@@ -1,3 +1,4 @@
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/filesystem/filesystem.hpp>
 #include <ludus/foundation/filesystem/namespace.hpp>
 
@@ -7,7 +8,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -190,7 +190,7 @@ TEST_CASE("Memory construction rejects duplicate invalid and oversized indexes t
     REQUIRE(CreateMemoryProvider(duplicates, provider).Code == Status::InvalidArgument);
     const MemoryEntry invalid{"../data", {}};
     REQUIRE(CreateMemoryProvider({&invalid, 1}, provider).Code == Status::InvalidArgument);
-    const std::vector<MemoryEntry> oversized(MAX_MEMORY_FILES + 1);
+    const Array<MemoryEntry> oversized(MAX_MEMORY_FILES + 1);
     REQUIRE(CreateMemoryProvider(oversized, provider).Code == Status::InvalidArgument);
     REQUIRE(provider.Get() == previous);
 }
@@ -374,7 +374,7 @@ TEST_CASE("Mount creation validates identities and preserves previous immutable 
     MountSnapshot snapshot;
     REQUIRE(MountSnapshot::Create({&mount, 1}, 5, snapshot).Succeeded());
     REQUIRE(MountSnapshot::Create({&mount, 1}, 0, snapshot).Code == Status::InvalidArgument);
-    const std::vector<Mount> oversized(MAX_MOUNTS + 1);
+    const Array<Mount> oversized(MAX_MOUNTS + 1);
     REQUIRE(MountSnapshot::Create(oversized, 6, snapshot).Code == Status::InvalidArgument);
     for (int fault = 0; fault < 4; ++fault)
     {

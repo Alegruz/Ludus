@@ -422,6 +422,7 @@ void Shutdown() noexcept
     internal::SetGpuTimingRequest(false);
     gRayProfileRequest = false;
     internal::SetBindlessRequest(false);
+    internal::SetRuntimeTextureArrayRequest(false);
     gFallback = nullptr;
     gToken = 0;
     if (internal::DeferNativeInteropShutdown())

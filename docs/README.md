@@ -199,6 +199,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [ADR 0021: Bounded networking core and transport boundary](decisions/0021-networking-core-and-transport-boundary.md)
 - [ADR 0022: Bounded parsing foundation and JSON extraction](decisions/0022-bounded-parsing-foundation.md)
 - [ADR 0023: Editor presentation and portable document core](decisions/0023-editor-presentation-and-document-core.md)
+- [ADR 0024: Curves and surfaces domains, statuses and numeric guarantees](decisions/0024-curves-surfaces-contracts.md)
 
 ## Research and reviews
 
@@ -268,7 +269,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Assertion startup / report-delivery — validation record](architecture/assertions-startup-validation.md)
 - [Assertion subsystem: M0 + M1 implementation evidence](architecture/assertions-m0-m1.md)
 - [Audio content implementation evidence](development/audio-content-evidence.md)
-- [Cubic and bicubic kernel evidence (G1)](architecture/math-evidence/curves-surfaces.md)
+- [Curves and surfaces evidence (G0-G1)](architecture/math-evidence/curves-surfaces.md)
 - [Evidence for the September 23, 2026 logging review](architecture/logging-review-evidence/README.md)
 - [First container-system increment: evidence](development/container-systems-evidence.md)
 - [FoundationMath evidence ledger](architecture/math-evidence/README.md)
@@ -278,6 +279,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Hosted acceptance and support record](development/webgpu-hosted-acceptance.md)
 - [Keyboard input: implementation decision log](architecture/keyboard-input-decision-log.md)
 - [Keyboard input: performance evidence](development/keyboard-input-performance.md)
+- [L0: localization schemas, message profile and ICU backend probe](architecture/localization-l0.md)
 - [Ludus audio decision log](architecture/audio-decision-log.md)
 - [Ludus Editor workspace (E0) — implementation evidence ledger](development/editor-workspace-evidence.md)
 - [Memory Phase 0A: Aliased Array Resize](development/memory-phase-0a.md)

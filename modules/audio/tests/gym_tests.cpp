@@ -4,14 +4,14 @@
 
 #include <ludus/audio/audio_gym.h>
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <vector>
-
 using namespace ludus::audio;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -23,7 +23,7 @@ SystemConfig OfflineConfig()
     return cfg;
 }
 
-std::vector<uint8> Sine(uint32 frames = 4800)
+Array<uint8> Sine(uint32 frames = 4800)
 {
     return test::MakeSineWav(48000, 1, frames);
 }
@@ -44,16 +44,17 @@ TEST_CASE("Gym runs a named scenario and captures tracked voices", "[audio][gym]
     p.PolicyTag = 42;
     VoiceHandle v{};
     REQUIRE(IsOk(scenario.System().PlayClip(p, v)));
-    scenario.Track(v);
+    REQUIRE(IsOk(scenario.Track(v)));
 
     REQUIRE(IsOk(scenario.Advance(128)));
     REQUIRE(IsOk(scenario.Advance(128)));
-    REQUIRE(scenario.Captures().size() == 2);
-    REQUIRE(scenario.Captures().back().RenderFrame == 256);
+    REQUIRE(scenario.Captures().GetSize() == 2);
+    REQUIRE(scenario.Captures().GetLast().RenderFrame == 256);
 
     // The tracked voice is visible and filterable by its policy tag.
-    const auto tagged = scenario.FilterByTag(42);
-    REQUIRE(tagged.size() == 1);
+    Array<VoiceInfo> tagged;
+    REQUIRE(IsOk(scenario.FilterByTag(42, tagged)));
+    REQUIRE(tagged.GetSize() == 1);
     REQUIRE(tagged[0].PolicyTag == 42);
 }
 
@@ -80,7 +81,7 @@ TEST_CASE("Gym group-saturation scenario reports admitted/selected counts", "[au
         p.Looping = true;                             // keep them alive
         p.Policy = VirtualPolicy::AdvanceWhenVirtual; // unselected -> Virtual, still admitted
         REQUIRE(IsOk(scenario.System().PlayClip(p, v)));
-        scenario.Track(v);
+        REQUIRE(IsOk(scenario.Track(v)));
     }
     // Fifth exceeds MaxAdmitted.
     VoiceHandle extra{};
@@ -111,7 +112,7 @@ TEST_CASE("A batch straddling the 64-command boundary budget makes progress", "[
     uint32 submitted = 0;
     for (int b = 0; b < 5; ++b) // 5 batches x 20 plays = 100 > 64 budget
     {
-        std::vector<Command> cmds(20);
+        Array<Command> cmds(20);
         for (auto& c : cmds)
         {
             c.Kind = CommandKind::Play;

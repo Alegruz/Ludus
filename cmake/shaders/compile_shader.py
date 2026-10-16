@@ -214,6 +214,7 @@ def main():
     parser.add_argument('--metal', action='store_true')
     parser.add_argument('--raster', action='store_true')
     parser.add_argument('--native-binding-arrays', action='store_true')
+    parser.add_argument('--runtime-binding-arrays', action='store_true')
     parser.add_argument('--include', action='append', default=[])
     parser.add_argument('--define', action='append', default=[])
     # Optional build-time SPIR-V -> GLSL ES 3.00 translator for the WebGL 2
@@ -228,14 +229,16 @@ def main():
         raise RuntimeError('Slang version differs from SDK pin')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', args.name):
         raise RuntimeError('Invalid shader name')
+    if args.runtime_binding_arrays and (not args.native_binding_arrays or not args.raster or args.metal):
+        raise RuntimeError("Runtime binding arrays require native Vulkan raster stages")
     if args.graph_stage or args.graph_target:
-        if not args.graph_stage or not args.graph_target or args.compute or args.vertex or args.fragment or args.raster or args.metal or args.include or args.define:
+        if not args.graph_stage or not args.graph_target or args.compute or args.vertex or args.fragment or args.raster or args.metal or args.include or args.define or args.native_binding_arrays or args.runtime_binding_arrays:
             raise RuntimeError("Graph stages require a closed generated source and exactly one target/stage")
         from compile_graph_stage import compile_graph_stage
         compile_graph_stage(args, lock)
         return
-    if args.native_binding_arrays and not args.raster:
-        raise RuntimeError("Native binding arrays require raster stages")
+    if args.native_binding_arrays and not (args.raster or args.compute):
+        raise RuntimeError("Native binding arrays require raster or compute stages")
     if args.compute and (args.vertex or args.fragment or args.raster):
         raise RuntimeError("Compute is mutually exclusive with raster/fullscreen stages")
     if not args.compute and (not args.vertex or not args.fragment):

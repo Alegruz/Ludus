@@ -261,9 +261,11 @@ struct Scanner
 
 // Exactly one bounded array of flat records; nested objects/arrays are rejected
 // before parsing a child, so untrusted input cannot cause recursive descent.
-[[nodiscard]] bool ParseRecords(Scanner& scanner, std::vector<Message>& records)
+// Parses into outRecords, which the caller owns as staging; allocation failure
+// is reported as a parse failure.
+[[nodiscard]] bool ParseRecords(Scanner& scanner, ludus::foundation::Array<Message>& outRecords)
 {
-    records.clear();
+    outRecords.Clear();
     if (!scanner.Expect('['))
     {
         return false;
@@ -276,7 +278,7 @@ struct Scanner
     {
         scanner.SkipWs();
         const usize start = scanner.pos;
-        if (records.size() >= kMaxPropertyBatch || !scanner.Expect('{'))
+        if (outRecords.GetSize() >= kMaxPropertyBatch || scanner.Expect('{') == false)
         {
             return false;
         }
@@ -309,7 +311,10 @@ struct Scanner
         {
             return false;
         }
-        records.push_back(std::move(record));
+        if (outRecords.TryAdd(std::move(record)) == false)
+        {
+            return false;
+        }
         if (scanner.Expect(']'))
         {
             return true;
@@ -442,10 +447,10 @@ void Message::SetBool(std::string_view key, bool value)
     Set(Field{std::string(key), value ? "true" : "false", ValueType::Bool});
 }
 
-void Message::SetRecords(std::string_view key, const std::vector<Message>& records)
+void Message::SetRecords(std::string_view key, std::span<const Message> records)
 {
     std::string value = "[";
-    for (const auto& record : records)
+    for (const Message& record : records)
     {
         if (value.size() > 1)
         {
@@ -457,15 +462,22 @@ void Message::SetRecords(std::string_view key, const std::vector<Message>& recor
     Set(Field{std::string(key), std::move(value), ValueType::Records});
 }
 
-bool Message::GetRecords(std::string_view key, std::vector<Message>& out) const
+bool Message::GetRecords(std::string_view key, ludus::foundation::Array<Message>& outRecords) const
 {
     const Field* field = Find(key);
     if (field == nullptr || field->Type != ValueType::Records)
     {
         return false;
     }
+    // Stage so a malformed or unallocatable batch leaves outRecords unchanged.
+    ludus::foundation::Array<Message> records;
     Scanner scanner{field->Value, 0};
-    return ParseRecords(scanner, out) && scanner.AtEnd();
+    if (ParseRecords(scanner, records) == false || scanner.AtEnd() == false)
+    {
+        return false;
+    }
+    outRecords.Swap(records);
+    return true;
 }
 
 bool Message::HasOnly(std::initializer_list<std::string_view> keys) const noexcept
@@ -507,7 +519,9 @@ void Message::Set(Field field)
             return;
         }
     }
-    Fields_.push_back(std::move(field));
+    // Setters build caller-owned outgoing messages; like the std::string values
+    // they hold, exhausting field storage here is fatal rather than reported.
+    Fields_.Add(std::move(field));
 }
 
 bool Message::GetString(std::string_view key, std::string& out) const
@@ -656,7 +670,7 @@ std::string Message::Serialize() const
 
 bool Message::Parse(std::string_view json, Message& out)
 {
-    out.Fields_.clear();
+    out.Fields_.Clear();
     if (json.size() > kMaxControlFrameBytes)
     {
         return false;
@@ -674,7 +688,7 @@ bool Message::Parse(std::string_view json, Message& out)
     }
     for (;;)
     {
-        if (out.Fields_.size() >= kMaxFields)
+        if (out.Fields_.GetSize() >= kMaxFields)
         {
             return false;
         }
@@ -709,8 +723,8 @@ bool Message::Parse(std::string_view json, Message& out)
         else if (s.text[s.pos] == '[')
         {
             const usize start = s.pos;
-            std::vector<Message> records;
-            if (!ParseRecords(s, records))
+            ludus::foundation::Array<Message> records;
+            if (ParseRecords(s, records) == false)
             {
                 return false;
             }
@@ -739,7 +753,10 @@ bool Message::Parse(std::string_view json, Message& out)
                 return false; // null / nested / unsupported
             }
         }
-        out.Fields_.push_back(std::move(field));
+        if (out.Fields_.TryAdd(std::move(field)) == false)
+        {
+            return false;
+        }
         if (s.Expect(','))
         {
             continue;
@@ -757,7 +774,7 @@ bool Message::Parse(std::string_view json, Message& out)
 // Integration", Game Engine Gems, section 1.13 "Platform Portability", p. 12:
 // the stream endian audit informs this explicit, unchanged little-endian format.
 // Original implementation; review: docs/architecture/primitive-types.md.
-bool EncodeFrame(std::string_view payload, std::vector<uint8>& outFrame)
+bool EncodeFrame(std::string_view payload, ludus::foundation::Array<uint8>& outFrame)
 {
     if (payload.size() > kMaxControlFrameBytes)
     {
@@ -770,14 +787,19 @@ bool EncodeFrame(std::string_view payload, std::vector<uint8>& outFrame)
     {
         return false;
     }
-    outFrame.clear();
-    outFrame.reserve(frameSize);
-    outFrame.resize(sizeof(length));
-    const bool written = ludus::foundation::TryWriteLittleEndian(length, outFrame);
+    // Stage the frame so allocation failure leaves outFrame unchanged.
+    ludus::foundation::Array<uint8> frame;
+    if (frame.TryEnsureCapacity(frameSize) == false)
+    {
+        return false;
+    }
+    frame.Resize(sizeof(length)); // within the reserved capacity; cannot allocate
+    const bool written = ludus::foundation::TryWriteLittleEndian(length, frame);
     LUDUS_ASSERT(written);
     (void)written;
-    const auto* bytes = reinterpret_cast<const uint8*>(payload.data());
-    outFrame.insert(outFrame.end(), bytes, bytes + payload.size());
+    const uint8* bytes = reinterpret_cast<const uint8*>(payload.data());
+    frame.AddRange(std::span<const uint8>(bytes, payload.size())); // within the reserved capacity
+    outFrame.Swap(frame);
     return true;
 }
 
@@ -788,17 +810,20 @@ void FrameReader::Append(const uint8* data, usize size)
         return;
     }
     usize queuedSize{};
-    if (!ludus::foundation::TryAdd(Buffer_.size(), size, queuedSize) || queuedSize > kMaxCommandQueueBytes)
+    if (ludus::foundation::TryAdd(Buffer_.GetSize(), size, queuedSize) == false || queuedSize > kMaxCommandQueueBytes)
     {
         Failed_ = true;
         return;
     }
-    Buffer_.insert(Buffer_.end(), data, data + size);
+    if (Buffer_.TryAddRange(std::span<const uint8>(data, size)) == false)
+    {
+        Failed_ = true;
+    }
 }
 
 bool FrameReader::Next(std::string& outPayload)
 {
-    if (Failed_ || Buffer_.size() < 4)
+    if (Failed_ || Buffer_.GetSize() < 4)
     {
         return false;
     }
@@ -811,12 +836,12 @@ bool FrameReader::Next(std::string& outPayload)
         Failed_ = true;
         return false;
     }
-    if (Buffer_.size() < 4 + static_cast<usize>(length))
+    if (Buffer_.GetSize() < 4 + static_cast<usize>(length))
     {
         return false; // incomplete; wait for more bytes
     }
-    outPayload.assign(reinterpret_cast<const char*>(Buffer_.data() + 4), length);
-    Buffer_.erase(Buffer_.begin(), Buffer_.begin() + 4 + static_cast<ludus::foundation::isize>(length));
+    outPayload.assign(reinterpret_cast<const char*>(Buffer_.GetData() + 4), length);
+    Buffer_.RemoveRange(0, 4 + static_cast<usize>(length));
     return true;
 }
 } // namespace ludus::runtime::game_host::protocol

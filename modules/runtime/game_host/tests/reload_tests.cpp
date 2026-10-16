@@ -32,7 +32,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
-#include <vector>
 
 using namespace ludus::runtime::game_host;
 using ludus::foundation::uint32;

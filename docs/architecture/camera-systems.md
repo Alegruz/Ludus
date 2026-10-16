@@ -853,7 +853,10 @@ proposal alone does not execute those runtime gates or claim implementation read
 
 Consumers include [world_demo](../examples/world-demo.md) for fixed/planar follow
 and the [Cornell box sample](../examples/cornell-box.md#9-follow-the-engine-frame-lifecycle)
-for a fixed perspective shot. Each renderer owns its checked extraction adapter.
+for a fixed perspective shot. Each renderer owns its checked extraction adapter. The native editor also publishes
+fixed C0 samples from its private [World navigation controller](../development/editor-workspace.md#world-viewport-navigation);
+input, focus/pivot state and project-local preferences stay with the editor.
+This does not deliver the general C1 director or its transition/damping stages.
 
 The initial C0 implementation exports `Ludus::GameplayCamera` on native and web
 targets. Its public contracts live in `camera.hpp` and `evaluation.hpp` under

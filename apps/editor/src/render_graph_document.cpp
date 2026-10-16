@@ -342,6 +342,18 @@ bool MoveNodeEdit(QJsonObject& inoutConfiguration, const QStringList& arguments)
     inoutConfiguration.insert(QStringLiteral("layout"), layout);
     return true;
 }
+bool MoveNodesEdit(QJsonObject& inoutConfiguration, const QStringList& arguments)
+{
+    // Arguments are node, x, y triples; one failed node rejects the whole gesture.
+    for (qsizetype i = 0; i + 2 < arguments.size(); i += 3)
+    {
+        if (MoveNodeEdit(inoutConfiguration, arguments.mid(i, 3)) == false)
+        {
+            return false;
+        }
+    }
+    return arguments.isEmpty() == false && arguments.size() % 3 == 0;
+}
 } // namespace
 
 QByteArray EncodeCanonicalJson(const QJsonObject& value)
@@ -578,6 +590,19 @@ RenderGraphDocument::MoveNode(const QString& file, const QString& configuration,
                                                                shouldMerge);
     mLastMove = status == RenderGraphDocumentStatus::Ok ? key : QString();
     return status;
+}
+
+RenderGraphDocumentStatus RenderGraphDocument::MoveNodes(const QString& file,
+                                                         const QString& configuration,
+                                                         const QVector<RenderGraphNodePosition>& positions)
+{
+    mLastMove.clear();
+    QStringList arguments;
+    for (const RenderGraphNodePosition& position : positions)
+    {
+        arguments += {position.Node, QString::number(position.X), QString::number(position.Y)};
+    }
+    return editConfiguration(file, configuration, arguments, &MoveNodesEdit, false);
 }
 
 RenderGraphDocumentStatus RenderGraphDocument::SetText(const QString& file, const QByteArray& bytes)

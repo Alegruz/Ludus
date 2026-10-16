@@ -3,15 +3,15 @@
 // worker, Platform or window.
 
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include <vector>
-
 using namespace ludus::audio;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -39,7 +39,7 @@ TEST_CASE("Zero-frame render is a no-op and does not advance the clock", "[audio
 {
     AudioSystem sys;
     InitOffline(sys);
-    std::vector<float32> out(0);
+    Array<float32> out(0);
     REQUIRE(IsOk(
         sys.RenderOffline(std::span<float32>(out.data(), 0), ChannelLayout::Stereo, BufferLayout::Interleaved, 0)));
     SystemSnapshot snap{};
@@ -52,7 +52,7 @@ TEST_CASE("Offline render fills output and advances the sample clock", "[audio][
     AudioSystem sys;
     InitOffline(sys);
     constexpr uint32 frames = 256;
-    std::vector<float32> out(static_cast<usize>(frames) * 2, 1.0F); // prefill nonzero to see it cleared
+    Array<float32> out(static_cast<usize>(frames) * 2, 1.0F); // prefill nonzero to see it cleared
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -75,8 +75,8 @@ TEST_CASE("Different RenderOffline partitions yield the same boundary behavior",
     InitOffline(a);
     AudioSystem b;
     InitOffline(b);
-    std::vector<float32> oa(static_cast<usize>(256) * 2);
-    std::vector<float32> ob(static_cast<usize>(128) * 2);
+    Array<float32> oa(static_cast<usize>(256) * 2);
+    Array<float32> ob(static_cast<usize>(128) * 2);
     REQUIRE(IsOk(a.RenderOffline(std::span<float32>(oa.data(), oa.size()),
                                  ChannelLayout::Stereo,
                                  BufferLayout::Interleaved,
@@ -101,7 +101,7 @@ TEST_CASE("Rejecting an unsupported output layout", "[audio][lifecycle]")
 {
     AudioSystem sys;
     InitOffline(sys);
-    std::vector<float32> out(128);
+    Array<float32> out(128);
     REQUIRE(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                               ChannelLayout::Mono,
                               BufferLayout::Interleaved,
@@ -119,7 +119,7 @@ TEST_CASE("Stop before start cancels a pending play with no sample emitted", "[a
     // Stop while still Pending (before the first render boundary consumes it).
     REQUIRE(IsOk(sys.Stop(v)));
 
-    std::vector<float32> out(static_cast<usize>(128) * 2);
+    Array<float32> out(static_cast<usize>(128) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -153,7 +153,7 @@ TEST_CASE("StopAll cancels old epoch but a subsequent Play survives", "[audio][l
     VoiceHandle fresh{};
     REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, fresh)));
 
-    std::vector<float32> out(static_cast<usize>(128) * 2);
+    Array<float32> out(static_cast<usize>(128) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -262,7 +262,7 @@ TEST_CASE("A stale handle cannot modify a reused slot's new generation", "[audio
     VoiceHandle old{};
     REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, old)));
     REQUIRE(IsOk(sys.Stop(old)));
-    std::vector<float32> out(static_cast<usize>(128) * 2);
+    Array<float32> out(static_cast<usize>(128) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -296,7 +296,7 @@ TEST_CASE("Dropped snapshots still allow terminal acknowledgment and reclaim", "
     REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, v)));
     REQUIRE(IsOk(sys.Stop(v)));
 
-    std::vector<float32> out(static_cast<usize>(128) * 2);
+    Array<float32> out(static_cast<usize>(128) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,

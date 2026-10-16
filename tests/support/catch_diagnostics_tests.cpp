@@ -1,4 +1,5 @@
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include <catch2/catch_chrono_stringmaker.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -6,7 +7,6 @@
 
 #include <string>
 #include <string_view>
-#include <vector>
 
 using namespace ludus::foundation;
 
@@ -17,7 +17,7 @@ TEST_CASE("Test adapter preserves scalar, range and opt-in chrono diagnostics", 
     REQUIRE(Catch::Detail::stringify(static_cast<long double>(1.25)) == "1.25");
     REQUIRE(Catch::Detail::stringify(true) == "true");
     REQUIRE(Catch::Detail::stringify(std::string("quoted")) == "\"quoted\"");
-    REQUIRE(Catch::Detail::stringify(std::vector<int32>{1, 2, 3}) == "{ 1, 2, 3 }");
+    REQUIRE(Catch::Detail::stringify(Array<int32>{1, 2, 3}) == "{ 1, 2, 3 }");
     REQUIRE(Catch::Detail::stringify(std::chrono::milliseconds(12)) == "12 ms");
     REQUIRE_THAT(std::string("probe"), Catch::Matchers::Equals("probe"));
     CAPTURE(int32(-42), uint64(42));

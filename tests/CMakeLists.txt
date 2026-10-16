@@ -4,6 +4,7 @@
 if(LUDUS_BUILD_TESTS)
     find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
     add_subdirectory(quality)
+    add_subdirectory(fixtures/curves_surfaces)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_build_contract_tests build_contract/exception_tests.cpp)
     target_link_libraries(ludus_build_contract_tests PRIVATE Catch2::Catch2WithMain)
@@ -32,6 +33,9 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_header_self_sufficiency
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_header_self_sufficiency.py"
             "${PROJECT_BINARY_DIR}")
+    add_test(NAME ludus_pointer_diagnostics
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_pointer_diagnostics.py"
+            "${PROJECT_BINARY_DIR}")
     add_test(NAME ludus_foundational_includes
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/check_foundational_includes.py"
             "${PROJECT_SOURCE_DIR}")
@@ -44,6 +48,6 @@ if(LUDUS_BUILD_TESTS)
             -p test_texture_goldens.py -v)
     set_tests_properties(ludus_texture_goldens PROPERTIES LABELS "goldens" TIMEOUT 120)
     set_tests_properties(ludus_build_contract_tests ludus_compile_policy ludus_setup_preflight ludus_dependency_diagnostics ludus_assert_policy ludus_assert_headers
-        ludus_header_self_sufficiency ludus_foundational_includes ludus_target_detection
+        ludus_header_self_sufficiency ludus_pointer_diagnostics ludus_foundational_includes ludus_target_detection
         PROPERTIES LABELS "build-contract" TIMEOUT 120)
 endif()

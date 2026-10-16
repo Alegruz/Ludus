@@ -121,6 +121,10 @@ DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noe
     {
         return DeviceStatus::Unsupported;
     }
+    if (description.Required.HasRuntimeTextureArrays == true && compiled.Vulkan == false)
+    {
+        return DeviceStatus::Unsupported;
+    }
     if (description.Required.RayQueries &&
         ((!compiled.Metal && !compiled.Vulkan) || description.Selection == BackendSelection::WebGPU ||
          description.Selection == BackendSelection::WebGL2))
@@ -168,6 +172,9 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     internal::SetBindlessRequest(description.Required.BindlessTextureIndexing == true ||
                                      description.Preferred.BindlessTextureIndexing == true,
                                  description.Required.BindlessTextureIndexing);
+    internal::SetRuntimeTextureArrayRequest(description.Required.HasRuntimeTextureArrays == true ||
+                                                description.Preferred.HasRuntimeTextureArrays == true,
+                                            description.Required.HasRuntimeTextureArrays);
     internal::SetRayProfileRequest(description.Required.RayQueries || description.Preferred.RayQueries);
     const auto result = internal::StartOwned(
         application,
@@ -177,6 +184,7 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
         description.Required.PortableRaster || description.Required.OrderedRasterGraph ||
             description.Required.Compute || description.Required.IndirectRendering || description.Required.RayQueries ||
             description.Required.BindlessTextureIndexing == true ||
+            description.Required.HasRuntimeTextureArrays == true ||
             internal::NeedsRaster(description.RequiredProfile) || internal::NeedsCompute(description.RequiredProfile),
         description.Required.Compute || description.Required.IndirectRendering || description.Required.RayQueries ||
             internal::NeedsCompute(description.RequiredProfile),
@@ -202,6 +210,12 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     }
     if (result == StartStatus::Ready && description.Required.BindlessTextureIndexing == true &&
         backend::BindingLimits().HasBindlessTextureIndexing == false)
+    {
+        Shutdown();
+        return DeviceStatus::Unsupported;
+    }
+    if (result == StartStatus::Ready && description.Required.HasRuntimeTextureArrays == true &&
+        backend::BindingLimits().HasRuntimeTextureArrays == false)
     {
         Shutdown();
         return DeviceStatus::Unsupported;
@@ -272,6 +286,8 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
         info.Profile = internal::CurrentDeviceProfile();
         info.Supported.BindlessTextureIndexing = info.Profile.Binding.HasBindlessTextureIndexing;
         info.Enabled.BindlessTextureIndexing = info.Supported.BindlessTextureIndexing;
+        info.Supported.HasRuntimeTextureArrays = info.Profile.Binding.HasRuntimeTextureArrays;
+        info.Enabled.HasRuntimeTextureArrays = info.Supported.HasRuntimeTextureArrays;
         info.Supported.PortableRaster = info.Profile.Raster.MaxUniformRange >= 16384;
         info.Enabled.PortableRaster = info.Supported.PortableRaster;
         info.Supported.OrderedRasterGraph = info.Supported.PortableRaster;
@@ -290,6 +306,8 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
             .OrderedRasterGraph = gDescription.Preferred.OrderedRasterGraph && !info.Enabled.OrderedRasterGraph,
             .BindlessTextureIndexing =
                 gDescription.Preferred.BindlessTextureIndexing == true && info.Enabled.BindlessTextureIndexing == false,
+            .HasRuntimeTextureArrays =
+                gDescription.Preferred.HasRuntimeTextureArrays == true && info.Enabled.HasRuntimeTextureArrays == false,
         };
         info.UnmetProfilePreference = internal::CheckProfile(gDescription.PreferredProfile, info.Profile);
     }
