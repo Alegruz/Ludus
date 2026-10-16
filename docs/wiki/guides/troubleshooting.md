@@ -27,7 +27,7 @@ reproducible steps. Keep the build host and game target distinct. State the
 expected result and what actually happened. Remove credentials and unrelated
 personal information from attached logs.
 
-Use [GitHub issues](https://github.com/Alegruz/Ludus/issues) for actionable reports.
+Use [GitHub issues](https://github.com/The-Ludus-Project/Ludus/issues) for actionable reports.
 For build-tool checks in an engine checkout, `./scripts/doctor` reports the tool
 environment. See [project setup](../../development/project-sdk-workflow.md) and
 [build/debug guidance](build-and-debug.md) for targeted recovery.

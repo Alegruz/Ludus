@@ -658,6 +658,74 @@ TEST_CASE("Editor import routes general pbrt files to pbrt-best-effort-v1", "[sc
     std::filesystem::remove_all(work, ignored);
 }
 
+TEST_CASE("Catalogs larger than the 1 MiB metadata limit still import", "[scene_assets]")
+{
+    // Every catalog record carries its import's full source_inputs map, so the catalog grows with
+    // resources x source files. Many included parts with distinct materials exceed 1 MiB.
+    constexpr int PART_COUNT = 640;
+    const std::filesystem::path work = MakeWorkDirectory();
+    const std::filesystem::path project = work / "project";
+    const std::filesystem::path source = work / "source";
+    std::filesystem::create_directories(project);
+    std::filesystem::create_directories(source / "parts");
+    std::ofstream scene(source / "many.pbrt", std::ios::binary);
+    scene << "LookAt 0 1 4  0 0 0  0 1 0\nCamera \"perspective\" \"float fov\" [ 45 ]\n"
+             "Film \"rgb\" \"integer xresolution\" [ 64 ] \"integer yresolution\" [ 64 ]\n"
+             "Sampler \"halton\"\nWorldBegin\nLightSource \"infinite\" \"rgb L\" [ .2 .2 .2 ]\n";
+    for (int part = 0; part < PART_COUNT; ++part)
+    {
+        const std::string name = "parts/part_with_a_descriptive_long_name_" + std::to_string(part) + ".pbrt";
+        std::ofstream(source / name, std::ios::binary)
+            << "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [ "
+            << static_cast<double>(part + 1) / static_cast<double>(PART_COUNT + 1) << " .5 .4 ]\nTranslate " << part
+            << " 0 0\n"
+            << "Shape \"trianglemesh\" \"point3 P\" [ -1 0 -1  1 0 -1  1 0 1  -1 0 1 ]\n"
+               "  \"integer indices\" [ 0 1 2  0 2 3 ]\nAttributeEnd\n";
+        scene << "Include \"" << name << "\"\n";
+    }
+    scene.close();
+    std::ofstream(source / "LICENSE.txt", std::ios::binary) << "CC0 synthetic catalog-size fixture\n";
+    const std::string root = project.string();
+    const std::string sourceText = source.string();
+    SequentialUuids counter;
+    UuidSource uuids{&SequentialUuids::Generate, &counter};
+    AssetOptions options;
+    options.UuidsOrNull = &uuids;
+    options.SourceOrigin = VIRTUAL_ORIGIN;
+    options.SourceEntry = "many.pbrt";
+    AssetError error;
+    Array<uint8> level;
+    REQUIRE(CreateLevel("Many parts", options, level, error));
+    EditorSceneRequest request;
+    request.Root = root;
+    request.Source = sourceText;
+    request.Level = ToSpan(level);
+    request.Operation = EditorSceneOperation::Import;
+    EditorSceneResult imported;
+    const bool isImported = OperateEditorScene(request, options, imported, error);
+    INFO(Describe(error));
+    REQUIRE(isImported);
+    CHECK(imported.Catalog.GetSize() > MAX_METADATA_BYTES);
+    CHECK(imported.Catalog.GetSize() <= MAX_CATALOG_BYTES);
+    const std::string candidate = GetResponseMember(imported.Response, "level");
+    request.Operation = EditorSceneOperation::CommitImport;
+    request.Level = ToSpan(candidate);
+    request.Catalog = ToSpan(imported.Catalog);
+    EditorSceneResult committed;
+    REQUIRE(OperateEditorScene(request, options, committed, error));
+    // The published catalog reads back for assembly.
+    request.Operation = EditorSceneOperation::Assemble;
+    request.Catalog = {};
+    EditorSceneResult assembled;
+    const bool isAssembled = OperateEditorScene(request, options, assembled, error);
+    INFO(Describe(error));
+    CHECK(isAssembled);
+    CHECK(std::filesystem::file_size(project / "assets" / "catalog.json") > MAX_METADATA_BYTES);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(work, ignored);
+}
+
 TEST_CASE("A confirmed import must match the approved preview", "[scene_assets]")
 {
     const std::filesystem::path work = MakeWorkDirectory();

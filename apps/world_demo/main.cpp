@@ -38,7 +38,9 @@ bool WriteRequestedTrace(std::string_view traceOutput) noexcept
         return true;
     }
     ludus::foundation::profiling::EndCapture();
-    const ludus::foundation::profiling::TraceHealth health = ludus::foundation::profiling::GetTraceHealth();
+    // Read only by the info log, which a Release build's log level compiles out.
+    [[maybe_unused]] const ludus::foundation::profiling::TraceHealth health =
+        ludus::foundation::profiling::GetTraceHealth();
     if (ludus::foundation::profiling::ExportPerfettoTrace(traceOutput) == false)
     {
         LUDUS_LOG_ERROR(ludus::foundation::logging::LOG_CORE, "Could not write profiling trace {}", traceOutput);

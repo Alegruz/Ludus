@@ -6,8 +6,8 @@ Use a pull request to make the change and its validation reviewable.
 
 ## Required engineering rules
 
-The repository's [AGENTS.md](https://github.com/Alegruz/Ludus/blob/main/AGENTS.md)
-and [.kiro steering](https://github.com/Alegruz/Ludus/tree/main/.kiro/steering)
+The repository's [AGENTS.md](https://github.com/The-Ludus-Project/Ludus/blob/main/AGENTS.md)
+and [.kiro steering](https://github.com/The-Ludus-Project/Ludus/tree/main/.kiro/steering)
 are authoritative. Read them before editing code. In particular:
 
 - Use C++23 and the pinned reference tools; engine/app code has no C++ exceptions.
@@ -50,7 +50,7 @@ site/link checks and browser evidence relevant to the change.
 
 ## Propose a change
 
-[Open a pull request](https://github.com/Alegruz/Ludus/pulls) or
-[report a reproducible issue](https://github.com/Alegruz/Ludus/issues).
+[Open a pull request](https://github.com/The-Ludus-Project/Ludus/pulls) or
+[report a reproducible issue](https://github.com/The-Ludus-Project/Ludus/issues).
 Explain the resulting behavior, why it helps, what was validated and any remaining
 acceptance limits. Keep secrets and machine-specific settings out of commits.

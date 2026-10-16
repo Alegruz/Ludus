@@ -79,5 +79,5 @@ Start with [troubleshooting](guides/troubleshooting.md) when setup or a build fa
 This wiki follows the repository's `main` branch. When working with an older
 checkout or SDK, use the documentation at that revision and its command help.
 
-[Improve a page](../development/wiki.md) · [Browse source](https://github.com/Alegruz/Ludus)
-· [Report an issue](https://github.com/Alegruz/Ludus/issues)
+[Improve a page](../development/wiki.md) · [Browse source](https://github.com/The-Ludus-Project/Ludus)
+· [Report an issue](https://github.com/The-Ludus-Project/Ludus/issues)

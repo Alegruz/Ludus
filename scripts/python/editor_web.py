@@ -174,7 +174,7 @@ def package(build: Path, source: Path, sdk: Path, qt_lock: dict, web_lock: dict)
     (licenses / "webgpu-native.txt").write_bytes(notice)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     notice = f"""Ludus Editor browser preview
-Ludus sources and rebuild instructions: https://github.com/Alegruz/Ludus/tree/{commit}
+Ludus sources and rebuild instructions: https://github.com/The-Ludus-Project/Ludus/tree/{commit}
 Qt source base: {qt_lock['qtbase_archive']}
 Qt is statically linked under LGPL-3.0; license texts and third-party notices
 are included in licenses/. Rebuild scripts compile Qt from source; users may

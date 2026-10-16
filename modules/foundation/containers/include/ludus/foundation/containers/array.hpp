@@ -461,7 +461,10 @@ public:
         }
         if (mSize + count > mCapacity)
         {
-            if (!TryEnsureCapacity(mSize + count))
+            // Grow geometrically like TryAdd: exact-fit growth makes repeated small
+            // appends (byte writers) quadratic. Reserve/TryEnsureCapacity stay exact.
+            const usize newCapacity = detail::ComputeGrowthCapacity(mCapacity, mSize + count, kElementSize);
+            if (newCapacity == 0 || newCapacity > GetMaxSize() || ReallocateTo(newCapacity) == false)
             {
                 return false;
             }

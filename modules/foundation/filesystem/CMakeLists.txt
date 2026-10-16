@@ -93,6 +93,9 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_pack_builder_tests COMMAND "${CMAKE_COMMAND}" -E env
         "PYTHONPATH=${PROJECT_SOURCE_DIR}/scripts/python" "${Python3_EXECUTABLE}" -m unittest test_pack_builder -v)
     set_tests_properties(ludus_pack_builder_tests PROPERTIES LABELS "unit;foundation;filesystem;tooling" TIMEOUT 30)
+    add_test(NAME ludus_filesystem_streaming_fixture_tests
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/test_streaming.py")
+    set_tests_properties(ludus_filesystem_streaming_fixture_tests PROPERTIES LABELS "foundation;filesystem;tooling" TIMEOUT 30)
 endif()
 
 if(LUDUS_BUILD_TESTS)
@@ -127,9 +130,16 @@ endif()
 
 option(LUDUS_BUILD_FILESYSTEM_BENCHMARK "Build the native offset I/O benchmark" OFF)
 if(LUDUS_BUILD_FILESYSTEM_BENCHMARK AND NOT EMSCRIPTEN)
-    add_executable(ludus_filesystem_benchmark tests/benchmark.cpp)
-    target_link_libraries(ludus_filesystem_benchmark PRIVATE Ludus::FoundationFilesystem)
+    add_executable(ludus_filesystem_benchmark tests/benchmark.cpp tests/streaming_benchmark.cpp)
+    target_link_libraries(ludus_filesystem_benchmark PRIVATE Ludus::FoundationFilesystem Ludus::FoundationContainers)
     ludus_apply_project_defaults(ludus_filesystem_benchmark)
+    if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$")
+        add_test(NAME ludus_filesystem_streaming_benchmark_tests
+            COMMAND "${CMAKE_COMMAND}" -E env "LUDUS_FS_R2_BENCHMARK=$<TARGET_FILE:ludus_filesystem_benchmark>"
+                "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/test_streaming_native.py")
+        set_tests_properties(ludus_filesystem_streaming_benchmark_tests PROPERTIES
+            LABELS "foundation;filesystem;benchmark" TIMEOUT 90)
+    endif()
 endif()
 
 if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
@@ -180,4 +190,20 @@ if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EM
     ludus_enable_test_exceptions(ludus_filesystem_watch_fault_tests)
     add_test(NAME ludus_filesystem_watch_fault_tests COMMAND ludus_filesystem_watch_fault_tests)
     set_tests_properties(ludus_filesystem_watch_fault_tests PROPERTIES LABELS "unit;foundation;filesystem;watch" TIMEOUT 30)
+endif()
+
+if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EMSCRIPTEN)
+    add_executable(ludus_filesystem_recovery_probe tests/recovery_probe.cpp)
+    target_include_directories(ludus_filesystem_recovery_probe PRIVATE src)
+    target_link_libraries(ludus_filesystem_recovery_probe PRIVATE ludus_filesystem_persistence_fault_backend)
+    ludus_apply_project_defaults(ludus_filesystem_recovery_probe)
+    add_test(NAME ludus_filesystem_recovery_oracle_tests
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/test_recovery.py")
+    set_tests_properties(ludus_filesystem_recovery_oracle_tests PROPERTIES LABELS "foundation;filesystem;persistence" TIMEOUT 30)
+    add_test(NAME ludus_filesystem_process_recovery_tests
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/recovery.py"
+            --probe "$<TARGET_FILE:ludus_filesystem_recovery_probe>"
+            --output "${CMAKE_CURRENT_BINARY_DIR}/recovery-process")
+    set_tests_properties(ludus_filesystem_process_recovery_tests PROPERTIES
+        LABELS "foundation;filesystem;persistence;process-crash" TIMEOUT 180)
 endif()

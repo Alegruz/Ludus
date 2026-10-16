@@ -216,6 +216,6 @@ The chapter review contains bibliographic details; its local PDF paths refer to
 an ignored reference library, not public wiki downloads. No chapter code is
 copied into these examples. See the
 [module guide](../../modules/foundation/math.md)
-and [public addressed API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/math/include/ludus/foundation/math/addressed_random.hpp)
+and [public addressed API](https://github.com/The-Ludus-Project/Ludus/blob/main/modules/foundation/math/include/ludus/foundation/math/addressed_random.hpp)
 for the implementation contract. Weighted choice, shuffle policies, entropy
 acquisition and GPU sampling remain separate future work.
