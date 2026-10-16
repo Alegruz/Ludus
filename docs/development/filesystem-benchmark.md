@@ -167,6 +167,50 @@ APFS storage recovery and stronger device-cache flushing remain evidence gaps;
 the portable process test cannot close them. No native backend is enabled here.
 
 
+### Linux FS-R1 block-prefix evidence
+
+[PR #263](https://github.com/The-Ludus-Project/Ludus/pull/263), code candidate
+`92a7f8f0` on the F5 baseline `5117c8c0`; CI checked-out merge source
+`f7789882006966e1f03d5370ba2ffed897df59a4`. The
+[successful recovery run](https://github.com/The-Ludus-Project/Ludus/actions/runs/38838253249)
+used Ubuntu 24.04, kernel `6.17.0-1022-azure`, x86-64/glibc 2.39 and Ubuntu
+Clang 18.1.3 Development. Its `filesystem-block-recovery` artifact records exact
+commands, source/probe/tool hashes, mkfs output, marks and per-prefix byte/name
+outcomes. Replay tool source was pinned to
+`7b70d8a6863c5de30933d42a7672d35d01d2dc6c`.
+
+| Filesystem | Completed create/replace × empty/multi × sync-policy cases | Recovered block-log prefixes |
+| --- | ---: | ---: |
+| ext4 | 12 | 196 |
+| XFS | 12 | 134 |
+| Total | 24 | 330 |
+
+Every explored prefix satisfied the fixed byte and directory-entry oracles,
+including exact new bytes/name after acknowledged file-and-directory sync. The
+seeded old inode is additionally checked for unchanged synced bytes even when
+PublishOnly permits arbitrary recovered **new** data. Each prefix started from
+its own seed copy; the bound was 256 prefixes per case. This is a pass for the
+declared loopback/block-prefix model on this host, not a physical power-cut,
+sector-tearing, arbitrary-permutation or APFS result.
+
+The requested mount options were `noatime,nodiscard`. Observed ext4 options were
+`rw,noatime`; XFS reported `rw,noatime,attr2,inode64,logbufs=8,logbsize=32k,noquota`.
+Images were harness-created 512 MiB files on the disposable runner; backing-host
+and virtual-device assumptions remain part of this model. Probe SHA256:
+`ca160170d52b2e626f668ebcd6f01560b3d9de3b88a982bd0afc5039d53ab8fa`;
+replay-tool SHA256:
+`12cb246bd8c1c377966ca4eac057588d2a680a04f8639f26079fffbbfcbab94b`.
+
+The [first run](https://github.com/The-Ludus-Project/Ludus/actions/runs/38836953485)
+completed all 12 ext4 cases and seven XFS cases, then failed with `target is busy`
+while unmounting the next XFS seed, before that publication started. The preserved
+command log identifies this cleanup failure separately from an oracle failure.
+The controller now retries only that specific unmount condition for a bounded
+interval, without force/lazy unmount; persistent busy and other failures still
+fail the experiment. Dedicated regressions cover both paths. The original failed
+run remains linked; the recovery oracle was strengthened, never relaxed.
+
+
 ## Post-baseline evidence
 
 F1-F5 are implemented. The architecture owns the
