@@ -627,6 +627,9 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     connect(preview, &RenderPreview::DeviceRequested, this, [this]() { mState->createWindow(); });
     connect(preview, &RenderPreview::ResettingFrames, this, [this]() { mState->clearFrames(); });
+    // A stopped preview uncovers the message label; replace the workspace's
+    // placeholder with the failure so the viewport says why it is empty.
+    connect(preview, &RenderPreview::Failed, this, [this](const QString& error) { mState->Message->setText(error); });
     connect(preview, &RenderPreview::Stopped, this, [this]() {
         if (mState->IsDestroyingWindow == true)
         {

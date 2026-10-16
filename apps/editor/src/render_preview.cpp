@@ -38,6 +38,26 @@ bool Accepted(rhi::RasterStatus s) noexcept
 {
     return s == rhi::RasterStatus::Ready || s == rhi::RasterStatus::Pending;
 }
+// Shared by the Qt-shared and offscreen devices: authored lighting needs the
+// same budgets whichever way the viewport presents.
+rhi::DeviceDescription MakeViewportDeviceDescription() noexcept
+{
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    // Two retained GPU generations, 80 caster views, and direct/baked material versions.
+    // These are explicit admission budgets, not allocations or inferred native limits.
+    description.Storage.ResourcesPerKind = 4096;
+    description.Storage.BindingDescriptors = 32768;
+    description.Storage.DrawsPerFrame = 32768;
+    description.Storage.DrawsPerPlan = 1024;
+    description.Storage.HostBytes = usize{256} * 1024 * 1024;
+    description.Storage.ResourceBytes = uint64{2} * 1024 * 1024 * 1024;
+    description.RequiredProfile.Raster.MinBindings = 11;
+    description.RequiredProfile.Raster.MinUniformRange = 16384;
+    description.RequiredProfile.Raster.MinVertexAttributes = 16;
+    description.RequiredProfile.Raster.MinTextureDimension2D = preview_lighting::SHADOW_ATLAS_PIXELS;
+    return description;
+}
 #endif
 } // namespace
 // A generation stays alive until Qt releases every display-image lease. The
@@ -322,6 +342,7 @@ bool RenderPreview::beginResourceRestart() noexcept
     mIsAwaitingProducer = false;
     mNeedsResourceRestart = false;
     LightingInitialized_ = false;
+    mPreparationFailure.clear();
     for (rr::Mesh& mesh : Meshes_)
     {
         mesh = {};
@@ -379,20 +400,7 @@ bool RenderPreview::AdmitDevice(const rhi::NativeDeviceDescription& native)
     {
         return false;
     }
-    rhi::DeviceDescription description;
-    description.Required.PortableRaster = true;
-    // Two retained GPU generations, 80 caster views, and direct/baked material versions.
-    // These are explicit admission budgets, not allocations or inferred native limits.
-    description.Storage.ResourcesPerKind = 4096;
-    description.Storage.BindingDescriptors = 32768;
-    description.Storage.DrawsPerFrame = 32768;
-    description.Storage.DrawsPerPlan = 1024;
-    description.Storage.HostBytes = usize{256} * 1024 * 1024;
-    description.Storage.ResourceBytes = uint64{2} * 1024 * 1024 * 1024;
-    description.RequiredProfile.Raster.MinBindings = 11;
-    description.RequiredProfile.Raster.MinUniformRange = 16384;
-    description.RequiredProfile.Raster.MinVertexAttributes = 16;
-    description.RequiredProfile.Raster.MinTextureDimension2D = preview_lighting::SHADOW_ATLAS_PIXELS;
+    const rhi::DeviceDescription description = MakeViewportDeviceDescription();
     const rhi::DeviceStatus started = rhi::CreateNativeDevice({ .Name = "Ludus shared editor viewport", .Version = 1 },
                                                               native,
                                                               description,
@@ -428,8 +436,7 @@ bool RenderPreview::AdmitOffscreenDevice()
     {
         return false;
     }
-    rhi::DeviceDescription description;
-    description.Required.PortableRaster = true;
+    const rhi::DeviceDescription description = MakeViewportDeviceDescription();
     // Headless target: the viewport reads the display image back, so no window surface is needed.
     const platform::NativeWindowInfo headless{ .Width = 1, .Height = 1 };
     const rhi::DeviceStatus started = rhi::CreateDevice({ .Name = "Ludus offscreen editor viewport", .Version = 1 },
@@ -439,8 +446,8 @@ bool RenderPreview::AdmitOffscreenDevice()
                                                         Surface_);
     if (started != rhi::DeviceStatus::Ready && started != rhi::DeviceStatus::Pending)
     {
-        Status_ =
-            QStringLiteral("No Vulkan device is available for the offscreen viewport. Editing remains available.");
+        Status_ = QStringLiteral("No Vulkan device meets the offscreen viewport's raster profile and budgets. "
+                                 "Editing remains available.");
         Q_EMIT Changed();
         Q_EMIT Failed(Status_);
         return false;
@@ -1204,7 +1211,7 @@ bool RenderPreview::prepare()
         options.OrbitCenter = &OrbitCenter_;
         options.OrbitRadius = OrbitRadius_;
         options.EditorCameraOrNull = &mCameraController.GetSample();
-        if (!Scene_.View(options, description, Status_))
+        if (Scene_.View(options, description, mPreparationFailure) == false)
         {
             return false;
         }
@@ -1290,8 +1297,8 @@ bool RenderPreview::prepareLighting()
             preview_lighting::BuildInputs(resources.Source, resources.LightingKey, resources.Lighting);
         if (status != rhi::RasterStatus::Ready)
         {
-            Status_ = QStringLiteral("Authored lighting admission failed (%1); no lights were dropped.")
-                          .arg(static_cast<uint32>(status));
+            mPreparationFailure = QStringLiteral("Authored lighting admission failed (%1); no lights were dropped.")
+                                      .arg(static_cast<uint32>(status));
             return false;
         }
         const resources::SceneEnvironment& environment = resources.Source.Definition->Environment;
@@ -1769,7 +1776,11 @@ void RenderPreview::Tick()
     }
     if (prepare() == false)
     {
-        fail(QStringLiteral("GPU renderer stopped or exceeded its supported profile. World edits are preserved."));
+        // Keep a stage's specific reason; the generic text covers unexplained failures.
+        fail(
+            mPreparationFailure.isEmpty() == false
+                ? mPreparationFailure + QStringLiteral(" World edits are preserved.")
+                : QStringLiteral("GPU renderer stopped or exceeded its supported profile. World edits are preserved."));
         return;
     }
     if (Phase_ != 6 || mHasViewport == false)

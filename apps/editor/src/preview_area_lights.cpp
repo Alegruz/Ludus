@@ -24,6 +24,8 @@ struct Plane final
     math::Vector3 Normal{};
     math::Vector3 Origin{};
     float32 Tolerance = 0;
+    /// Zero-area triangle: it has no normal and emits no power, so it joins no patch.
+    bool IsDegenerate = false;
 };
 [[nodiscard]] bool IsPositionLess(math::Vector3 a, math::Vector3 b) noexcept
 {
@@ -77,26 +79,15 @@ rhi::RasterStatus AppendPreviewAreaLights(const resources::SceneMesh& mesh,
     {
         return rhi::RasterStatus::OutOfMemory;
     }
+    usize edgeCount = 0;
     for (usize triangle = 0; triangle < count; ++triangle)
     {
         parents[triangle] = static_cast<uint32>(triangle);
         for (usize corner = 0; corner < CORNERS; ++corner)
         {
-            const uint32 a = mesh.Indices[triangle * CORNERS + corner];
-            const uint32 b = mesh.Indices[triangle * CORNERS + (corner + 1) % CORNERS];
-            if (a >= mesh.Positions.GetSize() || b >= mesh.Positions.GetSize())
+            if (mesh.Indices[triangle * CORNERS + corner] >= mesh.Positions.GetSize())
             {
                 return rhi::RasterStatus::InvalidDescription;
-            }
-            Edge& edge = edges[triangle * CORNERS + corner];
-            edge.A = mesh.Positions[a];
-            edge.B = mesh.Positions[b];
-            edge.Triangle = static_cast<uint32>(triangle);
-            if (IsPositionLess(edge.B, edge.A) == true)
-            {
-                const math::Vector3 temporary = edge.A;
-                edge.A = edge.B;
-                edge.B = temporary;
             }
         }
         const math::Vector3 a = math::TransformPoint(meshToWorld, mesh.Positions[mesh.Indices[triangle * CORNERS]]);
@@ -105,22 +96,44 @@ rhi::RasterStatus AppendPreviewAreaLights(const resources::SceneMesh& mesh,
         Plane& plane = planes[triangle];
         const math::Vector3 cross = math::Cross(b - a, c - a);
         const float32 length = math::Length(cross);
-        if (math::IsFinite(length) == false || length <= 0)
+        if (math::IsFinite(length) == false)
         {
             return rhi::RasterStatus::InvalidDescription;
+        }
+        if (length <= 0)
+        {
+            // Imported emitters commonly carry collapsed triangles. They add no
+            // area or power; excluding their edges also keeps them from making
+            // a neighbouring edge look nonmanifold.
+            plane.IsDegenerate = true;
+            continue;
         }
         plane.Normal = cross * (1 / length);
         plane.Origin = a;
         plane.Tolerance = 1e-4F + 1e-6F * math::Max(math::Length(a), math::Max(math::Length(b), math::Length(c)));
+        for (usize corner = 0; corner < CORNERS; ++corner)
+        {
+            Edge& edge = edges[edgeCount];
+            ++edgeCount;
+            edge.A = mesh.Positions[mesh.Indices[triangle * CORNERS + corner]];
+            edge.B = mesh.Positions[mesh.Indices[triangle * CORNERS + (corner + 1) % CORNERS]];
+            edge.Triangle = static_cast<uint32>(triangle);
+            if (IsPositionLess(edge.B, edge.A) == true)
+            {
+                const math::Vector3 temporary = edge.A;
+                edge.A = edge.B;
+                edge.B = temporary;
+            }
+        }
     }
-    Sort(edges.GetData(), edges.GetSize(), [](const Edge& a, const Edge& b) noexcept {
+    Sort(edges.GetData(), edgeCount, [](const Edge& a, const Edge& b) noexcept {
         return IsPositionLess(a.A, b.A) ||
                (a.A == b.A && (IsPositionLess(a.B, b.B) || (a.B == b.B && a.Triangle < b.Triangle)));
     });
-    for (usize first = 0; first < edges.GetSize();)
+    for (usize first = 0; first < edgeCount;)
     {
         usize end = first + 1;
-        while (end < edges.GetSize() && edges[end].A == edges[first].A && edges[end].B == edges[first].B)
+        while (end < edgeCount && edges[end].A == edges[first].A && edges[end].B == edges[first].B)
         {
             ++end;
         }
@@ -152,7 +165,7 @@ rhi::RasterStatus AppendPreviewAreaLights(const resources::SceneMesh& mesh,
     const uint32 initialCount = candidate.Count;
     for (usize root = 0; root < count; ++root)
     {
-        if (roots[root] != root)
+        if (roots[root] != root || planes[root].IsDegenerate == true)
         {
             continue;
         }
