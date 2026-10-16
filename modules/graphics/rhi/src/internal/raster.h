@@ -125,12 +125,15 @@ struct RasterViewSource final
 struct RasterSet final
 {
     foundation::usize Layout = 0;
+    RasterLayout Description;
     StorageArray<foundation::usize> Slots;
     StorageArray<foundation::usize> Offsets;
     StorageArray<foundation::usize> Sizes;
+    StorageArray<bool> IsPopulated;
     [[nodiscard]] bool TryResize(foundation::usize count) noexcept
     {
-        return Slots.TryResize(count) == true && Offsets.TryResize(count) == true && Sizes.TryResize(count) == true;
+        return Slots.TryResize(count) == true && Offsets.TryResize(count) == true && Sizes.TryResize(count) == true &&
+               IsPopulated.TryResize(count) == true;
     }
     [[nodiscard]] bool TryCopyFrom(const RasterSet& source) noexcept
     {
@@ -139,11 +142,13 @@ struct RasterSet final
             return false;
         }
         Layout = source.Layout;
+        Description = source.Description;
         for (foundation::usize descriptor = 0; descriptor < Slots.GetSize(); ++descriptor)
         {
             Slots[descriptor] = source.Slots[descriptor];
             Offsets[descriptor] = source.Offsets[descriptor];
             Sizes[descriptor] = source.Sizes[descriptor];
+            IsPopulated[descriptor] = source.IsPopulated[descriptor];
         }
         return true;
     }
@@ -291,6 +296,9 @@ struct TextureTransfer final
 bool IsBindlessRequested() noexcept;
 bool IsBindlessRequired() noexcept;
 void SetBindlessRequest(bool isRequested, bool isRequired = false) noexcept;
+bool IsRuntimeTextureArrayRequested() noexcept;
+bool IsRuntimeTextureArrayRequired() noexcept;
+void SetRuntimeTextureArrayRequest(bool isRequested, bool isRequired = false) noexcept;
 // These hooks join the existing frame/loss owner, not a second session.
 bool FrameOpen() noexcept;
 bool ClaimRasterFrame() noexcept;

@@ -5,6 +5,7 @@
 #include "internal/editor_files.h"
 #include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
+#include "internal/renderer_workspace.h"
 #include "internal/script_workspace.h"
 #include "internal/workspace_style.h"
 #include "internal/world_workspace.h"
@@ -107,6 +108,7 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
         LaunchAfterPreview(LaunchAction::Run);
     });
     connect(Scripts_, &ScriptWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(Renderer_, &RendererWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
     connect(qApp, &QApplication::focusChanged, this, [this](QWidget* before, QWidget* after) {
         LastEditedField_ = nullptr;
         disconnect(FocusUndoConnection_);
@@ -379,7 +381,8 @@ void MainWindow::BuildMenus()
 
 void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger, bool setup)
 {
-    if (AudioLaunchPending_ || AudioClosing_ || !Scripts_->ConfirmDiscard() || !World_->ConfirmDiscard())
+    if (AudioLaunchPending_ || AudioClosing_ || Scripts_->ConfirmDiscard() == false ||
+        World_->ConfirmDiscard() == false || Renderer_->ConfirmDiscard() == false)
     {
         return;
     }
@@ -510,7 +513,8 @@ void MainWindow::OnOpenRequested()
 void MainWindow::OpenProjectPath(const QString& path)
 {
     if (path.isEmpty() || !Controller_->Caps().CanOpen || Content_->Importing() || AudioClosing_ ||
-        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !World_->ConfirmDiscard()))
+        (Audio_->ConfirmDiscard() == false || Scripts_->ConfirmDiscard() == false ||
+         World_->ConfirmDiscard() == false || Renderer_->ConfirmDiscard() == false))
     {
         return;
     }
@@ -533,6 +537,11 @@ void MainWindow::OnSaveRequested()
     if (area == Scripts_)
     {
         (void)Scripts_->Save();
+        return;
+    }
+    if (area == Renderer_)
+    {
+        static_cast<void>(Renderer_->Save());
         return;
     }
     if (area == Configuration_)
@@ -564,7 +573,8 @@ bool MainWindow::SaveProjectSettings()
         return false;
     }
     if (state.Draft.SourceDir != state.Saved.SourceDir &&
-        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !World_->ConfirmDiscard()))
+        (Audio_->ConfirmDiscard() == false || Scripts_->ConfirmDiscard() == false ||
+         World_->ConfirmDiscard() == false || Renderer_->ConfirmDiscard() == false))
     {
         return false;
     }
@@ -585,7 +595,8 @@ void MainWindow::OnReloadRequested()
         return;
     }
     CommitProjectFields();
-    if (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !World_->ConfirmDiscard())
+    if (Audio_->ConfirmDiscard() == false || Scripts_->ConfirmDiscard() == false || World_->ConfirmDiscard() == false ||
+        Renderer_->ConfirmDiscard() == false)
     {
         return;
     }
@@ -659,6 +670,7 @@ void MainWindow::OnStateChanged()
             SetProjectWorkspace(root, true);
         }
         Scripts_->SetProject(QFileInfo(state.DescriptorPath).absolutePath(), root, state.Saved.Preset);
+        Renderer_->SetProject(root, state.ProjectEpoch);
         Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
         Content_->SetProject(QDir(root).absoluteFilePath(QStringLiteral("content")), state.ProjectEpoch);
     }
@@ -668,6 +680,7 @@ void MainWindow::OnStateChanged()
         SetProjectWorkspace({}, false);
         World_->SetProject({}, state.ProjectEpoch);
         Scripts_->SetProject({}, {}, {});
+        Renderer_->SetProject({}, state.ProjectEpoch);
         Audio_->SetRoot(QString());
         Content_->SetProject(QString(), state.ProjectEpoch);
     }
@@ -1148,7 +1161,8 @@ bool MainWindow::ConfirmProjectChange(const QString& action)
 void MainWindow::OnNewProject()
 {
     if (!Controller_->Caps().CanProjectCreate || Content_->Importing() ||
-        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !World_->ConfirmDiscard()) ||
+        (Audio_->ConfirmDiscard() == false || Scripts_->ConfirmDiscard() == false ||
+         World_->ConfirmDiscard() == false || Renderer_->ConfirmDiscard() == false) ||
         !ConfirmProjectChange(QStringLiteral("creating another project")))
     {
         return;
@@ -1163,7 +1177,8 @@ void MainWindow::OnNewProject()
 void MainWindow::OnCloseProject()
 {
     if (!Controller_->Caps().CanCloseProject || Content_->Importing() || AudioLaunchPending_ || AudioClosing_ ||
-        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !World_->ConfirmDiscard()) ||
+        (Audio_->ConfirmDiscard() == false || Scripts_->ConfirmDiscard() == false ||
+         World_->ConfirmDiscard() == false || Renderer_->ConfirmDiscard() == false) ||
         !ConfirmProjectChange(QStringLiteral("closing the project")))
     {
         return;
@@ -1306,7 +1321,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
             event->ignore();
             return;
         }
-        if ((!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !World_->ConfirmDiscard()) ||
+        if ((Audio_->ConfirmDiscard() == false || Scripts_->ConfirmDiscard() == false ||
+             World_->ConfirmDiscard() == false || Renderer_->ConfirmDiscard() == false) ||
             !Configuration_->ConfirmDiscard())
         {
             event->ignore();

@@ -4,9 +4,9 @@
 # https://squidfunk.github.io/mkdocs-material/; docs/development/wiki.md.
 site_name: Ludus Wiki
 site_description: Practical guides, explanations and references for using and contributing to Ludus.
-site_url: https://alegruz.github.io/Ludus/
-repo_url: https://github.com/Alegruz/Ludus
-repo_name: Alegruz/Ludus
+site_url: https://the-ludus-project.github.io/Ludus/
+repo_url: https://github.com/The-Ludus-Project/Ludus
+repo_name: The-Ludus-Project/Ludus
 edit_uri: edit/main/docs/
 docs_dir: docs
 exclude_docs: |
@@ -100,6 +100,7 @@ nav:
       - Save, validate and build render graphs: development/render-graph-authoring.md
       - Render graph authoring proposal: architecture/render-graph-authoring.md
       - Benchmark scenes and suites: development/benchmark-scenes.md
+      - Runtime profiling: development/runtime-profiling.md
       - Best-effort pbrt import: development/best-effort-scene-import.md
       - Release packages: development/game-packaging-publishing.md
       - Browser editor build: development/browser-editor.md

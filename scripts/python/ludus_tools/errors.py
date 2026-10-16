@@ -14,10 +14,16 @@ from __future__ import annotations
 class ToolingError(Exception):
     """A recoverable host-tooling failure with a stable code and message."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, location: dict | None = None,
+                 diagnostics: list | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        # Optional authored-source mapping (package-relative source, configuration,
+        # node, line). Diagnostics list mapped compiler messages; both are copied
+        # into versioned JSON results and never contain machine-absolute paths.
+        self.location = location
+        self.diagnostics = diagnostics
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"{self.code}: {self.message}"

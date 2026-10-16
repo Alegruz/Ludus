@@ -13,6 +13,7 @@
 
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 
 #include <new>
 
@@ -258,7 +259,7 @@ void Dependencies(Record& record, RasterKind kind, bool retain) noexcept
     }
     else if (kind == RasterKind::Set)
     {
-        const auto& layout = At(RasterKind::Layout, record.Set.Layout).Layout;
+        const RasterLayout& layout = record.Set.Description;
         for (usize i = 0; i < layout.DescriptorCount; ++i)
         {
             const RasterBindingKind type = layout.GetDescriptorBinding(i).Kind;
@@ -418,9 +419,18 @@ bool ValidBinding(const RasterBinding& binding) noexcept
     const auto visibility = static_cast<uint8>(binding.Visibility);
     if (binding.Binding >= RASTER_BINDINGS || visibility < 1 || visibility > 4 ||
         (binding.HasDynamicOffset == true && BufferBinding(binding.Kind) == false) || binding.Count == 0 ||
-        (binding.Count != 1 && (binding.Kind != RasterBindingKind::Texture2D)) ||
+        (binding.Count != 1 && binding.HasDynamicOffset == true) ||
+        (binding.Count > 1 &&
+         (binding.Kind == RasterBindingKind::TextureDepth2D || binding.Kind == RasterBindingKind::TextureStencil2D)) ||
+        (binding.IsRuntimeSized == true &&
+         (TextureBinding(binding.Kind) == false || binding.Kind == RasterBindingKind::TextureDepth2D ||
+          binding.Kind == RasterBindingKind::TextureStencil2D)) ||
+        (binding.HasPartialBinding == true && binding.Count == 1 && binding.IsRuntimeSized == false) ||
         static_cast<uint8>(binding.Indexing) > static_cast<uint8>(RasterBindingIndexing::NonUniform) ||
-        (binding.Count == 1 && binding.Indexing != RasterBindingIndexing::Constant))
+        (binding.Count == 1 && binding.IsRuntimeSized == false &&
+         binding.Indexing != RasterBindingIndexing::Constant) ||
+        (binding.Count > 1 && TextureBinding(binding.Kind) == false &&
+         binding.Indexing != RasterBindingIndexing::Constant))
     {
         return false;
     }
@@ -430,24 +440,24 @@ bool ValidBinding(const RasterBinding& binding) noexcept
     }
     if (binding.Kind == RasterBindingKind::StorageRead || binding.Kind == RasterBindingKind::StorageReadWrite)
     {
-        const auto limits = backend::ComputeLimits();
+        const ComputeCapabilities limits = backend::ComputeLimits();
         return visibility == 4 && binding.MinSize > 0 && binding.MinSize % 4 == 0 &&
                binding.MinSize <= limits.MaxStorageRange;
     }
-    return visibility != 4 && (TextureBinding(binding.Kind) || binding.Kind == RasterBindingKind::Sampler) &&
+    return visibility != 4 && (TextureBinding(binding.Kind) == true || binding.Kind == RasterBindingKind::Sampler) &&
            binding.MinSize == 0;
 }
-bool CopyLayout(std::span<const RasterBinding> entries, RasterLayout& layout) noexcept
+bool CopyLayout(std::span<const RasterBinding> entries, RasterLayout& outLayout) noexcept
 {
     if (entries.size() > RASTER_BINDINGS)
     {
         return false;
     }
-    layout.Count = entries.size();
-    layout.DescriptorCount = 0;
+    outLayout.Count = entries.size();
+    outLayout.DescriptorCount = 0;
     for (usize i = 0; i < entries.size(); ++i)
     {
-        if (!ValidBinding(entries[i]))
+        if (ValidBinding(entries[i]) == false)
         {
             return false;
         }
@@ -458,11 +468,68 @@ bool CopyLayout(std::span<const RasterBinding> entries, RasterLayout& layout) no
                 return false;
             }
         }
-        if (TryAdd(layout.DescriptorCount, usize{entries[i].Count}, layout.DescriptorCount) == false)
+        if (TryAdd(outLayout.DescriptorCount, usize{entries[i].Count}, outLayout.DescriptorCount) == false)
         {
             return false;
         }
-        layout.Entries[i] = entries[i];
+        if (entries[i].IsRuntimeSized == true)
+        {
+            for (const RasterBinding& candidate : entries)
+            {
+                if (candidate.Binding > entries[i].Binding ||
+                    (candidate.IsRuntimeSized == true && candidate.Binding != entries[i].Binding))
+                {
+                    return false;
+                }
+            }
+        }
+        outLayout.Entries[i] = entries[i];
+    }
+    for (usize entry = 0; entry < entries.size(); ++entry)
+    {
+        if (entries[entry].IsRuntimeSized == false)
+        {
+            continue;
+        }
+        if (entries[entry].Binding != RUNTIME_BINDING_ARRAY_SLOT)
+        {
+            return false;
+        }
+        bool hasLengthBinding = false;
+        for (usize candidate = 0; candidate < outLayout.Count; ++candidate)
+        {
+            const RasterBinding& binding = outLayout.Entries[candidate];
+            if (binding.Binding != RUNTIME_BINDING_LENGTH_SLOT)
+            {
+                continue;
+            }
+            hasLengthBinding = true;
+            if (binding.Kind != RasterBindingKind::UniformBuffer || binding.MinSize != RUNTIME_BINDING_LENGTH_BYTES ||
+                binding.Count != 1 || binding.HasDynamicOffset == true || binding.HasPartialBinding == true ||
+                (static_cast<uint8>(binding.Visibility) & static_cast<uint8>(entries[entry].Visibility)) !=
+                    static_cast<uint8>(entries[entry].Visibility))
+            {
+                return false;
+            }
+        }
+        if (hasLengthBinding == false)
+        {
+            if (outLayout.Count == RASTER_BINDINGS)
+            {
+                return false;
+            }
+            outLayout.Entries[outLayout.Count++] =
+            {
+                .Binding = RUNTIME_BINDING_LENGTH_SLOT,
+                .Kind = RasterBindingKind::UniformBuffer,
+                .Visibility = entries[entry].Visibility,
+                .MinSize = RUNTIME_BINDING_LENGTH_BYTES,
+            };
+            if (TryAdd(outLayout.DescriptorCount, usize{1}, outLayout.DescriptorCount) == false)
+            {
+                return false;
+            }
+        }
     }
     return true;
 }
@@ -477,8 +544,9 @@ RasterStatus ValidateLayoutCapabilities(const RasterLayout& layout) noexcept
     uint32 totalSamplers = 0;
     for (usize entry = 0; entry < layout.Count; ++entry)
     {
-        totalUniforms += layout.Entries[entry].Kind == RasterBindingKind::UniformBuffer ? 1U : 0U;
-        totalSamplers += layout.Entries[entry].Kind == RasterBindingKind::Sampler ? 1U : 0U;
+        totalUniforms +=
+            layout.Entries[entry].Kind == RasterBindingKind::UniformBuffer ? layout.Entries[entry].Count : 0U;
+        totalSamplers += layout.Entries[entry].Kind == RasterBindingKind::Sampler ? layout.Entries[entry].Count : 0U;
     }
     if (totalUniforms > capabilities.MaxUniformBuffersPerSet || totalSamplers > capabilities.MaxSamplersPerSet)
     {
@@ -536,23 +604,35 @@ RasterStatus ValidateLayoutCapabilities(const RasterLayout& layout) noexcept
         {
             textures += binding.Count;
         }
-        if ((binding.Count > 1 && binding.Count > capabilities.MaxTextureArrayElements) ||
+        if ((binding.Count > 1 && TextureBinding(binding.Kind) == true &&
+             binding.Count > capabilities.MaxTextureArrayElements) ||
+            (binding.Count > 1 && BufferBinding(binding.Kind) == true &&
+             capabilities.HasBufferDescriptorArrays == false) ||
+            (binding.Count > 1 && binding.Kind == RasterBindingKind::Sampler &&
+             capabilities.HasSamplerDescriptorArrays == false) ||
+            (binding.IsRuntimeSized == true && capabilities.HasRuntimeTextureArrays == false) ||
+            (binding.HasPartialBinding == true && capabilities.HasPartiallyBoundArrays == false) ||
             (binding.Indexing == RasterBindingIndexing::Uniform && capabilities.HasUniformTextureIndexing == false) ||
             (binding.Indexing == RasterBindingIndexing::NonUniform && capabilities.HasBindlessTextureIndexing == false))
         {
             return RasterStatus::Unsupported;
         }
-        if (backend::Kind() == Backend::Metal && TextureBinding(binding.Kind) == true)
+        if (backend::Kind() == Backend::Metal &&
+            (TextureBinding(binding.Kind) == true || binding.Kind == RasterBindingKind::Sampler))
         {
-            if (binding.Binding + binding.Count > capabilities.MaxTextureArrayElements)
+            const uint32 registerLimit = binding.Kind == RasterBindingKind::Sampler
+                                             ? capabilities.MaxSamplersPerStage
+                                             : capabilities.MaxTextureArrayElements;
+            if (binding.Count > registerLimit || binding.Binding > registerLimit - binding.Count)
             {
                 return RasterStatus::Unsupported;
             }
             for (usize previous = 0; previous < entry; ++previous)
             {
                 const RasterBinding& other = layout.Entries[previous];
-                if (TextureBinding(other.Kind) == true && binding.Binding < other.Binding + other.Count &&
-                    other.Binding < binding.Binding + binding.Count)
+                if (((TextureBinding(binding.Kind) == true && TextureBinding(other.Kind) == true) ||
+                     (binding.Kind == RasterBindingKind::Sampler && other.Kind == RasterBindingKind::Sampler)) &&
+                    binding.Binding < other.Binding + other.Count && other.Binding < binding.Binding + binding.Count)
                 {
                     return RasterStatus::InvalidDescription;
                 }
@@ -593,7 +673,7 @@ bool Fits(usize offset, usize size, usize total) noexcept
 }
 RasterStatus ValidateBindingOffsets(const RasterSet& set, const RasterBindingOffsets& offsets) noexcept
 {
-    const RasterLayout& layout = At(RasterKind::Layout, set.Layout).Layout;
+    const RasterLayout& layout = set.Description;
     const RasterCapabilities raster = backend::RasterLimits();
     const ComputeCapabilities compute = backend::ComputeLimits();
     for (usize bindingNumber = 0; bindingNumber < RASTER_BINDINGS; ++bindingNumber)
@@ -694,7 +774,9 @@ bool ShaderFits(const RasterShaderInfo& shader, const RasterLayout& layout) noex
         {
             const auto& entry = layout.Entries[j];
             if (entry.Binding == need.Binding && entry.Kind == need.Kind && entry.MinSize >= need.MinSize &&
-                entry.Count == need.Count && static_cast<uint8>(entry.Indexing) >= static_cast<uint8>(need.Indexing) &&
+                entry.IsRuntimeSized == need.IsRuntimeSized &&
+                (need.IsRuntimeSized == true ? entry.Count >= need.Count : entry.Count == need.Count) &&
+                static_cast<uint8>(entry.Indexing) >= static_cast<uint8>(need.Indexing) &&
                 (static_cast<uint8>(entry.Visibility) & stage) != 0)
             {
                 found = true;
@@ -1157,9 +1239,13 @@ CreateRasterShader(DeviceHandle device, const RasterShaderDescription& descripti
     {
         return RasterStatus::InvalidDescription;
     }
-    if (description.HasVerifiedArrayBounds == false && info.Layout.DescriptorCount != info.Layout.Count)
+    for (usize binding = 0; binding < info.Layout.Count; ++binding)
     {
-        return RasterStatus::InvalidDescription;
+        if (description.HasVerifiedArrayBounds == false &&
+            (info.Layout.Entries[binding].Count > 1 || info.Layout.Entries[binding].IsRuntimeSized == true))
+        {
+            return RasterStatus::InvalidDescription;
+        }
     }
     const RasterStatus bindingStatus = ValidateLayoutCapabilities(info.Layout);
     if (bindingStatus != RasterStatus::Ready)
@@ -1339,35 +1425,82 @@ uint64 CountBindingDescriptors() noexcept
     {
         if (record.Owner != 0)
         {
-            count += At(RasterKind::Layout, record.Set.Layout).Layout.DescriptorCount;
+            count += record.Set.Description.DescriptorCount;
         }
     }
     return count;
 }
 } // namespace
-RasterStatus CreateBindingSet(DeviceHandle device,
-                              BindingLayoutHandle handle,
-                              std::span<const RasterBindingResource> entries,
-                              BindingSetHandle& output) noexcept
+namespace
+{
+RasterStatus CreateBindingSnapshot(DeviceHandle device,
+                                   BindingLayoutHandle handle,
+                                   std::span<const RasterBindingResource> entries,
+                                   uint32 runtimeCount,
+                                   BindingSetHandle& outSet) noexcept
 {
     const auto admission = Admission(device);
     if (admission != RasterStatus::Ready)
     {
         return admission;
     }
-    const auto* layoutRecord = Resolve(handle, RasterKind::Layout);
-    if (layoutRecord == nullptr)
+    const Record* layoutRecordOrNull = Resolve(handle, RasterKind::Layout);
+    if (layoutRecordOrNull == nullptr)
     {
         return RasterStatus::InvalidHandle;
     }
-    if (layoutRecord->Status != RasterStatus::Ready)
+    if (layoutRecordOrNull->Status != RasterStatus::Ready)
     {
-        return layoutRecord->Status == RasterStatus::Pending ? RasterStatus::NotReady : layoutRecord->Status;
+        return layoutRecordOrNull->Status == RasterStatus::Pending ? RasterStatus::NotReady
+                                                                   : layoutRecordOrNull->Status;
     }
-    const auto& layout = layoutRecord->Layout;
-    if (entries.size() != layout.DescriptorCount)
+    RasterLayout layout = layoutRecordOrNull->Layout;
+    bool hasRuntimeBinding = false;
+    for (usize entry = 0; entry < layout.Count; ++entry)
+    {
+        RasterBinding& binding = layout.Entries[entry];
+        if (binding.IsRuntimeSized == true)
+        {
+            hasRuntimeBinding = true;
+            if (runtimeCount != 0)
+            {
+                if (runtimeCount > binding.Count)
+                {
+                    return RasterStatus::InvalidDescription;
+                }
+                layout.DescriptorCount -= binding.Count - runtimeCount;
+                binding.Count = runtimeCount;
+            }
+        }
+    }
+    if ((runtimeCount != 0 && hasRuntimeBinding == false) || entries.size() > layout.DescriptorCount)
     {
         return RasterStatus::InvalidDescription;
+    }
+    for (usize entry = 0; entry < entries.size(); ++entry)
+    {
+        if (hasRuntimeBinding == true && entries[entry].Binding == RUNTIME_BINDING_LENGTH_SLOT)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        bool hasLocation = false;
+        for (usize binding = 0; binding < layout.Count; ++binding)
+        {
+            hasLocation = hasLocation == true || (entries[entry].Binding == layout.Entries[binding].Binding &&
+                                                  entries[entry].ArrayElement < layout.Entries[binding].Count);
+        }
+        if (hasLocation == false)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        for (usize previous = 0; previous < entry; ++previous)
+        {
+            if (entries[entry].Binding == entries[previous].Binding &&
+                entries[entry].ArrayElement == entries[previous].ArrayElement)
+            {
+                return RasterStatus::InvalidDescription;
+            }
+        }
     }
     Collect();
     const uint64 descriptorCount = CountBindingDescriptors();
@@ -1382,10 +1515,28 @@ RasterStatus CreateBindingSet(DeviceHandle device,
         return StorageFailure();
     }
     set.Layout = RasterAccess::Slot(handle);
-    const auto limits = backend::RasterLimits();
+    set.Description = layout;
+    const RasterCapabilities limits = backend::RasterLimits();
+    usize lengthDescriptor = RASTER_INVALID;
+    uint32 allocatedRuntimeCount = 0;
+    for (usize binding = 0; binding < layout.Count; ++binding)
+    {
+        if (layout.Entries[binding].IsRuntimeSized == true)
+        {
+            allocatedRuntimeCount = layout.Entries[binding].Count;
+        }
+    }
     for (usize i = 0; i < layout.DescriptorCount; ++i)
     {
-        const RasterBindingResource* entry = nullptr;
+        if (hasRuntimeBinding == true && layout.GetDescriptorBinding(i).Binding == RUNTIME_BINDING_LENGTH_SLOT)
+        {
+            lengthDescriptor = i;
+            set.IsPopulated[i] = true;
+            set.Offsets[i] = 0;
+            set.Sizes[i] = RUNTIME_BINDING_LENGTH_BYTES;
+            continue;
+        }
+        const RasterBindingResource* entryOrNull = nullptr;
         for (const auto& candidate : entries)
         {
             if (candidate.Binding != layout.GetDescriptorBinding(i).Binding ||
@@ -1393,65 +1544,162 @@ RasterStatus CreateBindingSet(DeviceHandle device,
             {
                 continue;
             }
-            if (entry != nullptr)
+            if (entryOrNull != nullptr)
             {
                 return RasterStatus::InvalidDescription;
             }
-            entry = &candidate;
+            entryOrNull = &candidate;
         }
-        if (entry == nullptr)
+        set.IsPopulated[i] = entryOrNull != nullptr;
+        if (entryOrNull == nullptr && layout.GetDescriptorBinding(i).HasPartialBinding == true)
+        {
+            for (const RasterBindingResource& candidate : entries)
+            {
+                if (candidate.Binding == layout.GetDescriptorBinding(i).Binding && candidate.ArrayElement == 0)
+                {
+                    entryOrNull = &candidate;
+                }
+            }
+        }
+        if (entryOrNull == nullptr)
         {
             return RasterStatus::InvalidDescription;
         }
         const RasterBindingKind kind = layout.GetDescriptorBinding(i).Kind;
-        const auto* resource = BufferBinding(kind)    ? Resolve(entry->Buffer, RasterKind::Buffer)
-                               : TextureBinding(kind) ? Resolve(entry->Texture, RasterKind::View)
-                                                      : Resolve(entry->Sampler, RasterKind::Sampler);
-        if (resource == nullptr)
+        const Record* resourceOrNull = BufferBinding(kind)    ? Resolve(entryOrNull->Buffer, RasterKind::Buffer)
+                                       : TextureBinding(kind) ? Resolve(entryOrNull->Texture, RasterKind::View)
+                                                              : Resolve(entryOrNull->Sampler, RasterKind::Sampler);
+        if (resourceOrNull == nullptr)
         {
             return RasterStatus::InvalidHandle;
         }
-        if (resource->Status != RasterStatus::Ready)
+        if (resourceOrNull->Status != RasterStatus::Ready)
         {
-            return resource->Status == RasterStatus::Pending ? RasterStatus::NotReady : resource->Status;
+            return resourceOrNull->Status == RasterStatus::Pending ? RasterStatus::NotReady : resourceOrNull->Status;
         }
-        const auto textureType = resource->View.Aspect == TextureAspect::Depth ? RasterBindingKind::TextureDepth2D
-                                 : resource->View.Aspect == TextureAspect::Stencil
-                                     ? RasterBindingKind::TextureStencil2D
-                                     : TextureBindingType(resource->View.Dimension);
-        if (TextureBinding(kind) && (resource->View.Attachment || textureType != kind))
+        const RasterBindingKind textureType = resourceOrNull->View.Aspect == TextureAspect::Depth
+                                                  ? RasterBindingKind::TextureDepth2D
+                                              : resourceOrNull->View.Aspect == TextureAspect::Stencil
+                                                  ? RasterBindingKind::TextureStencil2D
+                                                  : TextureBindingType(resourceOrNull->View.Dimension);
+        if (TextureBinding(kind) == true && (resourceOrNull->View.Attachment == true || textureType != kind))
         {
             return RasterStatus::InvalidDescription;
         }
         if (kind == RasterBindingKind::UniformBuffer &&
-            (resource->Buffer.Role != BufferRole::Uniform || limits.UniformOffsetAlignment == 0 ||
-             entry->Offset % limits.UniformOffsetAlignment != 0 || entry->Size % 16 != 0 ||
-             entry->Size < layout.GetDescriptorBinding(i).MinSize || entry->Size > limits.MaxUniformRange ||
-             !Fits(entry->Offset, entry->Size, resource->Buffer.Size)))
+            (resourceOrNull->Buffer.Role != BufferRole::Uniform || limits.UniformOffsetAlignment == 0 ||
+             entryOrNull->Offset % limits.UniformOffsetAlignment != 0 || entryOrNull->Size % 16 != 0 ||
+             entryOrNull->Size < layout.GetDescriptorBinding(i).MinSize || entryOrNull->Size > limits.MaxUniformRange ||
+             Fits(entryOrNull->Offset, entryOrNull->Size, resourceOrNull->Buffer.Size) == false))
         {
             return RasterStatus::InvalidDescription;
         }
         if (kind == RasterBindingKind::StorageRead || kind == RasterBindingKind::StorageReadWrite)
         {
             const auto compute = backend::ComputeLimits();
-            if (!StorageRole(resource->Buffer.Role) || compute.StorageOffsetAlignment == 0 ||
-                entry->Offset % compute.StorageOffsetAlignment != 0 || entry->Size % 4 != 0 ||
-                entry->Size < layout.GetDescriptorBinding(i).MinSize || entry->Size > compute.MaxStorageRange ||
-                !Fits(entry->Offset, entry->Size, resource->Buffer.Size))
+            if (StorageRole(resourceOrNull->Buffer.Role) == false || compute.StorageOffsetAlignment == 0 ||
+                entryOrNull->Offset % compute.StorageOffsetAlignment != 0 || entryOrNull->Size % 4 != 0 ||
+                entryOrNull->Size < layout.GetDescriptorBinding(i).MinSize ||
+                entryOrNull->Size > compute.MaxStorageRange ||
+                Fits(entryOrNull->Offset, entryOrNull->Size, resourceOrNull->Buffer.Size) == false)
             {
                 return RasterStatus::InvalidDescription;
             }
         }
-        set.Slots[i] = BufferBinding(kind)    ? RasterAccess::Slot(entry->Buffer)
-                       : TextureBinding(kind) ? RasterAccess::Slot(entry->Texture)
-                                              : RasterAccess::Slot(entry->Sampler);
-        set.Offsets[i] = entry->Offset;
-        set.Sizes[i] = entry->Size;
+        set.Slots[i] = BufferBinding(kind)    ? RasterAccess::Slot(entryOrNull->Buffer)
+                       : TextureBinding(kind) ? RasterAccess::Slot(entryOrNull->Texture)
+                                              : RasterAccess::Slot(entryOrNull->Sampler);
+        set.Offsets[i] = entryOrNull->Offset;
+        set.Sizes[i] = entryOrNull->Size;
     }
-    return Publish(RasterKind::Set, output, [&](usize slot, Record& record) noexcept {
-        record.Set = Move(set);
-        return backend::RasterCreateSet(slot, layout, record.Set, record.Request);
+    BufferHandle lengthBuffer;
+    if (lengthDescriptor != RASTER_INVALID)
+    {
+        const StaticArray<uint32, RUNTIME_BINDING_LENGTH_WORDS> length{allocatedRuntimeCount, 0, 0, 0};
+        const RasterStatus lengthStatus =
+            CreateBuffer(device,
+                         { .Role = BufferRole::Uniform, .Size = RUNTIME_BINDING_LENGTH_BYTES },
+                         {reinterpret_cast<const uint8*>(length.GetData()), RUNTIME_BINDING_LENGTH_BYTES},
+                         lengthBuffer);
+        if (lengthStatus != RasterStatus::Ready)
+        {
+            if (RasterAccess::Owner(lengthBuffer) != 0)
+            {
+                (void)Destroy(device, lengthBuffer);
+            }
+            return lengthStatus == RasterStatus::Pending ? RasterStatus::NotReady : lengthStatus;
+        }
+        set.Slots[lengthDescriptor] = RasterAccess::Slot(lengthBuffer);
+    }
+    const RasterStatus result = Publish(RasterKind::Set, outSet, [&](usize slot, Record& inoutRecord) noexcept {
+        inoutRecord.Set = Move(set);
+        return backend::RasterCreateSet(slot, layout, inoutRecord.Set, inoutRecord.Request);
     });
+    if (RasterAccess::Owner(lengthBuffer) != 0)
+    {
+        // The accepted snapshot owns the buffer through Dependencies; on failure
+        // this releases the temporary buffer. No public metadata handle escapes.
+        (void)Destroy(device, lengthBuffer);
+    }
+    return result;
+}
+} // namespace
+RasterStatus CreateBindingSet(DeviceHandle device,
+                              BindingLayoutHandle layout,
+                              std::span<const RasterBindingResource> entries,
+                              BindingSetHandle& outSet) noexcept
+{
+    return CreateBindingSnapshot(device, layout, entries, 0, outSet);
+}
+RasterStatus CreateRuntimeBindingSet(DeviceHandle device,
+                                     BindingLayoutHandle layout,
+                                     BorrowedView<const RasterBindingResource> entries,
+                                     uint32 runtimeCount,
+                                     BindingSetHandle& outSet) noexcept
+{
+    if (runtimeCount == 0 || entries.IsValid() == false)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    return CreateBindingSnapshot(device, layout, {entries.GetDataOrNull(), entries.GetSize()}, runtimeCount, outSet);
+}
+RasterStatus PublishBindingSetUpdate(DeviceHandle device,
+                                     BindingSetHandle& inoutCurrent,
+                                     BindingSetHandle& inoutReplacement) noexcept
+{
+    const RasterStatus admission = Admission(device, false);
+    if (admission != RasterStatus::Ready)
+    {
+        return admission;
+    }
+    const Record* currentOrNull = Resolve(inoutCurrent, RasterKind::Set);
+    const Record* replacementOrNull = Resolve(inoutReplacement, RasterKind::Set);
+    if (currentOrNull == nullptr || replacementOrNull == nullptr)
+    {
+        return RasterStatus::InvalidHandle;
+    }
+    if (currentOrNull == replacementOrNull || currentOrNull->Set.Layout != replacementOrNull->Set.Layout)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    constexpr usize SNAPSHOT_COUNT = 2;
+    const StaticArray<const Record*, SNAPSHOT_COUNT> candidates{currentOrNull, replacementOrNull};
+    for (const Record* candidate : candidates)
+    {
+        if (candidate->Status != RasterStatus::Ready)
+        {
+            return candidate->Status == RasterStatus::Pending ? RasterStatus::NotReady : candidate->Status;
+        }
+    }
+    // Publish a new immutable identity without mutating an already encoded set.
+    // In-frame publication cannot allocate or collect. Concrete packet leases
+    // retain old metadata and native descriptors until submission completion.
+    Record& previous = At(RasterKind::Set, RasterAccess::Slot(inoutCurrent));
+    previous.Published = false;
+    --previous.References;
+    inoutCurrent = inoutReplacement;
+    inoutReplacement = {};
+    return RasterStatus::Ready;
 }
 RasterStatus GetBindingIndex(DeviceHandle device,
                              BindingSetHandle handle,
@@ -1473,15 +1721,18 @@ RasterStatus GetBindingIndex(DeviceHandle device,
     {
         return set->Status == RasterStatus::Pending ? RasterStatus::NotReady : set->Status;
     }
-    const RasterLayout& layout = At(RasterKind::Layout, set->Set.Layout).Layout;
+    const RasterLayout& layout = set->Set.Description;
+    usize descriptor = 0;
     for (usize entry = 0; entry < layout.Count; ++entry)
     {
         const RasterBinding& description = layout.Entries[entry];
-        if (description.Binding == binding && description.Count > 1 && element < description.Count)
+        if (description.Binding == binding && (description.Count > 1 || description.IsRuntimeSized == true) &&
+            element < description.Count && set->Set.IsPopulated[descriptor + element] == true)
         {
             RasterAccess::SetIndex(handle, { .Binding = binding, .Element = element }, outIndex);
             return RasterStatus::Ready;
         }
+        descriptor += description.Count;
     }
     return RasterStatus::InvalidDescription;
 }
@@ -1518,18 +1769,25 @@ namespace
 {
 RasterStatus ValidateReachableBindings(DeviceHandle device, const RasterDraw& draw, const RasterSet& set) noexcept
 {
-    const RasterLayout& layout = At(RasterKind::Layout, set.Layout).Layout;
+    const RasterLayout& layout = set.Description;
     usize required = 0;
+    usize descriptor = 0;
     for (usize entry = 0; entry < layout.Count; ++entry)
     {
         const RasterBinding& binding = layout.Entries[entry];
+        const usize firstDescriptor = descriptor;
+        descriptor += binding.Count;
         if (binding.Indexing != RasterBindingIndexing::NonUniform)
         {
             continue;
         }
-        required += binding.Count;
         for (uint32 element = 0; element < binding.Count; ++element)
         {
+            if (set.IsPopulated[firstDescriptor + element] == false)
+            {
+                continue;
+            }
+            ++required;
             usize matches = 0;
             for (const RasterBindingIndex& index : draw.ReachableBindings)
             {
@@ -1759,9 +2017,11 @@ RasterStatus ValidateDraw(DeviceHandle device, const RasterDraw& draw, RasterPac
                                                       draw.BindingOffsets,
                                                       packet.DynamicOffsets);
     const auto& info = pipeline->Pipeline;
-    if (set->Set.Layout != info.Layout || draw.Vertices.size() != info.StreamCount || draw.IndexCount == 0 ||
-        draw.IndexCount % 3 != 0 || draw.VertexCount == 0 || draw.InstanceCount == 0 ||
-        draw.InstanceCount > 0x7fffffffU ||
+    if (set->Set.Layout != info.Layout ||
+        ShaderFits(At(RasterKind::Shader, info.Vertex).Shader, set->Set.Description) == false ||
+        ShaderFits(At(RasterKind::Shader, info.Fragment).Shader, set->Set.Description) == false ||
+        draw.Vertices.size() != info.StreamCount || draw.IndexCount == 0 || draw.IndexCount % 3 != 0 ||
+        draw.VertexCount == 0 || draw.InstanceCount == 0 || draw.InstanceCount > 0x7fffffffU ||
         (indices->Buffer.Role != BufferRole::Index16 && indices->Buffer.Role != BufferRole::Index32))
     {
         return RasterStatus::InvalidDescription;
@@ -2088,7 +2348,7 @@ RasterStatus GetAllocationTelemetry(DeviceHandle device, AllocationTelemetry& ou
     {
         if (record.Owner != 0 && record.Published == false)
         {
-            output.RetiringBindingDescriptors += At(RasterKind::Layout, record.Set.Layout).Layout.DescriptorCount;
+            output.RetiringBindingDescriptors += record.Set.Description.DescriptorCount;
         }
     }
     internal::DescriptorArenaUsage arenaUsage;

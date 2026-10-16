@@ -2,6 +2,7 @@
 #include "internal/configuration_workspace.h"
 #include "internal/content_browser.h"
 #include "internal/main_window.h"
+#include "internal/renderer_workspace.h"
 #include "internal/script_workspace.h"
 #include "internal/world_workspace.h"
 
@@ -196,6 +197,10 @@ void MainWindow::BuildUi()
     WorkTabs_->addTab(World_, QStringLiteral("&World"));
     Scripts_ = new ScriptWorkspace(Controller_, WorkTabs_);
     WorkTabs_->addTab(Scripts_, QStringLiteral("&Scripts"));
+    Renderer_ = new RendererWorkspace(Controller_->Tooling(), WorkTabs_);
+    WorkTabs_->addTab(Renderer_, QStringLiteral("&Renderer"));
+    // The render-graph preview borrows the World viewport's device and extraction.
+    Renderer_->SetPreviewSource(&World_->GetRenderPreview());
     Configuration_ = new ConfigurationWorkspace(WorkTabs_);
     WorkTabs_->addTab(Configuration_, QStringLiteral("&Configuration"));
 

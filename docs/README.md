@@ -77,6 +77,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Port Ludus to a new platform](development/platform-porting.md)
 - [Public rendering: fullscreen and portable raster](development/fullscreen-rendering.md)
 - [Read and publish files through the filesystem](wiki/guides/filesystem.md)
+- [Runtime profiling](development/runtime-profiling.md)
 - [Save, validate and build render graphs](development/render-graph-authoring.md)
 - [Troubleshooting](wiki/guides/troubleshooting.md)
 - [Use deterministic randomness](wiki/guides/randomness.md)

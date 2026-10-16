@@ -1,0 +1,148 @@
+#pragma once
+
+#include <ludus/foundation/base/types.h>
+
+#include "internal/document_history.h"
+
+#include <QByteArray>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QMap>
+#include <QString>
+#include <QStringList>
+#include <QVector>
+
+namespace ludus::editor
+{
+/// Complete authored render-graph package content: package-relative path to bytes.
+struct RenderGraphSnapshot final
+{
+    QMap<QString, QByteArray> Files;
+    [[nodiscard]] bool operator==(const RenderGraphSnapshot& other) const = default;
+};
+
+/// Layout position of one node, in canvas units (presentation only; never compiled).
+struct RenderGraphNodePosition final
+{
+    QString Node;
+    foundation::int32 X = 0;
+    foundation::int32 Y = 0;
+};
+
+enum class RenderGraphDocumentStatus : foundation::uint8
+{
+    Ok,
+    NotFound,
+    Capacity,
+    Malformed,
+    InvalidEdit,
+    Conflict,
+    Locked,
+    WriteFailed,
+};
+
+/// Serialize a JSON object exactly like ludus_tools.render_graph.canonical_asset:
+/// sorted keys, two-space indentation, ASCII escapes and a trailing newline. Saving
+/// an editor draft therefore produces the same bytes as the shared CLI backend.
+[[nodiscard]] QByteArray EncodeCanonicalJson(const QJsonObject& value);
+
+// RG3 render-graph authoring document. It owns one package's saved and draft
+// sources (graph documents, build manifests and shader functions), a bounded
+// undo history and explicit save. Validation, lowering and builds stay in the
+// shared CLI backend; this class only applies typed edits by stable IDs and
+// writes immutable draft snapshots for those jobs. No Qt widgets; GUI thread.
+// See docs/architecture/render-graph-authoring.md, "Editor interaction".
+class RenderGraphDocument final
+{
+public:
+    static constexpr foundation::usize MAX_FILES = 64;
+    static constexpr qsizetype MAX_FILE_BYTES = qsizetype{128} * 1024;
+    static constexpr qsizetype MAX_TOTAL_BYTES = qsizetype{4} * 1024 * 1024;
+    static constexpr foundation::usize HISTORY_CAPACITY = 64;
+
+    /// Read every authored source below packageRoot (bounded, no symlinks, no
+    /// hidden or `out` directories). rootGraph is package-relative. Failure keeps
+    /// the previous document.
+    [[nodiscard]] RenderGraphDocumentStatus Load(const QString& packageRoot, const QString& rootGraph);
+    void Reset();
+    [[nodiscard]] bool IsLoaded() const noexcept
+    {
+        return mPackageRoot.isEmpty() == false;
+    }
+    [[nodiscard]] const QString& GetPackageRoot() const noexcept
+    {
+        return mPackageRoot;
+    }
+    [[nodiscard]] const QString& GetRootGraph() const noexcept
+    {
+        return mRootGraph;
+    }
+    [[nodiscard]] QStringList GetFiles() const;
+    [[nodiscard]] QByteArray GetDraft(const QString& file) const;
+    [[nodiscard]] QByteArray GetSaved(const QString& file) const;
+    [[nodiscard]] bool IsFileDirty(const QString& file) const;
+    [[nodiscard]] bool IsDirty() const;
+    /// Monotonic draft revision; increments on every committed edit, undo and redo.
+    [[nodiscard]] foundation::uint64 GetRevision() const noexcept
+    {
+        return mHistory.Revision();
+    }
+    /// Parse a draft graph document; returns false for missing or non-object JSON.
+    [[nodiscard]] bool GetGraph(const QString& file, QJsonObject& outGraph) const;
+
+    [[nodiscard]] RenderGraphDocumentStatus
+    ReplaceNode(const QString& file, const QString& configuration, const QJsonObject& node);
+    [[nodiscard]] RenderGraphDocumentStatus
+    AddNode(const QString& file, const QString& configuration, const QJsonObject& node);
+    [[nodiscard]] RenderGraphDocumentStatus
+    RemoveNode(const QString& file, const QString& configuration, const QString& node);
+    [[nodiscard]] RenderGraphDocumentStatus
+    Connect(const QString& file, const QString& configuration, const QString& from, const QString& to);
+    [[nodiscard]] RenderGraphDocumentStatus
+    Disconnect(const QString& file, const QString& configuration, const QString& from, const QString& to);
+    /// Layout-only edit. Consecutive moves of the same node coalesce into one undo step.
+    [[nodiscard]] RenderGraphDocumentStatus MoveNode(const QString& file,
+                                                     const QString& configuration,
+                                                     const QString& node,
+                                                     foundation::int32 x,
+                                                     foundation::int32 y);
+    /// Layout-only edit of several nodes as one undo step, for one canvas drag gesture.
+    /// Every node must exist; otherwise nothing changes. Never merges with another edit.
+    [[nodiscard]] RenderGraphDocumentStatus
+    MoveNodes(const QString& file, const QString& configuration, const QVector<RenderGraphNodePosition>& positions);
+    /// Replace an existing source's draft bytes (shader function, build manifest or graph text).
+    [[nodiscard]] RenderGraphDocumentStatus SetText(const QString& file, const QByteArray& bytes);
+
+    [[nodiscard]] bool CanUndo() const noexcept
+    {
+        return mHistory.CanUndo();
+    }
+    [[nodiscard]] bool CanRedo() const noexcept
+    {
+        return mHistory.CanRedo();
+    }
+    [[nodiscard]] bool Undo();
+    [[nodiscard]] bool Redo();
+
+    /// Write the complete draft package into an empty directory for a validation or build job.
+    [[nodiscard]] RenderGraphDocumentStatus WriteSnapshot(const QString& directory) const;
+    /// Replace each dirty file atomically after checking that disk still holds the saved bytes.
+    /// Conflict or Locked writes nothing. A failed replacement keeps the remaining files dirty.
+    [[nodiscard]] RenderGraphDocumentStatus Save(QStringList& outSavedFiles);
+
+private:
+    using EditFunction = bool (*)(QJsonObject& inoutConfiguration, const QStringList& arguments);
+    [[nodiscard]] RenderGraphDocumentStatus editConfiguration(const QString& file,
+                                                              const QString& configuration,
+                                                              const QStringList& arguments,
+                                                              EditFunction edit,
+                                                              bool shouldMerge);
+    [[nodiscard]] RenderGraphDocumentStatus commit(const RenderGraphSnapshot& candidate, bool shouldMerge);
+    QString mPackageRoot;
+    QString mRootGraph;
+    RenderGraphSnapshot mSaved;
+    RenderGraphSnapshot mDraft;
+    QString mLastMove;
+    DocumentHistory<RenderGraphSnapshot, HISTORY_CAPACITY> mHistory;
+};
+} // namespace ludus::editor

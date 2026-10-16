@@ -13,7 +13,8 @@ namespace ludus::resources
 // section 1.7, pp. 80-87, for separating generic lifetime from type preparation.
 // This original CPU adapter uses immutable copied versions and explicit leases;
 // Renderer uploads have a separate owner; no chapter implementation is copied.
-// Review: https://github.com/Alegruz/Ludus/blob/main/docs/architecture/resource-management-reference-review.md
+// Review:
+// https://github.com/The-Ludus-Project/Ludus/blob/main/docs/architecture/resource-management-reference-review.md
 namespace
 {
 std::atomic<uint64> NextEpoch{1};

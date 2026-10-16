@@ -55,8 +55,12 @@ that violates it.
   it does not automatically move agents that are already using a shared checkout.
 - Pull requests land through the `main` merge queue, never by a direct merge.
   Pull-request CI runs a fast tier; slow macOS, sanitizer, editor and budget jobs
-  run on the queued candidate. Add the `ci:full` label to run them on the PR
-  first. See `docs/development/continuous-integration.md`.
+  run on the queued candidate. The `ci:full` label runs them on the PR as well;
+  it is reserved for the maintainer. Agents must not add `ci:full` (or ask for
+  it by default): each labeled PR repeats the full tier and competes for the
+  limited macOS runners. Validate locally and let the queue run the full tier.
+  Agents open and update pull requests; only the maintainer enqueues or merges
+  them. See `docs/development/continuous-integration.md`.
 
 ## Coding standards
 

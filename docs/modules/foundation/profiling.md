@@ -39,6 +39,9 @@ EndCapture();
 ExportPerfettoTrace("trace.json");
 ```
 
+For scheduled captures of engine applications and benchmark harnesses, see
+[Runtime profiling](../../development/runtime-profiling.md).
+
 ## Build flavors
 
 `LUDUS_PROFILING_ENABLED` is SDK-owned (generated `profiling_config.hpp`) and

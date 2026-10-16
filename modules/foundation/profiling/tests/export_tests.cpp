@@ -3,6 +3,10 @@
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
 
+#include "internal/recorder.hpp"
+#include "internal/trace_chunk.hpp"
+#include "internal/trace_event.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdio>
@@ -76,6 +80,77 @@ TEST_CASE("export produces well-formed Chrome trace JSON with named B/E slices",
     CHECK(json.find("displayTimeUnit") != std::string::npos);
 
     std::remove(path.c_str());
+}
+
+TEST_CASE("equal-tick events keep recording order across a chunk boundary", "[profiling][export]")
+{
+    // A fast clock gives an End and the next Begin the same tick. Emit an outer
+    // scope around inner pairs at one fixed tick, sized so the first chunk ends
+    // on an inner Begin; its End and the outer End land in the next chunk.
+    using ludus::foundation::uint16;
+    using ludus::foundation::uint32;
+    RegisterThreadForTrace("Main");
+    REQUIRE(BeginCapture(8));
+    static constexpr ZoneDescriptor OUTER_ZONE{std::string_view{"BoundaryOuter"}};
+    static constexpr ZoneDescriptor INNER_ZONE{std::string_view{"BoundaryInner"}};
+    ludus::foundation::profiling::detail::RegisterSite(OUTER_ZONE);
+    ludus::foundation::profiling::detail::RegisterSite(INNER_ZONE);
+    constexpr uint64 FIXED_TICKS = 1000;
+    internal::TraceRecorder& recorder = internal::TraceRecorder::Instance();
+    usize rejectedEvents = 0;
+    const auto emit = [&recorder, &rejectedEvents](uint32 siteId, internal::TraceEventKind kind) {
+        if (recorder.Emit({FIXED_TICKS, siteId, static_cast<uint16>(kind), 0, 0}) == false)
+        {
+            ++rejectedEvents;
+        }
+    };
+    const usize innerPairs = (internal::kEventsPerChunk - 2) / 2;
+    emit(OUTER_ZONE.SiteId, internal::TraceEventKind::Begin);
+    for (usize pair = 0; pair < innerPairs; ++pair)
+    {
+        emit(INNER_ZONE.SiteId, internal::TraceEventKind::Begin);
+        emit(INNER_ZONE.SiteId, internal::TraceEventKind::End);
+    }
+    emit(INNER_ZONE.SiteId, internal::TraceEventKind::Begin);
+    emit(INNER_ZONE.SiteId, internal::TraceEventKind::End);
+    emit(OUTER_ZONE.SiteId, internal::TraceEventKind::End);
+    EndCapture();
+    REQUIRE(rejectedEvents == 0);
+
+    const std::string path = tempPath("chunk_boundary");
+    REQUIRE(ExportPerfettoTrace(path));
+    const std::string json = readFile(path);
+    std::remove(path.c_str());
+
+    // One event object per line; replay the B/E stream as a viewer would.
+    usize depth = 0;
+    usize begins = 0;
+    bool isNestingValid = true;
+    usize lineStart = 0;
+    while (lineStart < json.size())
+    {
+        usize lineEnd = json.find('\n', lineStart);
+        if (lineEnd == std::string::npos)
+        {
+            lineEnd = json.size();
+        }
+        const std::string line = json.substr(lineStart, lineEnd - lineStart);
+        if (line.find("\"ph\":\"B\"") != std::string::npos)
+        {
+            ++depth;
+            ++begins;
+        }
+        else if (line.find("\"ph\":\"E\"") != std::string::npos)
+        {
+            isNestingValid = isNestingValid == true && depth > 0;
+            depth = depth > 0 ? depth - 1 : 0;
+        }
+        lineStart = lineEnd + 1;
+    }
+    CHECK(isNestingValid == true);
+    CHECK(depth == 0);
+    CHECK(begins == static_cast<usize>(innerPairs + 2));
+    CHECK(json.find("\"incomplete\":true") == std::string::npos);
 }
 
 TEST_CASE("export of an empty capture reports failure, not a crash", "[profiling][export]")
