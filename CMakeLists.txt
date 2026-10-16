@@ -16,9 +16,11 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-if(EMSCRIPTEN)
-    set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
-endif()
+# Ludus does not use C++20 named modules. Left on, CMake (CMP0155) runs
+# clang-scan-deps on every C++ source and collates each target before it
+# compiles; see docs/development/build-profiling.md. Turn this back on only
+# when the codebase adopts modules.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
