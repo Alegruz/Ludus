@@ -300,7 +300,11 @@ TEST_CASE("Preview UI validates assets, selects authored cameras and clears stat
     cameras->setCurrentIndex(1);
     CHECK_FALSE(panel.findChild<QSlider*>(QStringLiteral("worldPreviewYaw"))->isEnabled());
     CHECK(panel.findChild<QLabel*>(QStringLiteral("worldPreviewTrace"))->text().contains(QStringLiteral("C0 fixed")));
-    const auto draft = f.World.Draft();
+    const QJsonObject draft = f.World.Draft();
+    panel.Preview().Orbit(0.5F, 0);
+    CHECK(cameras->currentIndex() == 0);
+    CHECK(panel.findChild<QSlider*>(QStringLiteral("worldPreviewYaw"))->isEnabled() == true);
+    CHECK(f.World.Draft() == draft);
     panel.findChild<QPushButton*>(QStringLiteral("worldPreviewFrameAll"))->click();
     CHECK(cameras->currentIndex() == 0);
     CHECK(f.World.Draft() == draft);

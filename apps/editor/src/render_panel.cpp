@@ -121,7 +121,7 @@ RenderPanel::RenderPanel(QWidget* parent) : QWidget(parent), Preview_(this)
     connect(Tint_, &QPushButton::clicked, this, [this]() {
         Q_EMIT TintRequested(Selected_, Preview_.Scene().RenderableBinding);
     });
-    connect(Cameras_, &QComboBox::currentIndexChanged, this, [this]() { navigate(false); });
+    connect(Cameras_, &QComboBox::currentIndexChanged, this, [this]() { navigate(); });
     connect(Yaw_, &QSlider::valueChanged, this, [this](foundation::int32 value) {
         const QJsonObject state = Preview_.Navigation();
         Preview_.Navigate(-1,
@@ -161,13 +161,18 @@ RenderPanel::RenderPanel(QWidget* parent) : QWidget(parent), Preview_(this)
     });
     connect(&Preview_, &RenderPreview::NavigationChanged, this, [this]() {
         const QJsonObject state = Preview_.Navigation();
-        const QSignalBlocker yaw(Yaw_), pitch(Pitch_), zoom(Zoom_), camera(Cameras_), reference(Reference_);
+        const QSignalBlocker yaw(Yaw_);
+        const QSignalBlocker pitch(Pitch_);
+        const QSignalBlocker zoom(Zoom_);
+        const QSignalBlocker camera(Cameras_);
+        const QSignalBlocker reference(Reference_);
         Yaw_->setValue(qRound(state.value(QStringLiteral("yaw")).toDouble()));
         Pitch_->setValue(qRound(state.value(QStringLiteral("pitch")).toDouble()));
         Zoom_->setValue(state.value(QStringLiteral("distance")).toDouble());
-        const auto index = Cameras_->findData(state.value(QStringLiteral("camera")).toString());
+        const foundation::int32 index = Cameras_->findData(state.value(QStringLiteral("camera")).toString());
         Cameras_->setCurrentIndex(index < 0 ? 0 : index);
         Reference_->setChecked(state.value(QStringLiteral("reference")).toBool());
+        updateNavigationControls();
     });
     SetWorld({}, nullptr);
 }
@@ -291,7 +296,7 @@ void RenderPanel::Publish(const RenderScene& scene, bool launch)
         {
             Cameras_->addItem(camera.Name + QStringLiteral(" — ") + camera.Id, camera.Id);
         }
-        const auto index = Cameras_->findData(selected);
+        const foundation::int32 index = Cameras_->findData(selected);
         Cameras_->setCurrentIndex(index < 0 ? 0 : index);
     }
     if (!Preview_.SetScene(scene))
@@ -299,7 +304,7 @@ void RenderPanel::Publish(const RenderScene& scene, bool launch)
         Status_->setText(Preview_.Status());
         return;
     }
-    navigate(false);
+    navigate();
     if (launch)
     {
         Q_EMIT Starting();
@@ -365,25 +370,22 @@ void RenderPanel::Stop() noexcept
     Open_->setEnabled(World_ != nullptr && World_->Loaded());
     Status_->setText(QStringLiteral("Viewport paused. World data is preserved."));
 }
-void RenderPanel::navigate(bool shouldUseControls)
+void RenderPanel::navigate()
+{
+    const QJsonObject state = Preview_.Navigation();
+    Preview_.Navigate(Cameras_->currentIndex() - 1,
+                      static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
+                      static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble()),
+                      static_cast<foundation::float32>(state.value(QStringLiteral("zoom")).toDouble()),
+                      state.value(QStringLiteral("reference")).toBool());
+}
+void RenderPanel::updateNavigationControls()
 {
     const foundation::int32 camera = Cameras_->currentIndex() - 1;
     const bool isOrbit = camera < 0;
     Yaw_->setEnabled(isOrbit);
     Pitch_->setEnabled(isOrbit);
     Zoom_->setEnabled(isOrbit);
-    const QJsonObject state = Preview_.Navigation();
-    Preview_.Navigate(
-        camera,
-        shouldUseControls == true ? static_cast<foundation::float32>(Yaw_->value())
-                                  : static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
-        shouldUseControls == true ? static_cast<foundation::float32>(Pitch_->value())
-                                  : static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble()),
-        shouldUseControls == true
-            ? static_cast<foundation::float32>(Zoom_->value()) /
-                  static_cast<foundation::float32>(state.value(QStringLiteral("radius")).toDouble(1))
-            : static_cast<foundation::float32>(state.value(QStringLiteral("zoom")).toDouble()),
-        shouldUseControls == true ? Reference_->isChecked() : state.value(QStringLiteral("reference")).toBool());
     if (isOrbit == true)
     {
         Trace_->setText(QStringLiteral("Editor view only. F fits selection; Home fits all while preserving "
@@ -391,8 +393,8 @@ void RenderPanel::navigate(bool shouldUseControls)
     }
     else if (camera < Preview_.Scene().Cameras.size())
     {
-        const auto& rig = Preview_.Scene().Cameras[camera];
-        const auto& trace = rig.Trace;
+        const PreviewCamera& rig = Preview_.Scene().Cameras[camera];
+        const gameplay::camera::CameraTrace& trace = rig.Trace;
         Trace_->setText(
             QStringLiteral("C0 %1 · evaluated eye (%2, %3, %4) · target %5 · reverse-Z · physical drawable aspect")
                 .arg(trace.Recipe == gameplay::camera::CameraRecipe::Fixed ? QStringLiteral("fixed")

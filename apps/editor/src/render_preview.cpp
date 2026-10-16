@@ -655,7 +655,11 @@ void RenderPreview::Pan(float32 deltaX, float32 deltaY, float32 heightLogical)
     {
         return;
     }
-    if (mCameraController.TryPan(deltaX, deltaY, heightLogical) == true)
+    if (mCameraController.TryPan(deltaX,
+                                 deltaY,
+                                 heightLogical,
+                                 static_cast<float32>(RequestedWidth_) / static_cast<float32>(RequestedHeight_)) ==
+        true)
     {
         navigationChanged();
     }
@@ -772,8 +776,13 @@ void RenderPreview::RestoreNavigation(const QJsonObject& state)
                                    static_cast<float32>(number(QStringLiteral("rotationY"), 0)),
                                    static_cast<float32>(number(QStringLiteral("rotationZ"), 0)),
                                    static_cast<float32>(number(QStringLiteral("rotationW"), 1))};
-        sample.Lens.Projection =
-            static_cast<gameplay::camera::CameraProjection>(state.value(QStringLiteral("projection")).toInt());
+        const int32 projection = state.value(QStringLiteral("projection")).toInt(-1);
+        if (projection < static_cast<int32>(gameplay::camera::CameraProjection::PerspectiveFinite) ||
+            projection > static_cast<int32>(gameplay::camera::CameraProjection::OrthographicFinite))
+        {
+            return;
+        }
+        sample.Lens.Projection = static_cast<gameplay::camera::CameraProjection>(projection);
         sample.Lens.VerticalFov = static_cast<float32>(number(QStringLiteral("fov"), 1));
         sample.Lens.VerticalSpan = static_cast<float32>(number(QStringLiteral("span"), 14));
         sample.Lens.MinimumVisibleWidth = static_cast<float32>(number(QStringLiteral("minimumWidth"), 0));

@@ -215,3 +215,30 @@ TEST_CASE("Viewport input frames selection, consumes fractional scrolling and st
     CHECK(preview.Navigation() == moving);
     QTest::mouseRelease(&viewport, Qt::RightButton);
 }
+
+TEST_CASE("Orthographic pan uses the active width constraint and invalid restore preserves the camera",
+          "[editor][navigation]")
+{
+    EditorCameraController controller;
+    camera::CameraSample sample = controller.GetSample();
+    sample.Lens.Projection = camera::CameraProjection::OrthographicFinite;
+    sample.Lens.VerticalSpan = 2;
+    sample.Lens.MinimumVisibleWidth = 8;
+    sample.Lens.FarPlane = 100;
+    REQUIRE(controller.TryAdopt(sample, 3) == true);
+    const math::Vector3d before = controller.GetSample().Pose.Position;
+    REQUIRE(controller.TryPan(0, 100, 400, 0.5F) == true);
+    CHECK(math::Length(controller.GetSample().Pose.Position - before) == Catch::Approx(4));
+    REQUIRE(controller.TryDolly(1) == true);
+    CHECK(controller.GetSample().Lens.VerticalSpan == Catch::Approx(1.7F));
+    const camera::CameraSample accepted = controller.GetSample();
+    CHECK(controller.TrySetDistance(-1) == false);
+    CHECK(controller.GetSample().Pose.Position == accepted.Pose.Position);
+    RenderPreview preview;
+    REQUIRE(preview.SetScene(MakeNavigationScene()) == true);
+    const QJsonObject navigation = preview.Navigation();
+    QJsonObject invalid = navigation;
+    invalid.insert(QStringLiteral("projection"), 256);
+    preview.RestoreNavigation(invalid);
+    CHECK(preview.Navigation() == navigation);
+}

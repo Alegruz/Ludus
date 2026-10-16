@@ -248,7 +248,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         ${editor_viewport_sources}
         src/render_scene.cpp
         src/render_preview.cpp
-    src/editor_camera_controller.cpp
+        src/editor_camera_controller.cpp
         src/static_lighting_job.cpp
         src/internal/static_lighting_job.h
         src/preview_area_lights.cpp

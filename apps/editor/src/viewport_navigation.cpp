@@ -66,6 +66,8 @@ void PreviewViewport::mousePressEvent(QMouseEvent* event)
         if (isVisible() == true && platformName != QStringLiteral("offscreen") &&
             platformName != QStringLiteral("minimal") && platformName != QStringLiteral("wasm"))
         {
+            mCaptureStartGlobal = event->globalPosition().toPoint();
+            mCanWarpPointer = platformName.startsWith(QStringLiteral("wayland")) == false;
             grabMouse(Qt::BlankCursor);
             mHasMouseCapture = true;
             recenterPointer();
@@ -181,6 +183,10 @@ void PreviewViewport::stopNavigation()
     {
         releaseMouse();
         mHasMouseCapture = false;
+        if (mCanWarpPointer == true)
+        {
+            QCursor::setPos(mCaptureStartGlobal);
+        }
     }
 }
 void PreviewViewport::advanceNavigation()
@@ -195,13 +201,17 @@ void PreviewViewport::advanceNavigation()
         (mHeldKeys[RIGHT_KEY] == true ? 1.0F : 0.0F) - (mHeldKeys[LEFT_KEY] == true ? 1.0F : 0.0F),
         (mHeldKeys[UP_KEY] == true ? 1.0F : 0.0F) - (mHeldKeys[DOWN_KEY] == true ? 1.0F : 0.0F),
         (mHeldKeys[BACKWARD_KEY] == true ? 1.0F : 0.0F) - (mHeldKeys[FORWARD_KEY] == true ? 1.0F : 0.0F)};
+    if (math::LengthSquared(movementControls) == 0)
+    {
+        return;
+    }
     const float32 speed = math::Clamp(Preview_->GetFocusDistance() * 0.5F, 0.001F, 10000.0F) * mSpeedMultiplier *
                           (mHeldKeys[BOOST_KEY] == true ? 4 : 1);
     Preview_->Fly(movementControls, deltaSeconds, speed);
 }
 void PreviewViewport::recenterPointer()
 {
-    if (mHasMouseCapture == true)
+    if (mHasMouseCapture == true && mCanWarpPointer == true)
     {
         const QPoint centerGlobal = mapToGlobal(rect().center());
         mLastPositionGlobal = centerGlobal;

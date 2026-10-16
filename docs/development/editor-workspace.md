@@ -603,6 +603,10 @@ no-op. Framing uses transformed mesh bounds, fits both viewport axes, and
 preserves orientation. Pan uses the current lens, focus distance and drawable
 height, so resizing and display scaling do not change the intended displacement.
 Fractional pointer/scroll input is retained rather than rounded to mouse notches.
+On Cocoa and X11, fly look recenters the captured pointer and restores its starting
+position on release. Wayland forbids pointer warping through this Qt API, so it
+uses the delivered drag motion; continuous look at the screen edge still needs a
+compositor-supported relative-pointer integration.
 
 Focus distance is independent of the scene radius. The numerical safety range
 is `0.000001`–`10000000` world units, with origin-zero camera coordinates bounded
@@ -615,7 +619,8 @@ orbit-only preferences are migrated on load.
 This is editor navigation using C0 fixed publications, not an implementation of
 the proposed C1 director, transitions, damping, or C2 collision. Mouse displacement
 is applied once per event; fly movement integrates presentation elapsed time and
-caps a single update at 100 ms rather than integrating the entire duration of a UI stall. Navigation
+caps a single update at 100 ms rather than integrating the entire duration of a UI
+stall. Navigation
 continues to use the current project's extracted World and existing GPU frame
 ownership; pending or failed scene preparation retains the last drawable view.
 

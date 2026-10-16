@@ -44,7 +44,8 @@ Q_SIGNALS:
 
 private:
     void Publish(const RenderScene& scene, bool launch);
-    void navigate(bool shouldUseControls = true);
+    void navigate();
+    void updateNavigationControls();
     void ShowStatus();
     void UpdateTintAction();
     const WorldDocument* World_ = nullptr;

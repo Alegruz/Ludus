@@ -18,6 +18,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QMouseEvent>
 #include <QSize>
 #include <QTemporaryDir>
 #include <QTest>
@@ -316,7 +317,8 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(Frames(preview, 3));
     CHECK(ReadViewport() == embedded);
     CHECK(world.Draft() == original);
-    // Native window events are forwarded to the persistent editor navigation model.
+    // Native child input changes the live extracted World image without editing the document.
+    const QJsonObject authoredNavigation = preview.Navigation();
     for (QWindow* window : QGuiApplication::allWindows())
     {
         if (window->objectName() == QStringLiteral("LudusGpuViewport"))
@@ -324,10 +326,49 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
             QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
             QTest::mouseMove(window, QPoint(145, 120));
             QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(145, 120));
+            CHECK(preview.Navigation() == authoredNavigation);
+            preview.Navigate(-1, 80, 40, 20, false);
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            CHECK(ReadViewport() == embedded);
+            QTest::mousePress(window, Qt::LeftButton, Qt::AltModifier, QPoint(100, 100));
+            const QPoint orbitPosition(145, 120);
+            QMouseEvent orbitMove(QEvent::MouseMove,
+                                  orbitPosition,
+                                  window->mapToGlobal(orbitPosition),
+                                  Qt::NoButton,
+                                  Qt::LeftButton,
+                                  Qt::AltModifier);
+            QApplication::sendEvent(window, &orbitMove);
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::AltModifier, QPoint(145, 120));
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            const QImage orbited = ReadViewport();
+            CHECK(orbited != embedded);
+            QTest::mousePress(window, Qt::MiddleButton, Qt::NoModifier, QPoint(145, 120));
+            QTest::mouseMove(window, QPoint(170, 130));
+            QTest::mouseRelease(window, Qt::MiddleButton, Qt::NoModifier, QPoint(170, 130));
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            CHECK(ReadViewport() != orbited);
+            const QJsonObject beforeFly = preview.Navigation();
+            QTest::mousePress(window, Qt::RightButton, Qt::NoModifier, QPoint(170, 130));
+            QTest::keyPress(window, Qt::Key_W);
+            QTest::qWait(100);
+            QTest::mouseRelease(window, Qt::RightButton, Qt::NoModifier, QPoint(170, 130));
+            CHECK(preview.Navigation() != beforeFly);
+            const QJsonObject stopped = preview.Navigation();
+            QTest::qWait(60);
+            CHECK(preview.Navigation() == stopped);
+            preview.SetSelection(QStringLiteral("starter.cube"));
+            QTest::keyClick(window, Qt::Key_F);
+            REQUIRE(Frames(preview, preview.Frames() + 3));
+            CHECK(preview.Report().Visible == 1);
+            CHECK(ReadViewport() != embedded);
+            if (qEnvironmentVariableIsSet("LUDUS_GPU_NAVIGATION_IMAGE") == true)
+            {
+                REQUIRE(ReadViewport().save(qEnvironmentVariable("LUDUS_GPU_NAVIGATION_IMAGE")));
+            }
         }
     }
-    REQUIRE(Frames(preview, preview.Frames() + 3));
-    CHECK(preview.Navigation().value(QStringLiteral("yaw")).toDouble() != 0);
+    CHECK(world.Draft() == original);
     const QJsonObject navigation = preview.Navigation();
     preview.Navigate(-1, 70, 30, 4, false);
     preview.RestoreNavigation(navigation);

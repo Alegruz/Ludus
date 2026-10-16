@@ -4,6 +4,7 @@
 
 #include <new>
 
+#include <QApplication>
 #include <QComboBox>
 #include <QGuiApplication>
 #include <QLabel>
@@ -712,6 +713,11 @@ bool PreviewViewport::eventFilter(QObject* watched, QEvent* event)
                 keyReleaseEvent(static_cast<QKeyEvent*>(event));
                 return event->isAccepted();
             case QEvent::FocusOut:
+                if (QApplication::focusWidget() != this)
+                {
+                    stopNavigation();
+                }
+                break;
             case QEvent::WindowDeactivate:
                 stopNavigation();
                 break;

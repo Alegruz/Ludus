@@ -60,6 +60,8 @@ private:
     static constexpr foundation::usize MOVEMENT_KEY_COUNT = 7;
     foundation::StaticArray<bool, MOVEMENT_KEY_COUNT> mHeldKeys{};
     QPointF mLastPositionGlobal;
+    QPoint mCaptureStartGlobal;
+    bool mCanWarpPointer = false;
     QTimer mNavigationTimer;
     QElapsedTimer mNavigationClock;
     foundation::float32 mSpeedMultiplier = 1;

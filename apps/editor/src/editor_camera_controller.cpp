@@ -122,17 +122,17 @@ bool EditorCameraController::TryRotate(float32 deltaX, float32 deltaY, bool isOr
     }
     return tryPublish(candidate, mDistance);
 }
-bool EditorCameraController::TryPan(float32 deltaX, float32 deltaY, float32 heightLogical) noexcept
+bool EditorCameraController::TryPan(float32 deltaX, float32 deltaY, float32 heightLogical, float32 aspect) noexcept
 {
     if (math::IsFinite(deltaX) == false || math::IsFinite(deltaY) == false || math::IsFinite(heightLogical) == false ||
-        heightLogical <= 0)
+        heightLogical <= 0 || math::IsFinite(aspect) == false || aspect <= 0)
     {
         return false;
     }
     const camera::CameraLens& lens = mSample.Lens;
     const float32 halfFov = lens.VerticalFov * 0.5F;
     const float32 span = lens.Projection == camera::CameraProjection::OrthographicFinite
-                             ? lens.VerticalSpan
+                             ? math::Max(lens.VerticalSpan, lens.MinimumVisibleWidth / aspect)
                              : 2 * mDistance * math::Sin(halfFov) / math::Cos(halfFov);
     return TryFly({-deltaX, deltaY, 0}, span / heightLogical);
 }

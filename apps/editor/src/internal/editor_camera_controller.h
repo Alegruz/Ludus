@@ -32,8 +32,10 @@ public:
                                    foundation::float32 pitchDegrees,
                                    foundation::float32 distance) noexcept;
     [[nodiscard]] bool TryRotate(foundation::float32 deltaX, foundation::float32 deltaY, bool isOrbit) noexcept;
-    [[nodiscard]] bool
-    TryPan(foundation::float32 deltaX, foundation::float32 deltaY, foundation::float32 heightLogical) noexcept;
+    [[nodiscard]] bool TryPan(foundation::float32 deltaX,
+                              foundation::float32 deltaY,
+                              foundation::float32 heightLogical,
+                              foundation::float32 aspect = 1) noexcept;
     [[nodiscard]] bool TrySetDistance(foundation::float32 distance) noexcept;
     [[nodiscard]] bool TryDolly(foundation::float32 steps) noexcept;
     [[nodiscard]] bool TryFly(foundation::math::Vector3 movementLocal, foundation::float32 distance) noexcept;
