@@ -134,4 +134,6 @@ unchanged. The native and browser platform entropy adapters are implemented in
 `TryGenerateUuidV4` from an entropy source its callers inject
 (`AssetOptions::EntropyOrNull`; see the
 [architecture decision](../../architecture/object-handles-uuid.md#implementation-sequence)).
+The Editor mints its World entity and level IDs the same way, from an injectable
+source that defaults to `GetSystemEntropySource()`.
 Registry alignment and UUID authoring records are later stages.

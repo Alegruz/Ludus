@@ -1,5 +1,7 @@
 #include "internal/world_document.h"
 
+#include "internal/editor_identity.h"
+
 #include <ludus/foundation/base/parse_number.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/scalar.hpp>
@@ -53,6 +55,20 @@ bool Text(const QJsonValue& value, foundation::int64 limit)
     }
     const auto text = value.toString();
     return text.toUtf8().size() <= limit && !text.contains(QChar(0)) && QString::fromUtf8(text.toUtf8()) == text;
+}
+// Mint a fresh entity ID. World-demo IDs keep their legacy `entity-` prefix and
+// the first ENTITY_UUID_CHARACTERS of the UUID text, so that they fit the
+// sample's 32-byte name field with its terminator.
+bool TryGenerateEntityId(const foundation::identity::EntropySource& entropy, bool isWorldDemo, QString& outId)
+{
+    constexpr qsizetype ENTITY_UUID_CHARACTERS = 24;
+    QString uuid;
+    if (TryGenerateUuidText(entropy, uuid) == false)
+    {
+        return false;
+    }
+    outId = isWorldDemo == true ? QStringLiteral("entity-") + uuid.left(ENTITY_UUID_CHARACTERS) : uuid;
+    return true;
 }
 bool Fields(const QJsonObject& object, const QStringList& allowed)
 {
@@ -671,11 +687,17 @@ bool WorldDocument::ReplaceEntity(const QJsonObject& entity, QString& error)
     }
     return Fail(error, QStringLiteral("Entity no longer exists."));
 }
-bool WorldDocument::CreateEntity(QString& error, const QString& name, QString& id)
+bool WorldDocument::CreateEntity(const foundation::identity::EntropySource& entropy,
+                                 QString& outError,
+                                 const QString& name,
+                                 QString& outId)
 {
-    const auto fresh = Schema_.value(QStringLiteral("id")) == QJsonValue(QStringLiteral("ludus.world-demo.v1"))
-                           ? QStringLiteral("entity-") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(24)
-                           : QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const bool isWorldDemo = Schema_.value(QStringLiteral("id")) == QJsonValue(QStringLiteral("ludus.world-demo.v1"));
+    QString fresh;
+    if (TryGenerateEntityId(entropy, isWorldDemo, fresh) == false)
+    {
+        return Fail(outError, DescribeEntropyUnavailable());
+    }
     QJsonObject components;
     for (const auto value : Schema_.value(QStringLiteral("components")).toArray())
     {
@@ -691,23 +713,29 @@ bool WorldDocument::CreateEntity(QString& error, const QString& name, QString& i
                                 {QStringLiteral("name"), name},
                                 {QStringLiteral("components"), components}});
     candidate.insert(QStringLiteral("entities"), entities);
-    if (!Commit(candidate, error))
+    if (Commit(candidate, outError) == false)
     {
         return false;
     }
-    id = fresh;
+    outId = fresh;
     return true;
 }
-bool WorldDocument::DuplicateEntity(QString& error, const QString& source, QString& id)
+bool WorldDocument::DuplicateEntity(const foundation::identity::EntropySource& entropy,
+                                    QString& outError,
+                                    const QString& source,
+                                    QString& outId)
 {
     auto entity = Entity(source);
     if (entity.isEmpty())
     {
-        return Fail(error, QStringLiteral("Select an entity to duplicate."));
+        return Fail(outError, QStringLiteral("Select an entity to duplicate."));
     }
-    const auto fresh = Schema_.value(QStringLiteral("id")) == QJsonValue(QStringLiteral("ludus.world-demo.v1"))
-                           ? QStringLiteral("entity-") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(24)
-                           : QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const bool isWorldDemo = Schema_.value(QStringLiteral("id")) == QJsonValue(QStringLiteral("ludus.world-demo.v1"));
+    QString fresh;
+    if (TryGenerateEntityId(entropy, isWorldDemo, fresh) == false)
+    {
+        return Fail(outError, DescribeEntropyUnavailable());
+    }
     auto components = entity.value(QStringLiteral("components")).toObject();
     for (auto c = components.begin(); c != components.end(); ++c)
     {
@@ -736,11 +764,11 @@ bool WorldDocument::DuplicateEntity(QString& error, const QString& source, QStri
     auto entities = candidate.value(QStringLiteral("entities")).toArray();
     entities.append(entity);
     candidate.insert(QStringLiteral("entities"), entities);
-    if (!Commit(candidate, error))
+    if (Commit(candidate, outError) == false)
     {
         return false;
     }
-    id = fresh;
+    outId = fresh;
     return true;
 }
 bool WorldDocument::RemoveEntity(const QString& id, QString& error)

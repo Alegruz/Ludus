@@ -3,6 +3,7 @@
 
 #include "internal/controller.h"
 #include "internal/editor_files.h"
+#include "internal/editor_identity.h"
 #include "internal/level_workspace.h"
 #include "internal/render_panel.h"
 #include "internal/world_demo_adapter.h"
@@ -34,7 +35,6 @@
 #include <QSaveFile>
 #include <QScrollArea>
 #include <QSplitter>
-#include <QUuid>
 #include <QVBoxLayout>
 
 namespace ludus::editor
@@ -326,7 +326,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     });
     connect(Add_, &QPushButton::clicked, this, [this]() {
         QString id, error;
-        if (!Document_.CreateEntity(error, QStringLiteral("Entity"), id))
+        if (Document_.CreateEntity(mEntropy, error, QStringLiteral("Entity"), id) == false)
         {
             Changed(error);
             return;
@@ -338,7 +338,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     });
     connect(Duplicate_, &QPushButton::clicked, this, [this]() {
         QString id, error;
-        if (!Document_.DuplicateEntity(error, Selected_, id))
+        if (Document_.DuplicateEntity(mEntropy, error, Selected_, id) == false)
         {
             Changed(error);
             return;
@@ -556,7 +556,7 @@ bool WorldWorkspace::Open(const QString& path)
                                           QFileInfo(path).completeBaseName() + QStringLiteral(".world.json")
                                     : path;
     if ((legacy && !Inside(destination, false)) ||
-        !(legacy ? ImportWorldDemo(candidate, bytes, error) : candidate.Load(bytes, error)))
+        (legacy ? ImportWorldDemo(candidate, mEntropy, bytes, error) : candidate.Load(bytes, error)) == false)
     {
         Changed(error);
         return false;
@@ -571,7 +571,7 @@ bool WorldWorkspace::Open(const QString& path)
     WorldDocument currentDefinition;
     if (!LoadProjectSchema(currentDefinition, currentSchema, demo) || currentSchema != schema ||
         !Read(path, bytes, WorldDocument::MaxBytes) ||
-        !(legacy ? ImportWorldDemo(candidate, bytes, error) : candidate.Load(bytes, error)))
+        (legacy ? ImportWorldDemo(candidate, mEntropy, bytes, error) : candidate.Load(bytes, error)) == false)
     {
         Changed(QStringLiteral("Incoming world/schema changed while opening. Retry Open World."));
         return false;
@@ -643,6 +643,11 @@ bool WorldWorkspace::Create(const QString& path)
     Changed(QStringLiteral("New world. Add entities, then Save World to create the file."));
     return true;
 }
+void WorldWorkspace::SetEntropySource(const foundation::identity::EntropySource& entropy) noexcept
+{
+    mEntropy = entropy;
+    Scene_->SetEntropySource(entropy);
+}
 bool WorldWorkspace::SceneBusy() const noexcept
 {
     return Scene_ != nullptr && Scene_->Busy();
@@ -671,8 +676,14 @@ bool WorldWorkspace::StartSceneImport(const QString& source, bool isPreviewed)
     auto level = Document_.SceneLevel();
     if (level.isEmpty())
     {
+        QString levelId;
+        if (TryGenerateUuidText(mEntropy, levelId) == false)
+        {
+            Changed(DescribeEntropyUnavailable());
+            return false;
+        }
         level = QJsonObject{{QStringLiteral("version"), 1},
-                            {QStringLiteral("id"), QUuid::createUuid().toString(QUuid::WithoutBraces)},
+                            {QStringLiteral("id"), levelId},
                             {QStringLiteral("name"), QFileInfo(Path_).completeBaseName()},
                             {QStringLiteral("profile"), QStringLiteral("resident-reference-v1")},
                             {QStringLiteral("objects"), QJsonArray{}},

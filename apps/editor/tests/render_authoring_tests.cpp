@@ -11,6 +11,7 @@
 
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/transform.hpp>
+#include <ludus/platform/entropy.h>
 
 #include <QCheckBox>
 #include <QColorDialog>
@@ -518,7 +519,10 @@ TEST_CASE("Duplicate textured objects share surfaces while distinct material cap
     for (int32 i = 0; i < 11; ++i)
     {
         QString id;
-        REQUIRE(f.World.DuplicateEntity(f.Error, QStringLiteral("starter.cube"), id));
+        REQUIRE(f.World.DuplicateEntity(ludus::platform::GetSystemEntropySource(),
+                                        f.Error,
+                                        QStringLiteral("starter.cube"),
+                                        id));
     }
     REQUIRE(RenderScene::Load(f.Root, f.World, f.Scene, f.Error));
     CHECK(f.Scene.Objects.size() == 12);
