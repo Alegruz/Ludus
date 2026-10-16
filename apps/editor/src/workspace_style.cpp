@@ -72,6 +72,7 @@ void UpdateWorkspaceStyle(QWidget* widget)
             "QPushButton:disabled { color: palette(placeholder-text); background: palette(window); } "
             "QLineEdit, QAbstractSpinBox, QComboBox { background: palette(base); color: palette(text); "
             "border: 1px solid palette(mid); border-radius: 4px; padding: 4px; } "
+            "QAbstractSpinBox QLineEdit { border: none; padding: 0px; background: transparent; } "
             "QComboBox { padding-right: 20px; } "
             "QAbstractItemView, QPlainTextEdit, QTextEdit { background: palette(base); border: 1px solid palette(mid); "
             "border-radius: 4px; selection-background-color: palette(highlight); selection-color: "
