@@ -761,10 +761,11 @@ void RenderPreview::RestoreNavigation(const QJsonObject& state)
     const math::Vector3d pivotWorld{number(QStringLiteral("x"), static_cast<float64>(Scene_.Center.X)),
                                     number(QStringLiteral("y"), static_cast<float64>(Scene_.Center.Y)),
                                     number(QStringLiteral("z"), static_cast<float64>(Scene_.Center.Z))};
-    OrbitRadius_ = static_cast<float32>(number(QStringLiteral("radius"), static_cast<float64>(Scene_.Radius)));
-    if (OrbitRadius_ <= 0 || math::IsFinite(OrbitRadius_) == false)
+    float32 orbitRadius = static_cast<float32>(number(QStringLiteral("radius"), static_cast<float64>(Scene_.Radius)));
+    EditorCameraController controller = mCameraController;
+    if (orbitRadius <= 0 || math::IsFinite(orbitRadius) == false)
     {
-        OrbitRadius_ = 1;
+        orbitRadius = 1;
     }
     if (state.value(QStringLiteral("navigationVersion")).toInt() == 2)
     {
@@ -788,17 +789,23 @@ void RenderPreview::RestoreNavigation(const QJsonObject& state)
         sample.Lens.MinimumVisibleWidth = static_cast<float32>(number(QStringLiteral("minimumWidth"), 0));
         sample.Lens.NearPlane = static_cast<float32>(number(QStringLiteral("near"), 0.01));
         sample.Lens.FarPlane = static_cast<float32>(number(QStringLiteral("far"), 100));
-        static_cast<void>(
-            mCameraController.TryAdopt(sample, static_cast<float32>(number(QStringLiteral("distance"), 3))));
+        if (controller.TryAdopt(sample, static_cast<float32>(number(QStringLiteral("distance"), 3))) == false)
+        {
+            return;
+        }
     }
     else
     {
-        static_cast<void>(
-            mCameraController.TrySetOrbit(pivotWorld,
-                                          {static_cast<float32>(number(QStringLiteral("yaw"), 25)),
-                                           static_cast<float32>(number(QStringLiteral("pitch"), 20))},
-                                          static_cast<float32>(number(QStringLiteral("zoom"), 3)) * OrbitRadius_));
+        if (controller.TrySetOrbit(pivotWorld,
+                                   {static_cast<float32>(number(QStringLiteral("yaw"), 25)),
+                                    static_cast<float32>(number(QStringLiteral("pitch"), 20))},
+                                   static_cast<float32>(number(QStringLiteral("zoom"), 3)) * orbitRadius) == false)
+        {
+            return;
+        }
     }
+    mCameraController = controller;
+    OrbitRadius_ = orbitRadius;
     Camera_ = -1;
     CameraId_ = state.value(QStringLiteral("camera")).toString().left(256);
     Reference_ = state.value(QStringLiteral("reference")).toBool();

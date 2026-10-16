@@ -260,6 +260,13 @@ TEST_CASE("Orthographic pan uses the active width constraint and invalid restore
     const QJsonObject navigation = preview.Navigation();
     QJsonObject invalid = navigation;
     invalid.insert(QStringLiteral("projection"), 256);
+    invalid.insert(QStringLiteral("radius"), 123);
+    preview.RestoreNavigation(invalid);
+    CHECK(preview.Navigation() == navigation);
+    invalid = navigation;
+    invalid.insert(QStringLiteral("distance"), -1);
+    invalid.insert(QStringLiteral("radius"), 123);
+    invalid.insert(QStringLiteral("camera"), QStringLiteral("authored-camera"));
     preview.RestoreNavigation(invalid);
     CHECK(preview.Navigation() == navigation);
 }
