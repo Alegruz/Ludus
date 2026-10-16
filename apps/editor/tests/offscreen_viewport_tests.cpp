@@ -2,7 +2,7 @@
 #include "internal/preview_viewport.h"
 #include "internal/render_preview.h"
 #include "internal/render_scene.h"
-#include "internal/world_document.h"
+#include "viewport_fixture.h"
 
 #include <ludus/foundation/time/time.hpp>
 
@@ -10,11 +10,8 @@
 #include <ludus/graphics/rhi/rhi.h>
 
 #include <QByteArray>
-#include <QDir>
 #include <QElapsedTimer>
-#include <QFile>
 #include <QFileInfo>
-#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QtGlobal>
@@ -34,17 +31,6 @@ constexpr uint32 FRAME_HEIGHT = 700;
 constexpr usize BYTES_PER_TEXEL = 4;
 /// Upper bound for one asynchronous copy on a software rasterizer.
 constexpr uint64 TIMEOUT_SECONDS = 20;
-/// Shadowed point lamps in the lit regression scene: six cube faces each gives
-/// 72 shadow regions, within the renderer's 80-region atlas.
-constexpr int32 LAMP_COUNT = 12;
-/// Extra copies of the sample cube. Each caster draws once per shadow region, so
-/// five casters need 360 atlas draws: above the RHI's default 256 draws per plan,
-/// like the supplied staircase2 scene (6 casters x 78 regions).
-constexpr int32 EXTRA_CASTER_COUNT = 4;
-/// Spacing between lamps along the row above the World origin, in world units.
-constexpr float64 LAMP_SPACING = 1.5;
-/// Height of the lamp row above the World origin, in world units.
-constexpr float64 LAMP_HEIGHT = 3;
 /// Upper bound for lit preparation, the shadow atlas and two frames on a software rasterizer.
 constexpr int32 LIT_TIMEOUT_MILLISECONDS = 120000;
 /// Qt event-loop slice between preview ticks while waiting for frames.
@@ -52,72 +38,6 @@ constexpr int32 POLL_MILLISECONDS = 20;
 uint8 GetPatternByte(uint32 x, uint32 y, uint32 channel)
 {
     return static_cast<uint8>((x * 7U + y * 13U + channel * 61U) & 0xFFU);
-}
-QByteArray ReadFile(const QString& path)
-{
-    QFile file(path);
-    REQUIRE(file.open(QIODevice::ReadOnly) == true);
-    return file.readAll();
-}
-/// Copies the live-edit sample World into root, adds shadow-casting cube copies and
-/// a row of authored point lamps, so the cooked scene takes the authored-lighting path.
-void MakeLitScene(const QString& root, RenderScene& outScene)
-{
-    REQUIRE(QDir(root).mkpath(QStringLiteral("authoring")) == true);
-    for (const QString& name : {QStringLiteral("world.schema.json"),
-                                QStringLiteral("rendering.world.json"),
-                                QStringLiteral("render.preview.json"),
-                                QStringLiteral("cube.mesh.json"),
-                                QStringLiteral("ludus.png")})
-    {
-        QFile target(root + QStringLiteral("/authoring/") + name);
-        REQUIRE(target.open(QIODevice::WriteOnly) == true);
-        const QByteArray bytes = ReadFile(QStringLiteral(":/samples/live-edit-game/authoring/") + name);
-        REQUIRE(target.write(bytes) == bytes.size());
-    }
-    QString error;
-    WorldDocument world;
-    REQUIRE(world.LoadSchema(ReadFile(root + QStringLiteral("/authoring/world.schema.json")), error) == true);
-    REQUIRE(world.Load(ReadFile(root + QStringLiteral("/authoring/rendering.world.json")), error) == true);
-    for (int32 i = 0; i < EXTRA_CASTER_COUNT; ++i)
-    {
-        QString casterId;
-        REQUIRE(world.DuplicateEntity(error, QStringLiteral("starter.cube"), casterId) == true);
-        QJsonObject components = world.Entity(casterId).value(QStringLiteral("components")).toObject();
-        QJsonObject transform = components.value(QStringLiteral("transform")).toObject();
-        transform.insert(QStringLiteral("x"),
-                         transform.value(QStringLiteral("x")).toDouble() + static_cast<float64>(i + 1) * LAMP_SPACING);
-        components.insert(QStringLiteral("transform"), transform);
-        REQUIRE(world.Edit(casterId, components, QStringLiteral("Caster"), error) == true);
-    }
-    for (int32 i = 0; i < LAMP_COUNT; ++i)
-    {
-        // Lamps carry no renderable, so they add lights without adding meshes.
-        QString lampId;
-        REQUIRE(world.CreateEntity(error, QStringLiteral("Lamp"), lampId) == true);
-        QJsonObject components = world.Entity(lampId).value(QStringLiteral("components")).toObject();
-        QJsonObject transform = components.value(QStringLiteral("transform")).toObject();
-        transform.insert(QStringLiteral("x"),
-                         (static_cast<float64>(i) - static_cast<float64>(LAMP_COUNT) / 2) * LAMP_SPACING);
-        transform.insert(QStringLiteral("y"), LAMP_HEIGHT);
-        components.insert(QStringLiteral("transform"), transform);
-        components.insert(QStringLiteral("light"),
-                          QJsonObject{{QStringLiteral("kind"), QStringLiteral("point")},
-                                      {QStringLiteral("enabled"), true},
-                                      {QStringLiteral("r"), 1},
-                                      {QStringLiteral("g"), 1},
-                                      {QStringLiteral("b"), 1},
-                                      {QStringLiteral("intensity"), 20},
-                                      {QStringLiteral("range"), 20},
-                                      {QStringLiteral("innerAngle"), 25},
-                                      {QStringLiteral("outerAngle"), 30}});
-        REQUIRE(world.Edit(lampId, components, QStringLiteral("Lamp"), error) == true);
-    }
-    const bool isLoaded = RenderScene::Load(root, world, outScene, error);
-    INFO(error.toStdString());
-    REQUIRE(isLoaded == true);
-    REQUIRE(outScene.Lit == true);
-    REQUIRE(outScene.AuthoredLights.Count == static_cast<uint32>(LAMP_COUNT));
 }
 } // namespace
 
@@ -248,7 +168,7 @@ TEST_CASE("Lit shading with many shadowed lights renders through the offscreen V
     QTemporaryDir directory;
     REQUIRE(directory.isValid() == true);
     RenderScene scene;
-    MakeLitScene(QFileInfo(directory.path()).canonicalFilePath(), scene);
+    tests::MakeLitScene(QFileInfo(directory.path()).canonicalFilePath(), scene);
     RenderPreview preview;
     REQUIRE(preview.SetScene(scene) == true);
     preview.SetShading(PreviewShading::Lit);
@@ -269,10 +189,10 @@ TEST_CASE("Lit shading with many shadowed lights renders through the offscreen V
     INFO(preview.Status().toStdString());
     REQUIRE(preview.Running() == true);
     REQUIRE(preview.Frames() >= 2);
-    CHECK(preview.Status().contains(QStringLiteral("Lit: %1 lights").arg(LAMP_COUNT)) == true);
+    CHECK(preview.Status().contains(QStringLiteral("Lit: %1 lights").arg(tests::LAMP_COUNT)) == true);
     CHECK(preview.Status().contains(
               QStringLiteral("%1 shadow faces")
-                  .arg(LAMP_COUNT * static_cast<int32>(ludus::graphics::renderer::POINT_SHADOW_FACES))) == true);
+                  .arg(tests::LAMP_COUNT * static_cast<int32>(ludus::graphics::renderer::POINT_SHADOW_FACES))) == true);
     preview.Stop();
 #else
     SKIP("Offscreen Vulkan presentation is Linux-only");
