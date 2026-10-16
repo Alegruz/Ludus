@@ -12,11 +12,13 @@
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/transform.hpp>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDir>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -395,6 +397,14 @@ TEST_CASE("Renderer controls and inspector remain reachable in a small styled Wo
     REQUIRE(scroll != nullptr);
     CHECK(scroll->height() <= 120);
     CHECK(scroll->verticalScrollBar()->maximum() > 0);
+    QDoubleSpinBox* distance = world.findChild<QDoubleSpinBox*>(QStringLiteral("worldPreviewZoom"));
+    REQUIRE(distance != nullptr);
+    scroll->ensureWidgetVisible(distance);
+    QApplication::processEvents();
+    QLineEdit* distanceEditor = distance->findChild<QLineEdit*>();
+    REQUIRE(distanceEditor != nullptr);
+    CHECK(distance->isVisible() == true);
+    CHECK(distanceEditor->height() >= distanceEditor->minimumSizeHint().height());
     for (const auto& name : {QStringLiteral("worldPreview3D"),
                              QStringLiteral("worldPreviewReload"),
                              QStringLiteral("worldAdd"),

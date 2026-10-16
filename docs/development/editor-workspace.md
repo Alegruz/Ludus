@@ -562,8 +562,9 @@ also pauses World rendering and resumes it when the operation returns to Idle. P
 results from reopening or publishing into another document. Failed GPU setup
 stops the surface with feedback and preserves World edits; resuming retries.
 
-Reopening a project restores its last World, selection, orbit center, distance,
-yaw/pitch, authored camera selection, splitter sizes, active tab and dock layout.
+Reopening a project restores its last World, selection, editor camera pose/lens
+and focus distance, authored camera selection, splitter sizes, active tab and dock
+layout.
 These preferences live beside the editor's local `workspace.json`, in `projects/`
 files keyed by the canonical project root. They do not alter World camera entities
 or project documents. Missing Worlds and incompatible or invalid preferences
@@ -849,8 +850,8 @@ renders the same raster viewport into its two display images, and copies the
 latest completed image back to the CPU in bands that each fit one RHI transfer
 slice. A plain widget paints that `QImage`. The renderer keeps drawing into the
 other image while one is being copied, and the GUI thread only polls, so no call
-waits for the GPU. Orbit, pan, zoom and double-click framing work as in the shared
-path; resizing recreates the offscreen targets. The copy costs some latency and
+waits for the GPU. [World navigation controls](#world-viewport-navigation) work as
+in the shared path; resizing recreates the offscreen targets. The copy costs some latency and
 bandwidth, and the frame is capped at 1024 pixels on its long side, the same as
 the shared path. Set `LUDUS_EDITOR_VIEWPORT=offscreen` to force this path on any
 Linux build (useful for testing it on newer Qt). Qt 6.6+ keeps the shared path
