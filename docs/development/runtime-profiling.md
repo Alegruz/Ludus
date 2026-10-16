@@ -127,8 +127,9 @@ change to the workflow takes effect after it lands.
 
 Each lane:
 
-1. Prepares the locked Profile preset with the shared native or macOS setup
-   action, and the pinned shader tools.
+1. Prepares the locked Profile preset without the optional Editor, using the
+   shared native or macOS setup action and the pinned shader tools. The macOS
+   presentation scenario uses the native World demo.
 2. Downloads the `runtime-profile-<lane>` artifact from the most recent completed
    run on `main` as the baseline, if one exists.
 3. Runs `./scripts/profile-engine` and appends `summary.md` to the job summary.
