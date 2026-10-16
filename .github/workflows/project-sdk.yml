@@ -82,7 +82,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, macos-14, macos-15-intel]
+        # Pull requests install on Ubuntu only; the macOS installs run in the
+        # merge queue and on main, keeping scarce macOS runners for queued work.
+        runner: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["ubuntu-24.04", "macos-14", "macos-15-intel"]') }}
     steps:
       - uses: actions/checkout@v4
         with:

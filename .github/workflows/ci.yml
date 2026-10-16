@@ -1,8 +1,24 @@
 name: ci
 
 on:
+  # The merge queue already validated each landed commit, so main reruns the
+  # full tier only when shared cache keys change, plus nightly. Caches saved by
+  # pull-request and merge-queue runs are not visible to other branches; these
+  # main runs keep the dependency and compiler caches that every PR restores warm.
   push:
     branches: [main]
+    paths:
+      - 'conanfile.py'
+      - 'conan.lock'
+      - 'third_party/**'
+      - 'config/conan/**'
+      - 'config/tool_versions.json'
+      - 'config/luau_toolchain.json'
+      - 'CMakePresets.json'
+      - '.github/workflows/ci.yml'
+      - '.github/actions/**'
+  schedule:
+    - cron: '17 9 * * *'
   pull_request:
     # labeled lets the ci:full label rerun the deferred merge-queue jobs on a PR.
     types: [opened, synchronize, reopened, labeled]
