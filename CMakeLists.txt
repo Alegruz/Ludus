@@ -142,6 +142,8 @@ add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/network/core)
 add_subdirectory(modules/foundation/memory)
 add_subdirectory(modules/foundation/hash)
+# FoundationIdentity depends only on FoundationBase and builds for native and web.
+add_subdirectory(modules/foundation/identity)
 add_subdirectory(modules/foundation/strings)
 add_subdirectory(modules/localization)
 add_subdirectory(modules/foundation/containers)

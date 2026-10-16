@@ -1,6 +1,6 @@
 #pragma once
 
-// Case ABI shared by gpu_random_tests.cpp and random_parity.slang. A case is two
+// Case ABI shared by random_parity_corpus.h and random_parity.slang. A case is two
 // uint4 words, (kind, key low, key high, bound) then a kind-specific operand;
 // the kernel writes one uint4 result per case.
 #define LUDUS_RANDOM_PARITY_CASE_PHILOX 0
