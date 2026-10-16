@@ -13,5 +13,7 @@ shared by the wiki and offline readers.
 - [reference review](../../architecture/smart-pointers-reference-review.md)
 - [module API and example](../../modules/foundation/threading.md)
 - [task graph design](../../architecture/threading.md)
+- [handle and UUID values](../../modules/foundation/identity.md)
+- [object handle and UUID design](../../architecture/object-handles-uuid.md)
 - [deterministic randomness](../guides/randomness.md)
 - [reference reading paths](../learn/references.md)

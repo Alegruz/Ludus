@@ -86,6 +86,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 
 ## Module usage
 
+- [FoundationIdentity](modules/foundation/identity.md)
 - [FoundationLogging](modules/foundation/logging.md)
 - [FoundationParsing](modules/foundation/parsing.md)
 - [FoundationProfiling](modules/foundation/profiling.md)
