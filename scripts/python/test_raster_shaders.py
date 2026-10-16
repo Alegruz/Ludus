@@ -12,11 +12,15 @@ from compile_raster import spirv_array_indexing, verify_native_metal_arrays, ras
 class RasterReflectionTests(unittest.TestCase):
     def test_binding_slot_limit_matches_the_public_rhi_contract(self):
         import re
-        from compile_raster import RASTER_BINDING_COUNT
+        from compile_raster import RASTER_BINDING_COUNT, RUNTIME_BINDING_LENGTH_SLOT, RUNTIME_BINDING_ARRAY_SLOT
         source = (ROOT/'modules/graphics/rhi/include/ludus/graphics/rhi/profile.h').read_text()
         match = re.search(r'RASTER_BINDING_COUNT\s*=\s*(\d+)', source)
         self.assertIsNotNone(match)
         self.assertEqual(RASTER_BINDING_COUNT, int(match.group(1)))
+        self.assertEqual(RUNTIME_BINDING_LENGTH_SLOT, RASTER_BINDING_COUNT - 2)
+        self.assertEqual(RUNTIME_BINDING_ARRAY_SLOT, RASTER_BINDING_COUNT - 1)
+        self.assertIn('RUNTIME_BINDING_LENGTH_SLOT = RASTER_BINDING_COUNT - 2', source)
+        self.assertIn('RUNTIME_BINDING_ARRAY_SLOT = RASTER_BINDING_COUNT - 1', source)
         document = self.fixture()
         document['parameters'][0]['binding']['index'] = RASTER_BINDING_COUNT - 1
         result = raster_interface(document, 'fragment')
@@ -32,7 +36,7 @@ class RasterReflectionTests(unittest.TestCase):
         self.assertIn(f"[{len(values)}]", declaration)
         self.assertNotIn('R"', definition)
 
-    def test_native_arrays_require_fixed_color_counts_and_preserve_target_identity(self):
+    def test_native_arrays_require_bounded_counts_and_preserve_target_identity(self):
         texture = {'kind': 'resource', 'baseShape': 'texture2D', 'resultType': {'kind': 'vector', 'elementType': {'scalarType': 'float32'}}}
         document = {'parameters': [{'name': 'Images', 'binding': {'kind': 'descriptorTableSlot', 'index': 1}, 'type': {'kind': 'array', 'elementCount': 72, 'elementType': texture}}],
                     'entryPoints': [{'stage': 'fragment', 'bindings': [{'name': 'Images', 'binding': {'used': 1}}]}]}
@@ -45,7 +49,7 @@ class RasterReflectionTests(unittest.TestCase):
             invalid['parameters'][0]['type']['elementCount'] = count
             with self.assertRaises(RuntimeError):
                 raster_interface(invalid, 'fragment', native_arrays=True)
-        for shape in ('texture3D', 'structuredBuffer'):
+        for shape in ('structuredBuffer',):
             invalid = copy.deepcopy(document)
             invalid['parameters'][0]['type']['elementType']['baseShape'] = shape
             with self.assertRaises(RuntimeError):
@@ -55,6 +59,70 @@ class RasterReflectionTests(unittest.TestCase):
         for invalid in (code.replace('72', '71'), code.replace('texture(1)', 'texture(2)')):
             with self.assertRaises(RuntimeError):
                 verify_native_metal_arrays(invalid, value)
+
+    def test_runtime_texture_arrays_require_the_owned_length_profile(self):
+        from compile_raster import RUNTIME_BINDING_ARRAY_SLOT
+        texture = {'kind': 'resource', 'baseShape': 'textureCube', 'resultType': {'kind': 'vector', 'elementType': {'scalarType': 'float32'}}}
+        document = {'parameters': [{'name': 'Images', 'binding': {'kind': 'descriptorTableSlot', 'index': RUNTIME_BINDING_ARRAY_SLOT}, 'type': {'kind': 'array', 'elementCount': 0, 'elementType': texture}}],
+                    'entryPoints': [{'stage': 'fragment', 'bindings': [{'name': 'Images', 'binding': {'used': 1}}]}]}
+        result = raster_interface(document, 'fragment', native_arrays=True, runtime_arrays=True)
+        self.assertEqual(result['entries'][0]['kind'], 'TextureCube')
+        self.assertEqual(result['entries'][0]['count'], 1)
+        self.assertTrue(result['entries'][0]['runtime_sized'])
+        with self.assertRaises(RuntimeError):
+            raster_interface(document, 'fragment', native_arrays=True)
+        with self.assertRaises(RuntimeError):
+            raster_interface(document, 'fragment', metal=True, native_arrays=True, runtime_arrays=True)
+        document['parameters'][0]['binding']['index'] = 3
+        with self.assertRaises(RuntimeError):
+            raster_interface(document, 'fragment', native_arrays=True, runtime_arrays=True)
+
+    def test_runtime_bounds_use_the_owned_uint4_abi_and_first_component(self):
+        from compile_raster import RUNTIME_BINDING_ARRAY_SLOT, RUNTIME_BINDING_LENGTH_SLOT
+        def instruction(operation, *values):
+            return [(len(values) + 1) << 16 | operation, *values]
+        def target(offset=0, width=4, component=0, subtract=1, bound=True):
+            words = [0x07230203, 0x00010300, 0, 1000, 0]
+            words += instruction(21, 2, 32, 0)
+            words += instruction(23, 3, 2, width)
+            words += instruction(30, 4, 3)
+            words += instruction(72, 4, 0, 35, offset)
+            words += instruction(32, 5, 2, 4)
+            words += instruction(32, 6, 2, 2)
+            words += instruction(32, 20, 0, 21)
+            words += instruction(59, 5, 10, 2)
+            words += instruction(59, 20, 1, 0)
+            words += instruction(71, 10, 33, RUNTIME_BINDING_LENGTH_SLOT)
+            words += instruction(71, 1, 33, RUNTIME_BINDING_ARRAY_SLOT)
+            words += instruction(43, 2, 11, 0)
+            words += instruction(43, 2, 12, subtract)
+            words += instruction(43, 2, 19, component)
+            words += instruction(65, 6, 13, 10, 11, 19)
+            words += instruction(61, 2, 14, 13)
+            words += instruction(130, 2, 15, 14, 12)
+            name = b'GLSL.std.450\0'
+            name += b'\0' * (-len(name) % 4)
+            words += instruction(11, 30, *struct.unpack('<' + 'I' * (len(name) // 4), name))
+            words += instruction(12, 2, 16, 30, 38, 999, 15)
+            words += instruction(65, 40, 18, 1, 16 if bound else 999)
+            return struct.pack('<' + 'I' * len(words), *words)
+        def reflection():
+            return {'entries': [{'binding': RUNTIME_BINDING_LENGTH_SLOT, 'kind': 'UniformBuffer', 'size': 16},
+                                {'binding': RUNTIME_BINDING_ARRAY_SLOT, 'kind': 'Texture2D', 'count': 1, 'runtime_sized': True}]}
+        result = reflection()
+        spirv_array_indexing(target(), result)
+        self.assertTrue(result['entries'][1]['verified_bounds'])
+        for changes in ({'offset': 4}, {'width': 3}, {'component': 1}, {'subtract': 0}, {'bound': False}):
+            with self.assertRaises(RuntimeError):
+                spirv_array_indexing(target(**changes), reflection())
+
+    def test_native_sampler_and_volume_arrays_verify_emitted_metal_registers(self):
+        for kind, declaration, register in (('Sampler', 'sampler', 'sampler'), ('Texture3D', 'texture3d<float>', 'texture'), ('Texture2DArray', 'texture2d_array<float>', 'texture'), ('TextureCube', 'texturecube<float>', 'texture')):
+            interface = {'entries': [{'binding': 2, 'count': 4, 'kind': kind}]}
+            code = f'fragment float4 Main(array<{declaration}, 4> Values [[{register}(2)]]) {{}}'
+            verify_native_metal_arrays(code, interface)
+            with self.assertRaises(RuntimeError):
+                verify_native_metal_arrays(code.replace(f'{register}(2)', f'{register}(3)'), interface)
 
     def test_native_indexing_is_derived_and_unbounded_access_rejects(self):
         def instruction(operation, *values):

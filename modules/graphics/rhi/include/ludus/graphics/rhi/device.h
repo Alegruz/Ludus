@@ -57,6 +57,9 @@ struct DeviceFeatures final
     /// Optional non-uniform fixed texture descriptor indexing (R11), separately
     /// requested through Required/Preferred; never implied by binding arrays.
     bool BindlessTextureIndexing = false;
+    /// Optional native unsized sampled texture descriptor arrays (R11c), requested
+    /// independently of non-uniform selection. Vulkan 1.2 only in this profile.
+    bool HasRuntimeTextureArrays = false;
 };
 
 /// Backend code compiled into this artifact; does not promise adapter/runtime availability.

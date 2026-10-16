@@ -27,9 +27,9 @@ target_link_libraries(ludus_graphics_rhi
     PRIVATE Ludus::FoundationMath Ludus::FoundationTime
     PUBLIC
         Ludus::FoundationBase
+        Ludus::FoundationContainers
         Ludus::Platform
     PRIVATE
-        Ludus::FoundationContainers
         Ludus::FoundationLogging
 )
 if(EMSCRIPTEN)
@@ -204,6 +204,27 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN AND LUDUS_SLANG_COMPILER AND (APPLE OR L
                 SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT ${fragment_entry}
                 INCLUDES "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders" DEFINES LUDUS_R11_ARRAYS=1)
         endforeach()
+    endif()
+    if(LUDUS_SPIRV_CROSS AND NOT EMSCRIPTEN)
+        foreach(shape IN ITEMS cube volume)
+            string(TOUPPER "${shape}" shape_define)
+            ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11${shape} RASTER NATIVE_BINDING_ARRAYS
+            SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT ConstantArrayMain
+            DEFINES LUDUS_R11_ARRAYS=1 LUDUS_R11C_WIDER=1 LUDUS_R11C_${shape_define}=1)
+        endforeach()
+        ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11wider RASTER NATIVE_BINDING_ARRAYS
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT ConstantArrayMain
+        DEFINES LUDUS_R11_ARRAYS=1 LUDUS_R11C_WIDER=1)
+        if(NOT APPLE)
+            target_compile_definitions(ludus_rhi_r11_consumer PRIVATE LUDUS_R11C_RUNTIME=1)
+            ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11buffers RASTER NATIVE_BINDING_ARRAYS
+            SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11buffers.slang" VERTEX VertexMain FRAGMENT FragmentMain)
+            ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11storage NATIVE_BINDING_ARRAYS
+            SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11storage.slang" COMPUTE ComputeMain)
+            ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11runtime RASTER NATIVE_BINDING_ARRAYS RUNTIME_BINDING_ARRAYS
+            SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT ConstantArrayMain
+            DEFINES LUDUS_R11_ARRAYS=1 LUDUS_R11C_RUNTIME=1)
+        endif()
     endif()
     add_test(NAME ludus_rhi_r11_consumer COMMAND ludus_rhi_r11_consumer)
     set_tests_properties(ludus_rhi_r11_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)

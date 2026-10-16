@@ -72,6 +72,7 @@ bool gQueueCompute = false;
 bool gRayEnabled = false, gRayApiAvailable = false;
 bool gHasUniformTextureIndexing = false;
 bool gHasBindlessTextureIndexing = false;
+bool gHasRuntimeTextureArrays = false;
 bool gHasBindingApi = false;
 VkPhysicalDeviceAccelerationStructurePropertiesKHR gRayProperties{};
 VkSurfaceKHR gSurface = VK_NULL_HANDLE;
@@ -589,6 +590,7 @@ bool Initialize(const ApplicationInfo& app) noexcept
         gRayEnabled = gRayApiAvailable = false;
         gHasUniformTextureIndexing = false;
         gHasBindlessTextureIndexing = false;
+        gHasRuntimeTextureArrays = false;
         gHasBindingApi = false;
         gHeadless = true;
         return true;
@@ -641,7 +643,8 @@ bool Initialize(const ApplicationInfo& app) noexcept
         static_cast<void>(vkEnumerateInstanceVersion(&loaderVersion));
     }
     gRayApiAvailable = internal::RequestsRayProfile() && loaderVersion >= VK_API_VERSION_1_2;
-    gHasBindingApi = internal::IsBindlessRequested() == true && loaderVersion >= VK_API_VERSION_1_2;
+    gHasBindingApi = (internal::IsBindlessRequested() == true || internal::IsRuntimeTextureArrayRequested() == true) &&
+                     loaderVersion >= VK_API_VERSION_1_2;
     application.apiVersion =
         gRayApiAvailable == true || gHasBindingApi == true ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
     gNativeInstanceVersion = application.apiVersion;
@@ -859,11 +862,16 @@ bool ConnectWindow(const WindowInfo& window) noexcept
                 }
             }
         }
+        // Thanks to Khronos Group, VkPhysicalDeviceDescriptorIndexingFeatures,
+        // https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceDescriptorIndexingFeatures.html
+        // for independent non-uniform indexing, runtime arrays and variable-count
+        // allocation admission; no native mutable descriptor features are enabled.
         VkPhysicalDeviceDescriptorIndexingFeatures indexing
         {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
         };
         gHasBindlessTextureIndexing = false;
+        gHasRuntimeTextureArrays = false;
         if (gHasBindingApi == true && properties.apiVersion >= VK_API_VERSION_1_2)
         {
             VkPhysicalDeviceFeatures2 features
@@ -872,9 +880,14 @@ bool ConnectWindow(const WindowInfo& window) noexcept
                 .pNext = &indexing,
             };
             vkGetPhysicalDeviceFeatures2(gPhysical, &features);
-            gHasBindlessTextureIndexing = indexing.shaderSampledImageArrayNonUniformIndexing == VK_TRUE;
+            gHasBindlessTextureIndexing = internal::IsBindlessRequested() == true &&
+                                          indexing.shaderSampledImageArrayNonUniformIndexing == VK_TRUE;
+            gHasRuntimeTextureArrays = internal::IsRuntimeTextureArrayRequested() == true &&
+                                       indexing.runtimeDescriptorArray == VK_TRUE &&
+                                       indexing.descriptorBindingVariableDescriptorCount == VK_TRUE;
         }
-        if (internal::IsBindlessRequired() == true && gHasBindlessTextureIndexing == false)
+        if ((internal::IsBindlessRequired() == true && gHasBindlessTextureIndexing == false) ||
+            (internal::IsRuntimeTextureArrayRequired() == true && gHasRuntimeTextureArrays == false))
         {
             // Required profiles filter candidates before committing native device
             // ownership, so a later supported adapter is still considered.
@@ -884,11 +897,13 @@ bool ConnectWindow(const WindowInfo& window) noexcept
         {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
             .shaderSampledImageArrayNonUniformIndexing = gHasBindlessTextureIndexing == true ? VK_TRUE : VK_FALSE,
+            .descriptorBindingVariableDescriptorCount = gHasRuntimeTextureArrays == true ? VK_TRUE : VK_FALSE,
+            .runtimeDescriptorArray = gHasRuntimeTextureArrays == true ? VK_TRUE : VK_FALSE,
         };
         void* featureChain = gRayEnabled == true ? static_cast<void*>(&address)
                              : gHeadless == true ? nullptr
                                                  : static_cast<void*>(&maintenance);
-        if (gHasBindlessTextureIndexing == true)
+        if (gHasBindlessTextureIndexing == true || gHasRuntimeTextureArrays == true)
         {
             indexing.pNext = featureChain;
             featureChain = &indexing;
@@ -1111,6 +1126,7 @@ void Shutdown() noexcept
     gRayEnabled = gRayApiAvailable = false;
     gHasUniformTextureIndexing = false;
     gHasBindlessTextureIndexing = false;
+    gHasRuntimeTextureArrays = false;
     gHasBindingApi = false;
     gRayProperties = {};
     gQueue = VK_NULL_HANDLE;

@@ -195,6 +195,10 @@ BindingCapabilities BindingLimits() noexcept
         .MaxSamplersPerStage = 16,
         .MaxUniformBuffersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
         .MaxSamplersPerSet = static_cast<uint32>(internal::RASTER_BINDINGS),
+        .HasBufferDescriptorArrays = Kind() == Backend::Vulkan,
+        .HasSamplerDescriptorArrays = hasNativeArrays,
+        .HasRuntimeTextureArrays = Kind() == Backend::Vulkan && internal::IsRuntimeTextureArrayRequested() == true,
+        .HasPartiallyBoundArrays = hasNativeArrays,
     };
 }
 RasterCapabilities RasterLimits() noexcept
