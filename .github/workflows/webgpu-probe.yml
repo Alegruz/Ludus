@@ -82,6 +82,10 @@ on:
       - '.clang-format'
       - '.clang-tidy'
   workflow_dispatch:
+  # Nightly browser coverage of main, including the advisory analyzer baselines
+  # that pull requests skip.
+  schedule:
+    - cron: '47 9 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -91,7 +95,9 @@ permissions:
   contents: read
 
 env:
-  LUDUS_TIDY_JOBS: "2"
+  # ubuntu-24.04 runners for public repositories have 4 CPUs (see ci.yml).
+  LUDUS_TIDY_JOBS: "4"
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
 
 jobs:
   compile-and-package:
@@ -178,7 +184,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/build/raster-web-sdk --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/raster-web-sdk --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
       - name: Build installed L0/L1/L2/L3/L4 renderer browser SDK consumers
         run: |
           out/host-tools/venv/bin/cmake --install out/build/web-emscripten-development --prefix "$PWD/out/install/raster-web-sdk"
@@ -191,7 +197,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/build/renderer-web-sdk --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/renderer-web-sdk --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
       - uses: actions/upload-artifact@v4
         with:
           name: renderer-web-sdk-consumer
@@ -283,10 +289,12 @@ jobs:
         run: |
           for preset in web-emscripten-development web-emscripten-release; do
             out/host-tools/venv/bin/cmake --preset "$preset" -DLUDUS_BUILD_WORLD_DEMO=ON
-            out/host-tools/venv/bin/cmake --build --preset "$preset" --target ludus_world_demo --parallel 2
+            out/host-tools/venv/bin/cmake --build --preset "$preset" --target ludus_world_demo --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
             ./scripts/check "$preset" --tidy
           done
+      # Advisory only (Q1 rollout); the required browser tidy above stays on every run.
       - name: Review complete browser analyzer baselines
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         run: |
           failed=0

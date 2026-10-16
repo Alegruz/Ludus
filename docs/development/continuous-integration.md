@@ -20,13 +20,18 @@ validated twice:
 
 1. **Pull-request tier** — fast feedback while the author (human or agent)
    iterates. It runs every native job except the slow ones listed in
-   `MERGE_QUEUE_JOBS` in `scripts/python/ci_scope.py`: the macOS compile,
-   sanitizer and analyzer jobs, Linux ASan/UBSan, the optional editor and the
-   uncached build-time budget.
-2. **Merge-queue tier** — the full set of jobs on the queue's candidate commit,
+   `MERGE_QUEUE_JOBS` in `scripts/python/ci_scope.py`: the macOS compile and
+   sanitizer jobs, Linux ASan/UBSan, the optional editor and the uncached
+   build-time budget.
+2. **Merge-queue tier** — every required job on the queue's candidate commit,
    which is the pull request merged on top of `main` and every pull request
    ahead of it in the queue. Only a passing candidate is pushed to `main`, so two
    pull requests that pass separately but conflict semantically cannot both land.
+
+A third, **nightly tier** runs on the `main` schedule and on manual dispatches.
+It adds the advisory analyzer baselines (`NIGHTLY_JOBS` plus the analyzer steps
+in the Linux analysis shards and the browser workflow), whose findings do not
+gate changes during the [Q1 rollout](#q1-analysis-and-host-tooling).
 
 When a pull request is ready (checks green, review threads resolved), add it to
 the queue with **Merge when ready** and move on; nobody has to watch it. If the
@@ -59,6 +64,16 @@ CI therefore avoids repeating work the queue already did:
   Pull requests still build the wiki and install butler on Ubuntu.
 - The wiki and `project-sdk.yml` keep running on every push to `main`; the wiki
   run publishes GitHub Pages.
+- Advisory analyzer baselines run only in the nightly tier. The macOS analyzer
+  job rebuilt the complete macOS Development configuration only to produce its
+  baseline, so it no longer occupies a macOS runner for every merge-queue
+  candidate; the required macOS source inventory runs inside the macOS native
+  job after its complete build. The browser workflow also runs nightly.
+- Builds and clang-tidy use the hosted runner core counts:
+  `CMAKE_BUILD_PARALLEL_LEVEL` and `LUDUS_TIDY_JOBS` are 4 on `ubuntu-24.04`
+  and 3 on `macos-14`. Explicit `cmake --build --parallel` calls pass
+  `$CMAKE_BUILD_PARALLEL_LEVEL`. The build-time budget keeps 2 so its summed
+  frontend timings stay comparable (see [build profiling](build-profiling.md)).
 
 ### Repository settings
 
@@ -119,7 +134,9 @@ boundaries, and Python tooling tests run first. Independent jobs then validate:
 The final `Ubuntu Clang` check always runs. It requires successful classification
 and every native job to succeed for full validation, or every native job to be
 skipped for documentation-only changes. In the pull-request tier the deferred
-merge-queue jobs must be skipped and every other native job must succeed.
+merge-queue and nightly jobs must be skipped; in the merge-queue tier only the
+nightly jobs; the nightly tier requires every native job. Every other native job
+must succeed.
 Failed or cancelled dependencies and missing classification or tier outputs
 fail this gate; malformed pull-request metadata selects the full tier. The installed host-tooling check
 also retains its name and reports success after routing tests for docs-only
@@ -154,7 +171,8 @@ keep their separate cache policy. The native setup action installs ccache.
 ## Analysis and timing
 
 `LUDUS_TIDY_JOBS` sets the maximum number of concurrent native clang-tidy
-processes. The local default is one; CI uses two. Diagnostics are saved per
+processes. The local default is one; CI uses the runner core count (four on
+Linux, three on macOS). Diagnostics are saved per
 compile command and printed in source/variant order.
 The selected preset's CMake File API codemodel is reconciled with its compilation
 database. All compiled first-party C, C++, Objective-C and Objective-C++ sources
@@ -245,9 +263,11 @@ Existing format, tidy, compiler, sanitizer and source-inventory gates stay
 required. Advisory commands still exit unsuccessfully for findings, missing
 tools, omissions, timeouts or incomplete output; CI explicitly tolerates their
 step failure during rollout and preserves their evidence. Artifact failures are
-not advisory. Complete macOS source admission has a separate required
-`--inventory` step; Linux/browser inventories run inside their required tidy
-checks. Analyzer findings cannot excuse source omissions.
+not advisory. Complete macOS source admission is a required `--inventory` step
+in the macOS native job; Linux/browser inventories run inside their required
+tidy checks. Analyzer findings cannot excuse source omissions. Advisory
+baselines run in the nightly tier only, not on pull requests or merge-queue
+candidates.
 
 ```bash
 ./scripts/setup-quality-tools   # explicit network install into ignored out/
@@ -274,8 +294,9 @@ without treating Ludus' documented empty/reusable moved-from states as errors.
 `--analyzer` uses the same
 complete per-configuration native inventory and bounded execution as required
 tidy. Browser checks now reconcile their database with the independent CMake
-File API too, retaining explicit Emscripten flags. Linux shards, the complete
-macOS Development build and both browser profiles produce advisory baselines;
+File API too, retaining explicit Emscripten flags. Nightly runs of the Linux
+shards, the complete macOS Development build and both browser profiles produce
+advisory baselines;
 no baseline suppression file is generated. Fix a finding or justify a narrow
 source suppression before promotion.
 

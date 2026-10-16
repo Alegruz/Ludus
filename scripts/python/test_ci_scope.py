@@ -62,10 +62,15 @@ class ValidationTierTests(unittest.TestCase):
         self.assertEqual(ci_scope.validation_tier("pull_request", self.pull_request("editor", "ci:full")),
                          ci_scope.FULL_TIER)
 
-    def test_queue_main_manual_and_unknown_events_run_the_full_tier(self):
-        for event_name in ("merge_group", "push", "workflow_dispatch", "schedule", ""):
+    def test_queue_main_and_unknown_events_run_the_full_tier(self):
+        for event_name in ("merge_group", "push", ""):
             with self.subTest(event_name=event_name):
                 self.assertEqual(ci_scope.validation_tier(event_name, {}), ci_scope.FULL_TIER)
+
+    def test_scheduled_and_manual_runs_add_the_nightly_advisory_jobs(self):
+        for event_name in ("schedule", "workflow_dispatch"):
+            with self.subTest(event_name=event_name):
+                self.assertEqual(ci_scope.validation_tier(event_name, {}), ci_scope.NIGHTLY_TIER)
 
     def test_malformed_pull_request_metadata_runs_the_full_tier(self):
         for event in ({}, {"pull_request": None}, {"pull_request": {"labels": [{}]}},
@@ -190,14 +195,77 @@ class RequiredGateTests(unittest.TestCase):
         jobs = set(re.findall(r"^  ([a-z][a-z0-9-]*):$", workflow, re.MULTILINE))
         self.assertTrue(set(ci_scope.NATIVE_JOBS) <= jobs)
 
-    def test_workflow_defers_exactly_the_merge_queue_jobs(self):
+    def test_workflow_defers_exactly_the_merge_queue_and_nightly_jobs(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
         self.assertTrue(set(ci_scope.MERGE_QUEUE_JOBS) <= set(ci_scope.NATIVE_JOBS))
+        self.assertTrue(set(ci_scope.NIGHTLY_JOBS) <= set(ci_scope.NATIVE_JOBS))
+        self.assertFalse(set(ci_scope.MERGE_QUEUE_JOBS) & set(ci_scope.NIGHTLY_JOBS))
         conditions = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n(?:    .*\n)*?    if: (.*)$", workflow, re.MULTILINE))
         for name in ci_scope.NATIVE_JOBS:
             with self.subTest(name=name):
-                deferred = "needs.changes.outputs.validation_tier == 'full'" in conditions.get(name, "")
-                self.assertEqual(deferred, name in ci_scope.MERGE_QUEUE_JOBS)
+                condition = conditions.get(name, "")
+                self.assertEqual("needs.changes.outputs.validation_tier != 'pull-request'" in condition,
+                                 name in ci_scope.MERGE_QUEUE_JOBS)
+                self.assertEqual("needs.changes.outputs.validation_tier == 'nightly'" in condition,
+                                 name in ci_scope.NIGHTLY_JOBS)
+        # A merge-queue job keyed to the full tier alone would vanish from nightly runs.
+        self.assertNotIn("validation_tier == 'full'", workflow)
+
+    def test_advisory_analyzers_run_nightly_and_required_inventory_runs_in_the_queue(self):
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        nightly = {
+            "ci.yml": "if: needs.changes.outputs.validation_tier == 'nightly'",
+            "webgpu-probe.yml": "if: github.event_name != 'pull_request'",
+        }
+        for name, condition in nightly.items():
+            jobs = re.findall(r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+                              root.joinpath(name).read_text().split("\njobs:\n", 1)[1])
+            analyzer_steps = 0
+            for job, body in jobs:
+                header = body.split("\n    steps:", 1)[0]
+                for step in re.findall(r"(?ms)^      - name: [^\n]*\n((?:        [^\n]*\n)+)", body):
+                    if "--analyzer" not in step:
+                        continue
+                    analyzer_steps += 1
+                    with self.subTest(workflow=name, job=job):
+                        # The step itself or its whole job must be nightly-only.
+                        self.assertTrue(condition in step or condition.replace("if: ", "") in header)
+                        self.assertIn("continue-on-error: true", step)
+            with self.subTest(workflow=name):
+                self.assertTrue(analyzer_steps)
+        self.assertRegex(root.joinpath("webgpu-probe.yml").read_text(), r"(?m)^  schedule:\n    - cron: '[^']+'$")
+        workflow = root.joinpath("ci.yml").read_text()
+        macos_compile = workflow.split("\n  macos-compile:\n", 1)[1].split("\n  macos-sanitizers:\n", 1)[0]
+        inventory = macos_compile.split("--inventory", 1)
+        self.assertEqual(len(inventory), 2)
+        self.assertNotIn("continue-on-error", inventory[0].rsplit("- name:", 1)[1])
+        self.assertNotIn("--inventory", workflow.split("\n  macos-analysis:\n", 1)[1].split("\n  formatting:\n", 1)[0])
+
+    def test_builds_and_tidy_use_the_runner_core_counts(self):
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        workflow = root.joinpath("ci.yml").read_text()
+        self.assertIn('\n  CMAKE_BUILD_PARALLEL_LEVEL: "4"\n', workflow.split("\njobs:\n", 1)[0])
+        jobs = dict(re.findall(r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)^    steps:", workflow.split("\njobs:\n", 1)[1]))
+        for name, header in jobs.items():
+            runner = re.search(r"(?m)^    runs-on: (\S+)$", header)
+            if runner is None:
+                continue
+            level = re.search(r'(?m)^      CMAKE_BUILD_PARALLEL_LEVEL: "(\d+)"$', header)
+            tidy = re.search(r'(?m)^      LUDUS_TIDY_JOBS: "(\d+)"$', header)
+            with self.subTest(job=name):
+                if name == "build-budget":
+                    self.assertEqual(level.group(1), "2")
+                elif runner.group(1).startswith("macos-14"):
+                    self.assertEqual(level.group(1) if level else None, "3")
+                    if tidy:
+                        self.assertEqual(tidy.group(1), "3")
+                else:
+                    self.assertIsNone(level)
+                    if tidy:
+                        self.assertEqual(tidy.group(1), "4")
+        for name in ("ci.yml", "webgpu-probe.yml"):
+            with self.subTest(workflow=name):
+                self.assertNotRegex(root.joinpath(name).read_text(), r"--parallel \d")
 
     def test_required_workflows_report_checks_to_the_merge_queue(self):
         # A required check that never runs for merge_group stalls every queued PR.
@@ -231,37 +299,37 @@ class RequiredGateTests(unittest.TestCase):
 
     def results(self, native_required=True, tier=ci_scope.FULL_TIER):
         def expected(name):
-            deferred = tier == ci_scope.PULL_REQUEST_TIER and name in ci_scope.MERGE_QUEUE_JOBS
-            return "success" if native_required and not deferred else "skipped"
+            return "success" if native_required and not self.deferred(name, tier) else "skipped"
         return {
             "changes": {"result": "success", "outputs": {
                 "native_required": "true" if native_required else "false", "validation_tier": tier}},
             **{name: {"result": expected(name)} for name in ci_scope.NATIVE_JOBS},
         }
 
+    @staticmethod
+    def deferred(name, tier):
+        return ((tier == ci_scope.PULL_REQUEST_TIER and name in ci_scope.MERGE_QUEUE_JOBS)
+                or (tier != ci_scope.NIGHTLY_TIER and name in ci_scope.NIGHTLY_JOBS))
+
     def test_all_native_successes_or_intentional_docs_skips_pass(self):
-        self.assertEqual(ci_scope.gate_failures(self.results()), [])
-        self.assertEqual(ci_scope.gate_failures(self.results(False)), [])
+        for tier in sorted(ci_scope.TIERS):
+            with self.subTest(tier=tier):
+                self.assertEqual(ci_scope.gate_failures(self.results(tier=tier)), [])
+                self.assertEqual(ci_scope.gate_failures(self.results(False, tier)), [])
 
-    def test_failed_cancelled_or_skipped_native_jobs_fail_full_validation(self):
-        for name in ci_scope.NATIVE_JOBS:
-            for status in ("failure", "cancelled", "skipped"):
-                with self.subTest(name=name, status=status):
-                    results = self.results()
-                    results[name]["result"] = status
-                    self.assertTrue(ci_scope.gate_failures(results))
-
-    def test_pull_request_tier_requires_fast_jobs_and_skips_only_deferred_jobs(self):
-        self.assertEqual(ci_scope.gate_failures(self.results(tier=ci_scope.PULL_REQUEST_TIER)), [])
-        self.assertEqual(ci_scope.gate_failures(self.results(False, ci_scope.PULL_REQUEST_TIER)), [])
-        for name in ci_scope.NATIVE_JOBS:
-            statuses = ("failure", "cancelled", "success") if name in ci_scope.MERGE_QUEUE_JOBS else (
-                "failure", "cancelled", "skipped")
-            for status in statuses:
-                with self.subTest(name=name, status=status):
-                    results = self.results(tier=ci_scope.PULL_REQUEST_TIER)
-                    results[name]["result"] = status
-                    self.assertTrue(ci_scope.gate_failures(results))
+    def test_each_tier_requires_its_jobs_and_skips_only_deferred_jobs(self):
+        # Full runs skip only nightly advisory jobs, pull requests also skip the
+        # merge-queue jobs, and nightly runs require every native job.
+        for tier in sorted(ci_scope.TIERS):
+            for name in ci_scope.NATIVE_JOBS:
+                deferred = self.deferred(name, tier)
+                statuses = ("failure", "cancelled", "success") if deferred else ("failure", "cancelled", "skipped")
+                for status in statuses:
+                    with self.subTest(tier=tier, name=name, status=status):
+                        results = self.results(tier=tier)
+                        results[name]["result"] = status
+                        self.assertTrue(ci_scope.gate_failures(results))
+        self.assertTrue(all(not self.deferred(name, ci_scope.NIGHTLY_TIER) for name in ci_scope.NATIVE_JOBS))
 
     def test_missing_or_invalid_tier_cannot_skip_merge_queue_jobs(self):
         for tier in (None, "", "Full", "fast"):
