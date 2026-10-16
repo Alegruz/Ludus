@@ -36,7 +36,7 @@ env:
   CI: "true"
   LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
   # Match the hosted runner core counts: ubuntu-24.04 runners for public
-  # repositories have 4 CPUs and macos-14 runners have 3, so macOS jobs set 3.
+  # repositories have 4 CPUs and arm64 macos-15 runners have 3, so macOS jobs set 3.
   # The build-time budget keeps 2 so its summed frontend timings stay
   # comparable. Thanks to GitHub, "GitHub-hosted runners" (standard runners for
   # public repositories):
@@ -58,11 +58,14 @@ jobs:
       - uses: ./.github/actions/change-scope
         id: scope
 
+  # Thanks to GitHub Actions runner-images, macOS 14 deprecation announcement #13518:
+  # https://github.com/actions/runner-images/issues/13518
+  # Keep arm64 native coverage on macOS 15; SDKs still declare a 14.0 deployment floor.
   macos-compile:
     needs: changes
     if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'pull-request'
     name: macOS native backends and diagnostics
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: "3"
     steps:
@@ -212,6 +215,8 @@ jobs:
             apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
             apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/editor_camera_controller.cpp apps/editor/src/viewport_navigation.cpp \
+            apps/editor/tests/viewport_navigation_tests.cpp \
             apps/editor/src/preview_viewport.cpp apps/editor/src/qt_viewport_device_metal.mm \
             apps/editor/src/level_workspace.cpp apps/editor/tests/level_workspace_tests.cpp \
             apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \
@@ -358,7 +363,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier != 'pull-request'
     name: macOS ASan and UBSan
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: "3"
     steps:
@@ -429,7 +434,7 @@ jobs:
     # not on pull requests or merge-queue candidates.
     if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'nightly'
     name: macOS analyzer baseline
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: "3"
       LUDUS_TIDY_JOBS: "3"
@@ -1107,6 +1112,8 @@ jobs:
             apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
             apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/editor_camera_controller.cpp apps/editor/src/viewport_navigation.cpp \
+            apps/editor/tests/viewport_navigation_tests.cpp \
             apps/editor/src/preview_viewport.cpp apps/editor/src/qt_viewport_device_vulkan.cpp \
             apps/editor/src/level_workspace.cpp apps/editor/tests/level_workspace_tests.cpp \
             apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \

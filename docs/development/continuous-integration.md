@@ -71,7 +71,7 @@ CI therefore avoids repeating work the queue already did:
   job after its complete build. The browser workflow also runs nightly.
 - Builds and clang-tidy use the hosted runner core counts:
   `CMAKE_BUILD_PARALLEL_LEVEL` and `LUDUS_TIDY_JOBS` are 4 on `ubuntu-24.04`
-  and 3 on `macos-14`. Explicit `cmake --build --parallel` calls pass
+  and 3 on arm64 `macos-15`. Explicit `cmake --build --parallel` calls pass
   `$CMAKE_BUILD_PARALLEL_LEVEL`. The build-time budget keeps 2 so its summed
   frontend timings stay comparable (see [build profiling](build-profiling.md)).
 
@@ -97,6 +97,19 @@ wait until the timeout. `ci.yml`, `project-sdk.yml` and `wiki.yml` therefore
 trigger on `merge_group`, and `test_ci_scope.py` checks this. The path-filtered
 browser package and release workflows stay advisory pull-request checks outside
 the queue.
+
+### macOS runner images
+
+Native compilation, analyzer and sanitizer jobs run on the explicit `macos-15`
+arm64 runner label. Host-tooling installation also checks `macos-15-intel` separately.
+GitHub's [macOS 14 image deprecation notice](https://github.com/actions/runner-images/issues/13518)
+announces longer queues, scheduled brownouts and retirement on November 2, 2026;
+the workflow avoids that deprecated runner pool.
+
+The SDK still declares a `14.0` deployment target. Testing on the macOS 15 runner
+verifies that host runtime, and does not by itself establish macOS 14 runtime
+qualification. Runner availability and the declared SDK baseline are separate
+contracts.
 
 ## Change routing
 
@@ -204,6 +217,16 @@ hosted Ubuntu and macOS runners, and on manual dispatch. It is not a pull-reques
 or merge-queue check: scenario correctness failures fail that workflow, and
 timings are report-only. Reports, Perfetto traces and logs are kept as artifacts
 for 90 days. See [Runtime profiling](runtime-profiling.md).
+
+Its opt-in `device` job adds self-hosted machines with a declared physical GPU,
+where the RHI and renderer GPU scenarios run. Lanes are listed in the
+`LUDUS_PERF_DEVICE_LANES` repository variable; without it the job is skipped.
+The job runs only scheduled or manually dispatched `main` code, never pull
+requests or forks. Each device runner's job-started hook
+(`tools/ci/perf-runner-job-started.sh`, installed outside the workspace) refuses
+any other job before it runs, so admission does not depend on pull-request YAML.
+Registration steps and the trust boundary are in
+[Controlled device lane](runtime-profiling.md#controlled-device-lane).
 
 ## Sanitizer failure controls
 

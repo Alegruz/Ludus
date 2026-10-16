@@ -139,7 +139,7 @@ scene/session revision so delayed hits cannot select obsolete objects.
 
 ## Renderer authoring workspace
 
-The proposed Renderer workspace uses the same document/command core for graph,
+The Renderer workspace uses the same document/command core for graph,
 schema and shader source editing. Its canonical contracts, typed connection
 domains, camera/scene coverage, explicit configuration counts, compiled-plan
 inspection and version activation are owned by the
@@ -148,8 +148,11 @@ authors provide computations and requirements; the graph owns resource wiring.
 Preview and live execution share the cooked Renderer/RHI contract, while keeping
 their process, scene and resource-instance ownership explicit. RG3a delivers a
 Renderer tab with typed graph/source drafts, undo, explicit save, mapped
-diagnostics and shared CLI jobs; its node canvas and live in-editor preview are
-RG3b. See [edit and reload graphs](../development/render-graph-authoring.md#edit-and-reload-graphs-rg3).
+diagnostics and shared CLI jobs. RG3b adds a node canvas over the same document
+operations and a trusted preview that activates cooked generations on the World
+viewport's device without replacing its last drawable view until a new frame is
+complete. See [edit and reload graphs](../development/render-graph-authoring.md#edit-and-reload-graphs-rg3)
+and [node canvas and preview](../development/render-graph-authoring.md#node-canvas-and-preview-rg3b).
 
 ## Performance and observability
 

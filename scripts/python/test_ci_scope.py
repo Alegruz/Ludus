@@ -242,6 +242,9 @@ class RequiredGateTests(unittest.TestCase):
         self.assertNotIn("--inventory", workflow.split("\n  macos-analysis:\n", 1)[1].split("\n  formatting:\n", 1)[0])
 
     def test_builds_and_tidy_use_the_runner_core_counts(self):
+        # Hosted runner CPUs for public repositories; a runner label not listed
+        # here must be added with its core count before a job can use it.
+        cores = {"ubuntu-24.04": "4", "macos-15": "3"}
         root = Path(__file__).resolve().parents[2] / ".github/workflows"
         workflow = root.joinpath("ci.yml").read_text()
         self.assertIn('\n  CMAKE_BUILD_PARALLEL_LEVEL: "4"\n', workflow.split("\njobs:\n", 1)[0])
@@ -252,17 +255,18 @@ class RequiredGateTests(unittest.TestCase):
                 continue
             level = re.search(r'(?m)^      CMAKE_BUILD_PARALLEL_LEVEL: "(\d+)"$', header)
             tidy = re.search(r'(?m)^      LUDUS_TIDY_JOBS: "(\d+)"$', header)
-            with self.subTest(job=name):
+            with self.subTest(job=name, runner=runner.group(1)):
+                self.assertIn(runner.group(1), cores)
+                expected = cores[runner.group(1)]
                 if name == "build-budget":
                     self.assertEqual(level.group(1), "2")
-                elif runner.group(1).startswith("macos-14"):
-                    self.assertEqual(level.group(1) if level else None, "3")
-                    if tidy:
-                        self.assertEqual(tidy.group(1), "3")
-                else:
+                elif expected == "4":
+                    # The workflow default already matches Linux runners.
                     self.assertIsNone(level)
-                    if tidy:
-                        self.assertEqual(tidy.group(1), "4")
+                else:
+                    self.assertEqual(level.group(1) if level else None, expected)
+                if tidy:
+                    self.assertEqual(tidy.group(1), expected)
         for name in ("ci.yml", "webgpu-probe.yml"):
             with self.subTest(workflow=name):
                 self.assertNotRegex(root.joinpath(name).read_text(), r"--parallel \d")
@@ -295,7 +299,8 @@ class RequiredGateTests(unittest.TestCase):
                             butler)
         self.assertIsNotNone(runners)
         self.assertEqual(json.loads(runners.group(1)), ["ubuntu-24.04"])
-        self.assertIn("macos-14", json.loads(runners.group(2)))
+        self.assertEqual(json.loads(runners.group(2)),
+                         ["ubuntu-24.04", "macos-15", "macos-15-intel"])
 
     def results(self, native_required=True, tier=ci_scope.FULL_TIER):
         def expected(name):
