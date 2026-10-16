@@ -103,6 +103,7 @@ if(LUDUS_BUILD_TESTS)
             tests/layout_tests.cpp
             tests/dynamics_tests.cpp
             tests/bezier_tests.cpp
+            tests/curves_surfaces_fixture_tests.cpp
             tests/summation_tests.cpp
     )
     target_include_directories(ludus_foundation_math_tests PRIVATE tests src)
@@ -112,6 +113,8 @@ if(LUDUS_BUILD_TESTS)
             Ludus::FoundationMath
             Ludus::FoundationContainers
             Catch2::Catch2WithMain
+            # Test-only G0 reference corpus (tests/fixtures/curves_surfaces); Math itself links only Base.
+            ludus_geometry_reference_fixtures
     )
     # Tests must observe the same precise FP semantics as the production .cpp so
     # oracle comparisons are meaningful.

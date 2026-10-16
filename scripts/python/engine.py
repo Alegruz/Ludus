@@ -2196,7 +2196,8 @@ def command_profile_engine(args: argparse.Namespace) -> int:
         scenarios = runtime_profile.load_manifest(root / (args.manifest or runtime_profile.MANIFEST_PATH))
         system = platform.system()
         shader_options = runtime_profile.shader_tool_options(root, system)
-        capabilities = runtime_profile.detect_capabilities(root, system) | set(args.capability or ())
+        capabilities = runtime_profile.resolve_capabilities(
+            runtime_profile.detect_capabilities(root, system), args.capability or (), args.device)
         if args.list:
             for scenario in scenarios:
                 needs = ", ".join(scenario.requires) or "none"
@@ -2217,7 +2218,8 @@ def command_profile_engine(args: argparse.Namespace) -> int:
         report = runtime_profile.run_scenarios(
             root, preset, build_dir_for_preset(root, preset), output_dir, selection, capabilities,
             compiler=compiler, repetitions=args.repetitions,
-            baseline_path=Path(args.baseline).resolve() if args.baseline else None)
+            baseline_path=Path(args.baseline).resolve() if args.baseline else None, device=args.device,
+            controlled_environment=runtime_profile.environment_names(scenarios))
     except runtime_profile.ProfileError as error:
         raise EngineError(str(error)) from error
     failed = [entry["id"] for entry in report["scenarios"] if entry["status"] == "failed"]
@@ -2465,7 +2467,11 @@ def make_parser() -> argparse.ArgumentParser:
     runtime_parser.add_argument("preset", nargs="?", default=None, help="host preset (default: the native -profile preset)")
     runtime_parser.add_argument("--scenario", action="append", help="run only this scenario id (repeatable)")
     runtime_parser.add_argument(
-        "--capability", action="append", help="declare a lane capability such as presentation (repeatable)"
+        "--capability", action="append",
+        help="declare a lane capability such as presentation or a GPU class gpu-<class> (repeatable)"
+    )
+    runtime_parser.add_argument(
+        "--device", help="declared GPU adapter, OS and driver identity recorded in the report (required with gpu-<class>)"
     )
     runtime_parser.add_argument("--repetitions", type=int, choices=range(1, 51), metavar="1..50",
                                 help="override each scenario's measured repetitions")

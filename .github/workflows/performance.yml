@@ -1,11 +1,17 @@
 name: performance
 
-# Scheduled runtime profiling on GitHub-hosted runners (hosted lane of the
-# Hardware/performance lane in docs/architecture/engineering-quality.md).
-# ./scripts/profile-engine builds the Profile preset, runs the scenarios in
-# config/runtime_profile_scenarios.json and fails only on correctness failures.
-# Timings and deltas against the previous run are report-only: shared runners
-# cannot calibrate a regression gate. Guide: docs/development/runtime-profiling.md.
+# Scheduled runtime profiling (Hardware/performance lane in
+# docs/architecture/engineering-quality.md). ./scripts/profile-engine builds the
+# Profile preset, runs the scenarios in config/runtime_profile_scenarios.json and
+# fails only on correctness failures. Timings and deltas against the previous run
+# are report-only until a device lane calibrates a variability bound.
+#
+# - hosted: GitHub-hosted Ubuntu and macOS runners, every scheduled run.
+# - device: opt-in self-hosted runners with a declared GPU, listed in the
+#   LUDUS_PERF_DEVICE_LANES repository variable. Trusted code only: main, from
+#   the schedule or a manual run, never pull requests or forks.
+#
+# Guide and runner registration: docs/development/runtime-profiling.md.
 
 on:
   # Thanks to GitHub's "Events that trigger workflows" reference: schedules run
@@ -15,8 +21,13 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
+      lanes:
+        description: Which lanes to run
+        type: choice
+        options: [all, hosted, device]
+        default: all
       scenarios:
-        description: Space-separated scenario ids (empty runs every scenario the lane supports)
+        description: Space-separated scenario ids (empty runs every scenario a lane supports; named ones must be runnable on every selected lane)
         required: false
         default: ""
       repetitions:
@@ -41,6 +52,7 @@ env:
 jobs:
   hosted:
     name: Hosted runtime profile (${{ matrix.lane }})
+    if: inputs.lanes != 'device'
     strategy:
       fail-fast: false
       matrix:
@@ -126,5 +138,122 @@ jobs:
         with:
           name: runtime-profile-${{ matrix.lane }}
           path: out/runtime-profile/${{ matrix.lane }}/
+          if-no-files-found: warn
+          retention-days: 90
+
+  device:
+    name: Device runtime profile (${{ matrix.lane }})
+    # Opt-in: without the variable the job is skipped instead of queueing for a
+    # runner that does not exist. The job-level condition is evaluated before the
+    # matrix, so an unset variable never reaches fromJSON. Each entry is
+    # {"lane", "os", "gpu_class", "preset", "device", "capabilities"}; see the guide.
+    # Thanks to GitHub's "Secure use reference": self-hosted runners only take
+    # trusted main code here. This condition is not the boundary, because a pull
+    # request controls its own YAML; each runner's job-started hook
+    # (tools/ci/perf-runner-job-started.sh, installed outside the workspace)
+    # refuses any job that is not this workflow on main from these events.
+    # https://docs.github.com/en/actions/reference/security/secure-use
+    if: >-
+      vars.LUDUS_PERF_DEVICE_LANES != '' &&
+      inputs.lanes != 'hosted' &&
+      github.repository == 'The-Ludus-Project/Ludus' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(vars.LUDUS_PERF_DEVICE_LANES) }}
+    runs-on: [self-hosted, ludus-perf, "${{ matrix.os }}", "${{ matrix.gpu_class }}"]
+    timeout-minutes: 180
+    env:
+      # The device is dedicated to this job; use the build tool's default parallelism.
+      CMAKE_BUILD_PARALLEL_LEVEL: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate the lane declaration
+        env:
+          LANE: ${{ matrix.lane }}
+          LANE_OS: ${{ matrix.os }}
+          GPU_CLASS: ${{ matrix.gpu_class }}
+          PRESET: ${{ matrix.preset }}
+          DEVICE: ${{ matrix.device }}
+          CAPABILITIES: ${{ matrix.capabilities }}
+        run: |
+          fail() { echo "::error::LUDUS_PERF_DEVICE_LANES entry '$LANE': $1"; exit 1; }
+          [[ "$LANE" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || fail "lane must be a short lowercase id"
+          [[ "$GPU_CLASS" =~ ^gpu-[a-z0-9][a-z0-9-]{0,31}$ ]] || fail "gpu_class must look like gpu-apple-m5"
+          [[ -n "$DEVICE" ]] || fail "device must name the adapter, OS and driver"
+          case "$LANE_OS/$RUNNER_OS/$PRESET" in
+            macos/macOS/macos-clang-profile | linux/Linux/linux-clang-profile) ;;
+            *) fail "os '$LANE_OS' and preset '$PRESET' do not match runner OS $RUNNER_OS" ;;
+          esac
+          for capability in $CAPABILITIES; do
+            [[ "$capability" =~ ^[a-z][a-z0-9-]{0,47}$ && "$capability" != gpu* ]] || fail "invalid capability '$capability'"
+          done
+      # Runner prerequisites (compiler, Ninja, CMake, Python, gh) are installed
+      # once by the device owner; this job installs nothing system-wide.
+      - name: Prepare the Profile preset and pinned shader tools
+        env:
+          PRESET: ${{ matrix.preset }}
+        run: |
+          ./init.sh --cli --preset "$PRESET" --preset-only --locked --with-tests --no-system-install
+          git diff --exit-code -- conan.lock
+          ./scripts/shader-probe bootstrap
+      - name: Fetch the previous report as baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT: runtime-profile-device-${{ matrix.lane }}
+        run: |
+          directory="$PWD/out/runtime-profile-baseline/$ARTIFACT"
+          runs="$(gh run list --workflow performance.yml --branch main --limit 10 \
+            --json databaseId,status --jq '.[] | select(.status == "completed") | .databaseId' || true)"
+          for run_id in $runs; do
+            rm -rf "$directory"
+            if gh run download "$run_id" --name "$ARTIFACT" --dir "$directory" && [[ -f "$directory/report.json" ]]; then
+              echo "report=$directory/report.json" >> "$GITHUB_OUTPUT"
+              echo "Baseline: run $run_id"
+              exit 0
+            fi
+          done
+          echo "No earlier report is available; this run has no baseline."
+      - name: Profile runtime scenarios on the device
+        env:
+          PRESET: ${{ matrix.preset }}
+          LANE: ${{ matrix.lane }}
+          GPU_CLASS: ${{ matrix.gpu_class }}
+          DEVICE: ${{ matrix.device }}
+          CAPABILITIES: ${{ matrix.capabilities }}
+          BASELINE: ${{ steps.baseline.outputs.report }}
+          SCENARIOS: ${{ inputs.scenarios }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          arguments=("$PRESET" --output "$PWD/out/runtime-profile/device-$LANE"
+                     --capability "$GPU_CLASS" --device "$DEVICE")
+          for capability in $CAPABILITIES; do arguments+=(--capability "$capability"); done
+          for scenario in $SCENARIOS; do arguments+=(--scenario "$scenario"); done
+          if [[ -n "$REPETITIONS" ]]; then arguments+=(--repetitions "$REPETITIONS"); fi
+          if [[ -n "$BASELINE" ]]; then arguments+=(--baseline "$BASELINE"); fi
+          ./scripts/profile-engine "${arguments[@]}"
+      - name: Publish runtime profile summary
+        if: always()
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          summary="out/runtime-profile/device-$LANE/summary.md"
+          if [[ -f "$summary" ]]; then
+            cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No runtime profile summary was produced for device lane $LANE." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Save report, traces and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-profile-device-${{ matrix.lane }}
+          path: out/runtime-profile/device-${{ matrix.lane }}/
           if-no-files-found: warn
           retention-days: 90

@@ -79,6 +79,25 @@ if(NOT EMSCRIPTEN)
             SOURCE ../shaders/r11.slang VERTEX VertexMain FRAGMENT ${fragment_entry}
             DEFINES LUDUS_R11_ARRAYS=1)
     endforeach()
+    foreach(shape IN ITEMS cube volume)
+        string(TOUPPER "${shape}" shape_define)
+        ludus_compile_shader(TARGET ludus_sdk_r11_consumer NAME r11${shape} RASTER NATIVE_BINDING_ARRAYS
+            SOURCE "../shaders/r11.slang" VERTEX VertexMain FRAGMENT ConstantArrayMain
+            DEFINES LUDUS_R11_ARRAYS=1 LUDUS_R11C_WIDER=1 LUDUS_R11C_${shape_define}=1)
+    endforeach()
+    ludus_compile_shader(TARGET ludus_sdk_r11_consumer NAME r11wider RASTER NATIVE_BINDING_ARRAYS
+        SOURCE ../shaders/r11.slang VERTEX VertexMain FRAGMENT ConstantArrayMain
+        DEFINES LUDUS_R11_ARRAYS=1 LUDUS_R11C_WIDER=1)
+    if(NOT APPLE)
+        target_compile_definitions(ludus_sdk_r11_consumer PRIVATE LUDUS_R11C_RUNTIME=1)
+        ludus_compile_shader(TARGET ludus_sdk_r11_consumer NAME r11buffers RASTER NATIVE_BINDING_ARRAYS
+            SOURCE "../shaders/r11buffers.slang" VERTEX VertexMain FRAGMENT FragmentMain)
+        ludus_compile_shader(TARGET ludus_sdk_r11_consumer NAME r11storage NATIVE_BINDING_ARRAYS
+            SOURCE "../shaders/r11storage.slang" COMPUTE ComputeMain)
+        ludus_compile_shader(TARGET ludus_sdk_r11_consumer NAME r11runtime RASTER NATIVE_BINDING_ARRAYS RUNTIME_BINDING_ARRAYS
+            SOURCE ../shaders/r11.slang VERTEX VertexMain FRAGMENT ConstantArrayMain
+            DEFINES LUDUS_R11_ARRAYS=1 LUDUS_R11C_RUNTIME=1)
+    endif()
     add_test(NAME ludus_sdk_r11_consumer COMMAND ludus_sdk_r11_consumer)
     set_tests_properties(ludus_sdk_r11_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
 endif()

@@ -36,7 +36,7 @@ class DocumentationScopeTests(unittest.TestCase):
 
     def test_manual_missing_malformed_and_unavailable_comparisons_require_native_validation(self):
         for event_name, event in (
-            ("workflow_dispatch", {}), ("pull_request", {}), ("push", {}),
+            ("workflow_dispatch", {}), ("schedule", {}), ("pull_request", {}), ("push", {}),
             ("push", {"before": "0" * 40, "after": "a" * 40}),
             ("push", {"before": "--help", "after": "a" * 40}),
             ("pull_request", {"pull_request": None}),
@@ -205,6 +205,30 @@ class RequiredGateTests(unittest.TestCase):
             with self.subTest(workflow=name):
                 workflow = (Path(__file__).resolve().parents[2] / ".github/workflows" / name).read_text()
                 self.assertRegex(workflow, r"(?m)^  merge_group:")
+
+    def test_main_reruns_full_ci_only_for_cache_inputs_and_nightly(self):
+        # The queue validates every landed commit; main runs exist to refresh
+        # the caches pull requests restore, so they must cover cache-key inputs.
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+        triggers = workflow.split("\npermissions:", 1)[0]
+        push = triggers.split("  push:", 1)[1].split("\n  schedule:", 1)[0]
+        for path in ("conanfile.py", "conan.lock", "config/tool_versions.json", "CMakePresets.json",
+                     ".github/actions/**"):
+            with self.subTest(path=path):
+                self.assertIn(f"'{path}'", push)
+        self.assertRegex(triggers, r"(?m)^  schedule:\n    - cron: '[^']+'$")
+
+    def test_pull_requests_leave_macos_tooling_jobs_to_the_queue(self):
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        wiki = root.joinpath("wiki.yml").read_text().split("\n  macos-documentation-tools:\n", 1)[1]
+        self.assertIn("    if: github.event_name != 'pull_request'\n", wiki.split("\n    steps:", 1)[0])
+        butler = root.joinpath("project-sdk.yml").read_text().split("\n  butler-install:\n", 1)[1]
+        runners = re.search(r"runner: \$\{\{ fromJSON\(github.event_name == 'pull_request' && '(\[.*?\])' \|\| '(\[.*?\])'\) \}\}",
+                            butler)
+        self.assertIsNotNone(runners)
+        self.assertEqual(json.loads(runners.group(1)), ["ubuntu-24.04"])
+        self.assertEqual(json.loads(runners.group(2)),
+                         ["ubuntu-24.04", "macos-15", "macos-15-intel"])
 
     def results(self, native_required=True, tier=ci_scope.FULL_TIER):
         def expected(name):

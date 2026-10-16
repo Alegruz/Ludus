@@ -2,6 +2,8 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/containers/borrowed_view.hpp>
+
 #include <ludus/foundation/containers/static_array.hpp>
 
 #include <ludus/graphics/rhi/device.h>
@@ -399,11 +401,20 @@ struct RasterBinding final
     /// Buffer bindings only; alignment and the final range are checked before encoding.
     /// This layout property does not change shader reflection or buffer ownership.
     bool HasDynamicOffset = false;
-    /// Fixed descriptor count, at least one. Arrays admit sampled color textures only;
-    /// every element must be populated and retained. Runtime-sized arrays are unsupported.
+    /// Fixed descriptor count, or the allocation ceiling for a runtime-sized binding.
+    /// Must be positive; array kinds and counts obey the enabled binding profile.
     ludus::foundation::uint32 Count = 1;
     /// Required shader selection mode, independently verified by target reflection.
     RasterBindingIndexing Indexing = RasterBindingIndexing::Constant;
+    /// Unsized shader array. Layout Count bounds allocation; shader Count is the
+    /// verified minimum allocation required by its accesses. Vulkan-only, sampled
+    /// color textures at RUNTIME_BINDING_ARRAY_SLOT. RUNTIME_BINDING_LENGTH_SLOT
+    /// is reserved for an immutable RHI-owned length buffer, created per snapshot.
+    bool IsRuntimeSized = false;
+    /// Permit omitted array elements, with element zero required as a fallback.
+    /// Holes sample/bind that retained fallback and cannot produce host index tokens.
+    /// Allocation and descriptor budgets charge the complete table, including holes.
+    bool HasPartialBinding = false;
 };
 /// Byte offsets indexed by group-zero binding number, copied into each accepted packet.
 /// Non-dynamic and absent bindings require zero. Values are added to the snapshot
@@ -492,8 +503,9 @@ struct RasterShaderDescription final
     std::span<const RasterUniformMember> UniformMembers{};
     /// The native array cooker verified every descriptor index as an in-range
     /// constant or bounded unsigned min/clamp in the emitted target. Required for
-    /// shaders declaring arrays. Hand-authored artifacts must independently verify
-    /// this same contract; false rejects before shader creation. Count changes reject.
+    /// shaders declaring arrays. Runtime shader Count certifies the minimum safe
+    /// allocation. Hand-authored artifacts must independently verify this contract;
+    /// false rejects before shader creation. Fixed counts must match exactly.
     bool HasVerifiedArrayBounds = false;
 };
 /// One immutable binding snapshot entry; exactly the resource matching Kind is used.
@@ -511,7 +523,7 @@ struct RasterBindingResource final
     TextureViewHandle Texture{};
     /// Sampler identity; ignored for other entries.
     SamplerHandle Sampler{};
-    /// Zero-based element of the fixed descriptor array; scalar entries require zero.
+    /// Zero-based descriptor array element; scalar entries require zero.
     ludus::foundation::uint32 ArrayElement = 0;
 };
 /// Borrowed generation-checked descriptor index belonging to one immutable snapshot.
@@ -709,7 +721,8 @@ struct RasterDraw final
     /// Per-binding additional buffer offsets; copied for batches/graphs and submission.
     RasterBindingOffsets BindingOffsets{};
     /// Exhaustive reachable index declarations for every NonUniform array element.
-    /// Tokens must belong to Bindings, be unique and cover the complete fixed table.
+    /// Tokens must belong to Bindings, be unique and cover every populated element
+    /// of each NonUniform table. Fallback holes require no token.
     /// Consumed/validated before admission; GDI additionally requires all corresponding
     /// sampled uses. Empty is valid when the layout has no NonUniform arrays.
     // NOLINTNEXTLINE(readability-redundant-member-init)
@@ -756,16 +769,44 @@ CreateTextureView(DeviceHandle, TextureHandle, const TextureViewDescription&, Te
 [[nodiscard]] RasterStatus
 CreateRasterShader(DeviceHandle, const RasterShaderDescription&, RasterShaderHandle&) noexcept;
 /// Create an immutable group-zero layout from at most Interface.MaxBindings unique entries; per-stage counts are
-/// checked independently.
+/// checked independently. A runtime entry reserves the length slot and adds its
+/// uniform entry when absent; conflicting consumer bindings reject.
 [[nodiscard]] RasterStatus
 CreateBindingLayout(DeviceHandle, std::span<const RasterBinding>, BindingLayoutHandle&) noexcept;
-/// Create an immutable snapshot containing every element of every layout entry.
-/// Entries are the exhaustive reachable-resource table; holes and duplicates reject.
+/// Create an immutable snapshot of the layout's full descriptor capacity.
+/// Every element is required unless its binding enables HasPartialBinding; omitted
+/// elements then use a required element-zero fallback. Duplicates always reject.
+/// Runtime length metadata is supplied by RHI; consumer entries at its reserved
+/// binding reject. Each runtime snapshot also owns one budgeted uniform buffer.
 /// Creation consumes StorageLimits::BindingDescriptors until physical retirement.
 /// It retains its layout and all resources even after public destruction.
 [[nodiscard]] RasterStatus
 CreateBindingSet(DeviceHandle, BindingLayoutHandle, std::span<const RasterBindingResource>, BindingSetHandle&) noexcept;
-/// Obtain a borrowed index into an owned, ready fixed texture array between or during frames.
+/// Allocate an explicitly sized snapshot of a runtime layout between frames.
+/// @param runtimeCount Positive runtime array length, no greater than layout Count.
+/// The borrowed entries are consumed before return. The RHI-owned length buffer
+/// matches runtimeCount; verified runtime shaders clamp through runtime_bindings.slang.
+/// Missing elements require
+/// HasPartialBinding and populated element zero; otherwise every element is required.
+/// Failure preserves output; Pending owns output and requires normal status polling.
+/// Layouts without exactly one runtime binding reject. Owner-thread only.
+[[nodiscard]] RasterStatus CreateRuntimeBindingSet(DeviceHandle,
+                                                   BindingLayoutHandle,
+                                                   ludus::foundation::BorrowedView<const RasterBindingResource>,
+                                                   ludus::foundation::uint32 runtimeCount,
+                                                   BindingSetHandle&) noexcept;
+/// Publish a prepared replacement after previous work has bound the old snapshot.
+/// Both handles must be owned, distinct, Ready and share the exact layout.
+/// Owner-thread only, including during an open frame; prepare replacements before
+/// the frame. Publication never allocates, collects or mutates native descriptors.
+/// Ready consumes inoutReplacement, updates inoutCurrent and logically destroys
+/// its old identity. Retained graphs/batches/submissions keep the previous backing
+/// until completion. NotReady or other failure preserves both handles and bindings.
+/// This snapshot operation does not enable Vulkan UPDATE_AFTER_BIND semantics.
+[[nodiscard]] RasterStatus
+PublishBindingSetUpdate(DeviceHandle, BindingSetHandle& inoutCurrent, BindingSetHandle& inoutReplacement) noexcept;
+/// Obtain a borrowed index into a populated element of an owned, ready descriptor
+/// array between or during frames. Logical holes and out-of-allocation indices reject.
 /// Invalid/stale set returns InvalidHandle; bad binding/element InvalidDescription.
 /// Failure preserves output. Does not retain resources or allocate. Owner-thread only.
 [[nodiscard]] RasterStatus GetBindingIndex(DeviceHandle,
@@ -775,8 +816,8 @@ CreateBindingSet(DeviceHandle, BindingLayoutHandle, std::span<const RasterBindin
                                            RasterBindingIndex&) noexcept;
 /// Resolve an index against the exact owned snapshot, preserving output on failure.
 /// Stale/foreign/replaced indices return InvalidHandle. Ready writes the bounded shader
-/// array element; shaders must keep accesses within the fully populated fixed array.
-/// No descriptor mutation, runtime-sized indexing or update-after-bind is implied.
+/// array element. Shaders must remain inside the allocated extent; logical holes
+/// access the retained fallback. Replacing a snapshot invalidates its host tokens.
 [[nodiscard]] RasterStatus
 GetBindingArrayElement(DeviceHandle, BindingSetHandle, const RasterBindingIndex&, ludus::foundation::uint32&) noexcept;
 /// Create an immutable triangle pipeline; dependencies must be ready. Binding contents
