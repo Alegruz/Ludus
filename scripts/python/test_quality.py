@@ -17,6 +17,7 @@ import analysis_inventory as inventory
 import engine
 from quality_process import group_is_live, LogBudget, ProcessResult, run_bounded
 import sanitizer_control
+import sanitizer_runtime_probe
 
 
 class TemporaryTest(unittest.TestCase):
@@ -222,6 +223,37 @@ class SanitizerDriverTests(TemporaryTest):
     def test_specific_nonzero_finding_and_clean_startup_are_required(self):
         self.assertTrue(self.verify("if len(sys.argv)>1:\n print('runtime error: signed integer overflow'); sys.exit(1)\n"))
         self.assertEqual(len(list((self.root / "evidence").glob("run-*/results.json"))), 1)
+
+
+class SanitizerRuntimeProbeTests(TemporaryTest):
+    def probe(self, body, timeout="30"):
+        child = self.root / "child"
+        child.write_text(f"#!{sys.executable}\nimport os, signal, sys, time\n" + body)
+        child.chmod(0o755)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = sanitizer_runtime_probe.main(
+                ["--child", str(child), "--log", str(self.root / "probe.log"), "--timeout", timeout])
+        return code, output.getvalue()
+
+    def test_clean_startup_passes(self):
+        self.assertEqual(self.probe("print('started')\n"), (0, "started\n"))
+
+    def test_hung_runtime_is_killed_rather_than_left_running(self):
+        pid_file = self.root / "pid"
+        code, output = self.probe(f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\nwhile True: time.sleep(1)\n", "2")
+        self.assertEqual(code, sanitizer_runtime_probe.EXIT_TIMED_OUT)
+        self.assertIn("timed out after 2 s", output)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(pid_file.read_text()), 0)
+
+    def test_crash_and_nonzero_exit_report_their_status(self):
+        code, output = self.probe("os.kill(os.getpid(), signal.SIGSEGV)\n")
+        self.assertEqual(code, sanitizer_runtime_probe.EXIT_FAILED)
+        self.assertIn("terminated by SIGSEGV", output)
+        code, output = self.probe("print('runtime refused'); sys.exit(3)\n")
+        self.assertEqual(code, sanitizer_runtime_probe.EXIT_FAILED)
+        self.assertIn("runtime refused\nexit status 3", output)
 
 
 if __name__ == "__main__":
