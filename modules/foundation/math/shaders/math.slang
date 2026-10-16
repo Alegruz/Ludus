@@ -11,42 +11,167 @@ bool HasPositiveComponent(float3 v)
 {
     return any(v > 0);
 }
-void MultiplyWide(uint a, uint b, out uint outLo, out uint outHi)
+// Exact 32x32->64-bit product from 16-bit limbs, because WGSL has no 64-bit
+// integers. Every partial sum stays below 2^32: a limb product is at most
+// (2^16-1)^2 = 2^32-2^17+1 and each added carry/middle term is below 2^16.
+void MultiplyWide(uint a, uint b, out uint outLow, out uint outHigh)
 {
-    uint al = a & 65535;
-    uint ah = a >> 16;
-    uint bl = b & 65535;
-    uint bh = b >> 16;
-    uint t = al * bl;
-    uint low = t & 65535;
-    uint carry = t >> 16;
-    t = ah * bl + carry;
-    uint middle = t & 65535;
-    outHi = t >> 16;
-    t = al * bh + middle;
-    outHi += ah * bh + (t >> 16);
-    outLo = (t << 16) | low;
+    uint aLow = a & 0xffff;
+    uint aHigh = a >> 16;
+    uint bLow = b & 0xffff;
+    uint bHigh = b >> 16;
+    uint partial = aLow * bLow;
+    uint lowest = partial & 0xffff;
+    uint carry = partial >> 16;
+    partial = aHigh * bLow + carry;
+    uint middle = partial & 0xffff;
+    outHigh = partial >> 16;
+    partial = aLow * bHigh + middle;
+    outHigh += aHigh * bHigh + (partial >> 16);
+    outLow = (partial << 16) | lowest;
 }
-// Thanks to John K. Salmon et al., "Parallel Random Numbers: As Easy as 1, 2, 3",
-// SC11 (2011), section 4.3, Philox4x32-10; this portable integer implementation
-// shares the reference renderer's addressed dimensions, not a mutable generator.
-// https://www.thesalmons.org/john/random123/papers/random123sc11.pdf
-uint RandomBits(uint pixel, uint sample, uint dimension, uint2 key, uint attempt = 0)
+
+// Addressed random v1 for kernels: a bit-exact port of FoundationMath's
+// ludus/foundation/math/addressed_random.hpp, not a separate visual hash.
+// docs/architecture/randomness.md#gpu-addressed-sampling owns the contract;
+// renderer GPU tests compare this code with the CPU reference and pinned
+// Random123 known answers. The owner's C++ constants define these values;
+// those tests read the shader copies back and compare them.
+static const uint RANDOM_ADDRESS_LAYOUT_VERSION = 1;
+static const uint RANDOM_BOUNDED_MAPPING_VERSION = 1;
+// Largest Dimension in layout v1 (the CPU field is uint16).
+static const uint RANDOM_MAX_DIMENSION = 0xffff;
+// Retry budget of TrySampleRandomBounded: attempts 0..65535.
+static const uint RANDOM_ATTEMPT_COUNT = 0x10000;
+
+// CPU RandomAddress with Scope split into (low32, high32) words. WGSL has no
+// uint64, so a 64-bit scope is carried as two explicit words; a 32-bit owner
+// identity passes uint2(identity, 0). Dimension must not exceed
+// RANDOM_MAX_DIMENSION. Check IsRandomAddressInRange (or use the bounded sampler,
+// which checks it) before relying on a computed dimension.
+struct RandomAddress
 {
-    uint4 c = uint4(pixel, 0, sample, (dimension >> 2) | (attempt << 16));
-    uint2 k = key;
-    for (uint r = 0; r < 10; ++r)
+    uint2 Scope;
+    uint Event;
+    uint Dimension;
+};
+
+RandomAddress MakeRandomAddress(uint2 scope, uint event, uint dimension)
+{
+    RandomAddress address;
+    address.Scope = scope;
+    address.Event = event;
+    address.Dimension = dimension;
+    return address;
+}
+
+bool IsRandomAddressInRange(RandomAddress address)
+{
+    return address.Dimension <= RANDOM_MAX_DIMENSION;
+}
+
+// Thanks to John K. Salmon et al., "Parallel Random Numbers: As Easy as 1, 2, 3",
+// SC11 (2011), section 4.3, Philox4x32-10; constants and round order match the
+// CPU reference, which pins Random123 revision 9545ff6413f258be2f04c1d319d99aaef7521150.
+// https://www.thesalmons.org/john/random123/papers/random123sc11.pdf
+// key.x/key.y are the low/high words of the CPU RandomKey value.
+uint4 Philox4x32(uint4 counter, uint2 key)
+{
+    for (uint roundIndex = 0; roundIndex < 10; ++roundIndex)
     {
-        uint a;
-        uint b;
-        uint x;
-        uint y;
-        MultiplyWide(0xd2511f53, c.x, a, b);
-        MultiplyWide(0xcd9e8d57, c.z, x, y);
-        c = uint4(y ^ c.y ^ k.x, x, b ^ c.w ^ k.y, a);
-        k += uint2(0x9e3779b9, 0xbb67ae85);
+        uint product0Low;
+        uint product0High;
+        uint product1Low;
+        uint product1High;
+        MultiplyWide(0xd2511f53, counter.x, product0Low, product0High);
+        MultiplyWide(0xcd9e8d57, counter.z, product1Low, product1High);
+        counter = uint4(product1High ^ counter.y ^ key.x, product1Low, product0High ^ counter.w ^ key.y, product0Low);
+        key += uint2(0x9e3779b9, 0xbb67ae85);
     }
-    return c[dimension & 3];
+    return counter;
+}
+
+// Layout v1 packing. Masking the dimension to 16 bits makes an out-of-range
+// dimension alias dimension % 65536, exactly like CPU uint16 narrowing; it can
+// never spill into the attempt bits [16,31] and alias another address's retry.
+uint4 PackRandomCounter(RandomAddress address, uint attempt)
+{
+    return uint4(address.Scope.x,
+                 address.Scope.y,
+                 address.Event,
+                 ((address.Dimension & RANDOM_MAX_DIMENSION) >> 2) | (attempt << 16));
+}
+
+// CPU SampleUInt32: attempt zero, lane Dimension & 3.
+uint SampleRandomUInt32(uint2 key, RandomAddress address)
+{
+    return Philox4x32(PackRandomCounter(address, 0), key)[address.Dimension & 3];
+}
+
+// CPU SampleFloat01 and PCG v1 float conversion: high 24 bits times 2^-24, [0,1).
+float RandomFloat01(uint bits)
+{
+    return float(bits >> 8) * (1.0 / 16777216.0);
+}
+
+float SampleRandomFloat01(uint2 key, RandomAddress address)
+{
+    return RandomFloat01(SampleRandomUInt32(key, address));
+}
+
+// Raw word for one rejection attempt; lets tests force rejection and exhaustion
+// through the same loop that production sampling uses.
+interface IRandomAttemptSource
+{
+    uint Draw(uint attempt);
+};
+
+struct AddressedRandomAttemptSource : IRandomAttemptSource
+{
+    uint2 Key;
+    RandomAddress Address;
+    uint Draw(uint attempt)
+    {
+        return Philox4x32(PackRandomCounter(Address, attempt), Key)[Address.Dimension & 3];
+    }
+};
+
+// Thanks to Daniel Lemire, "Fast Random Integer Generation in an Interval",
+// ACM TOMACS 29(1), 2019, Algorithm 5 (https://arxiv.org/abs/1805.10941), as in
+// the CPU mapper. Returns false for bound zero or after RANDOM_ATTEMPT_COUNT
+// rejected attempts, and outValue is then zero; callers must branch on the result
+// rather than treat any value as a sentinel.
+bool TrySampleRandomBoundedFrom<Source : IRandomAttemptSource>(Source source, uint bound, out uint outValue)
+{
+    outValue = 0;
+    if (bound == 0)
+        return false;
+    uint threshold = (0u - bound) % bound;
+    for (uint attempt = 0; attempt < RANDOM_ATTEMPT_COUNT; ++attempt)
+    {
+        uint productLow;
+        uint productHigh;
+        MultiplyWide(source.Draw(attempt), bound, productLow, productHigh);
+        if (productLow >= threshold)
+        {
+            outValue = productHigh;
+            return true;
+        }
+    }
+    return false;
+}
+
+// CPU TrySampleBounded in [0,bound). Also returns false for an address outside
+// layout v1, so a computed dimension cannot wrap silently here.
+bool TrySampleRandomBounded(uint2 key, RandomAddress address, uint bound, out uint outValue)
+{
+    outValue = 0;
+    if (IsRandomAddressInRange(address) == false)
+        return false;
+    AddressedRandomAttemptSource source;
+    source.Key = key;
+    source.Address = address;
+    return TrySampleRandomBoundedFrom(source, bound, outValue);
 }
 
 // UV-derived frame used by renderer raster and ray profiles; see

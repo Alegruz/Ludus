@@ -66,6 +66,8 @@ TEST_CASE("Addressed random v1 freezes derivation, packing and public mappings",
     REQUIRE(RandomKeyDerivationVersion == 1);
     REQUIRE(RandomAddressLayoutVersion == 1);
     REQUIRE(RandomBoundedMappingVersion == 1);
+    REQUIRE(RandomMaxDimension == 65535);
+    REQUIRE(RandomBoundedAttemptCount == 65536);
 }
 
 TEST_CASE("Checked randomness boundaries preserve outputs", "[math][random]")

@@ -686,7 +686,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
     {
         return Status::InvalidHandle;
     }
-    if (description.MaxDepth > 8 || description.TargetSamples > 4096 ||
+    if (description.MaxDepth > LUDUS_GPU_PREVIEW_MAX_DEPTH || description.TargetSamples > 4096 ||
         uint64(description.Width) * description.Height > (uint64{1} << 24))
     {
         return Status::Unsupported;
