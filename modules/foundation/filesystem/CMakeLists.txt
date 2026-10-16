@@ -195,7 +195,7 @@ endif()
 if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EMSCRIPTEN)
     add_executable(ludus_filesystem_recovery_probe tests/recovery_probe.cpp)
     target_include_directories(ludus_filesystem_recovery_probe PRIVATE src)
-    target_link_libraries(ludus_filesystem_recovery_probe PRIVATE ludus_filesystem_persistence_fault_backend)
+    target_link_libraries(ludus_filesystem_recovery_probe PRIVATE ludus_filesystem_persistence_fault_backend Ludus::FoundationContainers)
     ludus_apply_project_defaults(ludus_filesystem_recovery_probe)
     add_test(NAME ludus_filesystem_recovery_oracle_tests
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/test_recovery.py")

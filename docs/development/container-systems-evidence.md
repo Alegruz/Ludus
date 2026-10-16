@@ -80,7 +80,9 @@ ownership and failure handling, not lookup or growth policy, so it has no timing
 claims. The first increment's measurements above are unchanged.
 
 - **Inventory.** `python3 tools/check_container_policy.py` reports 209 findings
-  in 42 first-party files on the base revision. It reports none after migration.
+  in 42 first-party files on the base revision. Rebasing onto `db05ed6` exposed
+  14 more findings in two filesystem test files added on `main` in the meantime.
+  Those were migrated too, and the gate now reports none.
   `scripts/python/test_check_container_policy.py` covers every source root,
   spaced and `pmr` spellings, comments and literals (including raw strings),
   vendor/output trees, similarly named identifiers, line numbers and a stale
