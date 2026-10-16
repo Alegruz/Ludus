@@ -2,9 +2,10 @@
 
 **Status:** Architecture and implementation contract. Stage 1 of the
 [implementation sequence](#implementation-sequence) is implemented as
-[FoundationIdentity](../modules/foundation/identity.md). Existing entity, audio,
-and RHI identity mechanisms remain implemented as described below. Registry
-alignment, entropy adapters, and the UUID content workflow are proposed.
+[FoundationIdentity](../modules/foundation/identity.md), with native and browser
+entropy adapters in Platform. Existing entity, audio, and RHI identity
+mechanisms remain implemented as described below. Registry alignment and the
+UUID content workflow are proposed.
 
 **Audience:** Engine, gameplay, tools, content, and SDK contributors.
 
@@ -591,7 +592,11 @@ and reserved capacity on each target before optimizing them.
 1. Add the pure identity values/codecs and lifetime source with tests and SDK
    header checks. Leave existing public types and formats unchanged.
    *Implemented* in [FoundationIdentity](../modules/foundation/identity.md),
-   including the injected entropy-source seam; platform entropy adapters remain.
+   including the injected entropy-source seam. `Ludus::Platform` supplies the
+   production source (`GetSystemEntropySource`): `getentropy` on macOS/Linux and
+   a guarded Web Crypto `crypto.getRandomValues` bridge in browsers. Emscripten's
+   own `getentropy` is not used because a missing Web Crypto object raises a
+   JavaScript exception instead of reporting failure.
 2. Align duplicate generation/token helpers behind existing subsystem facades
    where policies actually match. Validate old-world, old-audio-session, and RHI
    session rejection independently. Preserve audio callback and RHI fence protocols.

@@ -40,6 +40,7 @@ endif()
 target_sources(
     ludus_platform
     PRIVATE
+        src/entropy.cpp
         src/window.cpp
         src/window_base.cpp
     PUBLIC
@@ -50,6 +51,7 @@ target_sources(
         FILES
             include/ludus/platform/browser/window.h
             include/ludus/platform/config.h
+            include/ludus/platform/entropy.h
             include/ludus/platform/keyboard_sink.h
             include/ludus/platform/log_categories.h
             include/ludus/platform/native_window.h
@@ -68,6 +70,9 @@ target_link_libraries(
     ludus_platform
     PUBLIC
         Ludus::FoundationBase
+        # The entropy adapter supplies FoundationIdentity's EntropySource
+        # (docs/architecture/object-handles-uuid.md); Identity never depends on Platform.
+        Ludus::FoundationIdentity
         Ludus::FoundationLogging
         # One-way dependency: Platform depends on Input for the normalized
         # keyboard record/sink vocabulary. Input never depends on Platform.
@@ -146,6 +151,14 @@ if(LUDUS_BUILD_TESTS)
     ludus_enable_test_exceptions(ludus_platform_headless_tests)
     add_test(NAME ludus_platform_headless_tests COMMAND ludus_platform_headless_tests)
     set_tests_properties(ludus_platform_headless_tests PROPERTIES LABELS "unit;platform")
+
+    add_executable(ludus_platform_entropy_tests tests/entropy_tests.cpp)
+    target_link_libraries(ludus_platform_entropy_tests PRIVATE
+        Ludus::Platform Ludus::FoundationIdentity Ludus::FoundationContainers Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_platform_entropy_tests)
+    ludus_enable_test_exceptions(ludus_platform_entropy_tests)
+    add_test(NAME ludus_platform_entropy_tests COMMAND ludus_platform_entropy_tests)
+    set_tests_properties(ludus_platform_entropy_tests PROPERTIES LABELS "unit;platform;identity")
 
     add_executable(ludus_platform_cocoa_keymap_tests tests/cocoa_keymap_tests.cpp)
     target_include_directories(ludus_platform_cocoa_keymap_tests PRIVATE src)

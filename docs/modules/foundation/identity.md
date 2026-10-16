@@ -84,10 +84,50 @@ a project, import, save or package index must check new values against that
 index and reject duplicates supplied by content. For a hash table, hash the
 canonical bytes with FoundationHash; exact byte equality decides identity.
 
+### Generating UUIDs with platform entropy
+
+`Ludus::Platform` provides the production source in
+`<ludus/platform/entropy.h>`. Link `Ludus::Platform` (it links
+FoundationIdentity publicly) and pass `GetSystemEntropySource()` to
+`TryGenerateUuidV4`:
+
+```cpp
+#include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
+
+namespace identity = ludus::foundation::identity;
+
+bool MintAssetId(identity::AssetId& output) noexcept
+{
+    identity::Uuid value;
+    if (identity::TryGenerateUuidV4(ludus::platform::GetSystemEntropySource(), value) !=
+        identity::UuidStatus::Success)
+    {
+        return false; // EntropyUnavailable; output is unchanged
+    }
+    output = identity::AssetId{value};
+    return true;
+}
+```
+
+| Target | Source | Failure |
+| --- | --- | --- |
+| macOS, Linux | `getentropy(3)`, in requests of at most 256 bytes | The call reports an error; `TryGenerateUuidV4` returns `EntropyUnavailable`. |
+| Browser (Emscripten) | Web Crypto `crypto.getRandomValues`, in requests of at most 256 bytes, called through a guarded bridge (Node's global Web Crypto object under Node) | A missing or throwing Web Crypto object fails the request instead of raising a JavaScript exception through wasm. |
+| Other targets | None yet | Every nonempty request fails. |
+
+The source is stateless and thread-safe; copy it freely. No target falls back to
+wall time, addresses, `rand` or a gameplay PRNG. `TryFillSystemEntropy(bytes,
+size)` exposes the same bytes for other security-sensitive callers; its
+destination is unspecified after a failure. Linux may block briefly during early
+boot until the kernel pool is initialized, so generate identities in tools,
+import and save paths rather than inside frame-critical work.
+
 ## Status
 
 This is the first stage of the
 [implementation sequence](../../architecture/object-handles-uuid.md#implementation-sequence).
 Existing `EntityId`, audio and RHI handles, and current content formats, are
-unchanged. The entropy adapters, registry alignment and UUID authoring records
-are later stages.
+unchanged. The native and browser platform entropy adapters are implemented in
+`Ludus::Platform`. Registry alignment and UUID authoring records are later
+stages; the private SceneCook UUID helper still calls `getentropy` directly.

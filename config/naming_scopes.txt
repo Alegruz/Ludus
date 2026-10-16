@@ -4,6 +4,9 @@
 modules/content/scene_cook
 modules/content/scene_format
 modules/foundation/identity
+modules/platform/include/ludus/platform/entropy.h
+modules/platform/src/entropy.cpp
+modules/platform/tests/entropy_tests.cpp
 modules/foundation/math/include/ludus/foundation/math/summation.hpp
 modules/foundation/math/src/summation.cpp
 modules/foundation/math/tests/summation_tests.cpp
