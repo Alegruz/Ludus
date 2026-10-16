@@ -32,6 +32,11 @@ syntax-checked before admission and take effect as coordinator definitions after
 promotion. Periodic workflows can start late when GitHub is busy; 30 minutes is
 the intended cadence, not a completion deadline.
 
+A batch that promotes coordinator edits still executes its original workflow
+revision through the last job. Verify changed coordinator behavior with a later
+`develop` candidate after the repair reaches `main`. Dispatching without a new
+candidate skips validation and publication, so it does not exercise the change.
+
 Only one batch is active. New `develop` commits do not cancel it or change its input.
 Concurrent scheduler ticks coalesce into at most one pending run. A tick captured
 before `main` advanced skips, letting the next tick use the new stable revision.
@@ -134,6 +139,21 @@ validation, retry against its new base. If develop diverged, reconcile it throug
 reviewed merges; do not reset either branch or rewrite other contributors' work.
 Set `BATCH_CI_ENABLED=false` to stop new snapshots. An already active batch is
 unaffected; cancel that run explicitly if it must not promote.
+
+If source promotion succeeded but documentation publication failed or was skipped,
+check **Publish promoted documentation** separately from **Promote validated
+candidate**. An intentionally skipped optional recovery job must not suppress
+publication after successful promotion. Failed, skipped or cancelled promotion
+must never publish a candidate's artifact. Confirm both jobs succeed, then open
+the deployed site and check the changed content before declaring publication proven.
+
+Rerun a failed publication job while its validated artifact is available. GitHub
+[reruns](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
+use the original workflow revision; a coordinator repair therefore needs promotion
+and a later batch to verify its new behavior. To rebuild and publish the current
+stable documentation explicitly, select **Actions → Ludus Wiki → Run workflow**
+and choose **main**. That workflow revalidates the wiki and browser payload before
+deployment; it does not promote a new source commit.
 
 ## Change routing
 
