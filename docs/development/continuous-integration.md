@@ -64,6 +64,19 @@ trigger on `merge_group`, and `test_ci_scope.py` checks this. The path-filtered
 browser package and release workflows stay advisory pull-request checks outside
 the queue.
 
+### macOS runner images
+
+Native compilation, analyzer and sanitizer jobs run on the explicit `macos-15`
+arm64 runner label. Host-tooling installation also checks `macos-15-intel` separately.
+GitHub's [macOS 14 image deprecation notice](https://github.com/actions/runner-images/issues/13518)
+announces longer queues, scheduled brownouts and retirement on November 2, 2026;
+the workflow avoids that deprecated runner pool.
+
+The SDK still declares a `14.0` deployment target. Testing on the macOS 15 runner
+verifies that host runtime, and does not by itself establish macOS 14 runtime
+qualification. Runner availability and the declared SDK baseline are separate
+contracts.
+
 ## Change routing
 
 Every run first tests the CI routing policy and compares the complete change.

@@ -82,7 +82,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, macos-14, macos-15-intel]
+        # Match the supported native runner; keep explicit Intel installer coverage.
+        # https://github.com/actions/runner-images/issues/13518
+        runner: [ubuntu-24.04, macos-15, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
         with:

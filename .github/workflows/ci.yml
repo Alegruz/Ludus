@@ -36,11 +36,14 @@ jobs:
       - uses: ./.github/actions/change-scope
         id: scope
 
+  # Thanks to GitHub Actions runner-images, macOS 14 deprecation announcement #13518:
+  # https://github.com/actions/runner-images/issues/13518
+  # Keep arm64 native coverage on macOS 15; SDKs still declare a 14.0 deployment floor.
   macos-compile:
     needs: changes
     if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: macOS native backends and diagnostics
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/macos-setup
@@ -332,7 +335,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: macOS ASan and UBSan
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/macos-setup
@@ -399,7 +402,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.native_required == 'true' && needs.changes.outputs.validation_tier == 'full'
     name: macOS analyzer baseline
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       LUDUS_TIDY_JOBS: "2"
     steps:
