@@ -24,7 +24,7 @@ EditorCameraController::EditorCameraController() noexcept
 {
     mSample.Lens.Projection = camera::CameraProjection::PerspectiveInfinite;
     mSample.Lens.NearPlane = 0.01F;
-    static_cast<void>(TrySetOrbit({}, 25, 20, mDistance));
+    static_cast<void>(TrySetOrbit({}, {25, 20}, mDistance));
 }
 bool EditorCameraController::tryPublish(const camera::CameraSample& sample, float32 distance) noexcept
 {
@@ -66,19 +66,17 @@ float32 EditorCameraController::GetPitchDegrees() const noexcept
         math::Atan2(-forwardWorld.Y, math::Sqrt(forwardWorld.X * forwardWorld.X + forwardWorld.Z * forwardWorld.Z)));
 }
 bool EditorCameraController::TrySetOrbit(math::Vector3d pivotWorld,
-                                         float32 yawDegrees,
-                                         float32 pitchDegrees,
+                                         math::Vector2 orbitDegrees,
                                          float32 distance) noexcept
 {
-    if (math::IsFinite(yawDegrees) == false || math::IsFinite(pitchDegrees) == false ||
-        math::IsFinite(pivotWorld) == false)
+    if (math::IsFinite(orbitDegrees) == false || math::IsFinite(pivotWorld) == false)
     {
         return false;
     }
     math::Quaternion yaw;
     math::Quaternion pitch;
-    if (math::TryFromAxisAngle({0, 1, 0}, math::DegreesToRadians(yawDegrees), yaw) != math::MathStatus::Success ||
-        math::TryFromAxisAngle({1, 0, 0}, -math::DegreesToRadians(math::Clamp(pitchDegrees, -89.9F, 89.9F)), pitch) !=
+    if (math::TryFromAxisAngle({0, 1, 0}, math::DegreesToRadians(orbitDegrees.X), yaw) != math::MathStatus::Success ||
+        math::TryFromAxisAngle({1, 0, 0}, -math::DegreesToRadians(math::Clamp(orbitDegrees.Y, -89.9F, 89.9F)), pitch) !=
             math::MathStatus::Success)
     {
         return false;

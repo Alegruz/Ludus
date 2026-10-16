@@ -557,7 +557,7 @@ void RenderPreview::FrameAll() noexcept
     OrbitRadius_ = Scene_.Radius;
     navigationChanged();
 }
-void RenderPreview::Navigate(int32 camera, float32 yaw, float32 pitch, float32 zoom, bool reference)
+void RenderPreview::Navigate(int32 camera, math::Vector2 orbitDegrees, float32 zoom, bool isReference)
 {
     if (camera < -1 || camera >= Scene_.Cameras.size())
     {
@@ -571,9 +571,9 @@ void RenderPreview::Navigate(int32 camera, float32 yaw, float32 pitch, float32 z
             return;
         }
         // Detaching adopts the visible pose/lens, including roll; stale orbit sliders never move it.
-        if (isDetaching == false && (Yaw_ != yaw || Pitch_ != pitch || Zoom_ != zoom))
+        if (isDetaching == false && (Yaw_ != orbitDegrees.X || Pitch_ != orbitDegrees.Y || Zoom_ != zoom))
         {
-            if (mCameraController.TrySetOrbit(mCameraController.GetPivotWorld(), yaw, pitch, zoom * OrbitRadius_) ==
+            if (mCameraController.TrySetOrbit(mCameraController.GetPivotWorld(), orbitDegrees, zoom * OrbitRadius_) ==
                 false)
             {
                 return;
@@ -582,7 +582,7 @@ void RenderPreview::Navigate(int32 camera, float32 yaw, float32 pitch, float32 z
     }
     Camera_ = camera;
     CameraId_ = camera >= 0 ? Scene_.Cameras[camera].Id : QString();
-    Reference_ = reference;
+    Reference_ = isReference;
     navigationChanged();
 }
 void RenderPreview::Resize(int32 width, int32 height)
@@ -795,8 +795,8 @@ void RenderPreview::RestoreNavigation(const QJsonObject& state)
     {
         static_cast<void>(
             mCameraController.TrySetOrbit(pivotWorld,
-                                          static_cast<float32>(number(QStringLiteral("yaw"), 25)),
-                                          static_cast<float32>(number(QStringLiteral("pitch"), 20)),
+                                          {static_cast<float32>(number(QStringLiteral("yaw"), 25)),
+                                           static_cast<float32>(number(QStringLiteral("pitch"), 20))},
                                           static_cast<float32>(number(QStringLiteral("zoom"), 3)) * OrbitRadius_));
     }
     Camera_ = -1;

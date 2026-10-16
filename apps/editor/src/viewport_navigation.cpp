@@ -17,6 +17,7 @@ namespace
 // Thanks to Epic Games, "Viewport Controls", Unreal Engine documentation:
 // https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-controls-in-unreal-engine
 // Adopted RMB fly/look, Alt orbit and F framing; editor input remains outside GameplayCamera.
+constexpr float32 NANOSECONDS_PER_SECOND = 1000000000.0F;
 constexpr int32 FORWARD_KEY = 0;
 constexpr int32 BACKWARD_KEY = 1;
 constexpr int32 LEFT_KEY = 2;
@@ -195,7 +196,7 @@ void PreviewViewport::advanceNavigation()
     {
         return;
     }
-    const float32 deltaSeconds = static_cast<float32>(mNavigationClock.nsecsElapsed()) / 1000000000;
+    const float32 deltaSeconds = static_cast<float32>(mNavigationClock.nsecsElapsed()) / NANOSECONDS_PER_SECOND;
     mNavigationClock.restart();
     const math::Vector3 movementControls{
         (mHeldKeys[RIGHT_KEY] == true ? 1.0F : 0.0F) - (mHeldKeys[LEFT_KEY] == true ? 1.0F : 0.0F),
@@ -206,7 +207,7 @@ void PreviewViewport::advanceNavigation()
         return;
     }
     const float32 speed = math::Clamp(Preview_->GetFocusDistance() * 0.5F, 0.001F, 10000.0F) * mSpeedMultiplier *
-                          (mHeldKeys[BOOST_KEY] == true ? 4 : 1);
+                          (mHeldKeys[BOOST_KEY] == true ? 4.0F : 1.0F);
     Preview_->Fly(movementControls, deltaSeconds, speed);
 }
 void PreviewViewport::recenterPointer()

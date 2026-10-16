@@ -60,7 +60,7 @@ TEST_CASE("Detaching an authored viewport camera preserves its pose lens and vis
     RenderPreview preview;
     const RenderScene scene = MakeNavigationScene();
     REQUIRE(preview.SetScene(scene) == true);
-    preview.Navigate(0, 25, 20, 3, false);
+    preview.Navigate(0, {25, 20}, 3, false);
     rr::ViewDescription before;
     rr::ViewDescription after;
     QString error;
@@ -70,7 +70,7 @@ TEST_CASE("Detaching an authored viewport camera preserves its pose lens and vis
     preview.Orbit(0, 0);
     preview.Pan(0, 0);
     CHECK(preview.Navigation() == authoredState);
-    preview.Navigate(-1, -80, -40, 20, false);
+    preview.Navigate(-1, {-80, -40}, 20, false);
     REQUIRE(preview.DescribeView(800, 600, after, error) == true);
     CHECK(after.WorldToClip == before.WorldToClip);
     CHECK(after.CameraPosition == before.CameraPosition);
@@ -199,7 +199,7 @@ TEST_CASE("Viewport input frames selection, consumes fractional scrolling and st
     preview.SetSelection(QStringLiteral("selected-cube"));
     QTest::keyClick(&viewport, Qt::Key_F);
     CHECK(preview.GetFocusDistance() < 10);
-    preview.Navigate(0, 25, 20, 3, false);
+    preview.Navigate(0, {25, 20}, 3, false);
     const QJsonObject before = preview.Navigation();
     QWheelEvent
         emptyWheel(QPointF(100, 100), QPointF(100, 100), {}, {}, Qt::NoButton, Qt::NoModifier, Qt::ScrollUpdate, false);

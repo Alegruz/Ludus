@@ -6,6 +6,7 @@
 #include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/viewport.hpp>
 #include <ludus/graphics/rhi/device.h>
@@ -46,11 +47,11 @@ public:
     /// @return False when no preview start is pending or the device cannot start.
     [[nodiscard]] bool AdmitOffscreenDevice();
     void Stop() noexcept;
+    /// Select a view; orbitDegrees contains yaw/pitch in degrees and zoom is the legacy radius scale.
     void Navigate(foundation::int32 camera,
-                  foundation::float32 yaw,
-                  foundation::float32 pitch,
+                  foundation::math::Vector2 orbitDegrees,
                   foundation::float32 zoom,
-                  bool reference);
+                  bool isReference);
     void FrameAll() noexcept;
     void SetSelection(const QString& id);
     [[nodiscard]] bool FrameSelection() noexcept;

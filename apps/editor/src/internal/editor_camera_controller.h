@@ -27,9 +27,9 @@ public:
     [[nodiscard]] foundation::float32 GetYawDegrees() const noexcept;
     [[nodiscard]] foundation::float32 GetPitchDegrees() const noexcept;
     [[nodiscard]] bool TryAdopt(const gameplay::camera::CameraSample& sample, foundation::float32 distance) noexcept;
+    /// Set a world pivot, yaw/pitch pair in degrees, and absolute focus distance in world units.
     [[nodiscard]] bool TrySetOrbit(foundation::math::Vector3d pivotWorld,
-                                   foundation::float32 yawDegrees,
-                                   foundation::float32 pitchDegrees,
+                                   foundation::math::Vector2 orbitDegrees,
                                    foundation::float32 distance) noexcept;
     [[nodiscard]] bool TryRotate(foundation::float32 deltaX, foundation::float32 deltaY, bool isOrbit) noexcept;
     [[nodiscard]] bool TryPan(foundation::float32 deltaX,

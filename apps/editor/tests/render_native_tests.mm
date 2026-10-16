@@ -256,7 +256,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     viewport.setContentsMargins(7, 11, 13, 17);
     viewport.show();
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(preview.Start());
     const bool presented = Frames(preview, 3);
     INFO(preview.Status().toStdString());
@@ -327,7 +327,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
             QTest::mouseMove(window, QPoint(145, 120));
             QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, QPoint(145, 120));
             CHECK(preview.Navigation() == authoredNavigation);
-            preview.Navigate(-1, 80, 40, 20, false);
+            preview.Navigate(-1, {80, 40}, 20, false);
             REQUIRE(Frames(preview, preview.Frames() + 3));
             CHECK(ReadViewport() == embedded);
             QTest::mousePress(window, Qt::LeftButton, Qt::AltModifier, QPoint(100, 100));
@@ -372,10 +372,10 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     }
     CHECK(world.Draft() == original);
     const QJsonObject navigation = preview.Navigation();
-    preview.Navigate(-1, 70, 30, 4, false);
+    preview.Navigate(-1, {70, 30}, 4, false);
     preview.RestoreNavigation(navigation);
     CHECK(preview.Navigation() == navigation);
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Submitted == 1);
     CHECK(preview.Report().Visible == 1);
@@ -391,7 +391,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(RenderScene::Load(root, world, scene, error));
     CHECK(scene.Surfaces.size() == 1);
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Visible == 12);
     CHECK(preview.Report().Draws == 1);
@@ -401,7 +401,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     }
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK_FALSE(world.Dirty());
     CHECK(preview.WindowInfo().System == ludus::platform::WindowSystem::Headless);
@@ -421,25 +421,25 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
         world.Edit(QStringLiteral("starter.cube"), components, entity.value(QStringLiteral("name")).toString(), error));
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Culled == 1);
     CHECK(preview.Report().Visible == 0);
     embedded = ReadViewport();
     CHECK(embedded.pixelColor(embedded.width() / 2, embedded.height() / 2) == embedded.pixelColor(0, 0));
-    preview.Navigate(0, 0, 0, 3, true);
+    preview.Navigate(0, {0, 0}, 3, true);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     CHECK(preview.Report().Visible == 1);
     CHECK(preview.Report().Culled == 0);
     REQUIRE(world.Undo());
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     CHECK(preview.Report().Visible == 1);
     CHECK_FALSE(world.Dirty());
     // Object edits preserve the independent orbit anchor until explicit Frame All.
-    preview.Navigate(-1, 25, 20, 3, false);
+    preview.Navigate(-1, {25, 20}, 3, false);
     REQUIRE(Frames(preview, preview.Frames() + 3));
     const ludus::foundation::math::Vector3 eye = preview.ViewDescription().CameraPosition;
     const QJsonObject orbitNavigation = preview.Navigation();
@@ -463,7 +463,7 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     REQUIRE(RenderScene::Load(root, world, scene, error));
     REQUIRE(preview.SetScene(scene));
     preview.FrameAll();
-    preview.Navigate(0, 0, 0, 3, false);
+    preview.Navigate(0, {0, 0}, 3, false);
     REQUIRE(Frames(preview, 3));
     preview.Stop();
     CHECK_FALSE(preview.Running());

@@ -125,16 +125,16 @@ RenderPanel::RenderPanel(QWidget* parent) : QWidget(parent), Preview_(this)
     connect(Yaw_, &QSlider::valueChanged, this, [this](foundation::int32 value) {
         const QJsonObject state = Preview_.Navigation();
         Preview_.Navigate(-1,
-                          static_cast<foundation::float32>(value),
-                          static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble()),
+                          {static_cast<foundation::float32>(value),
+                           static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble())},
                           static_cast<foundation::float32>(state.value(QStringLiteral("zoom")).toDouble()),
                           Reference_->isChecked());
     });
     connect(Pitch_, &QSlider::valueChanged, this, [this](foundation::int32 value) {
         const QJsonObject state = Preview_.Navigation();
         Preview_.Navigate(-1,
-                          static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
-                          static_cast<foundation::float32>(value),
+                          {static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
+                           static_cast<foundation::float32>(value)},
                           static_cast<foundation::float32>(state.value(QStringLiteral("zoom")).toDouble()),
                           Reference_->isChecked());
     });
@@ -144,8 +144,8 @@ RenderPanel::RenderPanel(QWidget* parent) : QWidget(parent), Preview_(this)
     connect(Reference_, &QCheckBox::toggled, this, [this](bool isReference) {
         const QJsonObject state = Preview_.Navigation();
         Preview_.Navigate(Cameras_->currentIndex() - 1,
-                          static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
-                          static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble()),
+                          {static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
+                           static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble())},
                           static_cast<foundation::float32>(state.value(QStringLiteral("zoom")).toDouble()),
                           isReference);
     });
@@ -374,8 +374,8 @@ void RenderPanel::navigate()
 {
     const QJsonObject state = Preview_.Navigation();
     Preview_.Navigate(Cameras_->currentIndex() - 1,
-                      static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
-                      static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble()),
+                      {static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
+                       static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble())},
                       static_cast<foundation::float32>(state.value(QStringLiteral("zoom")).toDouble()),
                       state.value(QStringLiteral("reference")).toBool());
 }
