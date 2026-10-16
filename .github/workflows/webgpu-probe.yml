@@ -86,24 +86,41 @@ on:
       - 'tools/check_foundational_includes.py'
       - '.clang-format'
       - '.clang-tidy'
+  workflow_call:
+    inputs:
+      batch_sha:
+        description: Frozen develop commit selected by the trusted batch coordinator.
+        required: true
+        type: string
+      batch_base_sha:
+        description: Stable main commit captured with this candidate.
+        required: true
+        type: string
+  schedule:
+    - cron: '47 9 * * *'
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: webgpu-probe-${{ inputs.batch_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 env:
-  LUDUS_TIDY_JOBS: "2"
+  LUDUS_TIDY_JOBS: "4"
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
 
 jobs:
   compile-and-package:
+    if: github.event_name != 'pull_request' || github.base_ref != 'develop'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - name: Cache pinned browser and shader tools
         uses: actions/cache@v4
         with:
@@ -183,7 +200,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/build/raster-web-sdk --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/raster-web-sdk --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
       - name: Build installed L0/L1/L2/L3/L4 renderer browser SDK consumers
         run: |
           out/host-tools/venv/bin/cmake --install out/build/web-emscripten-development --prefix "$PWD/out/install/raster-web-sdk"
@@ -196,7 +213,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
-          out/host-tools/venv/bin/cmake --build out/build/renderer-web-sdk --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/renderer-web-sdk --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
       - uses: actions/upload-artifact@v4
         with:
           name: renderer-web-sdk-consumer
@@ -288,10 +305,11 @@ jobs:
         run: |
           for preset in web-emscripten-development web-emscripten-release; do
             out/host-tools/venv/bin/cmake --preset "$preset" -DLUDUS_BUILD_WORLD_DEMO=ON
-            out/host-tools/venv/bin/cmake --build --preset "$preset" --target ludus_world_demo --parallel 2
+            out/host-tools/venv/bin/cmake --build --preset "$preset" --target ludus_world_demo --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
             ./scripts/check "$preset" --tidy
           done
       - name: Review complete browser analyzer baselines
+        if: inputs.batch_sha == '' && github.event_name != 'pull_request'
         continue-on-error: true
         run: |
           failed=0
@@ -412,6 +430,7 @@ jobs:
           if-no-files-found: error
 
   localization-icu-wasm:
+    if: github.event_name != 'pull_request' || github.base_ref != 'develop'
     # Separate runner: the ICU host data build and two wasm ICU compiles would
     # push compile-and-package past its timeout.
     name: L0 ICU backend probe (wasm)
@@ -419,6 +438,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - name: Cache pinned browser and shader tools
         uses: actions/cache@v4
         with:
@@ -499,6 +521,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: ludus-web-smoke-release
@@ -574,6 +599,9 @@ jobs:
         suite: [baseline, scaling]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.batch_sha || github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: renderer-web-sdk-consumer
