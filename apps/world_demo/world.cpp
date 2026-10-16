@@ -1111,25 +1111,60 @@ uint64 GameWorld::GetReplayHash() const noexcept
     }
     return hash;
 }
-Status TickDriver::Advance(GameWorld& world, float64 delta, TickInput input, bool visible) noexcept
+void TickDriver::dropTiming() noexcept
 {
-    if (!std::isfinite(delta) || delta < 0)
+    mFrameClock.Reset();
+    mDebt = 0;
+    mInput.Cancel();
+}
+void TickDriver::recordFrame(foundation::time::Duration interval) noexcept
+{
+    using foundation::time::Duration;
+    // Every observed interval is accepted, clamped or excluded; failed sums keep the previous totals.
+    const uint64 accounted = mFrameSample.Elapsed.Nanoseconds + mFrameSample.Discarded.Nanoseconds;
+    const Duration excluded{interval.Nanoseconds >= accounted ? interval.Nanoseconds - accounted : 0};
+    (void)foundation::time::TryAdd(mAccepted, mFrameSample.Elapsed, mAccepted);
+    (void)foundation::time::TryAdd(mClamped, mFrameSample.Discarded, mClamped);
+    (void)foundation::time::TryAdd(mExcluded, excluded, mExcluded);
+    mDiscarded += foundation::time::ToSeconds(mFrameSample.Discarded);
+}
+Status
+TickDriver::Advance(GameWorld& inoutWorld, foundation::time::Timestamp now, TickInput input, bool isVisible) noexcept
+{
+    using foundation::time::Duration;
+    using foundation::time::TimeStatus;
+    // The high-water mark survives frame resets, so a regressed sample can never become a new baseline.
+    Duration interval;
+    const TimeStatus observed =
+        mHasObserved == true ? foundation::time::TryElapsed(mObserved, now, interval) : TimeStatus::Ok;
+    if (observed == TimeStatus::Ok)
     {
-        return Status::InvalidConfiguration;
+        mObserved = now;
+        mHasObserved = true;
     }
-    if (!visible || mMode != Mode::Playing)
+    else
     {
-        mDebt = 0;
-        mInput.Cancel();
+        ++mClockRegressions;
+    }
+    mFrameSample = { .Status = observed };
+    if (isVisible == false || mMode != Mode::Playing)
+    {
+        dropTiming();
+        recordFrame(interval);
         return Status::Success;
     }
     mInput.Sample(input);
-    mDiscarded += foundation::math::Max(0.0, delta - 0.25);
-    mDebt += foundation::math::Min(delta, 0.25);
+    if (observed == TimeStatus::Ok)
+    {
+        mFrameSample = mFrameClock.Sample(now);
+    }
+    recordFrame(interval);
+    // The FrameClock is the only clamp; its discarded excess is already recorded.
+    mDebt += foundation::time::ToSeconds(mFrameSample.Elapsed);
     usize count = 0;
     while (mDebt + 1e-12 >= TickDuration && count < 4)
     {
-        const auto status = world.RunTick(mInput.Consume());
+        const Status status = inoutWorld.RunTick(mInput.Consume());
         if (status != Status::Success)
         {
             SetMode(Mode::Faulted);
@@ -1162,14 +1197,16 @@ Status TickDriver::Step(GameWorld& world) noexcept
 void TickDriver::SetMode(Mode mode) noexcept
 {
     mMode = mode;
-    mDebt = 0;
-    mInput.Cancel();
+    dropTiming();
+}
+void TickDriver::Interrupt() noexcept
+{
+    dropTiming();
 }
 void TickDriver::Reset() noexcept
 {
     mMode = Mode::Playing;
-    mDebt = 0;
-    mInput.Cancel();
+    dropTiming();
 }
 LevelResult Session::RequestLoad(std::string_view source) noexcept
 {

@@ -1,6 +1,7 @@
 #pragma once
 #include "level.h"
 #include <ludus/foundation/base/core.h>
+#include <ludus/foundation/time/timers.hpp>
 #include <ludus/gameplay/camera/evaluation.hpp>
 #include <ludus/gameplay/world/component_pool.hpp>
 #include <ludus/gameplay/world/entity_registry.h>
@@ -309,12 +310,22 @@ enum class Mode : uint8
     Paused,
     Faulted
 };
+/// Largest presentation interval accepted as simulation debt; the excess is reported as discarded.
+inline constexpr foundation::time::Duration MAXIMUM_FRAME_DELTA{foundation::time::NANOSECONDS_PER_SECOND / 4};
+/// Frame-to-simulation boundary: owns the one FrameClock, so every debt reset also drops the frame baseline.
+/// Pause/resume, suspension, faults and session replacement therefore never catch up excluded time.
 class TickDriver final
 {
 public:
-    [[nodiscard]] Status Advance(GameWorld& world, float64 delta, TickInput input, bool visible = true) noexcept;
+    /// Sample the timestamp read once at this presentation callback and run bounded fixed ticks.
+    /// Hidden or non-Playing frames reset debt, input edges and the frame baseline instead.
+    /// A sample below the highest observed timestamp counts a regression and adds no time.
+    [[nodiscard]] Status
+    Advance(GameWorld& inoutWorld, foundation::time::Timestamp now, TickInput input, bool isVisible = true) noexcept;
     [[nodiscard]] Status Step(GameWorld& world) noexcept;
     void SetMode(Mode mode) noexcept;
+    /// Drop debt, pending input edges and the frame baseline without changing mode.
+    void Interrupt() noexcept;
     void Reset() noexcept;
     [[nodiscard]] Mode GetMode() const noexcept
     {
@@ -324,15 +335,51 @@ public:
     {
         return mMode == Mode::Playing ? static_cast<float32>(mDebt * 60.0) : 1.0F;
     }
+    /// Seconds lost to the frame clamp plus whole ticks trimmed beyond the catch-up budget.
     [[nodiscard]] float64 GetDiscardedTime() const noexcept
     {
         return mDiscarded;
     }
+    /// Sample from the latest Advance, for presentation and diagnostics.
+    [[nodiscard]] LUDUS_INLINE const foundation::time::FrameSample& GetFrameSample() const noexcept
+    {
+        return mFrameSample;
+    }
+    /// Total frame time accepted as simulation debt.
+    [[nodiscard]] LUDUS_INLINE foundation::time::Duration GetAcceptedTime() const noexcept
+    {
+        return mAccepted;
+    }
+    /// Total frame time beyond MAXIMUM_FRAME_DELTA; included in GetDiscardedTime.
+    [[nodiscard]] LUDUS_INLINE foundation::time::Duration GetClampedTime() const noexcept
+    {
+        return mClamped;
+    }
+    /// Time between observed frames excluded by baselines, pause, suspension, faults or replacement.
+    [[nodiscard]] LUDUS_INLINE foundation::time::Duration GetExcludedTime() const noexcept
+    {
+        return mExcluded;
+    }
+    /// Number of Advance timestamps below the highest observed timestamp.
+    [[nodiscard]] LUDUS_INLINE uint64 GetClockRegressions() const noexcept
+    {
+        return mClockRegressions;
+    }
 
 private:
+    void dropTiming() noexcept;
+    void recordFrame(foundation::time::Duration interval) noexcept;
     InputBridge mInput;
+    foundation::time::FrameClock mFrameClock{MAXIMUM_FRAME_DELTA};
+    foundation::time::FrameSample mFrameSample;
+    foundation::time::Timestamp mObserved;
+    foundation::time::Duration mAccepted;
+    foundation::time::Duration mClamped;
+    foundation::time::Duration mExcluded;
+    uint64 mClockRegressions = 0;
     float64 mDebt = 0;
     float64 mDiscarded = 0;
+    bool mHasObserved = false;
     Mode mMode = Mode::Playing;
 };
 enum class LoadStage : uint8
