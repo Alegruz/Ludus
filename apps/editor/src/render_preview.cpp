@@ -664,20 +664,20 @@ void RenderPreview::Pan(float32 deltaX, float32 deltaY, float32 heightLogical)
         navigationChanged();
     }
 }
-void RenderPreview::Fly(math::Vector3 movementLocal, float32 deltaSeconds, float32 speed)
+void RenderPreview::Fly(math::Vector3 movementControls, float32 deltaSeconds, float32 speed)
 {
     if (math::IsFinite(deltaSeconds) == false || deltaSeconds <= 0 || math::IsFinite(speed) == false || speed <= 0 ||
-        math::LengthSquared(movementLocal) == 0 || beginNavigation() == false)
+        math::LengthSquared(movementControls) == 0 || beginNavigation() == false)
     {
         return;
     }
-    if (math::TryNormalize(movementLocal, movementLocal) != math::MathStatus::Success)
+    if (math::TryNormalize(movementControls, movementControls) != math::MathStatus::Success)
     {
         return;
     }
     const math::Quaternion orientation = mCameraController.GetSample().Pose.Orientation;
-    math::Vector3 movementWorld =
-        math::Rotate(orientation, {movementLocal.X, 0, movementLocal.Z}) + math::Vector3{0, movementLocal.Y, 0};
+    math::Vector3 movementWorld = math::Rotate(orientation, {movementControls.X, 0, movementControls.Z}) +
+                                  math::Vector3{0, movementControls.Y, 0};
     if (math::TryNormalize(movementWorld, movementWorld) != math::MathStatus::Success)
     {
         return;

@@ -878,7 +878,9 @@ bool RenderScene::View(const PreviewViewOptions& options, rr::ViewDescription& o
                               ? rr::ProjectionKind::PerspectiveInfinite
                               : rr::ProjectionKind::Orthographic;
         projection.VerticalFovRadians = sample.Lens.VerticalFov;
-        projection.OrthographicHeight = sample.Lens.VerticalSpan;
+        projection.OrthographicHeight =
+            math::Max(sample.Lens.VerticalSpan,
+                      sample.Lens.MinimumVisibleWidth * static_cast<float32>(height) / static_cast<float32>(width));
         projection.Near = sample.Lens.NearPlane;
         projection.Far = sample.Lens.FarPlane;
         position = pose.Translation;

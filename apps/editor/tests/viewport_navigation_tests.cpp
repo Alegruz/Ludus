@@ -242,3 +242,21 @@ TEST_CASE("Orthographic pan uses the active width constraint and invalid restore
     preview.RestoreNavigation(invalid);
     CHECK(preview.Navigation() == navigation);
 }
+
+TEST_CASE("Orthographic viewport projection agrees with its minimum visible width", "[editor][navigation]")
+{
+    RenderScene scene = MakeNavigationScene();
+    scene.Cameras[0].Sample.Lens.Projection = camera::CameraProjection::OrthographicFinite;
+    scene.Cameras[0].Sample.Lens.VerticalSpan = 2;
+    scene.Cameras[0].Sample.Lens.MinimumVisibleWidth = 8;
+    scene.Cameras[0].Sample.Lens.FarPlane = 100;
+    const PreviewViewOptions options{ .Camera = 0, .Width = 300, .Height = 600 };
+    rr::ViewDescription constrained;
+    rr::ViewDescription equivalent;
+    QString error;
+    REQUIRE(scene.View(options, constrained, error) == true);
+    scene.Cameras[0].Sample.Lens.VerticalSpan = 16;
+    scene.Cameras[0].Sample.Lens.MinimumVisibleWidth = 0;
+    REQUIRE(scene.View(options, equivalent, error) == true);
+    CHECK(constrained.WorldToClip == equivalent.WorldToClip);
+}

@@ -55,7 +55,7 @@ public:
     void SetSelection(const QString& id);
     [[nodiscard]] bool FrameSelection() noexcept;
     void Look(foundation::float32 deltaX, foundation::float32 deltaY);
-    void Fly(foundation::math::Vector3 movementLocal, foundation::float32 deltaSeconds, foundation::float32 speed);
+    void Fly(foundation::math::Vector3 movementControls, foundation::float32 deltaSeconds, foundation::float32 speed);
     [[nodiscard]] foundation::float32 GetFocusDistance() const noexcept;
     void SetShading(PreviewShading shading);
     [[nodiscard]] LUDUS_INLINE PreviewShading GetShading() const noexcept
