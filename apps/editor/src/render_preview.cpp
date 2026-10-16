@@ -32,6 +32,7 @@ namespace
 using namespace foundation;
 namespace rhi = graphics::rhi;
 namespace rr = graphics::renderer;
+constexpr int32 NAVIGATION_STATE_VERSION = 2;
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
 bool Accepted(rhi::RasterStatus s) noexcept
 {
@@ -196,6 +197,11 @@ bool RenderPreview::SetScene(const RenderScene& scene)
         Residency_.Reset();
         OrbitCenter_ = {};
         OrbitRadius_ = 1;
+        mCameraController = EditorCameraController{};
+        RestoredOrbit_ = false;
+        Camera_ = -1;
+        CameraId_.clear();
+        mSelectedId.clear();
         Status_.clear();
         return true;
     }
@@ -209,6 +215,13 @@ bool RenderPreview::SetScene(const RenderScene& scene)
     {
         OrbitCenter_ = scene.Center;
         OrbitRadius_ = scene.Radius;
+        math::Aabb3 boundsWorld;
+        if (scene.TryGetBounds({}, boundsWorld) == true)
+        {
+            static_cast<void>(mCameraController.TryFrame(boundsWorld,
+                                                         static_cast<float32>(RequestedWidth_) /
+                                                             static_cast<float32>(RequestedHeight_)));
+        }
     }
     foundation::UniquePtr<Residency> residency;
     if (scene.Lit)
@@ -486,36 +499,96 @@ void RenderPreview::SetShading(PreviewShading shading)
     Q_EMIT NavigationChanged();
     Q_EMIT Changed();
 }
-void RenderPreview::FrameAll() noexcept
+bool RenderPreview::beginNavigation()
 {
-    OrbitCenter_ = Scene_.Center;
-    OrbitRadius_ = Scene_.Radius;
-    RestoredOrbit_ = false;
-    Navigate(-1, 25, 20, 3, false);
-    Q_EMIT NavigationChanged();
+    if (Camera_ >= 0 && Camera_ < Scene_.Cameras.size())
+    {
+        const gameplay::camera::CameraSample& sample = Scene_.Cameras[Camera_].Sample;
+        const float32 distance = GetFocusDistance();
+        if (mCameraController.TryAdopt(sample, distance) == false)
+        {
+            return false;
+        }
+    }
+    Camera_ = -1;
+    CameraId_.clear();
+    return true;
+}
+void RenderPreview::navigationChanged()
+{
+    const math::Vector3d pivotWorld = mCameraController.GetPivotWorld();
+    OrbitCenter_ = {static_cast<float32>(pivotWorld.X),
+                    static_cast<float32>(pivotWorld.Y),
+                    static_cast<float32>(pivotWorld.Z)};
+    Yaw_ = mCameraController.GetYawDegrees();
+    Pitch_ = mCameraController.GetPitchDegrees();
+    Zoom_ = mCameraController.GetDistance() / math::Max(OrbitRadius_, 0.000001F);
+    RestoredOrbit_ = true;
     ViewDirty_ = true;
-    if (Running())
+    if (Running() == true)
     {
         Timer_.start();
     }
+    Q_EMIT NavigationChanged();
 }
-void RenderPreview::Navigate(int32 camera, float32 yaw, float32 pitch, float32 zoom, bool reference)
+void RenderPreview::SetSelection(const QString& id)
 {
-    if (Camera_ != camera || Yaw_ != yaw || Pitch_ != pitch || Zoom_ != zoom || Reference_ != reference)
+    mSelectedId = id;
+}
+bool RenderPreview::FrameSelection() noexcept
+{
+    math::Aabb3 boundsWorld;
+    if (mSelectedId.isEmpty() == true || Scene_.TryGetBounds(mSelectedId, boundsWorld) == false ||
+        beginNavigation() == false ||
+        mCameraController.TryFrame(boundsWorld,
+                                   static_cast<float32>(RequestedWidth_) / static_cast<float32>(RequestedHeight_)) ==
+            false)
     {
-        Camera_ = camera;
-        CameraId_ = camera >= 0 && camera < Scene_.Cameras.size() ? Scene_.Cameras[camera].Id : QString();
-        Yaw_ = yaw;
-        Pitch_ = pitch;
-        Zoom_ = zoom;
-        Reference_ = reference;
-        ViewDirty_ = true;
-        if (Running())
-        {
-            Timer_.start();
-        }
-        Q_EMIT NavigationChanged();
+        return false;
     }
+    navigationChanged();
+    return true;
+}
+void RenderPreview::FrameAll() noexcept
+{
+    math::Aabb3 boundsWorld;
+    if (Scene_.TryGetBounds({}, boundsWorld) == false || beginNavigation() == false ||
+        mCameraController.TryFrame(boundsWorld,
+                                   static_cast<float32>(RequestedWidth_) / static_cast<float32>(RequestedHeight_)) ==
+            false)
+    {
+        return;
+    }
+    OrbitRadius_ = Scene_.Radius;
+    navigationChanged();
+}
+void RenderPreview::Navigate(int32 camera, math::Vector2 orbitDegrees, float32 zoom, bool isReference)
+{
+    if (camera < -1 || camera >= Scene_.Cameras.size())
+    {
+        return;
+    }
+    const bool isDetaching = Camera_ >= 0 && camera == -1;
+    if (camera == -1)
+    {
+        if (beginNavigation() == false)
+        {
+            return;
+        }
+        // Detaching adopts the visible pose/lens, including roll; stale orbit sliders never move it.
+        if (isDetaching == false && (Yaw_ != orbitDegrees.X || Pitch_ != orbitDegrees.Y || Zoom_ != zoom))
+        {
+            if (mCameraController.TrySetOrbit(mCameraController.GetPivotWorld(), orbitDegrees, zoom * OrbitRadius_) ==
+                false)
+            {
+                return;
+            }
+        }
+    }
+    Camera_ = camera;
+    CameraId_ = camera >= 0 ? Scene_.Cameras[camera].Id : QString();
+    Reference_ = isReference;
+    navigationChanged();
 }
 void RenderPreview::Resize(int32 width, int32 height)
 {
@@ -523,46 +596,120 @@ void RenderPreview::Resize(int32 width, int32 height)
     {
         return;
     }
-    const auto scale = math::Min(1.0F, 1024.0F / static_cast<float32>(math::Max(width, height)));
+    const float32 scale = math::Min(1.0F, 1024.0F / static_cast<float32>(math::Max(width, height)));
     RequestedWidth_ = math::Max(uint32{1}, static_cast<uint32>(static_cast<float32>(width) * scale));
     RequestedHeight_ = math::Max(uint32{1}, static_cast<uint32>(static_cast<float32>(height) * scale));
-    if (Running())
+    if (Running() == true)
     {
         Timer_.start();
     }
 }
-void RenderPreview::Orbit(int32 dx, int32 dy)
+float32 RenderPreview::GetFocusDistance() const noexcept
 {
-    auto yaw = Yaw_ + static_cast<float32>(dx) * .5F;
-    while (yaw > 180)
+    if (Camera_ >= 0 && Camera_ < Scene_.Cameras.size())
     {
-        yaw -= 360;
+        const gameplay::camera::CameraSample& sample = Scene_.Cameras[Camera_].Sample;
+        math::Aabb3 boundsWorld;
+        if (mSelectedId.isEmpty() == false && Scene_.TryGetBounds(mSelectedId, boundsWorld) == true)
+        {
+            const math::Vector3 centerWorld = (boundsWorld.Min + boundsWorld.Max) * 0.5F;
+            const math::Vector3d offsetWorld = math::Vector3d{static_cast<float64>(centerWorld.X),
+                                                              static_cast<float64>(centerWorld.Y),
+                                                              static_cast<float64>(centerWorld.Z)} -
+                                               sample.Pose.Position;
+            const math::Vector3 forwardWorld = math::Rotate(sample.Pose.Orientation, {0, 0, -1});
+            const float64 distance = math::Dot(offsetWorld,
+                                               math::Vector3d{static_cast<float64>(forwardWorld.X),
+                                                              static_cast<float64>(forwardWorld.Y),
+                                                              static_cast<float64>(forwardWorld.Z)});
+            if (distance > 0.000001 && distance <= 10000000)
+            {
+                return static_cast<float32>(distance);
+            }
+        }
+        // A distant room or floor must not make the first fly step leap across the scene.
+        return math::Clamp(mCameraController.GetDistance(), 0.01F, 10.0F);
     }
-    while (yaw < -180)
-    {
-        yaw += 360;
-    }
-    Navigate(-1, yaw, math::Clamp(Pitch_ + static_cast<float32>(dy) * .5F, -80.0F, 80.0F), Zoom_, Reference_);
+    return mCameraController.GetDistance();
 }
-void RenderPreview::Pan(int32 dx, int32 dy)
+void RenderPreview::Orbit(float32 deltaX, float32 deltaY)
 {
-    const auto yaw = Yaw_ * .01745329252F, pitch = Pitch_ * .01745329252F;
-    const math::Vector3 right{math::Cos(yaw), 0, -math::Sin(yaw)};
-    const math::Vector3 up{-math::Sin(yaw) * math::Sin(pitch), math::Cos(pitch), -math::Cos(yaw) * math::Sin(pitch)};
-    OrbitCenter_ = OrbitCenter_ +
-                   (right * -static_cast<float32>(dx) + up * static_cast<float32>(dy)) * (OrbitRadius_ * Zoom_ * .002F);
-    RestoredOrbit_ = true;
-    Navigate(-1, Yaw_, Pitch_, Zoom_, Reference_);
-    ViewDirty_ = true;
-    if (Running())
+    if ((deltaX == 0 && deltaY == 0) || beginNavigation() == false)
     {
-        Timer_.start();
+        return;
     }
-    Q_EMIT NavigationChanged();
+    if (mCameraController.TryRotate(deltaX, deltaY, true) == true)
+    {
+        navigationChanged();
+    }
 }
-void RenderPreview::Zoom(int32 steps)
+void RenderPreview::Look(float32 deltaX, float32 deltaY)
 {
-    Navigate(-1, Yaw_, Pitch_, math::Clamp(Zoom_ - static_cast<float32>(steps) * .2F, 1.2F, 20.0F), Reference_);
+    if ((deltaX == 0 && deltaY == 0) || beginNavigation() == false)
+    {
+        return;
+    }
+    if (mCameraController.TryRotate(deltaX, deltaY, false) == true)
+    {
+        navigationChanged();
+    }
+}
+void RenderPreview::Pan(float32 deltaX, float32 deltaY, float32 heightLogical)
+{
+    if ((deltaX == 0 && deltaY == 0) || beginNavigation() == false)
+    {
+        return;
+    }
+    if (mCameraController.TryPan(deltaX,
+                                 deltaY,
+                                 heightLogical,
+                                 static_cast<float32>(RequestedWidth_) / static_cast<float32>(RequestedHeight_)) ==
+        true)
+    {
+        navigationChanged();
+    }
+}
+void RenderPreview::Fly(math::Vector3 movementControls, float32 deltaSeconds, float32 speed)
+{
+    if (math::IsFinite(deltaSeconds) == false || deltaSeconds <= 0 || math::IsFinite(speed) == false || speed <= 0 ||
+        math::LengthSquared(movementControls) == 0 || beginNavigation() == false)
+    {
+        return;
+    }
+    if (math::TryNormalize(movementControls, movementControls) != math::MathStatus::Success)
+    {
+        return;
+    }
+    const math::Quaternion orientation = mCameraController.GetSample().Pose.Orientation;
+    math::Vector3 movementWorld = math::Rotate(orientation, {movementControls.X, 0, movementControls.Z}) +
+                                  math::Vector3{0, movementControls.Y, 0};
+    if (math::TryNormalize(movementWorld, movementWorld) != math::MathStatus::Success)
+    {
+        return;
+    }
+    if (mCameraController.TryFly(math::Rotate(math::Conjugate(orientation), movementWorld),
+                                 math::Min(deltaSeconds, 0.1F) * speed) == true)
+    {
+        navigationChanged();
+    }
+}
+void RenderPreview::Zoom(float32 steps)
+{
+    if (steps == 0 || beginNavigation() == false)
+    {
+        return;
+    }
+    if (mCameraController.TryDolly(steps) == true)
+    {
+        navigationChanged();
+    }
+}
+void RenderPreview::SetFocusDistance(float32 distance)
+{
+    if (beginNavigation() == true && mCameraController.TrySetDistance(distance) == true)
+    {
+        navigationChanged();
+    }
 }
 QJsonObject RenderPreview::Navigation() const
 {
@@ -578,7 +725,22 @@ QJsonObject RenderPreview::Navigation() const
             {QStringLiteral("x"), OrbitCenter_.X},
             {QStringLiteral("y"), OrbitCenter_.Y},
             {QStringLiteral("z"), OrbitCenter_.Z},
-            {QStringLiteral("radius"), OrbitRadius_}};
+            {QStringLiteral("radius"), OrbitRadius_},
+            {QStringLiteral("navigationVersion"), NAVIGATION_STATE_VERSION},
+            {QStringLiteral("distance"), mCameraController.GetDistance()},
+            {QStringLiteral("eyeX"), mCameraController.GetSample().Pose.Position.X},
+            {QStringLiteral("eyeY"), mCameraController.GetSample().Pose.Position.Y},
+            {QStringLiteral("eyeZ"), mCameraController.GetSample().Pose.Position.Z},
+            {QStringLiteral("rotationX"), mCameraController.GetSample().Pose.Orientation.X},
+            {QStringLiteral("rotationY"), mCameraController.GetSample().Pose.Orientation.Y},
+            {QStringLiteral("rotationZ"), mCameraController.GetSample().Pose.Orientation.Z},
+            {QStringLiteral("rotationW"), mCameraController.GetSample().Pose.Orientation.W},
+            {QStringLiteral("projection"), static_cast<int32>(mCameraController.GetSample().Lens.Projection)},
+            {QStringLiteral("fov"), mCameraController.GetSample().Lens.VerticalFov},
+            {QStringLiteral("span"), mCameraController.GetSample().Lens.VerticalSpan},
+            {QStringLiteral("minimumWidth"), mCameraController.GetSample().Lens.MinimumVisibleWidth},
+            {QStringLiteral("near"), mCameraController.GetSample().Lens.NearPlane},
+            {QStringLiteral("far"), mCameraController.GetSample().Lens.FarPlane}};
 }
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) — width then height matches ViewDescription.
 bool RenderPreview::DescribeView(uint32 width, uint32 height, rr::ViewDescription& outView, QString& outError) const
@@ -592,41 +754,72 @@ bool RenderPreview::DescribeView(uint32 width, uint32 height, rr::ViewDescriptio
     options.Reference = Reference_;
     options.OrbitCenter = &OrbitCenter_;
     options.OrbitRadius = OrbitRadius_;
+    options.EditorCameraOrNull = &mCameraController.GetSample();
     return Scene_.View(options, outView, outError);
 }
 void RenderPreview::RestoreNavigation(const QJsonObject& state)
 {
-    const auto number = [&state](const QString& key, float32 fallback, float32 low, float32 high) {
-        const auto value = state.value(key).toDouble(static_cast<float64>(fallback));
-        return math::IsFinite(value) && value >= static_cast<float64>(low) && value <= static_cast<float64>(high)
-                   ? static_cast<float32>(value)
-                   : fallback;
+    const auto number = [&state](const QString& key, float64 fallback) {
+        const float64 value = state.value(key).toDouble(fallback);
+        return math::IsFinite(value) == true ? value : fallback;
     };
-    Navigate(-1,
-             number(QStringLiteral("yaw"), 25, -180, 180),
-             number(QStringLiteral("pitch"), 20, -80, 80),
-             number(QStringLiteral("zoom"), 3, 1.2F, 20),
-             state.value(QStringLiteral("reference")).toBool());
+    const math::Vector3d pivotWorld{number(QStringLiteral("x"), static_cast<float64>(Scene_.Center.X)),
+                                    number(QStringLiteral("y"), static_cast<float64>(Scene_.Center.Y)),
+                                    number(QStringLiteral("z"), static_cast<float64>(Scene_.Center.Z))};
+    float32 orbitRadius = static_cast<float32>(number(QStringLiteral("radius"), static_cast<float64>(Scene_.Radius)));
+    EditorCameraController controller = mCameraController;
+    if (orbitRadius <= 0 || math::IsFinite(orbitRadius) == false)
+    {
+        orbitRadius = 1;
+    }
+    if (state.value(QStringLiteral("navigationVersion")).toInt() == NAVIGATION_STATE_VERSION)
+    {
+        gameplay::camera::CameraSample sample;
+        sample.Pose.Position = {number(QStringLiteral("eyeX"), 0),
+                                number(QStringLiteral("eyeY"), 0),
+                                number(QStringLiteral("eyeZ"), 3)};
+        sample.Pose.Orientation = {static_cast<float32>(number(QStringLiteral("rotationX"), 0)),
+                                   static_cast<float32>(number(QStringLiteral("rotationY"), 0)),
+                                   static_cast<float32>(number(QStringLiteral("rotationZ"), 0)),
+                                   static_cast<float32>(number(QStringLiteral("rotationW"), 1))};
+        const int32 projection = state.value(QStringLiteral("projection")).toInt(-1);
+        if (projection < static_cast<int32>(gameplay::camera::CameraProjection::PerspectiveFinite) ||
+            projection > static_cast<int32>(gameplay::camera::CameraProjection::OrthographicFinite))
+        {
+            return;
+        }
+        sample.Lens.Projection = static_cast<gameplay::camera::CameraProjection>(projection);
+        sample.Lens.VerticalFov = static_cast<float32>(number(QStringLiteral("fov"), 1));
+        sample.Lens.VerticalSpan = static_cast<float32>(number(QStringLiteral("span"), 14));
+        sample.Lens.MinimumVisibleWidth = static_cast<float32>(number(QStringLiteral("minimumWidth"), 0));
+        sample.Lens.NearPlane = static_cast<float32>(number(QStringLiteral("near"), 0.01));
+        sample.Lens.FarPlane = static_cast<float32>(number(QStringLiteral("far"), 100));
+        if (controller.TryAdopt(sample, static_cast<float32>(number(QStringLiteral("distance"), 3))) == false)
+        {
+            return;
+        }
+    }
+    else
+    {
+        if (controller.TrySetOrbit(pivotWorld,
+                                   {static_cast<float32>(number(QStringLiteral("yaw"), 25)),
+                                    static_cast<float32>(number(QStringLiteral("pitch"), 20))},
+                                   static_cast<float32>(number(QStringLiteral("zoom"), 3)) * orbitRadius) == false)
+        {
+            return;
+        }
+    }
+    mCameraController = controller;
+    OrbitRadius_ = orbitRadius;
+    Camera_ = -1;
+    CameraId_ = state.value(QStringLiteral("camera")).toString().left(256);
+    Reference_ = state.value(QStringLiteral("reference")).toBool();
     SetShading(state.value(QStringLiteral("shading")).toString() == QStringLiteral("lit")
                    ? PreviewShading::Lit
                    : (state.value(QStringLiteral("shading")).toString() == QStringLiteral("albedo")
                           ? PreviewShading::Albedo
                           : PreviewShading::Solid));
-    CameraId_ = state.value(QStringLiteral("camera")).toString().left(256);
-    OrbitCenter_.X = number(QStringLiteral("x"), 0, -1000000, 1000000);
-    OrbitCenter_.Y = number(QStringLiteral("y"), 0, -1000000, 1000000);
-    OrbitCenter_.Z = number(QStringLiteral("z"), 0, -1000000, 1000000);
-    OrbitRadius_ = number(QStringLiteral("radius"), 1, .000001F, 1000000);
-    RestoredOrbit_ = state.value(QStringLiteral("radius")).isDouble() && state.value(QStringLiteral("x")).isDouble() &&
-                     state.value(QStringLiteral("y")).isDouble() && state.value(QStringLiteral("z")).isDouble() &&
-                     state.value(QStringLiteral("radius")).toDouble() > 0;
-    if (!RestoredOrbit_)
-    {
-        OrbitCenter_ = Scene_.Center;
-        OrbitRadius_ = Scene_.Radius;
-    }
-    ViewDirty_ = true;
-    Q_EMIT NavigationChanged();
+    navigationChanged();
 }
 void RenderPreview::resetFrames() noexcept
 {
@@ -1011,6 +1204,7 @@ bool RenderPreview::prepare()
         options.Reference = Reference_;
         options.OrbitCenter = &OrbitCenter_;
         options.OrbitRadius = OrbitRadius_;
+        options.EditorCameraOrNull = &mCameraController.GetSample();
         if (!Scene_.View(options, description, Status_))
         {
             return false;
