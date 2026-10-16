@@ -14,7 +14,7 @@ namespace ludus::foundation::math::internal
 template <typename Draw>
 [[nodiscard]] MathStatus SampleBounded(PreparedBound32 bound, uint32& out, Draw draw) noexcept
 {
-    for (uint32 attempt = 0; attempt < 65536u; ++attempt)
+    for (uint32 attempt = 0; attempt < RandomBoundedAttemptCount; ++attempt)
     {
         const uint64 product = static_cast<uint64>(draw(static_cast<uint16>(attempt))) * bound.Bound();
         if (static_cast<uint32>(product) >= bound.Threshold())

@@ -93,7 +93,7 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
     {
         return result;
     }
-    const auto dimension = static_cast<uint16>(2 + path.Depth * 8);
+    const uint16 dimension = ReferenceBounceDimension(path.Depth, 0);
     // Use the owning unbiased bounded mapper for discrete emitter selection;
     // float multiplication/truncation would give unequal selector probabilities.
     uint32 selected = 0;
@@ -155,8 +155,8 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
     if (emitter < job.Scene.Emitters.GetSize())
     {
         const auto& triangle = job.Scene.Triangles[job.Scene.Emitters[emitter]];
-        const auto root = math::Sqrt(ReferenceRandom(job, path, static_cast<uint16>(dimension + 1)));
-        const auto u = root * (1 - ReferenceRandom(job, path, static_cast<uint16>(dimension + 2)));
+        const float32 root = math::Sqrt(ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 1)));
+        const float32 u = root * (1 - ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 2)));
         const auto v = root - u;
         result.Point = Position(triangle, u, v);
         const auto delta = result.Point - point;
@@ -187,17 +187,17 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
     {
         const EnvironmentSample sample =
             SampleEnvironment(*job.EnvironmentOrNull,
-                              ReferenceRandom(job, path, static_cast<uint16>(dimension + 1)),
-                              ReferenceRandom(job, path, static_cast<uint16>(dimension + 2)));
+                              ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 1)),
+                              ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 2)));
         result.Direction = sample.DirectionWorld;
         result.Radiance = sample.Radiance;
         result.Pdf = sample.Pdf / static_cast<float32>(count);
         result.Distance = job.Description.SecondaryDistance;
         return result;
     }
-    const auto z = 1 - 2 * ReferenceRandom(job, path, static_cast<uint16>(dimension + 1));
+    const float32 z = 1 - 2 * ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 1));
     const auto radius = math::Sqrt(math::Max(0.0F, 1 - z * z));
-    const auto angle = math::kTauF * ReferenceRandom(job, path, static_cast<uint16>(dimension + 2));
+    const float32 angle = math::kTauF * ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 2));
     result.Direction = {radius * math::Cos(angle), radius * math::Sin(angle), z};
     result.Distance = job.Description.SecondaryDistance;
     result.Radiance = job.Description.Environment;
@@ -344,14 +344,13 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
             path.HasShadow = true;
         }
     }
-    const auto dimension = static_cast<uint16>(2 + path.Depth * 8);
     ReferenceBsdfSample sample;
     if (SampleReferenceBsdf(bsdf,
                             normal,
                             view,
-                            {ReferenceRandom(job, path, static_cast<uint16>(dimension + 3)),
-                             ReferenceRandom(job, path, static_cast<uint16>(dimension + 4)),
-                             ReferenceRandom(job, path, static_cast<uint16>(dimension + 5))},
+                            {ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 3)),
+                             ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 4)),
+                             ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 5))},
                             sample) != rhi::RasterStatus::Ready)
     {
         return Invalid(job, path);
@@ -378,7 +377,7 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     {
         const auto survival =
             math::Clamp(math::Max(math::Max(path.Throughput.X, path.Throughput.Y), path.Throughput.Z), 0.05F, 0.95F);
-        if (ReferenceRandom(job, path, static_cast<uint16>(dimension + 6)) >= survival)
+        if (ReferenceRandom(job, path, ReferenceBounceDimension(path.Depth, 6)) >= survival)
         {
             ++job.Info.RouletteTerminations;
             return rhi::RasterStatus::Ready;

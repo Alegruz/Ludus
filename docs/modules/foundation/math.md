@@ -117,6 +117,16 @@ functions preserve outputs on failure. Rejection attempts stay inside the
 address, have a 65536-attempt cap, and report `OutOfRange` on exhaustion. This is
 non-cryptographic randomness. `PreparedBound32` amortizes threshold division;
 `TrySampleBlock` shares one evaluation across four aligned dimensions.
+`RandomMaxDimension` and `RandomBoundedAttemptCount` name the layout's 16-bit
+dimension limit and the retry budget.
+
+Kernels use the same contract through `math.slang` (installed with the SDK shader
+includes): `SampleRandomUInt32`, `SampleRandomFloat01` and `TrySampleRandomBounded`
+reproduce the CPU results bit for bit for the same key and address. The 64-bit
+scope is passed as two words, dimensions above 65,535 are a caller error, and
+bounded failure is a `false` result to branch on. See
+[GPU addressed sampling](../../architecture/randomness.md#gpu-addressed-sampling)
+for the exact contract and its Metal/Vulkan evidence.
 
 References: Salmon et al., [Random123 (SC11)](https://www.thesalmons.org/john/random123/papers/random123sc11.pdf),
 Lemire, [Fast Random Integer Generation in an Interval](https://arxiv.org/abs/1805.10941),

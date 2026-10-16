@@ -43,22 +43,17 @@ float4 SceneValue(uint index)
 LUDUS_SHADER_BINDING(2) RWStructuredBuffer<float4> accumulation; // sum/count, compensation/error
 LUDUS_SHADER_BINDING(3) RWStructuredBuffer<float4> colors;       // Encoded RGB and binary32-exact pixel index.
 LUDUS_SHADER_BINDING(4) StructuredBuffer<uint4> textureWords;
-float Random01(uint p, uint s, uint d)
+// Mirrors the CPU reference path's addresses: Scope is the 32-bit pixel index,
+// Event is the sample and dimensions follow LUDUS_PATH_RANDOM_* in
+// renderer_gpu_preview_layout.h. Host admission bounds depth, so every
+// dimension stays inside addressed-random layout v1.
+RandomAddress PixelRandomAddress(uint pixel, uint sample, uint dimension)
 {
-    return float(RandomBits(p, s, d, Sampling.xy) >> 8) * (1.0 / 16777216.0);
+    return MakeRandomAddress(uint2(pixel, 0), sample, dimension);
 }
-uint Choose(uint p, uint s, uint d, uint count)
+float Random01(uint pixel, uint sample, uint dimension)
 {
-    uint threshold = (0u - count) % count;
-    for (uint retry = 0; retry < 65536; ++retry)
-    {
-        uint lo;
-        uint hi;
-        MultiplyWide(RandomBits(p, s, d, Sampling.xy, retry), count, lo, hi);
-        if (lo >= threshold)
-            return hi;
-    }
-    return 0xffffffff;
+    return SampleRandomFloat01(Sampling.xy, PixelRandomAddress(pixel, sample, dimension));
 }
 float3 PositionWorld(uint t, float2 uv)
 {
@@ -526,11 +521,12 @@ float3 Integrate(uint pixel, uint sample)
                                                 SceneValue(t * LUDUS_GPU_PREVIEW_TRIANGLE_WORDS + 6).xy) *
                                                    uvScale);
         }
-        uint dimension = 2 + depth * 8;
+        uint dimension = LUDUS_PATH_RANDOM_FIRST_BOUNCE_DIMENSION + depth * LUDUS_PATH_RANDOM_DIMENSIONS_PER_BOUNCE;
         if (lights > 0)
         {
-            uint selected = Choose(pixel, sample, dimension, lights);
-            if (selected == 0xffffffff)
+            uint selected;
+            if (TrySampleRandomBounded(Sampling.xy, PixelRandomAddress(pixel, sample, dimension), lights, selected) ==
+                false)
                 return float3(-1);
             float3 lightDirectionWorld;
             float3 lightColor = 0;
