@@ -23,6 +23,7 @@ namespace ludus::editor
 {
 // Desktop, project-owned schema UI. No runtime pools or project code are loaded.
 class RenderPanel;
+class RenderPreview;
 class LevelWorkspace;
 struct ToolingPaths;
 class WorldWorkspace final : public QWidget
@@ -50,6 +51,8 @@ public:
         return DemoDocument_;
     }
     [[nodiscard]] bool StartPreview();
+    /// World-bound viewport renderer whose device and extraction feed the render-graph preview.
+    [[nodiscard]] RenderPreview& GetRenderPreview() noexcept;
     void SetProject(const QString& root, foundation::uint64 epoch);
     [[nodiscard]] bool Open(const QString& path);
     [[nodiscard]] bool Create(const QString& path);

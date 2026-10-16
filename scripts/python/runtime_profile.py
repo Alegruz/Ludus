@@ -2,11 +2,13 @@
 
 ``./scripts/profile-engine`` builds the targets declared in
 ``config/runtime_profile_scenarios.json`` and calls :func:`run_scenarios`; the
-scheduled ``performance`` workflow runs the same command on hosted runners.
-Correctness failures (non-zero exits, missing traces, unparseable output) fail
-the run. Timings never do: hosted runners are noisy, so deltas against a
-baseline are reported until controlled devices calibrate a variability bound
-(docs/architecture/engineering-quality.md, sections 4 and 6).
+scheduled ``performance`` workflow runs the same command on hosted runners and
+on opted-in self-hosted device lanes that declare a GPU class and identity.
+Correctness failures (non-zero exits, missing traces, unparseable or incomplete
+output, a software adapter where a physical GPU was declared) fail the run.
+Timings never do: deltas against a baseline are reported until a device lane
+calibrates a variability bound (docs/architecture/engineering-quality.md,
+sections 4 and 6; docs/development/runtime-profiling.md).
 
 Percentiles use the nearest-rank convention shared with scripts/benchmark-rhi.
 """
@@ -30,22 +32,38 @@ from typing import Callable, Mapping, Sequence
 SCHEMA_VERSION = 1
 MANIFEST_PATH = Path("config/runtime_profile_scenarios.json")
 OUTPUT_MARKER = ".ludus-runtime-profile"
-PARSER_KINDS = ("perfetto-scopes", "key-value", "csv", "regex")
+PARSER_KINDS = ("perfetto-scopes", "key-value", "csv", "regex", "tagged-rows")
 SCENARIO_KEYS = frozenset({
     "id", "owner", "description", "target", "executable", "arguments", "cmake_options",
-    "requires", "trace", "parser", "warmup", "repetitions", "timeout_seconds",
+    "environment", "requires", "trace", "parser", "warmup", "repetitions", "timeout_seconds",
 })
 PARSER_KEYS = {
     "perfetto-scopes": frozenset({"kind"}),
     "key-value": frozenset({"kind", "identity", "metrics"}),
     "csv": frozenset({"kind", "header", "key", "metrics", "ignore"}),
     "regex": frozenset({"kind", "pattern"}),
+    "tagged-rows": frozenset({"kind", "tables", "observe"}),
 }
+TABLE_KEYS = frozenset({"tag", "columns", "key", "metrics", "where", "rows"})
 # Capabilities the runner detects itself; anything else (presentation, a GPU
 # class) must be declared by the lane with --capability.
 DETECTED_CAPABILITIES = ("shader-tools",)
+# Declaring a GPU class (gpu-<class>) also provides "gpu", the capability GPU
+# scenarios require, and needs a --device identity so reports name the adapter.
+GPU_CAPABILITY = "gpu"
+GPU_CLASS = re.compile(r"^gpu-[a-z0-9][a-z0-9-]{0,31}$")
+CAPABILITY = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 SCENARIO_ID = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 CMAKE_OPTION = re.compile(r"^LUDUS_[A-Z0-9_]+$")
+ENVIRONMENT_NAME = CMAKE_OPTION
+ROW_TAG = re.compile(r"^[A-Z][A-Z0-9]{0,15}$")
+MAX_ROWS = 100_000
+MAX_DEVICE_TEXT = 200
+# ludus_rhi_render_tests prints the selected adapter as
+# R7ADAPTER,<hex name>,<vendor>,<device>,<driver>,<software known>,<software>.
+ADAPTER_TAG = "R7ADAPTER"
+ADAPTER_FIELDS = 6
+SYSTEM_PROBE_TIMEOUT_SECONDS = 30
 MAX_REPETITIONS = 50
 MAX_WARMUP = 10
 MAX_TIMEOUT_SECONDS = 1800
@@ -75,6 +93,7 @@ class Scenario:
     executable: str
     arguments: tuple[str, ...]
     cmake_options: tuple[tuple[str, str], ...]
+    environment: tuple[tuple[str, str], ...]
     requires: tuple[str, ...]
     trace: bool
     parser: Mapping[str, object]
@@ -131,7 +150,37 @@ def validate_parser(parser: object, where: str) -> Mapping[str, object]:
             raise ProfileError(f"{where}.pattern is invalid: {error}") from error
         if not set(pattern.groupindex) - {"label"}:
             raise ProfileError(f"{where}.pattern needs at least one named metric group besides label")
+    elif kind == "tagged-rows":
+        tables = parser["tables"]
+        if not isinstance(tables, list) or not tables:
+            raise ProfileError(f"{where}.tables must list at least one table")
+        tags = [validate_table(table, f"{where}.tables[{index}]") for index, table in enumerate(tables)]
+        observed = require_strings(parser["observe"], f"{where}.observe")
+        if any(not ROW_TAG.match(tag) for tag in observed) or len(set(tags) | set(observed)) != len(tags) + len(observed):
+            raise ProfileError(f"{where} table and observation tags must be distinct and match {ROW_TAG.pattern}")
     return dict(parser)
+
+
+def validate_table(table: object, where: str) -> str:
+    """Check one tagged-rows table and return its tag."""
+    if not isinstance(table, dict) or set(table) != TABLE_KEYS:
+        raise ProfileError(f"{where} requires exactly {sorted(TABLE_KEYS)}")
+    if not isinstance(table["tag"], str) or not ROW_TAG.match(table["tag"]):
+        raise ProfileError(f"{where}.tag must match {ROW_TAG.pattern}")
+    columns = require_strings(table["columns"], f"{where}.columns")
+    if not columns or len(set(columns)) != len(columns):
+        raise ProfileError(f"{where}.columns must name each column once")
+    key = require_strings(table["key"], f"{where}.key")
+    metrics = require_strings(table["metrics"], f"{where}.metrics")
+    where_filter = table["where"]
+    if not isinstance(where_filter, dict) or not all(isinstance(value, str) for value in where_filter.values()):
+        raise ProfileError(f"{where}.where must map columns to exact string values")
+    if not metrics or any(column not in columns for column in (*key, *metrics, *where_filter)):
+        raise ProfileError(f"{where} key, metric and where columns must be present in columns")
+    if set(key) & set(metrics):
+        raise ProfileError(f"{where} key and metric columns must differ")
+    require_integer(table["rows"], f"{where}.rows", 1, MAX_ROWS)
+    return table["tag"]
 
 
 def load_manifest(path: Path) -> list[Scenario]:
@@ -168,6 +217,11 @@ def load_manifest(path: Path) -> list[Scenario]:
                 isinstance(name, str) and CMAKE_OPTION.match(name) and value in ("ON", "OFF")
                 for name, value in options.items()):
             raise ProfileError(f"{where}.cmake_options must map LUDUS_* options to ON or OFF")
+        environment = entry["environment"]
+        if not isinstance(environment, dict) or not all(
+                isinstance(name, str) and ENVIRONMENT_NAME.match(name) and isinstance(value, str) and value
+                for name, value in environment.items()):
+            raise ProfileError(f"{where}.environment must map LUDUS_* variables to non-empty strings")
         if not isinstance(entry["trace"], bool):
             raise ProfileError(f"{where}.trace must be a boolean")
         parser = validate_parser(entry["parser"], f"{where}.parser")
@@ -181,6 +235,7 @@ def load_manifest(path: Path) -> list[Scenario]:
             executable=entry["executable"],
             arguments=require_strings(entry["arguments"], f"{where}.arguments"),
             cmake_options=tuple(sorted(options.items())),
+            environment=tuple(sorted(environment.items())),
             requires=require_strings(entry["requires"], f"{where}.requires"),
             trace=entry["trace"],
             parser=parser,
@@ -210,6 +265,31 @@ def shader_tool_options(root: Path, system: str) -> list[str] | None:
 
 def detect_capabilities(root: Path, system: str) -> set[str]:
     return {"shader-tools"} if shader_tool_options(root, system) is not None else set()
+
+
+def resolve_capabilities(detected: set[str], declared: Sequence[str], device: str | None) -> set[str]:
+    """Combine detected and lane-declared capabilities; a GPU class implies gpu and needs a device identity."""
+    for capability in declared:
+        if not CAPABILITY.match(capability):
+            raise ProfileError(f"capability '{capability}' must match {CAPABILITY.pattern}")
+        if capability == GPU_CAPABILITY:
+            raise ProfileError("declare a GPU class such as gpu-apple-m5 instead of bare gpu")
+    if device is not None and (not device.strip() or len(device) > MAX_DEVICE_TEXT or not device.isprintable()):
+        raise ProfileError(f"--device must be printable text of 1..{MAX_DEVICE_TEXT} characters")
+    capabilities = set(detected) | set(declared)
+    classes = [capability for capability in capabilities if capability.startswith("gpu-")]
+    if any(not GPU_CLASS.match(capability) for capability in classes):
+        raise ProfileError(f"GPU classes must match {GPU_CLASS.pattern}")
+    if classes:
+        if device is None:
+            raise ProfileError("a GPU class capability requires --device with the adapter and driver identity")
+        capabilities.add(GPU_CAPABILITY)
+    return capabilities
+
+
+def environment_names(scenarios: Sequence[Scenario]) -> frozenset[str]:
+    """Variables some scenario sets; runs never inherit them, so one scenario's switches cannot leak into another."""
+    return frozenset(name for scenario in scenarios for name, _ in scenario.environment)
 
 
 def select_scenarios(scenarios: Sequence[Scenario], requested: Sequence[str],
@@ -310,6 +390,83 @@ def parse_regex(output: str, pattern: str) -> dict[str, float]:
     return metrics
 
 
+def tagged_lines(output: str, tag: str) -> list[list[str]]:
+    prefix = f"{tag},"
+    return [row[1:] for row in csv.reader(io.StringIO("\n".join(
+        line.strip() for line in output.splitlines() if line.strip().startswith(prefix))))]
+
+
+def distribution_names(column: str) -> tuple[str, str]:
+    """Median and p95 names that keep the nanosecond suffix last, so reports format units."""
+    if column.endswith("_ns"):
+        return f"{column[:-3]}_median_ns", f"{column[:-3]}_p95_ns"
+    return f"{column}_median", f"{column}_p95"
+
+
+def parse_tagged_rows(output: str, tables: Sequence[Mapping[str, object]]) -> dict[str, float]:
+    """Per-key median, p95 and sample count of tagged CSV sample rows (for example R5,... or L5,...).
+
+    Each table must print exactly its declared number of rows: an incomplete
+    sample set is a correctness failure, as in scripts/benchmark-rhi. ``where``
+    keeps only rows whose columns equal the given values (for example GPU timing
+    samples that are available) before grouping; a filter that keeps no row means
+    the run did not measure what the scenario declares and is a failure too.
+    """
+    metrics: dict[str, float] = {}
+    for table in tables:
+        tag = str(table["tag"])
+        columns = list(table["columns"])
+        rows = tagged_lines(output, tag)
+        if len(rows) != table["rows"]:
+            raise ProfileError(f"{tag}: expected {table['rows']} rows, found {len(rows)}")
+        groups: dict[str, dict[str, list[float]]] = {}
+        for row in rows:
+            if len(row) != len(columns):
+                raise ProfileError(f"{tag}: row has {len(row)} fields, expected {len(columns)}")
+            values = dict(zip(columns, (cell.strip() for cell in row)))
+            if any(values[column] != expected for column, expected in table["where"].items()):
+                continue
+            prefix = "/".join([tag, *(f"{column}={values[column]}" for column in table["key"])])
+            group = groups.setdefault(prefix, {})
+            for column in table["metrics"]:
+                group.setdefault(column, []).append(number(values[column], f"{tag} {column}"))
+        if not groups:
+            raise ProfileError(f"{tag}: no rows match {dict(table['where'])}")
+        for prefix, group in sorted(groups.items()):
+            for column, samples in group.items():
+                median_name, p95_name = distribution_names(column)
+                add_metric(metrics, f"{prefix}/{median_name}", median(samples))
+                add_metric(metrics, f"{prefix}/{p95_name}", percentile(samples, 0.95))
+            add_metric(metrics, f"{prefix}/samples", float(len(next(iter(group.values())))))
+    return metrics
+
+
+def parse_observations(scenario: Scenario, output: str) -> dict[str, list[str]]:
+    """Identity lines a tagged-rows scenario declares in ``observe``; each must appear exactly once."""
+    if scenario.parser["kind"] != "tagged-rows":
+        return {}
+    observations: dict[str, list[str]] = {}
+    for tag in scenario.parser["observe"]:
+        lines = tagged_lines(output, tag)
+        if len(lines) != 1:
+            raise ProfileError(f"expected one {tag} observation, found {len(lines)}")
+        observations[tag] = [cell.strip() for cell in lines[0]]
+    return observations
+
+
+def decode_adapter(fields: Sequence[str]) -> dict[str, object]:
+    """The selected RHI adapter from an R7ADAPTER observation."""
+    if len(fields) != ADAPTER_FIELDS:
+        raise ProfileError(f"{ADAPTER_TAG} has {len(fields)} fields, expected {ADAPTER_FIELDS}")
+    try:
+        name = bytes.fromhex(fields[0]).decode("utf-8", errors="replace")
+        vendor, device, driver, software_known, software = (int(field) for field in fields[1:])
+    except ValueError as error:
+        raise ProfileError(f"{ADAPTER_TAG} is malformed: {error}") from error
+    return {"name": name, "vendor_id": vendor, "device_id": device, "driver_version_raw": driver or None,
+            "software": bool(software) if software_known else None}
+
+
 def parse_perfetto_scopes(trace: Mapping[str, object] | Sequence[object]) -> dict[str, float]:
     """Per-scope duration distributions and frame intervals from Chrome/Perfetto JSON."""
     events = trace.get("traceEvents") if isinstance(trace, Mapping) else trace
@@ -370,6 +527,8 @@ def parse_metrics(scenario: Scenario, output: str, trace_path: Path | None) -> d
         metrics = parse_key_value(output, parser["identity"], parser["metrics"])
     elif kind == "csv":
         metrics = parse_csv(output, parser["header"], parser["key"], parser["metrics"], parser["ignore"])
+    elif kind == "tagged-rows":
+        metrics = parse_tagged_rows(output, parser["tables"])
     else:
         metrics = parse_regex(output, parser["pattern"])
     if not metrics:
@@ -394,8 +553,13 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 
 def run_scenario(scenario: Scenario, build_dir: Path, output_dir: Path,
-                 repetitions: int | None = None, runner: Runner = subprocess.run) -> dict[str, object]:
-    """Run one scenario's warmups and measured repetitions; never raises for scenario failures."""
+                 repetitions: int | None = None, runner: Runner = subprocess.run,
+                 controlled_environment: frozenset[str] = frozenset()) -> dict[str, object]:
+    """Run one scenario's warmups and measured repetitions; never raises for scenario failures.
+
+    Inherited variables named in ``controlled_environment`` are removed before
+    the scenario's own ``environment`` is applied.
+    """
     count = repetitions if repetitions is not None else scenario.repetitions
     executable = build_dir / scenario.executable
     work = output_dir / "work" / scenario.id
@@ -408,11 +572,16 @@ def run_scenario(scenario: Scenario, build_dir: Path, output_dir: Path,
         "command": [scenario.executable, *scenario.arguments], "warmup": scenario.warmup,
         "repetitions": count, "status": "failed", "metrics": {}, "trace": None, "logs": [],
     }
+    if scenario.environment:
+        result["environment"] = dict(scenario.environment)
     if not executable.is_file():
         result["reason"] = f"executable {scenario.executable} was not built"
         return result
-    environment = {**os.environ, "LUDUS_DIAGNOSTIC_INTERACTIVE": "0"}
+    removed = controlled_environment | environment_names([scenario])
+    environment = {**{name: value for name, value in os.environ.items() if name not in removed},
+                   "LUDUS_DIAGNOSTIC_INTERACTIVE": "0", **dict(scenario.environment)}
     per_metric: dict[str, list[float]] = {}
+    observations: dict[str, list[str]] | None = None
     for index in range(scenario.warmup + count):
         measured = index >= scenario.warmup
         label = f"{scenario.id}-{'run' if measured else 'warmup'}-{index - scenario.warmup if measured else index}"
@@ -440,9 +609,22 @@ def run_scenario(scenario: Scenario, build_dir: Path, output_dir: Path,
             return result
         try:
             metrics = parse_metrics(scenario, process.stdout or "", trace_path)
+            observed = parse_observations(scenario, process.stdout or "")
+            adapter = decode_adapter(observed[ADAPTER_TAG]) if ADAPTER_TAG in observed else None
         except ProfileError as error:
             result["reason"] = f"{label}: {error}"
             return result
+        if observations is not None and observed != observations:
+            result["reason"] = f"{label} observed a different adapter, profile or backend than earlier runs"
+            return result
+        observations = observed
+        if adapter is not None and GPU_CAPABILITY in scenario.requires and adapter["software"] is True:
+            result["reason"] = f"{label} selected software adapter '{adapter['name']}', not physical GPU evidence"
+            return result
+        if observed:
+            result["observations"] = observed
+        if adapter is not None:
+            result["adapter"] = adapter
         if not measured:
             continue
         metrics["process/wall_ns"] = float(elapsed)
@@ -494,9 +676,67 @@ def host_identity() -> dict[str, object]:
 
 def ci_identity() -> dict[str, str] | None:
     names = ("GITHUB_WORKFLOW", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_EVENT_NAME", "GITHUB_REF", "RUNNER_OS",
-             "RUNNER_ARCH", "ImageOS", "ImageVersion")
+             "RUNNER_ARCH", "RUNNER_NAME", "RUNNER_ENVIRONMENT", "ImageOS", "ImageVersion")
     values = {name: os.environ[name] for name in names if os.environ.get(name)}
     return values or None
+
+
+def parse_vulkan_summary(text: str) -> list[dict[str, str]]:
+    """Devices from ``vulkaninfo --summary``: one entry per GPUn block."""
+    fields = ("deviceName", "deviceType", "vendorID", "deviceID", "driverName", "driverInfo", "apiVersion")
+    devices: list[dict[str, str]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^GPU[0-9]+:$", stripped):
+            devices.append({})
+        elif devices and "=" in stripped:
+            name, value = (part.strip() for part in stripped.split("=", 1))
+            if name in fields:
+                devices[-1][name] = value
+    return [device for device in devices if device]
+
+
+def parse_display_profile(text: str) -> list[dict[str, str]]:
+    """GPUs from macOS ``system_profiler SPDisplaysDataType -json``."""
+    try:
+        entries = json.loads(text).get("SPDisplaysDataType", [])
+    except (ValueError, AttributeError):
+        return []
+    fields = {"sppci_model": "model", "spdisplays_vendor": "vendor", "sppci_cores": "cores",
+              "spdisplays_mtlgpufamilysupport": "metal_family", "sppci_device_type": "type"}
+    return [{label: str(entry[key]) for key, label in fields.items() if key in entry}
+            for entry in entries if isinstance(entry, dict)]
+
+
+def observe_system_gpus(system: str, runner: Runner = subprocess.run) -> list[dict[str, str]]:
+    """Best-effort OS report of the host GPUs; empty when the tool is missing or fails. Never raises."""
+    if system == "Darwin":
+        command, parse = ["system_profiler", "SPDisplaysDataType", "-json"], parse_display_profile
+    elif shutil.which("vulkaninfo"):
+        command, parse = ["vulkaninfo", "--summary"], parse_vulkan_summary
+    else:
+        return []
+    try:
+        completed = runner(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace",
+                           timeout=SYSTEM_PROBE_TIMEOUT_SECONDS, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return parse(completed.stdout or "") if completed.returncode == 0 else []
+
+
+def device_identity(declared: str | None, capabilities: set[str], system_gpus: Sequence[Mapping[str, str]],
+                    results: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    adapters: list[object] = []
+    for entry in results:
+        adapter = entry.get("adapter")
+        if adapter is not None and adapter not in adapters:
+            adapters.append(adapter)
+    return {
+        "declared": declared,
+        "gpu_classes": sorted(capability for capability in capabilities if GPU_CLASS.match(capability)),
+        "system_reported": list(system_gpus),
+        "engine_adapters": adapters,
+    }
 
 
 def prepare_output(output_dir: Path) -> None:
@@ -548,8 +788,11 @@ def compare(report: Mapping[str, object], baseline: Mapping[str, object],
 
 
 def same_host(report: Mapping[str, object], baseline: Mapping[str, object]) -> bool:
+    """Same host and declared device; reports from before device identity count as undeclared."""
     keys = ("system", "machine", "processor", "logical_cpus")
-    return all(report["host"].get(key) == baseline.get("host", {}).get(key) for key in keys)
+    device = (report.get("device") or {}).get("declared")
+    return (all(report["host"].get(key) == baseline.get("host", {}).get(key) for key in keys)
+            and device == (baseline.get("device") or {}).get("declared"))
 
 
 def format_value(name: str, value: float) -> str:
@@ -572,8 +815,16 @@ def render_summary(report: Mapping[str, object]) -> str:
         f"Commit `{commit}`{' (dirty)' if report['git'].get('dirty') else ''} on {host['system']} {host['machine']}, "
         f"{host['processor']}, {host['logical_cpus']} logical CPUs. "
         f"{counts['passed']} passed, {counts['failed']} failed, {counts['skipped']} skipped.",
+    ]
+    device = report.get("device") or {}
+    if device.get("declared"):
+        classes = ", ".join(f"`{name}`" for name in device.get("gpu_classes", [])) or "no GPU class"
+        adapters = "; ".join(f"{adapter['name']}{' (software)' if adapter.get('software') else ''}"
+                             for adapter in device.get("engine_adapters", [])) or "not observed"
+        lines += ["", f"Device: {device['declared']} ({classes}). Engine-selected adapter: {adapters}."]
+    lines += [
         "",
-        "Timings are report-only: hosted runners are shared and noisy. A change is marked notable when the "
+        "Timings are report-only until a device lane calibrates a variability bound. A change is marked notable when the "
         f"median moved at least {DEFAULT_NOTICE_FRACTION:.0%}, the repetition ranges do not overlap and a "
         f"trace-derived shift exceeds {TRACE_MINIMUM_EFFECT_NS:.0f} ns of clock resolution.",
     ]
@@ -610,8 +861,17 @@ def render_summary(report: Mapping[str, object]) -> str:
 def run_scenarios(root: Path, preset: str, build_dir: Path, output_dir: Path,
                   selection: Sequence[tuple[Scenario, str | None]], capabilities: set[str], *,
                   compiler: str, repetitions: int | None = None, baseline_path: Path | None = None,
-                  runner: Runner = subprocess.run) -> dict[str, object]:
-    """Run the selected scenarios into a fresh output directory and write report.json and summary.md."""
+                  device: str | None = None, controlled_environment: frozenset[str] | None = None,
+                  runner: Runner = subprocess.run,
+                  system_gpus: Callable[[], list[dict[str, str]]] | None = None) -> dict[str, object]:
+    """Run the selected scenarios into a fresh output directory and write report.json and summary.md.
+
+    ``device`` is the lane's declared adapter/driver identity. ``controlled_environment``
+    defaults to the variables the selected scenarios set. ``system_gpus`` overrides
+    the OS GPU probe (tests pass a stub).
+    """
+    if controlled_environment is None:
+        controlled_environment = environment_names([scenario for scenario, _ in selection])
     baseline = load_report(baseline_path) if baseline_path is not None else None
     prepare_output(output_dir)
     results: list[dict[str, object]] = []
@@ -623,7 +883,7 @@ def run_scenarios(root: Path, preset: str, build_dir: Path, output_dir: Path,
             continue
         print(f"Running {scenario.id} ({scenario.warmup} warmup, "
               f"{repetitions if repetitions is not None else scenario.repetitions} measured)", flush=True)
-        result = run_scenario(scenario, build_dir, output_dir, repetitions, runner)
+        result = run_scenario(scenario, build_dir, output_dir, repetitions, runner, controlled_environment)
         print(f"  {result['status']}{': ' + str(result['reason']) if result.get('reason') else ''}", flush=True)
         results.append(result)
     shutil.rmtree(output_dir / "work", ignore_errors=True)
@@ -637,6 +897,9 @@ def run_scenarios(root: Path, preset: str, build_dir: Path, output_dir: Path,
         "host": host_identity(),
         "ci": ci_identity(),
         "capabilities": sorted(capabilities),
+        "device": device_identity(device, capabilities,
+                                  system_gpus() if system_gpus is not None else observe_system_gpus(platform.system()),
+                                  results),
         "scenarios": results,
     }
     if baseline is not None:

@@ -2,12 +2,17 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/math/matrix.hpp>
+
 #include "internal/controller.h"
+#include "internal/render_graph_canvas.h"
 #include "internal/render_graph_document.h"
 #include "internal/render_graph_job.h"
 
+#include <QByteArray>
 #include <QJsonObject>
 #include <QString>
+#include <QTimer>
 #include <QWidget>
 
 QT_BEGIN_NAMESPACE
@@ -26,12 +31,16 @@ QT_END_NAMESPACE
 
 namespace ludus::editor
 {
+class RenderGraphPreview;
+class RenderPreview;
 // RG3 Renderer workspace: edits one render-graph package through the typed
 // RenderGraphDocument, and runs validation, builds and runtime cooking through
 // the shared `ludus render-graph` backend on explicit immutable draft snapshots.
 // Saved sources change only on Save. Diagnostics map to authored nodes and source
-// lines. The visual node canvas and live in-editor GPU preview are RG3b work.
-// See docs/development/render-graph-authoring.md#edit-and-reload-graphs-rg3.
+// lines. RG3b adds a node canvas over the same document operations and an explicit
+// trusted preview of the cooked runtime generation on the World viewport device.
+// See docs/development/render-graph-authoring.md#edit-and-reload-graphs-rg3 and
+// docs/development/render-graph-authoring.md#node-canvas-and-preview-rg3b.
 class RendererWorkspace final : public QWidget
 {
     Q_OBJECT
@@ -86,6 +95,25 @@ public:
     [[nodiscard]] QString GetRuntimePackagePath() const;
     [[nodiscard]] QString GetStatusText() const;
 
+    /// Node canvas over the selected configuration (RG3b).
+    [[nodiscard]] RenderGraphCanvas& GetCanvas() noexcept
+    {
+        return *mCanvas;
+    }
+    /// Borrow the World viewport whose device and extraction feed the preview; null detaches.
+    /// The source must outlive this workspace or be cleared first.
+    void SetPreviewSource(RenderPreview* sourceOrNull);
+    /// Explicitly preview the last cooked runtime generation. False when the editor was built
+    /// without the native GPU preview or the generation cannot be staged.
+    [[nodiscard]] bool PreviewRuntime();
+    /// Trusted preview, or null in builds without the native GPU preview.
+    [[nodiscard]] RenderGraphPreview* GetPreviewOrNull() noexcept
+    {
+        return mPreviewOrNull;
+    }
+    /// Advance the preview from its source once (the timer calls this every display refresh).
+    void ServicePreview();
+
 Q_SIGNALS:
     void DocumentChanged();
     void JobFinished();
@@ -105,6 +133,9 @@ private:
     [[nodiscard]] QJsonObject selectedNode() const;
     [[nodiscard]] QString buildDirectory() const;
     [[nodiscard]] QString manifestFile() const;
+    void renderCanvas();
+    void renderPreview();
+    void openSubgraph(const QString& asset, const QString& configuration);
 
     ToolingPaths mTooling;
     QString mProjectRoot;
@@ -146,5 +177,16 @@ private:
     QLineEdit* mSpirvCross;
     QListWidget* mDiagnostics;
     QLabel* mStatus;
+    RenderGraphCanvas* mCanvas;
+    QWidget* mPreviewImage;
+    QLabel* mPreviewStatus;
+    QPushButton* mPreviewButton;
+    RenderPreview* mPreviewSourceOrNull = nullptr;
+    RenderGraphPreview* mPreviewOrNull = nullptr;
+    QTimer mPreviewTimer;
+    foundation::uint64 mPreviewDeviceSerial = 0;
+    foundation::uint64 mPreviewRevision = 0;
+    QByteArray mPreviewSceneIdentity;
+    foundation::math::Matrix4 mPreviewWorldToClip = foundation::math::Matrix4::Identity();
 };
 } // namespace ludus::editor

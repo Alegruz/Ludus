@@ -570,10 +570,10 @@ runtime in a browser.
 ## Edit and reload graphs (RG3)
 
 RG3a delivers the editing, diagnostics and activation half of the
-[RG3 contract](../architecture/render-graph-authoring.md#editor-interaction-diagnostics-and-hot-reload).
-The visual node canvas and the trusted in-editor GPU preview are RG3b; this
-stage edits through a tree, field inspector, connection table and source editor,
-and cooks runtime generations without rendering them in the editor.
+[RG3 contract](../architecture/render-graph-authoring.md#editor-interaction-diagnostics-and-hot-reload):
+a tree, field inspector, connection table and source editor, and runtime
+generations with atomic activation. RG3b adds the node canvas and the trusted
+in-editor preview; see [Node canvas and preview (RG3b)](#node-canvas-and-preview-rg3b).
 
 ### Edit in the Renderer tab
 
@@ -707,5 +707,122 @@ addition. Neither command writes sources, values or packages.
 
 Local qualification ran these suites with Clang 18 on macOS, including the Metal
 pixel test. Linux/Vulkan and browser execution of runtime generations are not
-established by these local runs. The editor does not yet render or activate
-runtime generations, and RG3a makes no scheduling, memory or performance claim.
+established by these local runs. RG3a makes no scheduling, memory or performance
+claim; the editor renders runtime generations only through the RG3b preview below.
+
+## Node canvas and preview (RG3b)
+
+RG3b completes the editor half of the
+[RG3 contract](../architecture/render-graph-authoring.md#editor-interaction-diagnostics-and-hot-reload):
+a visual node canvas over the same draft, and a trusted preview of the cooked
+runtime generation on the editor's existing viewport device.
+
+### Edit on the canvas
+
+The canvas sits between the source tree and the inspector and shows the selected
+configuration (a selected file shows its `default`). It is another view of the
+same typed draft: every canvas edit is a `RenderGraphDocument` operation, so
+undo, explicit save, validation and the inspector stay in step.
+
+| Gesture | Draft operation |
+| --- | --- |
+| Drag nodes (Ctrl-click adds to the selection) | One `MoveNodes` edit per gesture, applied on release: one undo step however far the drag went. A drag that returns to its start commits nothing. |
+| Drag from an output port to an input port | `Connect`, after the pre-check below |
+| Select a link and press Delete | `Disconnect` |
+| Select a node and press Delete | `RemoveNode` (also drops its links and layout position) |
+| Double-click a Subgraph node | Opens its asset's configuration on the canvas, in the tree and in the Source tab; not an edit |
+| Wheel, or drag empty space | Zoom or pan the view only |
+
+Header colours show the connection domain: blue scene/view (Scene, Camera),
+orange execution (Raster, Present), green resource (Target, Export), purple
+Subgraph and grey for a configuration's `input` ports and outputs. Port colours
+show the value type. Nodes without a `layout` position are arranged by
+dependency order for display only; nothing is written until you move them.
+Configuration outputs appear as dashed, read-only links; edit them in the
+Source tab.
+
+Before a link reaches the draft, the canvas checks it against the configuration
+and rejects it with the shared validator's error name and a reason in the status
+line:
+
+| Code | Rejected link |
+| --- | --- |
+| `Port` | Unknown output or input, or a link that starts at an input or ends at an output |
+| `MultipleWriters` | The input already has a connection; disconnect it first |
+| `TypeMismatch` | The output and input types differ, for example `DepthTexture` into a color input |
+| `Cycle` | The link would make a node depend on its own result within a frame |
+
+The pre-check gives immediate feedback; **Validate Draft** still runs the shared
+CLI backend, which owns legality and reports the same codes as
+`RenderGraph<Code>` for drafts edited another way.
+
+### Preview a cooked generation
+
+1. Build and **Cook Runtime** as above, so `out/render-graph/<graph>.lurgrt`
+   exists.
+2. Open a World and start its viewport; the preview borrows that device and the
+   World extraction. It never starts a device of its own.
+3. Open the **Preview** tab and choose **Preview Runtime**.
+
+Preview is an explicit action: it reads the last cooked file once, decodes it and
+stages it in a `RenderGraphActivation` beside the generation already shown. Editing,
+saving, building or cooking never changes the preview by itself. The preview shows
+the configuration's first exported `ColorTexture` at its authored extent, using the
+World viewport's current camera or orbit. Each World object becomes one static
+opaque item with its flat tint (object tint times surface tint); a tint with alpha
+below one is declared `Transparent`, and the editor's `DiagnosticColor` coverage
+policy draws unsupported items in magenta instead of hiding them. Textures, lights
+and other materials are outside the current static profile.
+
+The image changes only when a complete copy of a frame from the **active**
+generation arrives:
+
+- While a candidate prepares (`Preparing` or `NeedsUpdate`), the previous frame
+  stays; the active generation keeps rendering World changes.
+- A rejected file (unreadable, larger than 16 MiB, malformed or an unsupported
+  version), a candidate that fails setup, coverage or device admission, and a
+  `RestartRequired` interface mismatch all keep the previous frame and its
+  generation number. The status line names the failure.
+- Configurations that render to a presentation surface are not previewed; they
+  run in the game host. A configuration without an exported color texture is
+  reported instead of shown.
+- When the World viewport stops, the preview releases every generation before the
+  device is destroyed and keeps showing the last presented frame, labelled as such.
+  Starting the viewport again re-stages the last requested file.
+
+The status line distinguishes the shown frame (`Showing generation N at World
+revision R`) from the candidate's state. The copy to the CPU is asynchronous and
+always finishes before the preview polls for activation or renders again, so a
+replaced generation is never reset while its export is being read.
+
+The editor is built against the RendererStatic interface of the checked-in
+[offscreen fixture](../../tests/sdk_consumer/rg2/offscreen/main.lurender.json):
+CMake cooks it into the editor and its interface identity is the one every
+previewed generation must match. Graphs scaffolded with
+`ludus render-graph new-build --renderer-static` use that interface. Hot-swapping
+a candidate whose camera count differs from the active generation's fails, because
+one extraction feeds both; preview it after a viewport restart instead.
+
+### RG3b acceptance evidence
+
+- Editor `[render-graph][canvas]` tests cover domain and port display, dependency
+  placement without edits, a ten-step drag committing one undo step (and undo
+  restoring every moved node), separate steps for separate gestures, a real mouse
+  drag, Delete removal with undo, each rejected link code with an unchanged draft,
+  a legal link as one undoable `Connect`, the CLI reporting `RenderGraphTypeMismatch`
+  for the edge the canvas rejects, and double-click Subgraph navigation.
+- Editor `[render-graph][preview]` tests run on a headless RHI device (skipped
+  without a GPU adapter). They cover the World extraction mapping; a pending first
+  candidate showing nothing; the first successful frame; truncated, foreign-interface
+  and missing generations keeping the previous frame and generation; a pending
+  replacement keeping the previous frame until it presents; and the last
+  frame surviving a device stop. Preview/live parity renders the frozen fixture
+  through the preview (cooked `.lurgrt`, activation, World extraction adapter) and
+  through the live runtime path (the compiled header and a directly owned
+  `RenderGraph` with independently written inputs) and requires identical bytes.
+
+Local qualification ran these suites with Clang 18 on macOS (Metal) under the
+offscreen Qt platform. They prove the preview's renderer output and publication
+rules, not native Qt presentation of the Preview tab or a live GameHost session.
+Linux/Vulkan and browser execution are not established by these local runs, and
+RG3b makes no scheduling, memory or performance claim.
