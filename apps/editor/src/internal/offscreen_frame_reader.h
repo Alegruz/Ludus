@@ -25,7 +25,8 @@ enum class OffscreenReadStatus : foundation::uint8
 };
 /// Copies one RGBA8 viewport display image to a QImage in row bands.
 ///
-/// Used when Qt cannot share the engine's GPU device (Linux with Qt older than 6.6). Each band
+/// Used when Qt cannot share the engine's GPU device (forced offscreen, or no Vulkan adapter
+/// can present to the window with a shareable device). Each band
 /// fits one RHI transfer slice, at most TransfersPerDirection bands are in flight, and the GUI
 /// thread only polls, so no call waits for the GPU. Owner-thread use only, between frames.
 class OffscreenFrameReader final

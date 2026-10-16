@@ -18,9 +18,11 @@ namespace ludus::editor
 /// How the viewport shows engine frames in this process.
 enum class ViewportPresentation : foundation::uint8
 {
-    /// Qt Quick imports the engine texture from Qt's own GPU device (Metal, or Vulkan with Qt 6.6+).
+    /// Qt Quick and the engine share one GPU device: Qt's Metal device, or on Linux a Vulkan
+    /// device the editor creates on Qt's instance and Qt Quick adopts (any Qt 6 release).
     SharedDevice,
     /// The engine owns a headless Vulkan device and the viewport paints double-buffered CPU copies.
+    /// Used when forced with LUDUS_EDITOR_VIEWPORT=offscreen or when no shareable device presents.
     OffscreenReadback,
     /// Neither path exists on this platform; the viewport only explains why.
     Unavailable,

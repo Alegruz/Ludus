@@ -871,9 +871,8 @@ void LevelWorkspace::Publish()
         // Commit without a rendered frame, but say why the viewport stays empty
         // instead of leaving the generic placeholder.
         Viewport_->ClearFrame(QStringLiteral("Scene ready, but this Editor cannot show the GPU viewport here: native "
-                                             "GPU sharing needs macOS (Metal), or X11/Wayland with Vulkan; Qt "
-                                             "older than 6.6 uses an offscreen copy (this build uses Qt %1 on "
-                                             "platform '%2').")
+                                             "GPU sharing needs macOS (Metal), or X11/Wayland with Vulkan "
+                                             "(this build uses Qt %1 on platform '%2').")
                                   .arg(QStringLiteral(QT_VERSION_STR), QGuiApplication::platformName()));
         if (Operation_ == QStringLiteral("import"))
         {
