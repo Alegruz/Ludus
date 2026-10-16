@@ -806,9 +806,9 @@ aid, not the imported scene lighting. Wireframe and normal visualizations are
 not yet available.
 
 Lit first publishes shadowed direct lighting, then prepares static diffuse and
-indirect lighting on a cancellable CPU worker. The worker computes illumination
-charts rather than viewport pixels; navigation and Qt presentation continue on
-the GPU. Completed charts upload once on the device owner thread and replace the
+indirect lighting as cancellable CPU jobs on the preview's three-worker job system
+(the UI thread only polls). The jobs compute illumination charts rather than
+viewport pixels; navigation and Qt presentation continue on the GPU. Completed charts upload once on the device owner thread and replace the
 per-instance materials and snapshot only after they are ready. Analytic direct
 lighting and area specular remain raster; baked area diffuse replaces its proxy
 contribution. HDR/constant authored environments supply the initial irradiance

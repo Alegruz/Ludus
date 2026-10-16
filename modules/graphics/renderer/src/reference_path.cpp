@@ -22,11 +22,11 @@ bool ValidContribution(math::Vector3 value) noexcept
 {
     return math::IsFinite(value) && value.X >= 0 && value.Y >= 0 && value.Z >= 0;
 }
-rhi::RasterStatus Invalid(ReferenceJob& job, const ReferencePath& path) noexcept
+rhi::RasterStatus Invalid(ReferenceCaptureInfo& inoutInfo, const ReferencePath& path) noexcept
 {
-    ++job.Info.InvalidContributions;
-    job.Info.FailurePixel = path.Pixel;
-    job.Info.FailureDepth = path.Depth;
+    ++inoutInfo.InvalidContributions;
+    inoutInfo.FailurePixel = path.Pixel;
+    inoutInfo.FailureDepth = path.Depth;
     return rhi::RasterStatus::Failed;
 }
 void AddTransport(ReferencePath& path, math::Vector3 contribution, uint32 depth, bool emission) noexcept
@@ -205,8 +205,12 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
     return result;
 }
 } // namespace
-rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path, const rhi::RayResult& hit) noexcept
+rhi::RasterStatus PrepareReferenceVertex(const ReferenceJob& job,
+                                         ReferenceCaptureInfo& inoutInfo,
+                                         ReferencePath& inoutPath,
+                                         const rhi::RayResult& hit) noexcept
 {
+    ReferencePath& path = inoutPath;
     path.HasShadow = path.HasNext = false;
     path.Active = false;
     const auto lights = LightCount(job);
@@ -228,18 +232,18 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
                      true);
         return ValidContribution(path.Emission) && ValidContribution(path.Direct) && ValidContribution(path.Indirect)
                    ? rhi::RasterStatus::Ready
-                   : Invalid(job, path);
+                   : Invalid(inoutInfo, path);
     }
     if (hit.Hit != 1 || hit.Instance >= job.Scene.InstanceCount || !math::IsFinite(hit.Distance) ||
         !math::IsFinite(hit.U) || !math::IsFinite(hit.V) || hit.Distance < path.Ray.MinDistance ||
         hit.Distance > path.Ray.MaxDistance || hit.U < -1e-5F || hit.V < -1e-5F || hit.U + hit.V > 1.00001F)
     {
-        return Invalid(job, path);
+        return Invalid(inoutInfo, path);
     }
     const auto& instance = job.Scene.Instances[hit.Instance];
     if (hit.Primitive >= instance.TriangleCount)
     {
-        return Invalid(job, path);
+        return Invalid(inoutInfo, path);
     }
     const auto& triangle = job.Scene.Triangles[instance.FirstTriangle + hit.Primitive];
     const auto point = Position(triangle, hit.U, hit.V);
@@ -251,7 +255,7 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
         const auto pdf = AreaPdf(triangle, path.PreviousPoint, point, lights);
         if (!math::IsFinite(pdf) || pdf < 0)
         {
-            return Invalid(job, path);
+            return Invalid(inoutInfo, path);
         }
         const auto weight = path.Depth == 0 ? 1 : ReferencePowerWeight(path.PreviousPdf, pdf);
         AddTransport(path,
@@ -264,7 +268,7 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     {
         return ValidContribution(path.Emission) && ValidContribution(path.Direct) && ValidContribution(path.Indirect)
                    ? rhi::RasterStatus::Ready
-                   : Invalid(job, path);
+                   : Invalid(inoutInfo, path);
     }
     math::Vector3 normal = ReferenceNormalize(triangle.Normals[0] * (1 - hit.U - hit.V) + triangle.Normals[1] * hit.U +
                                               triangle.Normals[2] * hit.V);
@@ -286,7 +290,7 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
                                     surface.NormalScale,
                                     parameters) != rhi::RasterStatus::Ready)
         {
-            return Invalid(job, path);
+            return Invalid(inoutInfo, path);
         }
         bsdf.Metallic = parameters.Metallic;
         bsdf.Roughness = parameters.Roughness;
@@ -295,7 +299,7 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     const auto proposal = SampleLight(job, path, point);
     if (!math::IsFinite(proposal.Pdf) || proposal.Pdf < 0 || !ValidContribution(proposal.Radiance))
     {
-        return Invalid(job, path);
+        return Invalid(inoutInfo, path);
     }
     const auto cosine = math::Dot(normal, proposal.Direction);
     if (proposal.Pdf > 0 && Positive(proposal.Radiance) && cosine > 0 &&
@@ -304,14 +308,14 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
         ReferenceBsdfEvaluation evaluation;
         if (EvaluateReferenceBsdf(bsdf, normal, view, proposal.Direction, evaluation) != rhi::RasterStatus::Ready)
         {
-            return Invalid(job, path);
+            return Invalid(inoutInfo, path);
         }
         const auto weight = proposal.Delta ? 1 : ReferencePowerWeight(proposal.Pdf, evaluation.Pdf);
         path.PendingDirect = math::Hadamard(path.Throughput, math::Hadamard(evaluation.Value, proposal.Radiance)) *
                              (cosine * weight / proposal.Pdf);
         if (!ValidContribution(path.PendingDirect))
         {
-            return Invalid(job, path);
+            return Invalid(inoutInfo, path);
         }
         if (Positive(path.PendingDirect))
         {
@@ -325,13 +329,13 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
                     math::TryOffsetRayOrigin({proposal.Point, proposal.Error, proposal.Normal, -direction}, end) !=
                         math::MathStatus::Success)
                 {
-                    return Invalid(job, path);
+                    return Invalid(inoutInfo, path);
                 }
                 const auto delta = end - start;
                 distance = math::Length(delta);
                 if (distance <= 0 || !math::IsFinite(distance))
                 {
-                    return Invalid(job, path);
+                    return Invalid(inoutInfo, path);
                 }
                 direction = delta / distance;
                 // The target endpoint is excluded by one representable step.
@@ -354,18 +358,18 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
                              ReferenceRandom(job, path, static_cast<uint16>(dimension + 5))},
                             sample) != rhi::RasterStatus::Ready)
     {
-        return Invalid(job, path);
+        return Invalid(inoutInfo, path);
     }
     if (!sample.Accepted || math::Dot(triangle.GeometricNormal, sample.Direction) <= 0)
     {
-        ++job.Info.NullBsdfSamples;
+        ++inoutInfo.NullBsdfSamples;
         return rhi::RasterStatus::Ready;
     }
     path.Throughput = math::Hadamard(path.Throughput, sample.Evaluation.Value) *
                       (math::Dot(normal, sample.Direction) / sample.Evaluation.Pdf);
     if (!ValidContribution(path.Throughput))
     {
-        return Invalid(job, path);
+        return Invalid(inoutInfo, path);
     }
     if (!Positive(path.Throughput))
     {
@@ -380,7 +384,7 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
             math::Clamp(math::Max(math::Max(path.Throughput.X, path.Throughput.Y), path.Throughput.Z), 0.05F, 0.95F);
         if (ReferenceRandom(job, path, static_cast<uint16>(dimension + 6)) >= survival)
         {
-            ++job.Info.RouletteTerminations;
+            ++inoutInfo.RouletteTerminations;
             return rhi::RasterStatus::Ready;
         }
         path.Throughput = path.Throughput / survival;
@@ -388,21 +392,22 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     const auto origin = Offset(point, triangle, sample.Direction);
     if (!math::IsFinite(origin))
     {
-        return Invalid(job, path);
+        return Invalid(inoutInfo, path);
     }
     path.Next = ReferenceRay(origin, sample.Direction, job.Description.SecondaryDistance);
     path.HasNext = path.Active = true;
     return ValidContribution(path.Emission) && ValidContribution(path.Direct) && ValidContribution(path.Indirect)
                ? rhi::RasterStatus::Ready
-               : Invalid(job, path);
+               : Invalid(inoutInfo, path);
 }
-rhi::RasterStatus EvaluateReferenceDiffuseProbe(ReferenceJob& inoutJob,
+rhi::RasterStatus EvaluateReferenceDiffuseProbe(const ReferenceJob& job,
+                                                ReferenceCaptureInfo& inoutInfo,
                                                 const ReferenceProbeAddress& address,
                                                 math::Vector3& outIrradiance) noexcept
 {
     const uint32 triangleIndex = address.TriangleIndex;
     const uint32 sampleIndex = address.SampleIndex;
-    const ReferenceTriangle& triangle = inoutJob.Scene.Triangles[triangleIndex];
+    const ReferenceTriangle& triangle = job.Scene.Triangles[triangleIndex];
     const math::Vector3 pointWorld = Position(triangle, 1.F / 3.F, 1.F / 3.F);
     const math::Vector3 normalWorld = triangle.GeometricNormal;
     ReferencePath path;
@@ -411,7 +416,7 @@ rhi::RasterStatus EvaluateReferenceDiffuseProbe(ReferenceJob& inoutJob,
     // At a virtual white diffuse receiver, cosine sampling turns the irradiance
     // integral into PI times incoming radiance. Reuse the reference MIS/BSDF
     // transport after this first event; analytic direct remains the raster term.
-    const LightProposal proposal = SampleLight(inoutJob, path, pointWorld);
+    const LightProposal proposal = SampleLight(job, path, pointWorld);
     math::Vector3 directIrradiance;
     const float32 cosine = math::Max(math::Dot(normalWorld, proposal.Direction), 0.F);
     if (proposal.Delta == false && proposal.Pdf > 0 && cosine > 0)
@@ -439,7 +444,7 @@ rhi::RasterStatus EvaluateReferenceDiffuseProbe(ReferenceJob& inoutJob,
         rhi::RayInput shadow = ReferenceRay(originWorld, directionWorld, distance);
         shadow.VisibilityOnly = 1;
         rhi::RayResult visibility;
-        if (TraceReferenceOracle(inoutJob.Scene, shadow, visibility) != rhi::RasterStatus::Ready)
+        if (TraceReferenceOracle(job.Scene, shadow, visibility) != rhi::RasterStatus::Ready)
         {
             return rhi::RasterStatus::Failed;
         }
@@ -449,8 +454,8 @@ rhi::RasterStatus EvaluateReferenceDiffuseProbe(ReferenceJob& inoutJob,
                 proposal.Radiance * (cosine / proposal.Pdf * ReferencePowerWeight(proposal.Pdf, cosine / math::kPiF));
         }
     }
-    const float32 radius = math::Sqrt(ReferenceRandom(inoutJob, path, 0));
-    const float32 angle = math::kTauF * ReferenceRandom(inoutJob, path, 1);
+    const float32 radius = math::Sqrt(ReferenceRandom(job, path, 0));
+    const float32 angle = math::kTauF * ReferenceRandom(job, path, 1);
     const float32 cosineSample = math::Sqrt(math::Max(0.F, 1 - radius * radius));
     const math::Vector3 upWorld = math::Abs(normalWorld.Y) > .9F ? math::Vector3{1, 0, 0} : math::Vector3{0, 1, 0};
     const math::Vector3 tangentWorld = ReferenceNormalize(math::Cross(upWorld, normalWorld));
@@ -462,21 +467,20 @@ rhi::RasterStatus EvaluateReferenceDiffuseProbe(ReferenceJob& inoutJob,
     path.Throughput = {math::kPiF, math::kPiF, math::kPiF};
     path.PreviousPoint = pointWorld;
     path.PreviousPdf = cosineSample / math::kPiF;
-    path.Ray = ReferenceRay(Offset(pointWorld, triangle, directionWorld),
-                            directionWorld,
-                            inoutJob.Description.SecondaryDistance);
+    path.Ray =
+        ReferenceRay(Offset(pointWorld, triangle, directionWorld), directionWorld, job.Description.SecondaryDistance);
     while (path.Active == true)
     {
         rhi::RayResult hit;
-        if (TraceReferenceOracle(inoutJob.Scene, path.Ray, hit) != rhi::RasterStatus::Ready ||
-            PrepareReferenceVertex(inoutJob, path, hit) != rhi::RasterStatus::Ready)
+        if (TraceReferenceOracle(job.Scene, path.Ray, hit) != rhi::RasterStatus::Ready ||
+            PrepareReferenceVertex(job, inoutInfo, path, hit) != rhi::RasterStatus::Ready)
         {
             return rhi::RasterStatus::Failed;
         }
         if (path.HasShadow == true)
         {
             rhi::RayResult visibility;
-            if (TraceReferenceOracle(inoutJob.Scene, path.Shadow, visibility) != rhi::RasterStatus::Ready)
+            if (TraceReferenceOracle(job.Scene, path.Shadow, visibility) != rhi::RasterStatus::Ready)
             {
                 return rhi::RasterStatus::Failed;
             }

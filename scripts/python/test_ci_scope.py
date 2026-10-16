@@ -63,9 +63,14 @@ class ValidationTierTests(unittest.TestCase):
                          ci_scope.FULL_TIER)
 
     def test_queue_main_manual_and_unknown_events_run_the_full_tier(self):
-        for event_name in ("merge_group", "push", "workflow_dispatch", "schedule", ""):
+        for event_name in ("merge_group", "push", ""):
             with self.subTest(event_name=event_name):
                 self.assertEqual(ci_scope.validation_tier(event_name, {}), ci_scope.FULL_TIER)
+
+    def test_only_standalone_scheduled_or_manual_runs_select_nightly(self):
+        for event_name in ("schedule", "workflow_dispatch"):
+            self.assertEqual(ci_scope.validation_tier(event_name, {}), ci_scope.NIGHTLY_TIER)
+            self.assertEqual(ci_scope.validation_tier(event_name, {}, is_batch=True), ci_scope.FULL_TIER)
 
     def test_malformed_pull_request_metadata_runs_the_full_tier(self):
         for event in ({}, {"pull_request": None}, {"pull_request": {"labels": [{}]}},
@@ -190,14 +195,73 @@ class RequiredGateTests(unittest.TestCase):
         jobs = set(re.findall(r"^  ([a-z][a-z0-9-]*):$", workflow, re.MULTILINE))
         self.assertTrue(set(ci_scope.NATIVE_JOBS) <= jobs)
 
-    def test_workflow_defers_exactly_the_merge_queue_jobs(self):
+    def test_workflow_defers_exactly_the_queue_and_nightly_jobs(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
-        self.assertTrue(set(ci_scope.MERGE_QUEUE_JOBS) <= set(ci_scope.NATIVE_JOBS))
         conditions = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n(?:    .*\n)*?    if: (.*)$", workflow, re.MULTILINE))
         for name in ci_scope.NATIVE_JOBS:
-            with self.subTest(name=name):
-                deferred = "needs.changes.outputs.validation_tier == 'full'" in conditions.get(name, "")
-                self.assertEqual(deferred, name in ci_scope.MERGE_QUEUE_JOBS)
+            condition = conditions.get(name, "")
+            self.assertEqual("validation_tier != 'pull-request'" in condition, name in ci_scope.MERGE_QUEUE_JOBS)
+            self.assertEqual("validation_tier == 'nightly'" in condition, name in ci_scope.NIGHTLY_JOBS)
+
+    def test_advisory_analyzers_run_nightly_and_required_inventory_runs_in_the_queue(self):
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        nightly = {
+            "ci.yml": "if: needs.changes.outputs.validation_tier == 'nightly'",
+            "webgpu-probe.yml": "if: inputs.batch_sha == '' && github.event_name != 'pull_request'",
+        }
+        for name, condition in nightly.items():
+            jobs = re.findall(r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+                              root.joinpath(name).read_text().split("\njobs:\n", 1)[1])
+            analyzer_steps = 0
+            for job, body in jobs:
+                header = body.split("\n    steps:", 1)[0]
+                for step in re.findall(r"(?ms)^      - name: [^\n]*\n((?:        [^\n]*\n)+)", body):
+                    if "--analyzer" not in step:
+                        continue
+                    analyzer_steps += 1
+                    with self.subTest(workflow=name, job=job):
+                        # The step itself or its whole job must be nightly-only.
+                        self.assertTrue(condition in step or condition.replace("if: ", "") in header)
+                        self.assertIn("continue-on-error: true", step)
+            with self.subTest(workflow=name):
+                self.assertTrue(analyzer_steps)
+        self.assertRegex(root.joinpath("webgpu-probe.yml").read_text(), r"(?m)^  schedule:\n    - cron: '[^']+'$")
+        workflow = root.joinpath("ci.yml").read_text()
+        macos_compile = workflow.split("\n  macos-compile:\n", 1)[1].split("\n  macos-sanitizers:\n", 1)[0]
+        inventory = macos_compile.split("--inventory", 1)
+        self.assertEqual(len(inventory), 2)
+        self.assertNotIn("continue-on-error", inventory[0].rsplit("- name:", 1)[1])
+        self.assertNotIn("--inventory", workflow.split("\n  macos-analysis:\n", 1)[1].split("\n  formatting:\n", 1)[0])
+
+    def test_builds_and_tidy_use_the_runner_core_counts(self):
+        # Hosted runner CPUs for public repositories; a runner label not listed
+        # here must be added with its core count before a job can use it.
+        cores = {"ubuntu-24.04": "4", "macos-15": "3"}
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        workflow = root.joinpath("ci.yml").read_text()
+        self.assertIn('\n  CMAKE_BUILD_PARALLEL_LEVEL: "4"\n', workflow.split("\njobs:\n", 1)[0])
+        jobs = dict(re.findall(r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)^    steps:", workflow.split("\njobs:\n", 1)[1]))
+        for name, header in jobs.items():
+            runner = re.search(r"(?m)^    runs-on: (\S+)$", header)
+            if runner is None:
+                continue
+            level = re.search(r'(?m)^      CMAKE_BUILD_PARALLEL_LEVEL: "(\d+)"$', header)
+            tidy = re.search(r'(?m)^      LUDUS_TIDY_JOBS: "(\d+)"$', header)
+            with self.subTest(job=name, runner=runner.group(1)):
+                self.assertIn(runner.group(1), cores)
+                expected = cores[runner.group(1)]
+                if name == "build-budget":
+                    self.assertEqual(level.group(1), "2")
+                elif expected == "4":
+                    # The workflow default already matches Linux runners.
+                    self.assertIsNone(level)
+                else:
+                    self.assertEqual(level.group(1) if level else None, expected)
+                if tidy:
+                    self.assertEqual(tidy.group(1), expected)
+        for name in ("ci.yml", "webgpu-probe.yml"):
+            with self.subTest(workflow=name):
+                self.assertNotRegex(root.joinpath(name).read_text(), r"--parallel \d")
 
     def test_required_workflows_report_checks_to_the_merge_queue(self):
         # A required check that never runs for merge_group stalls every queued PR.
@@ -206,17 +270,35 @@ class RequiredGateTests(unittest.TestCase):
                 workflow = (Path(__file__).resolve().parents[2] / ".github/workflows" / name).read_text()
                 self.assertRegex(workflow, r"(?m)^  merge_group:")
 
-    def test_main_reruns_full_ci_only_for_cache_inputs_and_nightly(self):
-        # The queue validates every landed commit; main runs exist to refresh
-        # the caches pull requests restore, so they must cover cache-key inputs.
+    def test_full_validation_is_owned_by_the_batch_scheduler(self):
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        for name in ("ci.yml", "wiki.yml", "project-sdk.yml"):
+            triggers = root.joinpath(name).read_text().split("\npermissions:", 1)[0]
+            self.assertNotRegex(triggers, r"(?m)^  push:")
+            self.assertIn("  workflow_call:", triggers)
+        batch = root.joinpath("batch-ci.yml").read_text()
+        self.assertIn("cron: '13,43 * * * *'", batch)
+        self.assertIn("  cancel-in-progress: false", batch)
+
+    def test_integration_prs_run_only_the_source_and_tooling_native_job(self):
+        event = {"pull_request": {"base": {"ref": "develop"}, "labels": [{"name": "ci:full"}]}}
+        self.assertEqual(ci_scope.validation_tier("pull_request", event), ci_scope.INTEGRATION_TIER)
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
-        triggers = workflow.split("\npermissions:", 1)[0]
-        push = triggers.split("  push:", 1)[1].split("\n  schedule:", 1)[0]
-        for path in ("conanfile.py", "conan.lock", "config/tool_versions.json", "CMakePresets.json",
-                     ".github/actions/**"):
-            with self.subTest(path=path):
-                self.assertIn(f"'{path}'", push)
-        self.assertRegex(triggers, r"(?m)^  schedule:\n    - cron: '[^']+'$")
+        conditions = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n(?:    .*\n)*?    if: (.*)$", workflow, re.MULTILINE))
+        for name in ci_scope.NATIVE_JOBS:
+            condition = conditions.get(name, "")
+            self.assertEqual("validation_tier" in condition, name != "formatting", name)
+        results = self.results()
+        results["changes"]["outputs"]["validation_tier"] = ci_scope.INTEGRATION_TIER
+        for name in ci_scope.INTEGRATION_JOBS:
+            results[name]["result"] = "skipped"
+        self.assertEqual(ci_scope.gate_failures(results), [])
+        for name in ci_scope.INTEGRATION_JOBS:
+            results[name]["result"] = "success"
+            self.assertTrue(ci_scope.gate_failures(results), name)
+            results[name]["result"] = "skipped"
+        results["formatting"]["result"] = "skipped"
+        self.assertTrue(ci_scope.gate_failures(results))
 
     def test_pull_requests_leave_macos_tooling_jobs_to_the_queue(self):
         root = Path(__file__).resolve().parents[2] / ".github/workflows"
@@ -232,7 +314,8 @@ class RequiredGateTests(unittest.TestCase):
 
     def results(self, native_required=True, tier=ci_scope.FULL_TIER):
         def expected(name):
-            deferred = tier == ci_scope.PULL_REQUEST_TIER and name in ci_scope.MERGE_QUEUE_JOBS
+            deferred = ((tier == ci_scope.PULL_REQUEST_TIER and name in ci_scope.MERGE_QUEUE_JOBS)
+                        or (tier != ci_scope.NIGHTLY_TIER and name in ci_scope.NIGHTLY_JOBS))
             return "success" if native_required and not deferred else "skipped"
         return {
             "changes": {"result": "success", "outputs": {
@@ -246,7 +329,8 @@ class RequiredGateTests(unittest.TestCase):
 
     def test_failed_cancelled_or_skipped_native_jobs_fail_full_validation(self):
         for name in ci_scope.NATIVE_JOBS:
-            for status in ("failure", "cancelled", "skipped"):
+            statuses = ("failure", "cancelled", "success") if name in ci_scope.NIGHTLY_JOBS else ("failure", "cancelled", "skipped")
+            for status in statuses:
                 with self.subTest(name=name, status=status):
                     results = self.results()
                     results[name]["result"] = status
@@ -256,13 +340,25 @@ class RequiredGateTests(unittest.TestCase):
         self.assertEqual(ci_scope.gate_failures(self.results(tier=ci_scope.PULL_REQUEST_TIER)), [])
         self.assertEqual(ci_scope.gate_failures(self.results(False, ci_scope.PULL_REQUEST_TIER)), [])
         for name in ci_scope.NATIVE_JOBS:
-            statuses = ("failure", "cancelled", "success") if name in ci_scope.MERGE_QUEUE_JOBS else (
+            statuses = ("failure", "cancelled", "success") if name in (*ci_scope.MERGE_QUEUE_JOBS, *ci_scope.NIGHTLY_JOBS) else (
                 "failure", "cancelled", "skipped")
             for status in statuses:
                 with self.subTest(name=name, status=status):
                     results = self.results(tier=ci_scope.PULL_REQUEST_TIER)
                     results[name]["result"] = status
                     self.assertTrue(ci_scope.gate_failures(results))
+
+    def test_nightly_requires_every_native_job_and_retargeting_runs_cheap_checks(self):
+        results = self.results(tier=ci_scope.NIGHTLY_TIER)
+        self.assertEqual(ci_scope.gate_failures(results), [])
+        for name in ci_scope.NATIVE_JOBS:
+            results[name]["result"] = "skipped"
+            self.assertTrue(ci_scope.gate_failures(results), name)
+            results[name]["result"] = "success"
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        for name in ("ci.yml", "wiki.yml", "project-sdk.yml"):
+            triggers = root.joinpath(name).read_text().split("\npermissions:", 1)[0]
+            self.assertRegex(triggers, r"types: \[[^\]\n]*edited")
 
     def test_missing_or_invalid_tier_cannot_skip_merge_queue_jobs(self):
         for tier in (None, "", "Full", "fast"):
