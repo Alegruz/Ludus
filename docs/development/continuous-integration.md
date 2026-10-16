@@ -7,10 +7,11 @@ the next tooling, evidence and platform improvements; its
 the Game Programming Gems ideas incorporated after the initial design.
 Q0 failure semantics are implemented below; later phases remain proposals.
 
-Native CI runs on pull requests, the `main` merge queue, pushes to `main`, and
-manual dispatches. Feature branches are validated through their pull requests,
-avoiding a duplicate full run for every branch push. Superseded pull-request
-runs are cancelled; merge-queue and `main` validation is allowed to finish.
+Native CI runs on pull requests, the `main` merge queue, a nightly schedule,
+cache-input pushes to `main`, and manual dispatches. Feature branches are
+validated through their pull requests, avoiding a duplicate full run for every
+branch push. Superseded pull-request runs are cancelled; merge-queue and `main`
+validation is allowed to finish.
 
 ## Landing changes through the merge queue
 
@@ -32,14 +33,32 @@ the queue with **Merge when ready** and move on; nobody has to watch it. If the
 queued candidate fails, GitHub removes only that pull request from the queue and
 the others continue. Fix it and enqueue it again.
 
-Add the `ci:full` label to a pull request to run the merge-queue tier on the
+The maintainer may add the `ci:full` label to run the merge-queue tier on the
 pull request itself, for example when it changes the editor, macOS or sanitizer
-paths and you want that feedback before queueing. Adding the label starts a
-new run.
+paths and that feedback is wanted before queueing. Adding the label starts a
+new run. Agents do not add it: a labeled pull request repeats the full tier,
+and its macOS jobs compete with queued candidates for the account's few
+concurrent macOS runners. Validate locally and let the queue run the full tier.
 
-Pushes to `main` still run the full tier. They warm the dependency and compiler
-caches that pull requests restore, because caches saved by merge-queue runs are
-not visible to other branches.
+### Runner capacity and `main` runs
+
+Wall time is usually dominated by waiting for a runner, not by job execution:
+GitHub limits how many jobs, and especially macOS jobs, an account runs at once.
+CI therefore avoids repeating work the queue already did:
+
+- Every commit on `main` was produced by a passing merge-queue candidate, so
+  `ci.yml` does not rerun the full tier on every push to `main`. It runs on
+  `main` nightly, and on pushes that change shared cache-key inputs (Conan
+  recipes and lock, pinned tool versions, presets, the CI workflow and setup
+  actions). Those runs save the dependency and compiler caches that pull
+  requests restore; caches saved by pull-request and merge-queue runs are not
+  visible to other branches. Between refreshes, compiler caches restore by
+  prefix from the latest `main` snapshot.
+- The wiki's macOS documentation-tool checks and the macOS butler installs in
+  `project-sdk.yml` run in the merge queue and on `main`, not on pull requests.
+  Pull requests still build the wiki and install butler on Ubuntu.
+- The wiki and `project-sdk.yml` keep running on every push to `main`; the wiki
+  run publishes GitHub Pages.
 
 ### Repository settings
 
@@ -82,8 +101,9 @@ contracts.
 Every run first tests the CI routing policy and compares the complete change.
 Pull requests are compared from the merge base to their head; merge-queue runs
 compare the queue's base commit with its candidate; pushes to `main`
-compare the previous and new commit. A documentation-only change skips native
-engine and installed host-tooling validation, while the wiki workflow still
+compare the previous and new commit; nightly runs validate everything. A
+documentation-only change skips native engine and installed host-tooling
+validation, while the wiki workflow still
 builds the complete site, generates the API reference, checks documentation
 coverage, and validates links and search.
 
@@ -171,6 +191,14 @@ missing log, launch failure or omitted result fails even if the process returns
 zero. Independent commands still report findings. CI always uploads each shard's
 available evidence with 14-day retention; a missing artifact fails the upload.
 These are Q0 inventory/control records, not the proposed Q2 full run schema.
+
+## Scheduled runtime profiling
+
+The separate `performance` workflow runs runtime profiling scenarios nightly on
+hosted Ubuntu and macOS runners, and on manual dispatch. It is not a pull-request
+or merge-queue check: scenario correctness failures fail that workflow, and
+timings are report-only. Reports, Perfetto traces and logs are kept as artifacts
+for 90 days. See [Runtime profiling](runtime-profiling.md).
 
 ## Sanitizer failure controls
 

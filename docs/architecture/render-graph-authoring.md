@@ -1,7 +1,9 @@
 # Render graph authoring, shader builds and pipeline management
 
 Status: RG0 contracts, RG1 bounded offline shader builds and RG2 static opaque
-Renderer execution implemented, October 13, 2026; RG3-RG4 remain proposed. This defines the renderer
+Renderer execution implemented, October 13, 2026; RG3a editing, mapped
+diagnostics and runtime activation implemented, October 15, 2026; RG3b canvas and
+live preview, and RG4, remain proposed. This defines the renderer
 authoring/compiler contract; it does not claim a graph editor, unrestricted
 shader composition or new RHI capability.
 Baseline design: `5c44d19`. See [usage and source formats](../development/render-graph-authoring.md).
@@ -531,6 +533,8 @@ architecture fits Ludus or that current features exist on our pinned tools.
 | RG1: build integration | Shared schemas, existing shader-helper extension, packages and local incremental cache | Target layout/entry fixtures; deterministic clean builds; correct transitive invalidation; corrupt/cancelled/stale build preserves prior output; configuration and pipeline bounds |
 | RG2: Renderer integration | Scene matching, coverage reports, ready pipeline admission and error route | Mixed layouts/material slots; missing/conflicting roles; alpha/deformation/depth parity; capability rejection; no compile during draw; streaming/resize/history invalidation |
 | RG3: editor and reload | Graph/schema/source editing, preview, undo/save, diagnostics and atomic version activation | CLI/editor equivalent result; mapped errors; draft/save separation; failed reload old pixels preserved; pending pipelines; CPU schema mismatch/migration and unload/completion lifetime fixtures |
+| RG3a (delivered) | Typed document/undo/save, source editing, mapped diagnostics, runtime generations and native activation | All RG3 acceptance fixtures above, without visual canvas or in-editor GPU preview |
+| RG3b | Node canvas and trusted in-editor preview of the activated generation | Preview/live parity on a frozen fixture; pending/failed preview keeps the last drawable view |
 | RG4: measured scheduling/memory work | Optional pooling improvements, merging/aliasing/parallel paths individually | Identical serial-control pixels/effects and actual retained memory; named native/browser profiles; repeated resize/reload and frames in flight; unsupported paths explicit |
 
 RG0 is delivered in `ludus_tools.render_graph` and the installed `ludus
@@ -599,6 +603,31 @@ depth images cannot share one physical depth, and a plan has one surface owner.
 No aliasing, pooling, async scheduling, reduced allocation
 or performance improvement is claimed. See
 [RG2 usage, qualified scope and evidence](../development/render-graph-authoring.md#execute-cooked-static-graphs-rg2).
+
+RG3a is delivered in the shared `render_graph_authoring` service, `render-graph
+cook-runtime`/`schema-diff`/`migrate`, the neutral `runtime_package.h` layout,
+Renderer's `RenderGraphPackage`/`RenderGraphActivation` and the editor's Renderer
+tab. CLI JSON failures map graph errors to their package-relative source,
+configuration, node and expanded instance, and shader-compiler lines to authored
+function files; generated-wrapper lines map to their owning manifest program.
+The editor edits typed drafts by stable ID with bounded undo and conflict-checked
+explicit save, and runs the same CLI backend on immutable draft snapshots, so a
+draft and its saved equivalent produce identical plans and errors.
+
+A `.lurgrt` runtime generation carries the RG2 numeric plan, cooked stages and a
+CPU interface identity; decoding copies the bytes, so an unloadable module can
+release its buffer immediately. Activation stages a candidate beside the drawing
+generation, prewarms it, requires it to prepare the latest accepted extraction,
+and publishes it only inside `Poll` between frames with no unconfirmed encoding.
+A pending, failed or coverage-rejecting candidate leaves the active generation,
+its pixels and output revision unchanged; a CPU interface mismatch returns
+RestartRequired and stages nothing. The replaced generation is Reset at the
+boundary and its GPU uses retire through RHI completion; GameHost quiescence
+remains a separate obligation. Parameter migration keeps values only for equal
+field identity and type, requires explicit defaults for added or changed fields
+and reports dropped values; it never writes sources. The editor cooks runtime
+generations but does not yet render or activate them: the canvas and live
+preview are RG3b. See [RG3 usage and evidence](../development/render-graph-authoring.md#edit-and-reload-graphs-rg3).
 
 Run representative native and browser raster fixtures under pinned tools, SDK
 consumer checks, warning/format/tidy gates and sanitizers for implementation.

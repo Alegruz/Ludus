@@ -544,6 +544,8 @@ namespace
 {
 bool gIsBindlessRequested = false;
 bool gIsBindlessRequired = false;
+bool gIsRuntimeTextureArrayRequested = false;
+bool gIsRuntimeTextureArrayRequired = false;
 StorageLimits gStorageLimits;
 StorageUsage gStorageUsage;
 RasterStatus gStorageFailure = RasterStatus::CapacityExceeded;
@@ -567,6 +569,19 @@ void SetBindlessRequest(bool isRequested, bool isRequired) noexcept
 const StorageLimits& CurrentStorageLimits() noexcept
 {
     return gStorageLimits;
+}
+bool IsRuntimeTextureArrayRequested() noexcept
+{
+    return gIsRuntimeTextureArrayRequested;
+}
+bool IsRuntimeTextureArrayRequired() noexcept
+{
+    return gIsRuntimeTextureArrayRequired;
+}
+void SetRuntimeTextureArrayRequest(bool isRequested, bool isRequired) noexcept
+{
+    gIsRuntimeTextureArrayRequested = isRequested;
+    gIsRuntimeTextureArrayRequired = isRequired;
 }
 bool ValidStorageLimits(const StorageLimits& limits) noexcept
 {

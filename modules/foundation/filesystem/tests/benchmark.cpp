@@ -1,3 +1,5 @@
+#include "streaming_benchmark.hpp"
+
 #include <ludus/foundation/filesystem/async.hpp>
 #include <ludus/foundation/filesystem/pack.hpp>
 
@@ -104,8 +106,24 @@ void operator delete[](void* p, const std::nothrow_t&) noexcept
 {
     std::free(p);
 }
+void SetBenchmarkAllocationTracking(bool shouldTrack) noexcept
+{
+    if (shouldTrack == true)
+    {
+        gAllocations = 0;
+    }
+    gTracking = shouldTrack;
+}
+uint64 GetBenchmarkAllocationCount() noexcept
+{
+    return gAllocations.load();
+}
 int main(int argc, char** argv)
 {
+    if (argc > 4)
+    {
+        return RunStreamingBenchmark(argc, argv);
+    }
     // Generated corpus directory, loose/raw.pack/lz4.pack, worker count 0/1/4.
     if (argc != 4)
     {

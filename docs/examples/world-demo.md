@@ -35,8 +35,13 @@ out/build/linux-clang-development/apps/world_demo/ludus_world_demo
 
 The CMake cache stores local tool paths; do not commit those paths. Existing CMake
 Tools settings select the pinned CMake and selectable presets. `--headless` runs
-120 simulation ticks without a window. `--frames 10` presents ten native frames
-and exits through ordinary shutdown.
+120 simulation ticks without a window; with `--headless`, `--frames N` runs `N`
+ticks instead. Without `--headless`, `--frames 10` presents ten native frames and
+exits through ordinary shutdown. `--trace-output <path>` captures the whole run
+with FoundationProfiling and writes a Perfetto trace there; it fails in a
+profiling-disabled Release build and is not available for the browser window.
+[Runtime profiling](../development/runtime-profiling.md) runs these modes on a
+schedule.
 
 For the browser, prepare `./init.sh --cli web-emscripten-development --preset-only`,
 enable `LUDUS_BUILD_WORLD_DEMO=ON` in that preset's local CMake cache, and run

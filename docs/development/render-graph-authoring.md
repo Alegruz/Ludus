@@ -8,7 +8,9 @@ installation. See [host tools](host-tools.md) for installation and the
 [architecture](../architecture/render-graph-authoring.md) for ownership and later
 stages. RG1 adds explicit offline shader/schema builds and immutable packages,
 using the same CLI/backend. RG2 adds bounded static opaque Renderer admission and
-execution through cooked headers. Editor authoring and atomic graph reload are RG3.
+execution through cooked headers. RG3a adds the editor's Renderer tab, mapped
+diagnostics, runtime generations and atomic activation; the node canvas and live
+in-editor preview are RG3b.
 
 **RG0 plans are contract diagnostics, not executable renderer packages.** They
 do not compile shaders, evaluate scene draw-item coverage, negotiate device
@@ -563,3 +565,147 @@ a platform qualification gate before editor/browser adoption. The RG2 Renderer u
 main in an empty control executable on this host. RG2 WGSL stages pass pinned
 Chromium software-adapter admission; that check does not execute the C++ graph
 runtime in a browser.
+
+
+## Edit and reload graphs (RG3)
+
+RG3a delivers the editing, diagnostics and activation half of the
+[RG3 contract](../architecture/render-graph-authoring.md#editor-interaction-diagnostics-and-hot-reload).
+The visual node canvas and the trusted in-editor GPU preview are RG3b; this
+stage edits through a tree, field inspector, connection table and source editor,
+and cooks runtime generations without rendering them in the editor.
+
+### Edit in the Renderer tab
+
+Open a project, choose **Renderer**, then **Open Graph...** and select a root
+`.lurender.json` inside the project. Its directory is the package root. The tab
+loads every `.lurender.json`, `.lushader.json` and `.slang` file below it (at
+most 64 files, 128 KiB each and 4 MiB in total; hidden and `out` directories and
+symlinks are skipped).
+
+- **Inspector** edits the selected node's authored fields by stable ID, adds or
+  removes nodes (removal also drops their connections and layout position), and
+  connects or disconnects `node.port` endpoints. Layout x/y edits only change
+  the `layout` record; consecutive moves of one node coalesce into one undo step.
+- **Source** edits graph, build-manifest/schema and shader text; **Apply Text to
+  Draft** makes it one undoable document edit. Generated wrappers and packages
+  are build products and never editable sources.
+- Edit > Undo/Redo and Save act on the Renderer draft when the tab is focused.
+  Save writes only changed files, each through an atomic replacement, and first
+  checks that disk still holds the bytes that were loaded or last saved. An
+  external change returns a conflict and writes nothing. Graph documents are
+  saved in the same canonical form as `ludus render-graph new`.
+
+Closing the project, opening another one or launching a build asks to save or
+discard a dirty Renderer draft.
+
+### Validate, build and cook a draft
+
+**Validate Draft**, **Build Draft** and **Cook Runtime** run the installed
+`ludus --json render-graph` backend as a separate process; the GUI never waits
+for it. Validate and Build first write an immutable copy of the current draft to
+`out/render-graph/drafts/` in the project and delete it afterwards, so unsaved
+edits can be checked without touching saved sources. The same files give the
+same result through the CLI:
+
+```bash
+ludus --json render-graph dump graphs/main.lurender.json --root graphs
+```
+
+A result names the draft revision it checked; a later edit marks it as describing
+an older revision. Results from a cancelled job, an earlier request or another
+project are discarded. Build uses the **Build Settings** tab's SDK helper and
+pinned compiler paths (stored in editor preferences, never in the project) and
+publishes to `out/render-graph/<graph>/build`. Cook Runtime writes
+`out/render-graph/<graph>.lurgrt` from that build tree.
+
+### Mapped diagnostics
+
+With `--json`, a failure's `error.location` names its authored owner:
+
+| Failure | Location fields | Editor action |
+| --- | --- | --- |
+| Source/document error | `source`, optional `configuration` and `node` | Selects the configuration or node |
+| Expanded-plan error | `source`, `configuration`, `node`, `instance` (nested path such as `Main/raster/draw`) | Selects the node in its own library |
+| Shader compiler error | `source`, `line`, optional `column`; `diagnostics` lists up to 32 compiler messages | Opens the function file at that line |
+| Generated wrapper error | `generated: wrapper.slang`, `program`, `line` | Opens the program record in the build manifest |
+
+Locations are package-relative and never contain machine paths. Activate a
+diagnostic (double-click or Enter) to navigate to it.
+
+### Runtime generations and activation
+
+```bash
+ludus render-graph cook-runtime out/raster-package out/main.lurgrt --configuration Default
+```
+
+`cook-runtime` accepts the same verified `--renderer-static` packages as
+`emit-runtime` and writes the same plan records, stages and CPU interface
+identity into a little-endian file described by
+`ludus/content/render_graph_format/runtime_package.h`. `emit-runtime` headers
+now also export `INTERFACE_IDENTITY`. With CMake, add `RUNTIME_PACKAGE` to
+`ludus_compile_render_graph`; it sets `<NAME>_RUNTIME_PACKAGE` to the cooked file.
+
+At runtime, decode the file into a `RenderGraphPackage` (bytes are copied, so the
+source buffer may be released immediately) and pass it to a
+`RenderGraphActivation` initialized with the host's `INTERFACE_IDENTITY` and the
+installed composite recipes:
+
+1. `Stage` prewarms the candidate beside the drawing generation. A different
+   CPU interface returns Unsupported with `RestartRequired` and stages nothing.
+2. Call `Poll` between frames. While pipelines are pending the active generation
+   keeps drawing. When the report says `NeedsUpdate`, call `Update` with the
+   current extraction; the candidate must prepare it before activation.
+3. `Poll` publishes the candidate once it is Ready, only when the active graph has
+   no unconfirmed encoding. `ActiveGeneration` changes, so re-query
+   `GetActiveOrNull` and exports. The new graph reports no output revision until it
+   renders, so it never relabels the previous generation's pixels.
+4. A failed setup, failed pipeline or a candidate that rejects an extraction the
+   active generation accepts reports `Failed` with `LastFailure`; the active
+   generation, its pixels and output revision are unchanged. A newer `Stage`
+   supersedes an unactivated candidate.
+
+Export consumers of the active generation must finish before a `Poll` that may
+activate, as before `Render`/`Reset`. The replaced graph's GPU uses retire through
+RHI completion; unloading game code is a separate GameHost obligation and never
+implied by activation.
+
+### Schema changes and parameter migration
+
+```bash
+ludus --json render-graph schema-diff out/old-build out/new-build
+ludus --json render-graph migrate out/old-build out/new-build --values values.json --defaults defaults.json
+```
+
+`schema-diff` compares logical schemas field by field and every program/target
+binding layout. Any changed Uniform or Vertex schema or layout makes
+`cpu_interface` `RestartRequired`: rebuild the host/game interface before
+activating that generation. `migrate` maps `schema -> field -> numbers` (a
+`Float32` uses one number). A value is kept only when the field identity and type
+are unchanged. An added field or a changed type needs an explicit default, or the
+result is `Rejected` with no values and exit status 1. Removed values are reported
+as dropped. Field IDs are stable identities, so a rename is a removal plus an
+addition. Neither command writes sources, values or packages.
+
+### RG3 acceptance evidence
+
+- `test_render_graph_authoring` covers mapped graph/shader locations, CLI JSON
+  locations, draft-snapshot plan equality, layout-only digest stability,
+  migration and restart verdicts, deterministic runtime packages and header/package
+  identity agreement.
+- Renderer `[activation]` tests cover decoding and malformed packages, first
+  activation, pending replacements that keep drawing without creating pipelines,
+  failed reloads that preserve output revisions, `RestartRequired`, activation
+  waiting for a confirmed submission, completion-gated retirement and superseded
+  candidates. They also check that caller bytes can be released after decoding.
+- The `[render-graph][gpu]` test loads the CMake-cooked `.lurgrt`, activates it
+  twice and compares its pixels byte for byte with the compiled-header graph.
+- Editor `[render-graph]` tests cover canonical JSON bytes, draft/save separation,
+  undo coalescing, save conflicts, snapshots and diagnostic navigation. They run
+  the real CLI to check that the editor and CLI produce the same plan and the same
+  mapped failure.
+
+Local qualification ran these suites with Clang 18 on macOS, including the Metal
+pixel test. Linux/Vulkan and browser execution of runtime generations are not
+established by these local runs. The editor does not yet render or activate
+runtime generations, and RG3a makes no scheduling, memory or performance claim.

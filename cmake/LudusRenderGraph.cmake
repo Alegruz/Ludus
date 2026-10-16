@@ -3,8 +3,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/LudusDependencies.cmake")
 
 # Shared RG1 builder and RG2 lowering, also installed for relocated SDK consumers.
 # Dependencies stay within ROOT; generated package/build output must be outside it.
+# RUNTIME_PACKAGE also cooks <NAME>.lurgrt for RG3 runtime activation and sets
+# <NAME>_RUNTIME_PACKAGE in the caller's scope to its absolute build-tree path.
 function(ludus_compile_render_graph)
-    cmake_parse_arguments(PARSE_ARGV 0 GRAPH "" "TARGET;NAME;MANIFEST;ROOT;CONFIGURATION" "")
+    cmake_parse_arguments(PARSE_ARGV 0 GRAPH "RUNTIME_PACKAGE" "TARGET;NAME;MANIFEST;ROOT;CONFIGURATION" "")
     if(GRAPH_UNPARSED_ARGUMENTS OR NOT TARGET "${GRAPH_TARGET}" OR
        NOT GRAPH_NAME MATCHES "^[A-Za-z][A-Za-z0-9_]*$" OR NOT GRAPH_MANIFEST)
         message(FATAL_ERROR "ludus_compile_render_graph requires TARGET NAME MANIFEST; optional ROOT CONFIGURATION")
@@ -58,7 +60,13 @@ function(ludus_compile_render_graph)
     file(GLOB_RECURSE inputs CONFIGURE_DEPENDS LIST_DIRECTORIES false "${root}/*")
     file(GLOB modules "${package}/ludus_tools/render_graph*.py")
     set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-graphs/${GRAPH_TARGET}/${GRAPH_NAME}")
-    add_custom_command(OUTPUT "${output}/${GRAPH_NAME}.h"
+    set(outputs "${output}/${GRAPH_NAME}.h")
+    if(GRAPH_RUNTIME_PACKAGE)
+        list(APPEND arguments --runtime-package "${output}/${GRAPH_NAME}.lurgrt")
+        list(APPEND outputs "${output}/${GRAPH_NAME}.lurgrt")
+        set(${GRAPH_NAME}_RUNTIME_PACKAGE "${output}/${GRAPH_NAME}.lurgrt" PARENT_SCOPE)
+    endif()
+    add_custom_command(OUTPUT ${outputs}
         COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${package}" "${Python3_EXECUTABLE}" "${driver}"
             --manifest "${manifest}" --root "${root}" --output "${output}/package"
             --header "${output}/${GRAPH_NAME}.h" --name "${GRAPH_NAME}" --configuration "${GRAPH_CONFIGURATION}"

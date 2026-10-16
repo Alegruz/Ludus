@@ -144,6 +144,12 @@ qt_add_executable(ludus_editor
     src/content_workspace.cpp
     src/internal/script_workspace.h
     src/script_workspace.cpp
+    src/internal/render_graph_document.h
+    src/render_graph_document.cpp
+    src/internal/render_graph_job.h
+    src/render_graph_job.cpp
+    src/internal/renderer_workspace.h
+    src/renderer_workspace.cpp
     src/configuration_workspace.cpp
     src/editor_files.cpp
     src/internal/scene_archive.h
@@ -281,6 +287,12 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/content_workspace.cpp
         src/internal/script_workspace.h
         src/script_workspace.cpp
+        src/internal/render_graph_document.h
+        src/render_graph_document.cpp
+        src/internal/render_graph_job.h
+        src/render_graph_job.cpp
+        src/internal/renderer_workspace.h
+        src/renderer_workspace.cpp
         src/configuration_workspace.cpp
         src/editor_files.cpp
         src/internal/scene_archive.h
@@ -307,6 +319,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/recent_projects_tests.cpp
         tests/source_watch_tests.cpp
         tests/script_workspace_tests.cpp
+        tests/renderer_workspace_tests.cpp
         tests/live_journey_tests.cpp
         tests/macos_journey_tests.cpp
     )

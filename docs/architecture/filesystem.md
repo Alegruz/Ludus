@@ -870,9 +870,11 @@ ownership truth intact across storage, CPU preparation and GPU publication.
 Completing F1-F5 establishes the byte-I/O, namespace, pack, scheduling and
 publication contracts above. It does not establish universal durability or
 optimal performance for every game's asset mix. Keep that baseline available
-while evaluating the proposals below. All FS-R items are **proposed**, with no
-implementation or measured benefit claimed by this plan. They are follow-up
-identifiers, not additional acceptance requirements for the completed F1-F5 work.
+while evaluating the proposals below. FS-R items are follow-up identifiers, not
+additional acceptance requirements for the completed F1-F5 work. Implementation
+and evidence are tracked per item in the
+[measurement owner](../development/filesystem-benchmark.md); an implemented
+harness does not establish backend adoption or supported-host coverage.
 
 ### Venues and reading priorities
 
@@ -913,6 +915,10 @@ not establish behavior or gains on our current Linux/macOS targets.
 
 ### Immediate reading sequence and translation into experiments
 
+FS-R2 now has an implemented replay harness; its evidence and remaining
+qualification gaps are recorded in the
+[measurement owner](../development/filesystem-benchmark.md#fs-r2-representative-streaming-trace-replay).
+
 Read the full SYSTOR API comparison first to build FS-R2's experimental matrix:
 worker count, admitted queue depth, request size/locality, completion collection
 cadence, cold/warm cache and spare versus contended CPU. Compare the existing
@@ -952,7 +958,7 @@ with its baseline revision, inputs, result and outstanding limitations recorded.
 
 | ID / priority | Question and proposed experiment | Acceptance evidence before adoption |
 | --- | --- | --- |
-| FS-R1 / first: publication recovery | Extend F5's syscall-failure tests with bounded crash-state exploration for create/replace, empty/multi-block content and each sync policy. Check recovered bytes and directory entries after storage recovery. | Declare the permitted outcomes at each persistence boundary before testing. Preserve reproducible failing images/traces; record OS/kernel, filesystem/mount options and the crash model. Begin on disposable Linux images with ext4/XFS; track macOS/APFS coverage separately. A missing supported-host result remains an evidence gap, not a pass. |
+| FS-R1 / first: publication recovery; harness and Linux prefix model validated; APFS evidence pending | Extend F5's syscall-failure tests with bounded crash-state exploration for create/replace, empty/multi-block content and each sync policy. Check recovered bytes and directory entries after storage recovery. | Declare the permitted outcomes at each persistence boundary before testing. Preserve reproducible failing images/traces; record OS/kernel, filesystem/mount options and the crash model. Begin on disposable Linux images with ext4/XFS; track macOS/APFS coverage separately. A missing supported-host result remains an evidence gap, not a pass. |
 | FS-R2 / first: representative streaming | Extend the existing F4 benchmark with startup, level-transition and background-loading traces, realistic compressibility and host completion cadence. Compare synchronous and fixed worker counts with controlled CPU contention. | Verify identical byte results; report repeated p50/p95/p99 queue, service and delivery latency, CPU, throughput, bytes/requests retained, cancellations and frame impact when integrated. Record cold/warm cache methodology, hardware and instrumentation cost. Preserve regressions and inconclusive results alongside gains. |
 | FS-R3 / conditional on FS-R2: submission and completion | If traces expose syscall/handoff cost, compare compatible range batching/coalescing or a Linux io_uring backend against the blocking pool, one change at a time. A future Windows IOCP experiment needs its own native provider/support plan. | Preserve revision identity, caller destination ownership, byte/request budgets, latest-start deadlines, cancellation/drain and exactly-once collection. Define partial-read and coalesced cancellation behavior; rerun fault, allocation, race and sanitizer gates. Adopt only with repeatable benefit inside a declared CPU/memory budget. Keep the portable fallback and explicit Unsupported behavior. |
 | FS-R4 / conditional on FS-R2: pack cost and layout | Determine whether CRC/decode, block size, access layout or opened-file scratch contention dominates. Compare existing raw/LZ4 block sizes and trace-derived layouts using held-out gameplay traces. | Retain full-key lookup, integrity checks, decode/range bounds and opened-revision lifetime. Report CPU, tails, stored bytes, scratch and descriptor costs; validate byte equality, reproducibility and corrupt-input/fuzz cases. Prefer existing format knobs; any new codec, alignment or format version needs a separate compatibility decision. |
