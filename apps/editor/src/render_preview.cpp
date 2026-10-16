@@ -32,6 +32,7 @@ namespace
 using namespace foundation;
 namespace rhi = graphics::rhi;
 namespace rr = graphics::renderer;
+constexpr int32 NAVIGATION_STATE_VERSION = 2;
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
 bool Accepted(rhi::RasterStatus s) noexcept
 {
@@ -721,7 +722,7 @@ QJsonObject RenderPreview::Navigation() const
             {QStringLiteral("y"), OrbitCenter_.Y},
             {QStringLiteral("z"), OrbitCenter_.Z},
             {QStringLiteral("radius"), OrbitRadius_},
-            {QStringLiteral("navigationVersion"), 2},
+            {QStringLiteral("navigationVersion"), NAVIGATION_STATE_VERSION},
             {QStringLiteral("distance"), mCameraController.GetDistance()},
             {QStringLiteral("eyeX"), mCameraController.GetSample().Pose.Position.X},
             {QStringLiteral("eyeY"), mCameraController.GetSample().Pose.Position.Y},
@@ -767,7 +768,7 @@ void RenderPreview::RestoreNavigation(const QJsonObject& state)
     {
         orbitRadius = 1;
     }
-    if (state.value(QStringLiteral("navigationVersion")).toInt() == 2)
+    if (state.value(QStringLiteral("navigationVersion")).toInt() == NAVIGATION_STATE_VERSION)
     {
         gameplay::camera::CameraSample sample;
         sample.Pose.Position = {number(QStringLiteral("eyeX"), 0),
