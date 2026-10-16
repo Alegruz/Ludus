@@ -49,58 +49,53 @@ uint4 EvaluateCase(uint4 header, uint4 operand)
     uint value;
     switch (header.x)
     {
-    case LUDUS_RANDOM_PARITY_CASE_PHILOX:
-        return Philox4x32(operand, key);
-    case LUDUS_RANDOM_PARITY_CASE_SAMPLE:
-    {
-        RandomAddress address = MakeRandomAddress(operand.xy, operand.z, operand.w);
-        bool isSampled = TrySampleRandomBounded(key, address, bound, value);
-        return uint4(SampleRandomUInt32(key, address),
-                     asuint(SampleRandomFloat01(key, address)),
-                     value,
-                     (isSampled ? LUDUS_RANDOM_PARITY_IS_SAMPLED : 0) |
-                         (IsRandomAddressInRange(address) ? LUDUS_RANDOM_PARITY_IS_IN_RANGE : 0));
-    }
-    case LUDUS_RANDOM_PARITY_CASE_MULTIPLY:
-    {
-        uint productLow;
-        uint productHigh;
-        MultiplyWide(operand.x, operand.y, productLow, productHigh);
-        return uint4(productLow, productHigh, 0, 0);
-    }
-    case LUDUS_RANDOM_PARITY_CASE_CONSTANTS:
-        return uint4(RANDOM_ADDRESS_LAYOUT_VERSION,
-                     RANDOM_BOUNDED_MAPPING_VERSION,
-                     RANDOM_MAX_DIMENSION,
-                     RANDOM_ATTEMPT_COUNT);
-    case LUDUS_RANDOM_PARITY_CASE_FORCED_EXHAUSTION:
-    {
-        ExhaustingAttemptSource source;
-        bool isSampled = TrySampleRandomBoundedFrom(source, bound, value);
-        return BoundedResult(isSampled, value);
-    }
-    case LUDUS_RANDOM_PARITY_CASE_FORCED_LAST_ATTEMPT:
-    {
-        LastAttemptSource source;
-        bool isSampled = TrySampleRandomBoundedFrom(source, bound, value);
-        return BoundedResult(isSampled, value);
-    }
-    case LUDUS_RANDOM_PARITY_CASE_FORCED_CONSTANT:
-    {
-        ConstantAttemptSource source;
-        source.Value = operand.x;
-        bool isSampled = TrySampleRandomBoundedFrom(source, bound, value);
-        return BoundedResult(isSampled, value);
-    }
-    case LUDUS_RANDOM_PARITY_CASE_FLOAT:
-        return uint4(asuint(RandomFloat01(operand.x)), 0, 0, 0);
-    default:
-        return uint4(0);
+        case LUDUS_RANDOM_PARITY_CASE_PHILOX:
+            return Philox4x32(operand, key);
+        case LUDUS_RANDOM_PARITY_CASE_SAMPLE: {
+            RandomAddress address = MakeRandomAddress(operand.xy, operand.z, operand.w);
+            bool isSampled = TrySampleRandomBounded(key, address, bound, value);
+            return uint4(SampleRandomUInt32(key, address),
+                         asuint(SampleRandomFloat01(key, address)),
+                         value,
+                         (isSampled ? LUDUS_RANDOM_PARITY_IS_SAMPLED : 0) |
+                             (IsRandomAddressInRange(address) ? LUDUS_RANDOM_PARITY_IS_IN_RANGE : 0));
+        }
+        case LUDUS_RANDOM_PARITY_CASE_MULTIPLY: {
+            uint productLow;
+            uint productHigh;
+            MultiplyWide(operand.x, operand.y, productLow, productHigh);
+            return uint4(productLow, productHigh, 0, 0);
+        }
+        case LUDUS_RANDOM_PARITY_CASE_CONSTANTS:
+            return uint4(RANDOM_ADDRESS_LAYOUT_VERSION,
+                         RANDOM_BOUNDED_MAPPING_VERSION,
+                         RANDOM_MAX_DIMENSION,
+                         RANDOM_ATTEMPT_COUNT);
+        case LUDUS_RANDOM_PARITY_CASE_FORCED_EXHAUSTION: {
+            ExhaustingAttemptSource source;
+            bool isSampled = TrySampleRandomBoundedFrom(source, bound, value);
+            return BoundedResult(isSampled, value);
+        }
+        case LUDUS_RANDOM_PARITY_CASE_FORCED_LAST_ATTEMPT: {
+            LastAttemptSource source;
+            bool isSampled = TrySampleRandomBoundedFrom(source, bound, value);
+            return BoundedResult(isSampled, value);
+        }
+        case LUDUS_RANDOM_PARITY_CASE_FORCED_CONSTANT: {
+            ConstantAttemptSource source;
+            source.Value = operand.x;
+            bool isSampled = TrySampleRandomBoundedFrom(source, bound, value);
+            return BoundedResult(isSampled, value);
+        }
+        case LUDUS_RANDOM_PARITY_CASE_FLOAT:
+            return uint4(asuint(RandomFloat01(operand.x)), 0, 0, 0);
+        default:
+            return uint4(0);
     }
 }
 
-[shader("compute")][numthreads(LUDUS_RANDOM_PARITY_GROUP_SIZE, 1, 1)] void ComputeMain(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
+[shader("compute")][numthreads(LUDUS_RANDOM_PARITY_GROUP_SIZE, 1, 1)] void ComputeMain(uint3 dispatchThreadId
+                                                                                       : SV_DispatchThreadID) {
     uint index = dispatchThreadId.x;
     Results[index] = EvaluateCase(Cases[index * LUDUS_RANDOM_PARITY_WORDS_PER_CASE],
                                   Cases[index * LUDUS_RANDOM_PARITY_WORDS_PER_CASE + 1]);
