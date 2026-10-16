@@ -105,7 +105,8 @@ void WriteWord(std::span<uint8> destination, usize offset, usize value) noexcept
 {
     // Callers pass values bounded by the format limits, all below 2^32.
     LUDUS_ASSERT(value <= usize{0xffffffffU});
-    const bool isWritten = foundation::TryWriteLittleEndian(static_cast<uint32>(value), destination.subspan(offset));
+    [[maybe_unused]] const bool isWritten =
+        foundation::TryWriteLittleEndian(static_cast<uint32>(value), destination.subspan(offset));
     LUDUS_ASSERT(isWritten == true);
 }
 } // namespace
@@ -217,7 +218,7 @@ StringDictionaryStatus StringDictionaryWriter::TryFinish() noexcept
     {
         std::string_view spelling;
         const foundation::NameId id{ .TableToken = state.TableToken, .Index = foundation::StringIndex{i} };
-        const foundation::StringStatus resolved = state.Table.TryResolve(id, spelling);
+        [[maybe_unused]] const foundation::StringStatus resolved = state.Table.TryResolve(id, spelling);
         LUDUS_ASSERT(resolved == foundation::StringStatus::Ok);
         new (sorted + i) State::SortedEntry{ .Spelling = spelling, .ProvisionalIndex = i };
         new (remap + i) uint32{};
@@ -337,7 +338,7 @@ StringDictionaryStatus CreateStringDictionaryWriter(const StringDictionaryWriter
         return ConvertStatus(created);
     }
     foundation::NameId empty;
-    const foundation::StringStatus found = table.TryFind({}, empty);
+    [[maybe_unused]] const foundation::StringStatus found = table.TryFind({}, empty);
     LUDUS_ASSERT(found == foundation::StringStatus::Ok && empty.Index.Value == format::EMPTY_ENTRY);
     using State = StringDictionaryWriter::State;
     void* storageOrNull = domain.TryAllocate(sizeof(State), alignof(State));

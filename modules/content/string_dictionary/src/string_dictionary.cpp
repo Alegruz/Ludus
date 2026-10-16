@@ -24,7 +24,7 @@ uint32 ReadWord(const uint8* bytes, usize offset) noexcept
 {
     uint32 value{};
     const std::span<const uint8> field{bytes + offset, sizeof(uint32)};
-    const bool isRead = foundation::TryReadLittleEndian(field, value);
+    [[maybe_unused]] const bool isRead = foundation::TryReadLittleEndian(field, value);
     LUDUS_ASSERT(isRead == true);
     return value;
 }
