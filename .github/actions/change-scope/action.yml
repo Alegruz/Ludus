@@ -28,6 +28,6 @@ runs:
           *) echo 'Missing or invalid CI routing output.' >&2; exit 1 ;;
         esac
         case "$VALIDATION_TIER" in
-          full|pull-request|integration) ;;
+          full|pull-request|integration|nightly) ;;
           *) echo 'Missing or invalid CI validation tier.' >&2; exit 1 ;;
         esac

@@ -6,11 +6,12 @@ name: project-sdk
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   merge_group:
   workflow_call:
     inputs:
       batch_sha:
-        description: Frozen dev commit selected by the trusted batch coordinator.
+        description: Frozen develop commit selected by the trusted batch coordinator.
         required: true
         type: string
       batch_base_sha:
@@ -85,7 +86,7 @@ jobs:
 
   butler-install:
     needs: host-tooling
-    if: needs.host-tooling.outputs.native_required == 'true' && (github.event_name != 'pull_request' || github.base_ref != 'dev')
+    if: needs.host-tooling.outputs.native_required == 'true' && (github.event_name != 'pull_request' || github.base_ref != 'develop')
     name: Pinned butler installation (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
     strategy:

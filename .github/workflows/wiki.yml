@@ -6,11 +6,12 @@ name: Ludus Wiki
 # https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   merge_group:
   workflow_call:
     inputs:
       batch_sha:
-        description: Frozen dev commit selected by the trusted batch coordinator.
+        description: Frozen develop commit selected by the trusted batch coordinator.
         required: true
         type: string
       batch_base_sha:
@@ -59,7 +60,7 @@ jobs:
         run: python scripts/build-api --bootstrap
 
       - name: Validate canonical documentation without rebuilding the browser editor
-        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+        if: github.event_name == 'pull_request' && github.base_ref == 'develop'
         run: |
           python scripts/check-docs
           python -m unittest discover -s scripts/python -p test_docs.py -v
@@ -67,7 +68,7 @@ jobs:
           python scripts/check-wiki --documentation-only
 
   editor:
-    if: github.event_name != 'pull_request' || github.base_ref != 'dev'
+    if: github.event_name != 'pull_request' || github.base_ref != 'develop'
     name: Build or reuse browser editor
     runs-on: ubuntu-24.04
     timeout-minutes: 60

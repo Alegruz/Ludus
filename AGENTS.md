@@ -28,7 +28,7 @@ that violates it.
 
 - **Never perform agent implementation or documentation work directly on
   `main`, and never commit or push agent changes to `main`.** Use a task-specific
-  `codex/` branch. Start new work from freshly fetched `origin/dev` after batch
+  `codex/` branch. Start new work from freshly fetched `origin/develop` after batch
   activation, or `origin/main` before activation; continue an existing task on
   its own branch.
 - **Reserve the user's original/primary Ludus checkout for the user's own
@@ -51,21 +51,21 @@ that violates it.
   agent task. Do not bypass Git's protection against checking out a branch
   already used by another worktree.
 - After batched CI is activated, submit agent changes through pull requests
-  targeting `dev`. Start isolated task branches from freshly fetched `origin/dev`;
-  `dev` may contain changes awaiting full validation. Use `origin/main` when a
+  targeting `develop`. Start isolated task branches from freshly fetched `origin/develop`;
+  `develop` may contain changes awaiting full validation. Use `origin/main` when a
   fully validated starting point is required. Before activation, use `main` and
   its existing merge queue, including the one-time CI migration pull request.
-- Never push agent changes directly to `dev` or `main`, enqueue or merge a pull
+- Never push agent changes directly to `develop` or `main`, enqueue or merge a pull
   request, or move the batch-attempt marker. Agents open and update pull requests;
-  the maintainer accepts reviewed changes into `dev`. Preserve worktree isolation
+  the maintainer accepts reviewed changes into `develop`. Preserve worktree isolation
   and report the task branch and worktree path for review.
 - Integration pull requests run source/tooling, installed host-tooling and public
-  documentation checks. The batch coordinator captures one `dev` commit every
+  documentation checks. The batch coordinator captures one `develop` commit every
   30 minutes and runs the full native, sanitizer, editor, browser and SDK suites
   once for the combined changes. Only the promotion workflow advances `main`,
   to exactly the validated commit, with an explicit lease and no history rewrite.
   Failed/cancelled validation leaves `main` unchanged. Never bypass promotion or
-  represent acceptance into `dev` as full platform qualification.
+  represent acceptance into `develop` as full platform qualification.
 - Do not add `ci:full` to integration pull requests. Request a manual batch only
   when the maintainer needs earlier qualification; retry an unchanged failed
   candidate only after investigating the failure. See

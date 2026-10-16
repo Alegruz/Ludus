@@ -9,13 +9,13 @@ Q0 failure semantics and Q1 analysis remain described below.
 
 ## Integrate changes and promote a validated batch
 
-`dev` is the integration branch. `main` is the last completely validated commit.
+`develop` is the integration branch. `main` is the last completely validated commit.
 Keep `main` as the default branch: the scheduler and promotion code run from its
-trusted workflow revision. Task branches and pull requests target `dev` after
+trusted workflow revision. Task branches and pull requests target `develop` after
 activation. Review changes and resolve review threads before accepting a PR.
-Acceptance into `dev` does not establish full platform qualification.
+Acceptance into `develop` does not establish full platform qualification.
 
-Pull requests targeting `dev` run source formatting, source-policy and workflow
+Pull requests targeting `develop` run source formatting, source-policy and workflow
 syntax checks, tooling regressions, the installed host-tooling tests, and public
 API/documentation validation. Drafts retain these inexpensive checks. Native
 build variants, full analysis, sanitizers, browser builds, SDK qualification,
@@ -23,8 +23,8 @@ editor journeys and build budgets run on the combined batch. The `ci:full` label
 does not expand an integration PR into a full run.
 
 `.github/workflows/batch-ci.yml` wakes at minutes 13 and 43 of each hour. When
-`BATCH_CI_ENABLED` is `true`, it captures the current `main` and `dev` commit SHAs.
-If they differ and `dev` descends from `main`, it records the candidate in
+`BATCH_CI_ENABLED` is `true`, it captures the current `main` and `develop` commit SHAs.
+If they differ and `develop` descends from `main`, it records the candidate in
 `ci/last-batch-attempt` and invokes the existing validation workflows with that
 exact SHA. The original workflow definitions come from `main`; source, local
 build actions and tests come from the captured candidate. Changed workflows are
@@ -32,7 +32,7 @@ syntax-checked before admission and take effect as coordinator definitions after
 promotion. Periodic workflows can start late when GitHub is busy; 30 minutes is
 the intended cadence, not a completion deadline.
 
-Only one batch is active. New `dev` commits do not cancel it or change its input.
+Only one batch is active. New `develop` commits do not cancel it or change its input.
 Concurrent scheduler ticks coalesce into at most one pending run. A tick captured
 before `main` advanced skips, letting the next tick use the new stable revision.
 Native, SDK, wiki and browser workflows must all succeed. Filesystem block-prefix
@@ -45,7 +45,7 @@ After validation, a separate job checks out the original trusted `main` revision
 and mints a fresh repository-scoped GitHub App credential. The trusted snapshot
 job uses a separate short-lived App token only to read refs and record the attempt.
 Test jobs receive no App credential or inherited secrets. Promotion rechecks that `main` is unchanged,
-that the candidate descends from it, and that the candidate remains in `dev`'s
+that the candidate descends from it, and that the candidate remains in `develop`'s
 history. Git verifies ancestry again and pushes exactly that commit with an
 explicit expected-old-SHA lease. A concurrent `main` update rejects the push;
 there is no rebase, squash, new merge commit or non-fast-forward promotion.
@@ -56,24 +56,30 @@ previous website available; rerun the publication job. Promotion does not trigge
 another native, SDK or wiki build on `main`. Batches run in the `main` cache scope
 and save compiler entries under the candidate SHA, warming caches visible to PRs.
 The separate performance and release workflows retain their existing schedules
-and explicit publication policies.
+and explicit publication policies. Standalone nightly native/browser runs retain
+Q1 advisory analyzer coverage. Batches skip the advisory macOS analyzer job and
+advisory analyzer steps; required inventories and clang-tidy remain mandatory.
+Linux builds/tidy use four workers and native macOS jobs use three. The uncached
+build-time budget retains two workers for comparable measurements.
 
 ## Activate the process once
 
 The coordinator is disabled until `BATCH_CI_ENABLED=true`. These settings need a
 repository/organization administrator; no credential belongs in Git or chat.
-Finish them after the migration PR lands, before accepting ordinary PRs into dev.
+Finish them after the migration PR lands, before accepting ordinary PRs into develop.
 
 1. Land the migration PR through the existing `main` merge queue. Legacy PRs
    targeting `main` and `merge_group` checks remain supported for this transition.
    Drain or remove the remaining old queue entries before switching processes.
-2. Create `dev` from the resulting `main` commit. Keep `main` the default branch.
-   Protect `dev` against deletion and non-fast-forward updates; require PRs,
+2. Use the existing `develop` branch. After landing, fast-forward it to main if
+   it is behind; if it contains unique commits, merge main through a reviewed PR
+   so those commits are preserved. Keep `main` the default branch.
+   Protect `develop` against deletion and non-fast-forward updates; require PRs,
    existing review requirements, and these GitHub Actions checks: `Ubuntu Clang`,
    `Host tooling (ludus_tools) unit tests`, and `Public API documentation`.
-   Do not require the skipped browser/wiki packaging checks on dev. Apply the
-   Copilot review rule to dev as well. An integration merge queue is unnecessary;
-   do not require every dev PR to rebase whenever dev advances.
+   Do not require the skipped browser/wiki packaging checks on develop. Apply the
+   Copilot review rule to develop as well. An integration merge queue is unnecessary;
+   do not require every develop PR to rebase whenever develop advances.
 3. Create a dedicated GitHub App and install it on this repository only. Grant
    **Contents: read/write**, **Workflows: read/write** and the automatic Metadata
    read permission. Workflow permission lets promotion include reviewed commits
@@ -92,7 +98,7 @@ Finish them after the migration PR lands, before accepting ordinary PRs into dev
    **Restrict updates**, allowing only the promotion App to bypass it, and main
    PR/status requirements with that same App as an **Always** bypass actor.
    Remove **Require merge queue**. Ordinary users and Actions' default token
-   must not update main. Keep protections on dev and the marker independent so
+   must not update main. Keep protections on develop and the marker independent so
    a main-only App bypass does not grant access to them.
 6. Give `ci/last-batch-attempt` its own ruleset restricting creation, updates and
    deletion to the same App, with non-fast-forward protection. This ref records
@@ -100,7 +106,7 @@ Finish them after the migration PR lands, before accepting ordinary PRs into dev
    job uses the main-only environment to mint its own short-lived App token; the
    default `GITHUB_TOKEN` needs only read permission throughout the coordinator.
 7. Set repository variable `BATCH_CI_ENABLED=true`. Retarget remaining feature
-   PRs to dev. The next real dev change starts full validation at the next tick;
+   PRs to develop. The next real develop change starts full validation at the next tick;
    use **Actions → Batched integration and promotion → Run workflow**, selecting
    main, to start sooner. Confirm the first candidate, all required suites, exact
    promoted SHA and Pages deployment in that run before declaring rollout proven.
@@ -117,14 +123,14 @@ a missing permission or denied push fails rather than weakening the protections.
 Validation failures or cancellation before promotion keep main and its deployed
 documentation unchanged. Cancellation does not undo a promotion already in flight
 or completed. Inspect the failing suite and its artifacts. Fix or revert the offending change
-through a dev PR; split or bisect a large batch when the source is unclear.
+through a develop PR; split or bisect a large batch when the source is unclear.
 Changes accepted while the run was active remain eligible for the next snapshot.
 
 The scheduler will not repeatedly run heavy CI for an unchanged attempted SHA.
 After an infrastructure failure, dispatch the coordinator on main with **retry**
 enabled. This reruns every required suite before another promotion attempt;
 never push main manually or mark failed checks successful. If main moved during
-validation, retry against its new base. If dev diverged, reconcile it through
+validation, retry against its new base. If develop diverged, reconcile it through
 reviewed merges; do not reset either branch or rewrite other contributors' work.
 Set `BATCH_CI_ENABLED=false` to stop new snapshots. An already active batch is
 unaffected; cancel that run explicitly if it must not promote.
@@ -135,7 +141,8 @@ The shared change-scope action tests routing before classifying the complete
 change. PRs compare the merge base with their head; legacy queue runs compare the
 queue base and candidate. Integration PRs select the cheap `integration` tier;
 legacy main PRs keep their earlier fast tier, and legacy queue/manual/batch runs
-select `full`. Scheduled and manually dispatched batches always run full native
+select `full`. Standalone scheduled/manual native runs select `nightly`, including
+the advisory analysis. Scheduled and manually dispatched batches always run full native
 validation, including a documentation-only batch.
 
 The documentation exemption for individual PRs is an explicit allowlist in
@@ -184,7 +191,7 @@ keep their separate cache policy. The native setup action installs ccache.
 ## Analysis and timing
 
 `LUDUS_TIDY_JOBS` sets the maximum number of concurrent native clang-tidy
-processes. The local default is one; CI uses two. Diagnostics are saved per
+processes. The local default is one; CI uses four on Linux and three on macOS. Diagnostics are saved per
 compile command and printed in source/variant order.
 The selected preset's CMake File API codemodel is reconciled with its compilation
 database. All compiled first-party C, C++, Objective-C and Objective-C++ sources

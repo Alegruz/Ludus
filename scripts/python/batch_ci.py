@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture a dev batch and promote its exact validated commit without rewriting history."""
+"""Capture a develop batch and promote its exact validated commit without rewriting history."""
 from __future__ import annotations
 
 import argparse
@@ -92,16 +92,16 @@ def git(root: Path, arguments: list[str], token: str = "") -> str:
 
 def snapshot(client: GitHub, root: Path, expected_main: str, *, retry: bool = False) -> dict:
     base = client.head("main")
-    candidate = client.head("dev")
+    candidate = client.head("develop")
     if base != validate_sha(expected_main):
         return {"should_run": "false", "reason": "main advanced before this scheduler started; next tick will retry."}
     if base == candidate:
-        return {"should_run": "false", "reason": "dev has no unpromoted changes."}
+        return {"should_run": "false", "reason": "develop has no unpromoted changes."}
     if not client.is_ancestor(base, candidate):
-        raise BatchError("dev must descend from main; reconcile the branches before validating a batch.")
+        raise BatchError("develop must descend from main; reconcile the branches before validating a batch.")
     previous = client.head(ATTEMPT_BRANCH)
     if previous == candidate and not retry:
-        return {"should_run": "false", "reason": "This dev commit was already attempted; fix dev or dispatch with retry."}
+        return {"should_run": "false", "reason": "This develop commit was already attempted; fix develop or dispatch with retry."}
     remote = f"https://github.com/{client.repository}.git"
     git(root, ["fetch", "--no-tags", remote, base, candidate], client.token)
     paths = git(root, ["diff", "--name-only", "--no-renames", "-z", f"{base}..{candidate}", "--"]).split("\0")
@@ -112,7 +112,7 @@ def snapshot(client: GitHub, root: Path, expected_main: str, *, retry: bool = Fa
         client.request(f"git/refs/heads/{ATTEMPT_BRANCH}", "PATCH", {"sha": candidate, "force": False})
     return {"should_run": "true", "base_sha": base, "candidate_sha": candidate,
             "recovery_required": "true" if recovery else "false",
-            "reason": f"Validate frozen dev commit {candidate} above main {base}."}
+            "reason": f"Validate frozen develop commit {candidate} above main {base}."}
 
 
 def validate_results(results: dict, base: str, candidate: str) -> None:
@@ -151,8 +151,8 @@ def promote(client: GitHub, root: Path, base: str, candidate: str, results: dict
     validate_results(results, base, candidate)
     if client.head("main") != base:
         raise BatchError("main changed during validation; the candidate must be validated again.")
-    if not client.is_ancestor(base, candidate) or not client.is_ancestor(candidate, client.head("dev")):
-        raise BatchError("The tested candidate must descend from main and remain in dev's history.")
+    if not client.is_ancestor(base, candidate) or not client.is_ancestor(candidate, client.head("develop")):
+        raise BatchError("The tested candidate must descend from main and remain in develop's history.")
     push_fast_forward(root, f"https://github.com/{client.repository}.git", base, candidate, client.token)
 
 

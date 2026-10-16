@@ -30,7 +30,7 @@ def successful_results(recovery=False):
 class CaptureTests(unittest.TestCase):
     def setUp(self):
         self.client = mock.Mock(repository="example/engine", token="test-token")
-        self.heads = {"main": BASE, "dev": CANDIDATE, batch_ci.ATTEMPT_BRANCH: None}
+        self.heads = {"main": BASE, "develop": CANDIDATE, batch_ci.ATTEMPT_BRANCH: None}
         self.client.head.side_effect = self.heads.__getitem__
         self.client.is_ancestor.return_value = True
         self.git = mock.patch("batch_ci.git", return_value="docs/index.md\0").start()
@@ -50,9 +50,9 @@ class CaptureTests(unittest.TestCase):
         self.assertIn(f"{BASE}..{CANDIDATE}", self.git.call_args.args[1])
 
     def test_unchanged_main_dev_and_stale_scheduler_do_no_work(self):
-        for main, dev in ((BASE, BASE), (LATER, CANDIDATE)):
-            with self.subTest(main=main, dev=dev):
-                self.heads.update(main=main, dev=dev)
+        for main, develop in ((BASE, BASE), (LATER, CANDIDATE)):
+            with self.subTest(main=main, develop=develop):
+                self.heads.update(main=main, develop=develop)
                 self.assertEqual(self.capture()["should_run"], "false")
                 self.client.request.assert_not_called()
                 self.git.assert_not_called()
@@ -93,7 +93,7 @@ class CaptureTests(unittest.TestCase):
 class PromotionTests(unittest.TestCase):
     def setUp(self):
         self.client = mock.Mock(repository="example/engine", token="test-token")
-        self.client.head.side_effect = {"main": BASE, "dev": LATER}.__getitem__
+        self.client.head.side_effect = {"main": BASE, "develop": LATER}.__getitem__
         self.client.is_ancestor.return_value = True
         self.push = mock.patch("batch_ci.push_fast_forward").start()
         self.addCleanup(mock.patch.stopall)
@@ -146,10 +146,10 @@ class PromotionTests(unittest.TestCase):
         self.push.assert_not_called()
 
     def test_moved_main_or_rewritten_dev_preserves_main(self):
-        self.client.head.side_effect = {"main": LATER, "dev": CANDIDATE}.__getitem__
+        self.client.head.side_effect = {"main": LATER, "develop": CANDIDATE}.__getitem__
         with self.assertRaises(batch_ci.BatchError):
             self.promote()
-        self.client.head.side_effect = {"main": BASE, "dev": CANDIDATE}.__getitem__
+        self.client.head.side_effect = {"main": BASE, "develop": CANDIDATE}.__getitem__
         for answers in ((False,), (True, False)):
             self.client.is_ancestor.side_effect = answers
             with self.assertRaises(batch_ci.BatchError):
@@ -190,12 +190,12 @@ class GitPromotionTests(unittest.TestCase):
         return self.run_git(self.root, "--git-dir", self.remote, "rev-parse", "refs/heads/main")
 
     def prepare_remote(self):
-        # Make the candidate available without updating stable, as dev would.
-        self.run_git(self.checkout, "push", self.remote, f"{self.candidate}:refs/heads/dev")
+        # Make the candidate available without updating stable, as develop would.
+        self.run_git(self.checkout, "push", self.remote, f"{self.candidate}:refs/heads/develop")
 
     def test_success_promotes_exact_sha_even_when_checkout_has_later_changes(self):
         self.prepare_remote()
-        self.commit("later dev")
+        self.commit("later develop")
         batch_ci.push_fast_forward(self.checkout, self.remote, self.base, self.candidate)
         self.assertEqual(self.remote_main(), self.candidate)
 
@@ -204,7 +204,7 @@ class GitPromotionTests(unittest.TestCase):
         # Another actor advances main to the candidate after the API check.
         self.run_git(self.checkout, "push", self.remote, f"{self.candidate}:refs/heads/main")
         later = self.commit("later")
-        self.run_git(self.checkout, "push", self.remote, f"{later}:refs/heads/dev")
+        self.run_git(self.checkout, "push", self.remote, f"{later}:refs/heads/develop")
         with self.assertRaises(batch_ci.BatchError):
             batch_ci.push_fast_forward(self.checkout, self.remote, self.base, later)
         self.assertEqual(self.remote_main(), self.candidate)
@@ -231,7 +231,7 @@ class GitHubTests(unittest.TestCase):
                     with self.assertRaises(batch_ci.BatchError):
                         client.head(batch_ci.ATTEMPT_BRANCH)
                 with self.assertRaises(batch_ci.BatchError):
-                    client.head("dev")
+                    client.head("develop")
 
     def test_api_metadata_and_response_boundaries(self):
         client = batch_ci.GitHub("example/engine", "test-token")
@@ -239,12 +239,12 @@ class GitHubTests(unittest.TestCase):
         response.__enter__.return_value.read.return_value = json.dumps(
             {"object": {"type": "commit", "sha": CANDIDATE}}).encode()
         with mock.patch("urllib.request.urlopen", return_value=response) as request:
-            self.assertEqual(client.head("dev"), CANDIDATE)
+            self.assertEqual(client.head("develop"), CANDIDATE)
             self.assertEqual(request.call_args.args[0].full_url,
-                             "https://api.github.com/repos/example/engine/git/ref/heads/dev")
+                             "https://api.github.com/repos/example/engine/git/ref/heads/develop")
         response.__enter__.return_value.read.return_value = b"x" * (2 * 1024 * 1024 + 1)
         with mock.patch("urllib.request.urlopen", return_value=response), self.assertRaises(batch_ci.BatchError):
-            client.head("dev")
+            client.head("develop")
         for value in ("", "0" * 40, "--help", CANDIDATE + "\n"):
             with self.subTest(value=value), self.assertRaises(batch_ci.BatchError):
                 batch_ci.validate_sha(value)
