@@ -70,3 +70,45 @@ standalone headers, include boundaries and installed-SDK checks are the review
 gates. Live Wayland/keyboard tests require a desktop session; local headless
 runs report them as skipped. The PR's CI jobs supply the independent build
 budget and browser/package validation. No budget is raised by this increment.
+
+## M1 migration and policy gate
+
+Recorded 2026-10-16 for [M1](../architecture/container-systems.md#m1-consumer-migration).
+The base revision is `5117c8c`. The host was an Apple M5 (arm64) running macOS,
+with the pinned Homebrew Clang/LLD 18.1.8 and libc++. This increment changes
+ownership and failure handling, not lookup or growth policy, so it has no timing
+claims. The first increment's measurements above are unchanged.
+
+- **Inventory.** `python3 tools/check_container_policy.py` reports 209 findings
+  in 42 first-party files on the base revision. It reports none after migration.
+  `scripts/python/test_check_container_policy.py` covers every source root,
+  spaced and `pmr` spellings, comments and literals (including raw strings),
+  vendor/output trees, similarly named identifiers, line numbers and a stale
+  exception. The gate runs from `./scripts/check --format` and in CI.
+- **Allocation failure.** `ludus_text_alloc_tests` rejects the aligned nothrow
+  allocation seam only. It verifies that creation, font loading, shaping and
+  rasterization report `OutOfMemory` with no published owner or handle, cleared
+  outputs and unchanged counters. Each operation succeeds after rejection is
+  disarmed, and the font remains unloadable. GameHost and Audio Gym failure
+  paths stage allocations before committing outputs. They were verified by
+  review and by their existing success-path suites; no fault injection was
+  added for them.
+- **Validation.** The Development preset builds warning-clean, including
+  `-Werror` on project targets. All ctest suites relevant to the change pass.
+  The containers, containers allocation, localization and test-diagnostics
+  executables are built but outside this preset's ctest selection, so they were
+  run directly and pass. The pinned clang-tidy is clean on the 37 changed
+  translation units in the compile database, with warnings treated as errors.
+  `./scripts/check --format` and `scripts/python/source_policy.py --base HEAD`
+  with the pinned formatter pass.
+- **Sanitizers.** The ASan/UBSan preset builds warning-clean. Its tests could
+  not run on this host: the LLVM 18 ASan runtime deadlocks during its own
+  initialization on this macOS release, before test code runs. Sampling showed
+  dyld shared-cache iteration re-entering ASan's allocator, and other
+  worktrees' ASan runs hang the same way. Linux CI runs the sanitizer suites.
+- **Not run locally.** Two suites failed for environmental reasons:
+  `ludus_platform_cocoa_tests` skips every case without a WindowServer session,
+  and `ludus_target_detection` lacks iOS/tvOS/watchOS SDKs. The renderer render
+  tests are Linux/Slang-only, the editor tests need Qt, and the script-provider
+  tests need cooked provider inputs. The filesystem benchmark is opt-in and was
+  syntax-checked only. Linux CI and the `ci:full` queue tier build these targets.

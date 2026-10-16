@@ -11,10 +11,10 @@
 #include <ludus/audio/audio_system.h>
 #include <ludus/audio/audio_types.h>
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include <span>
 #include <string>
-#include <vector>
 
 namespace ludus::audio::gym
 {
@@ -29,8 +29,10 @@ struct Capture final
 {
     uint64 RenderFrame = 0;
     SystemSnapshot System{};
-    std::vector<VoiceInfo> Voices;
-    std::vector<OwnerEvent> OwnerEvents;
+    /// VoiceInfo for each tracked handle that was live at RenderFrame, in tracking order.
+    ludus::foundation::Array<VoiceInfo> Voices;
+    /// Owner events observed with this capture. The gym does not populate it yet.
+    ludus::foundation::Array<OwnerEvent> OwnerEvents;
 };
 
 /// @brief A named, reproducible offline scenario.
@@ -63,29 +65,43 @@ public:
     [[nodiscard]] Status
     PrepareClip(std::span<const uint8> encoded, const ClipDescriptor& descriptor, ClipHandle& out) noexcept;
 
-    /// Track a voice handle so subsequent captures include its VoiceInfo.
-    void Track(VoiceHandle voice) noexcept;
+    /// @brief Track a voice handle so subsequent captures include its VoiceInfo.
+    /// @return Ok, or OutOfMemory with the tracked set unchanged.
+    [[nodiscard]] Status Track(VoiceHandle voice) noexcept;
 
     /// @brief Advance the offline renderer by `frames` (stereo interleaved scratch) and
     /// append a capture of the state afterwards.
+    ///
+    /// Scratch and capture storage are allocated before rendering. OutOfMemory therefore leaves the system,
+    /// the captures and the tracked set unchanged; otherwise the capture is appended and the render status is
+    /// returned.
     [[nodiscard]] Status Advance(uint32 frames) noexcept;
 
-    [[nodiscard]] const std::vector<Capture>& Captures() const noexcept
+    /// @brief Captures in Advance order. The reference is invalidated by the next successful Advance.
+    [[nodiscard]] const ludus::foundation::Array<Capture>& Captures() const noexcept
     {
         return mCaptures;
     }
 
-    /// Filtering helpers over the most recent capture.
-    [[nodiscard]] std::vector<VoiceInfo> FilterByGroup(uint32 groupIndex) const noexcept;
-    [[nodiscard]] std::vector<VoiceInfo> FilterByBus(uint32 busIndex) const noexcept;
-    [[nodiscard]] std::vector<VoiceInfo> FilterByTag(uint32 policyTag) const noexcept;
+    /// @brief Replace outVoices with the most recent capture's voices in group `groupIndex`.
+    ///
+    /// No capture yields an empty result.
+    /// @return Ok, or OutOfMemory with outVoices unchanged.
+    [[nodiscard]] Status FilterByGroup(uint32 groupIndex,
+                                       ludus::foundation::Array<VoiceInfo>& outVoices) const noexcept;
+    /// @brief Replace outVoices with the most recent capture's voices routed to bus `busIndex`.
+    /// @return Ok, or OutOfMemory with outVoices unchanged.
+    [[nodiscard]] Status FilterByBus(uint32 busIndex, ludus::foundation::Array<VoiceInfo>& outVoices) const noexcept;
+    /// @brief Replace outVoices with the most recent capture's voices carrying `policyTag`.
+    /// @return Ok, or OutOfMemory with outVoices unchanged.
+    [[nodiscard]] Status FilterByTag(uint32 policyTag, ludus::foundation::Array<VoiceInfo>& outVoices) const noexcept;
 
 private:
     std::string mName;
     AudioSystem mSystem;
-    std::vector<VoiceHandle> mTracked;
-    std::vector<Capture> mCaptures;
-    std::vector<float32> mScratch;
+    ludus::foundation::Array<VoiceHandle> mTracked;
+    ludus::foundation::Array<Capture> mCaptures;
+    ludus::foundation::Array<float32> mScratch;
 };
 
 } // namespace ludus::audio::gym

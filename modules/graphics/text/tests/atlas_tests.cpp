@@ -55,8 +55,8 @@ TEST_CASE("CPU shaped Latin Hangul and Arabic runs retain clusters and cache war
     REQUIRE(atlas.Initialize() == Status::Ready);
     for (usize run = 0; run < 3; ++run)
     {
-        auto bytes = cpu::test::LoadFixtureFont(fonts[run]);
-        REQUIRE(!bytes.empty());
+        const ludus::foundation::Array<ludus::foundation::uint8> bytes = cpu::test::LoadFixtureFont(fonts[run]);
+        REQUIRE(bytes.IsEmpty() == false);
         cpu::FontId font;
         REQUIRE(cpu::LoadFont(system, bytes, 0, &font) == cpu::Status::Ok);
         cpu::RunSpec spec;

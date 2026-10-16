@@ -1748,6 +1748,16 @@ def run_naming_check(root: Path) -> None:
     run([sys.executable, str(script), str(root)], cwd=root)
 
 
+def run_container_policy(root: Path) -> None:
+    """Reject first-party std::vector outside the documented exceptions.
+
+    Text-only and toolchain-independent; see tools/check_container_policy.py
+    and docs/architecture/containers.md section 34.3.
+    """
+    script = root / "tools" / "check_container_policy.py"
+    run([sys.executable, str(script), str(root)], cwd=root)
+
+
 def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
     # getattr guards callers that build the Namespace by hand (e.g. command_init).
@@ -1765,6 +1775,7 @@ def command_check(args: argparse.Namespace) -> int:
     if args.format or run_all:
         run_foundational_includes(root)
         run_naming_check(root)
+        run_container_policy(root)
     if args.tidy or run_all or include_cleaner or analyzer or inventory_only:
         ensure_bootstrap_for_preset(root, args.preset)
     if inventory_only:

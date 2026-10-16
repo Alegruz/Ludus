@@ -110,6 +110,7 @@ if(LUDUS_BUILD_TESTS)
         ludus_foundation_math_tests
         PRIVATE
             Ludus::FoundationMath
+            Ludus::FoundationContainers
             Catch2::Catch2WithMain
     )
     # Tests must observe the same precise FP semantics as the production .cpp so
