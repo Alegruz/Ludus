@@ -285,6 +285,15 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotRegex(snapshot, r"(?m)^      contents: write$")
         self.assertIn("    needs: promote", workflow.split("\n  publish:\n", 1)[1])
 
+    def test_publication_explicitly_checks_promotion_after_optional_ancestor_skips(self):
+        workflow = (self.ROOT / ".github/workflows/batch-ci.yml").read_text()
+        publish = workflow.split("\n  publish:\n", 1)[1].split("    steps:\n", 1)[0]
+        condition = re.search(r"(?m)^    if: (.*)$", publish)
+        self.assertIsNotNone(condition, "Implicit success() also rejects intentionally skipped recovery ancestors.")
+        self.assertIn("always()", condition.group(1))
+        self.assertIn("!cancelled()", condition.group(1))
+        self.assertIn("needs.promote.result == 'success'", condition.group(1))
+
 
 if __name__ == "__main__":
     unittest.main()

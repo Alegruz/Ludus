@@ -135,6 +135,10 @@ jobs:
   publish:
     name: Publish promoted documentation
     needs: promote
+    # Thanks to GitHub, "Workflow syntax for GitHub Actions", jobs.<job_id>.needs:
+    # skipped optional ancestors must not suppress publication after promotion.
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds
+    if: always() && !cancelled() && needs.promote.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
