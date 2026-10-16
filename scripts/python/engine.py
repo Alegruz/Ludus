@@ -2169,6 +2169,54 @@ def command_profile_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_profile_engine(args: argparse.Namespace) -> int:
+    """Build and run the runtime profiling scenarios from config/runtime_profile_scenarios.json.
+
+    Writes report.json, summary.md, Perfetto traces and per-run logs. Fails on
+    scenario correctness failures only; timings are report-only."""
+    import runtime_profile
+
+    root = repo_root()
+    preset = args.preset or NATIVE_PRESET_PREFIX + "-profile"
+    ensure_known_preset(preset)
+    if not preset.startswith(NATIVE_PRESET_PREFIX):
+        raise EngineError(f"profile-engine runs host presets only ({NATIVE_PRESET_PREFIX}-*), got {preset}")
+    try:
+        scenarios = runtime_profile.load_manifest(root / (args.manifest or runtime_profile.MANIFEST_PATH))
+        system = platform.system()
+        shader_options = runtime_profile.shader_tool_options(root, system)
+        capabilities = runtime_profile.detect_capabilities(root, system) | set(args.capability or ())
+        if args.list:
+            for scenario in scenarios:
+                needs = ", ".join(scenario.requires) or "none"
+                print(f"{scenario.id:<26} {scenario.owner:<32} requires: {needs}")
+                print(f"{'':<26} {scenario.description}")
+            return 0
+        selection = runtime_profile.select_scenarios(scenarios, args.scenario or (), capabilities)
+        runnable = [scenario for scenario, reason in selection if reason is None]
+        if not runnable:
+            raise EngineError("no runnable scenarios for this host; see --list and --capability")
+        if not args.no_build:
+            ensure_bootstrap_for_preset(root, preset)
+            cmake_configure(root, preset, runtime_profile.configure_arguments(runnable, shader_options))
+            targets = sorted({scenario.target for scenario in runnable})
+            cmake_build(root, preset, ["--target", *targets])
+        output_dir = Path(args.output).resolve() if args.output else root / "out" / "runtime-profile" / preset
+        compiler = executable_version(str(clang_cxx(root)), ["--version"], root) if clang_cxx(root).exists() else "unknown"
+        report = runtime_profile.run_scenarios(
+            root, preset, build_dir_for_preset(root, preset), output_dir, selection, capabilities,
+            compiler=compiler, repetitions=args.repetitions,
+            baseline_path=Path(args.baseline).resolve() if args.baseline else None)
+    except runtime_profile.ProfileError as error:
+        raise EngineError(str(error)) from error
+    failed = [entry["id"] for entry in report["scenarios"] if entry["status"] == "failed"]
+    print(f"Runtime profile report: {output_dir / 'report.json'}")
+    print(f"Summary: {output_dir / 'summary.md'}")
+    if failed:
+        raise EngineError(f"runtime profile scenario(s) failed: {', '.join(failed)}")
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 # Build-time budget gate
 # --------------------------------------------------------------------------- #
@@ -2399,6 +2447,23 @@ def make_parser() -> argparse.ArgumentParser:
     )
     profile_parser.add_argument("--ccache", action="store_true", help="enable ccache for the profiled build")
     profile_parser.set_defaults(func=command_profile_build)
+
+    runtime_parser = subparsers.add_parser(
+        "profile-engine", help="build and run runtime profiling scenarios (report-only timings, Perfetto traces)"
+    )
+    runtime_parser.add_argument("preset", nargs="?", default=None, help="host preset (default: the native -profile preset)")
+    runtime_parser.add_argument("--scenario", action="append", help="run only this scenario id (repeatable)")
+    runtime_parser.add_argument(
+        "--capability", action="append", help="declare a lane capability such as presentation (repeatable)"
+    )
+    runtime_parser.add_argument("--repetitions", type=int, choices=range(1, 51), metavar="1..50",
+                                help="override each scenario's measured repetitions")
+    runtime_parser.add_argument("--output", help="report directory (default: out/runtime-profile/<preset>)")
+    runtime_parser.add_argument("--baseline", help="earlier report.json to compare medians against")
+    runtime_parser.add_argument("--manifest", help="scenario manifest (default: config/runtime_profile_scenarios.json)")
+    runtime_parser.add_argument("--no-build", action="store_true", help="run already-built executables")
+    runtime_parser.add_argument("--list", action="store_true", help="list scenarios and exit")
+    runtime_parser.set_defaults(func=command_profile_engine)
 
     budget_parser = subparsers.add_parser(
         "check-build-budget", help="fail if project headers or total parse time exceed config/build_budget.json"
