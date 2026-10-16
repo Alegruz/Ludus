@@ -1,6 +1,6 @@
 # Container systems
 
-Status: first implementation increment. This design extends the implemented
+Status: M0 and M1 implemented. This design extends the implemented
 [contiguous containers](containers.md#34-ludus-native-taxonomy-and-api-authoritative-naming)
 and respects [memory ownership](memory-management.md). It does not replace
 those contracts. Types marked planned below are architectural decisions, not
@@ -234,7 +234,7 @@ below determine which increments can proceed independently.
 | ID | Milestone | Status | Deliverable and exit criterion |
 | --- | --- | --- | --- |
 | M0 | Contiguous arrays and first ordered map | Implemented | `StaticArray`, `Array`, `SortedMap`, fallible insertion/append, GameHost resource bindings, model/lifetime/allocation tests, SDK probe and benchmark exist. Retain their contracts and scoped measurement evidence. |
-| M1 | Restore migration and explicit allocation failure | Planned | Replace reintroduced first-party `std::vector` uses with `Array`, including tests and exported Audio Gym APIs. Use fallible operations at status-returning boundaries, preserve consumer lifetimes and outputs on failure, and add an automated policy check with the existing benchmark/vendor exceptions. |
+| M1 | Restore migration and explicit allocation failure | Implemented | First-party `std::vector` uses were replaced with `Array`, including tests, tools and the exported Audio Gym API. Status-returning boundaries use fallible operations and preserve outputs on failure. `tools/check_container_policy.py` rejects new uses outside the benchmark/vendor exceptions; see [M1 consumer migration](#m1-consumer-migration). |
 | M2 | Complete existing container API documentation | Planned | Add Doxygen contracts to the existing public container API, remove resolved entries from `api-undocumented.json`, and provide a wiki usage/selection guide distinguishing shipped APIs from plans. Strict wiki/API builds and coverage checks pass. |
 | M3 | `FixedArray<T, N>` and one Input migration | Planned | Implement a live prefix in inline raw storage, explicit full status, and construction of occupied slots only. Migrate an Input binding or step-event buffer; verify zero allocation, zero capacity, non-default/move-only values, aliasing, failure preservation and balanced lifetimes. |
 | M4 | Single-owner `RingBuffer<T>` | Gated | Establish capacity/backing-storage ownership and select a FIFO consumer; Input's pending-transition ring is a candidate. Implement wrapped front/back spans and explicit full/empty behavior; model-test wraparound and lifetimes while preserving the consumer's overflow/reset policy. |
@@ -246,21 +246,52 @@ below determine which increments can proceed independently.
 | M10 | `SparseSet<T>` extraction | Gated | Demonstrate reusable storage logic in World or another bounded-ID consumer. Extract membership/dense storage while retaining ECS policy in World; verify ID bounds, back-links, swap removal, failure preservation and sparse-address-space memory costs. |
 | M11 | Research and measured improvements after the initial implementation | Planned; initial baseline required | Review the queued conference/journal sources below, record testable hypotheses, and trial promising alternatives against the validated initial implementation. Record adopt/defer/reject decisions with correctness, allocation, memory, performance and portability evidence. |
 
-M1 should land in reviewable consumer increments: Text and its OOM paths first,
-then GameHost protocol/session storage and Audio Gym, followed by remaining
-first-party tests/tools. For example,
-[`LoadFont`](../../modules/text/src/font_system.cpp) currently calls
-`std::vector::resize` before checking the resulting size for OOM; allocation
-failure does not reach that status check in the exception-free build. Migration
-must repair the failure protocol rather than only rename the container. Recheck
-the inventory at implementation time and update the historical migration claims
-only after the policy gate passes. Replacing `std::string`, filesystem facilities
+#### M1 consumer migration
+
+M1 landed as consumer increments in one change. On base revision `5117c8c`, the
+new gate reports 209 findings (`std::vector` uses and `<vector>` includes) in 42
+first-party files. Migration repaired each
+failure protocol rather than only renaming the container. Previously, Text's
+[`LoadFont`](../../modules/text/src/font_system.cpp) called `std::vector::resize`
+before an OOM size check that the exception-free build could never reach.
+
+- **Text.** Font bytes, glyph records, slot metadata and raster scratch are
+  `Array`s. `CreateFontSystem`, `LoadFont`, `ShapeRun` and `RasterizeGlyph`
+  return `OutOfMemory` without publishing a handle, changing counters or
+  consuming a slot. `RasterizeGlyph` publishes its bitmap and counter only after
+  the scratch allocation succeeds. `ludus_text_alloc_tests` rejects the aligned
+  nothrow seam to verify each path.
+- **GameHost.** Codec fields, record batches, frames and the frame-reader
+  backlog are `Array`s. `Message::Parse`, `GetRecords` and `EncodeFrame` stage
+  their results and return false with outputs unchanged. Property snapshots and
+  batches map allocation failure to `HostFailed` before anything is emitted.
+  Reload checkpoint staging rejects the reload and keeps A running. Output and
+  retained-result queues reserve capacity at construction. If a later append
+  fails, the session latches a channel failure rather than silently dropping an
+  outcome.
+- **Audio Gym.** The public `Capture` and `Scenario` storage is `Array`.
+  `Track`, `Advance` and the `FilterBy*` helpers return `Status`. `Advance`
+  allocates scratch and capture storage before rendering, so `OutOfMemory`
+  leaves the system, captures and tracked set unchanged. The filters write to a
+  caller-owned output that is preserved on failure. Audio now links
+  FoundationContainers publicly for this header.
+- **Tests, tools and samples.** These use the infallible operations where
+  failure aborts the test. The smoke text demo reports read-buffer allocation
+  failure explicitly.
+
+Two compromises remain. `GetRecords` keeps its `bool` contract, so an edit
+batch that cannot be allocated is reported as `InvalidRequest`. Outgoing
+`Message` setters stay infallible, like the `std::string` values they own.
+
+The [container evidence](../development/container-systems-evidence.md#m1-migration-and-policy-gate)
+records the commands and results. `./scripts/check --format` and the CI policy
+step run the gate. Replacing `std::string`, filesystem facilities, `std::array`
 or unrelated ownership types stays in their own workstreams.
 
-M2 can proceed alongside M1. Every subsequent milestone includes Doxygen for its
+M2 can proceed independently. Every subsequent milestone includes Doxygen for its
 new/changed API and the relevant wiki/guide update in the same change; M2 is not
 permission to defer documentation for new features. M3 is the recommended next
-new container after M1. M4 and M5 may follow independently once their consumers
+new container. M4 and M5 may follow independently once their consumers
 are established; generic rings retain single-owner semantics and do not replace
 the audio/logging/profiling publication protocols.
 

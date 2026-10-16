@@ -2,6 +2,7 @@
 // path (design sections 5-7; tasks A2 gate). No device/worker/Platform/window.
 
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
@@ -9,9 +10,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
-#include <vector>
 
 using namespace ludus::audio;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -23,7 +24,7 @@ void InitOffline(AudioSystem& sys, uint32 rate = 48000)
     REQUIRE(IsOk(sys.Initialize(cfg)));
 }
 
-ClipHandle Prepare(AudioSystem& sys, const std::vector<uint8>& wav)
+ClipHandle Prepare(AudioSystem& sys, const Array<uint8>& wav)
 {
     ClipHandle h{};
     ClipDescriptor d{};
@@ -33,7 +34,7 @@ ClipHandle Prepare(AudioSystem& sys, const std::vector<uint8>& wav)
 
 // Peak absolute amplitude of an interleaved stereo buffer channel.
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): test helper.
-float32 ChannelPeak(const std::vector<float32>& out, uint32 frames, uint32 channel)
+float32 ChannelPeak(const Array<float32>& out, uint32 frames, uint32 channel)
 {
     float32 peak = 0.0F;
     for (uint32 f = 0; f < frames; ++f)
@@ -62,7 +63,7 @@ TEST_CASE("A played clip produces audible nonzero output", "[audio][dsp]")
     REQUIRE(IsOk(sys.PlayClip(p, v)));
 
     constexpr uint32 frames = 2048;
-    std::vector<float32> out(static_cast<std::size_t>(frames) * 2U);
+    Array<float32> out(static_cast<usize>(frames) * 2U);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -87,7 +88,7 @@ TEST_CASE("Hard-left and hard-right pan route to the correct channel", "[audio][
         VoiceHandle v{};
         REQUIRE(IsOk(sys.PlayClip(p, v)));
         constexpr uint32 frames = 2048;
-        std::vector<float32> out(static_cast<std::size_t>(frames) * 2U);
+        Array<float32> out(static_cast<usize>(frames) * 2U);
         REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                        ChannelLayout::Stereo,
                                        BufferLayout::Interleaved,
@@ -103,7 +104,7 @@ TEST_CASE("Hard-left and hard-right pan route to the correct channel", "[audio][
         VoiceHandle v{};
         REQUIRE(IsOk(sys.PlayClip(p, v)));
         constexpr uint32 frames = 2048;
-        std::vector<float32> out(static_cast<std::size_t>(frames) * 2U);
+        Array<float32> out(static_cast<usize>(frames) * 2U);
         REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                        ChannelLayout::Stereo,
                                        BufferLayout::Interleaved,
@@ -132,8 +133,8 @@ TEST_CASE("Planar and interleaved adapters carry identical L/R content", "[audio
     REQUIRE(IsOk(b.PlayClip(p, vb)));
 
     constexpr uint32 frames = 1024;
-    std::vector<float32> inter(static_cast<std::size_t>(frames) * 2);
-    std::vector<float32> planar(static_cast<std::size_t>(frames) * 2);
+    Array<float32> inter(static_cast<usize>(frames) * 2);
+    Array<float32> planar(static_cast<usize>(frames) * 2);
     REQUIRE(IsOk(a.RenderOffline(std::span<float32>(inter.data(), inter.size()),
                                  ChannelLayout::Stereo,
                                  BufferLayout::Interleaved,
@@ -170,7 +171,7 @@ TEST_CASE("Playback rate 2.0 shortens duration; 0.5 lengthens it", "[audio][dsp]
         REQUIRE(IsOk(sys.PlayClip(p, v)));
 
         constexpr uint32 total = 16384;
-        std::vector<float32> out(static_cast<std::size_t>(total) * 2);
+        Array<float32> out(static_cast<usize>(total) * 2);
         REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                        ChannelLayout::Stereo,
                                        BufferLayout::Interleaved,
@@ -208,7 +209,7 @@ TEST_CASE("A looping clip keeps producing signal past its length", "[audio][dsp]
     REQUIRE(IsOk(sys.PlayClip(p, v)));
 
     constexpr uint32 frames = 4800; // 100 ms >> 10 ms clip
-    std::vector<float32> out(static_cast<std::size_t>(frames) * 2U);
+    Array<float32> out(static_cast<usize>(frames) * 2U);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -233,7 +234,7 @@ TEST_CASE("44100 <-> 48000 conversion in both directions produces finite audio",
         VoiceHandle v{};
         REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, v)));
         constexpr uint32 frames = 4096;
-        std::vector<float32> out(static_cast<std::size_t>(frames) * 2U);
+        Array<float32> out(static_cast<usize>(frames) * 2U);
         REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                        ChannelLayout::Stereo,
                                        BufferLayout::Interleaved,
@@ -253,7 +254,7 @@ TEST_CASE("44100 <-> 48000 conversion in both directions produces finite audio",
         VoiceHandle v{};
         REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, v)));
         constexpr uint32 frames = 4096;
-        std::vector<float32> out(static_cast<std::size_t>(frames) * 2U);
+        Array<float32> out(static_cast<usize>(frames) * 2U);
         REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                        ChannelLayout::Stereo,
                                        BufferLayout::Interleaved,
@@ -290,7 +291,7 @@ TEST_CASE("Positional distance attenuation falls off with distance", "[audio][ds
         REQUIRE(IsOk(sys.PlayClip(p, v)));
 
         constexpr uint32 frames = 2048;
-        std::vector<float32> out(static_cast<std::size_t>(frames) * 2U);
+        Array<float32> out(static_cast<usize>(frames) * 2U);
         REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                        ChannelLayout::Stereo,
                                        BufferLayout::Interleaved,

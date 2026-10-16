@@ -1,4 +1,5 @@
 #include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/filesystem/pack.hpp>
 
 #include "internal/pack_codec.hpp"
@@ -8,7 +9,6 @@
 #include <cstring>
 #include <span>
 #include <string_view>
-#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,9 +31,9 @@ ProviderHandle Pack(std::span<const uint8> bytes = pack_fixture::kPack)
     return pack;
 }
 template <typename T>
-void Set(std::vector<uint8>& bytes, usize at, T value)
+void Set(Array<uint8>& bytes, usize at, T value)
 {
-    REQUIRE(TryWriteLittleEndian(value, std::span(bytes).subspan(at)));
+    REQUIRE(TryWriteLittleEndian(value, bytes.AsSpan().subspan(at)));
 }
 uint64 Get64(std::span<const uint8> bytes, usize at)
 {
@@ -47,12 +47,12 @@ uint32 Get32(std::span<const uint8> bytes, usize at)
     REQUIRE(TryReadLittleEndian(bytes.subspan(at), value));
     return value;
 }
-void Seal(std::vector<uint8>& bytes)
+void Seal(Array<uint8>& bytes)
 {
     const auto length = static_cast<usize>(Get64(bytes, 40));
-    Set(bytes, 64, internal::Crc32(std::span(bytes).subspan(80, length)));
+    Set(bytes, 64, internal::Crc32(bytes.AsSpan().subspan(80, length)));
     Set(bytes, 68, uint32{0});
-    Set(bytes, 68, internal::Crc32(std::span(bytes).first(80)));
+    Set(bytes, 68, internal::Crc32(bytes.AsSpan().first(80)));
 }
 usize BlockTable(std::span<const uint8> bytes)
 {
@@ -63,7 +63,7 @@ usize BlockTable(std::span<const uint8> bytes)
     }
     return position;
 }
-void Rejected(const std::vector<uint8>& bytes, Status expected = Status::CorruptData)
+void Rejected(std::span<const uint8> bytes, Status expected = Status::CorruptData)
 {
     auto existing = Pack();
     const auto* before = existing.Get();
@@ -132,10 +132,10 @@ TEST_CASE("Packs built by the Python tool resolve raw compressed and empty revis
 
 TEST_CASE("Pack admission rejects malformed headers features indexes lengths and ownership before publication")
 {
-    const std::vector<uint8> good(std::begin(pack_fixture::kPack), std::end(pack_fixture::kPack));
-    for (usize end = 0; end < good.size(); end += 19)
+    const Array<uint8> good = Array<uint8>::FromRange(std::span<const uint8>(pack_fixture::kPack));
+    for (usize end = 0; end < good.GetSize(); end += 19)
     {
-        Rejected({good.begin(), good.begin() + static_cast<isize>(end)});
+        Rejected(good.AsSpan().first(end));
     }
     auto corrupt = good;
     corrupt[0] ^= 1;
@@ -216,8 +216,8 @@ TEST_CASE("Pack admission rejects malformed headers features indexes lengths and
     Seal(corrupt);
     Rejected(corrupt);
     corrupt = good;
-    corrupt.push_back(0);
-    Set(corrupt, 56, static_cast<uint64>(corrupt.size()));
+    corrupt.Add(uint8{0});
+    Set(corrupt, 56, static_cast<uint64>(corrupt.GetSize()));
     Seal(corrupt);
     Rejected(corrupt); // No unowned/trailing payload bytes.
 }
@@ -270,14 +270,14 @@ TEST_CASE("Configured pack budgets reject storage index files blocks and decoded
 
 TEST_CASE("Payload corruption is visible with only previously verified progress and never falls back")
 {
-    const std::vector<uint8> good(std::begin(pack_fixture::kPack), std::end(pack_fixture::kPack));
+    const Array<uint8> good = Array<uint8>::FromRange(std::span<const uint8>(pack_fixture::kPack));
     const usize table = BlockTable(good);
     auto corrupt = good;
     corrupt[static_cast<usize>(Get64(good, table + 24))] ^= 1; // Second compressed block.
     auto pack = Pack(corrupt); // Mount only checks metadata, avoiding an eager full payload scan.
     ProviderFile* file = nullptr;
     REQUIRE(pack.Get()->OpenRead("compressed", file).Succeeded());
-    std::vector<uint8> bytes(70013, 99);
+    Array<uint8> bytes(70013, 99);
     const auto result = file->ReadAt(0, bytes);
     REQUIRE(result.Outcome.Code == Status::CorruptData);
     REQUIRE(result.BytesRead == 65536);
@@ -329,7 +329,7 @@ TEST_CASE("Independent CRC and LZ4 golden vectors enforce bounded lengths offset
     {
         REQUIRE_FALSE(internal::DecodeLz4(std::span(repeated).first(count), output));
     }
-    auto damaged = std::vector<uint8>(std::begin(repeated), std::end(repeated));
+    Array<uint8> damaged = Array<uint8>::FromRange(std::span<const uint8>(repeated));
     damaged[2] = 0;
     REQUIRE_FALSE(internal::DecodeLz4(damaged, output));
     damaged[2] = 2;

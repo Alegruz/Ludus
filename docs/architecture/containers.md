@@ -4,13 +4,12 @@
 > [Container systems](container-systems.md). That design supersedes the
 > historical future taxonomy in §26; §34 remains authoritative for the arrays.
 >
-> Status: **Implemented; migration follow-up required.** This document began as
-> the design/architecture deliverable; the containers were implemented, tested,
-> benchmarked, and the first-party codebase migrated at that point. The
-> 2026-10-06 source review found reintroduced `std::vector` uses in newer modules
-> and tests. The [container milestone roadmap](container-systems.md#milestone-roadmap)
-> tracks migration repair as M1; earlier migration-completeness statements are
-> historical snapshots. See §34.3/§34.4 for the authoritative policy and permitted
+> Status: **Implemented.** This document began as the design/architecture
+> deliverable; the containers were implemented, tested, benchmarked, and the
+> first-party codebase migrated at that point. The 2026-10-06 source review found
+> reintroduced `std::vector` uses in newer modules and tests. Milestone M1 of the
+> [container roadmap](container-systems.md#m1-consumer-migration) migrated them
+> on 2026-10-15. `tools/check_container_policy.py` now rejects new uses. See §34.3/§34.4 for the authoritative policy and permitted
 > exceptions. Earlier sections that described a *sequenced*
 > migration with deferred/"stay STL" container uses (§3, §4, §23, §24, §32.6) are
 > historical and are superseded by §34.3/§34.4 where they conflict.
@@ -1956,9 +1955,11 @@ The original audit retained two categories of exceptions:
   comparison baselines. Their whole purpose is to benchmark against the STL, and
   the translation unit is not in the engine build graph.
 
-The exceptions do not cover the later first-party `std::vector` uses tracked by
-M1. Restore migration completeness before claiming the current tree contains
-only these exceptions.
+The later first-party `std::vector` uses found by the 2026-10-06 review were
+migrated by [M1](container-systems.md#m1-consumer-migration). The tree again
+contains only these exceptions, and `tools/check_container_policy.py` enforces
+the `std::vector` exception list. It runs from `./scripts/check --format` and
+in CI. The checker reports any listed exception that no longer needs the type.
 
 ### 34.5 `Array` with move-only / non-trivial element types (verified)
 

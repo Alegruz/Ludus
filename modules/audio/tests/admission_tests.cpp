@@ -3,14 +3,14 @@
 // Platform or window.
 
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <vector>
-
 using namespace ludus::audio;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -84,7 +84,7 @@ TEST_CASE("Oversized batch is rejected", "[audio][admission]")
     AudioSystem sys;
     InitOffline(sys);
     ClipHandle clip = PrepareSine(sys);
-    std::vector<Command> big(MAX_BATCH_RECORDS + 1);
+    Array<Command> big(MAX_BATCH_RECORDS + 1);
     for (auto& c : big)
     {
         c.Kind = CommandKind::Play;

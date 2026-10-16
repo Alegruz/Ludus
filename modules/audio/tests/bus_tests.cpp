@@ -2,6 +2,7 @@
 // tasks A3 gate). No device/worker/Platform/window.
 
 #include <ludus/audio/audio_system.h>
+#include <ludus/foundation/containers/array.hpp>
 
 #include "wav_fixture.h"
 
@@ -10,9 +11,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
-#include <vector>
 
 using namespace ludus::audio;
+using ludus::foundation::Array;
 
 namespace
 {
@@ -59,7 +60,7 @@ float32 RenderPeak(AudioSystem& sys, uint32 busIndex, ClipHandle clip)
     VoiceHandle v{};
     REQUIRE(IsOk(sys.PlayClip(p, v)));
     constexpr uint32 frames = 2048;
-    std::vector<float32> out(static_cast<std::size_t>(frames) * 2);
+    Array<float32> out(static_cast<usize>(frames) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,
@@ -169,7 +170,7 @@ TEST_CASE("Bus meters report post-gain levels and clip counts", "[audio][bus]")
     REQUIRE(IsOk(sys.PlayClip(p, v2)));
 
     constexpr uint32 frames = 2048;
-    std::vector<float32> out(static_cast<std::size_t>(frames) * 2);
+    Array<float32> out(static_cast<usize>(frames) * 2);
     REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
                                    ChannelLayout::Stereo,
                                    BufferLayout::Interleaved,

@@ -1,4 +1,5 @@
 #include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/localization/catalog.hpp>
 
 #include "fixture.hpp"
@@ -9,12 +10,12 @@
 #include <thread>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
 using namespace ludus::localization;
 using ludus::foundation::AllocationDomain;
+using ludus::foundation::Array;
 using ludus::foundation::GetSystemAllocationDomain;
 using ludus::foundation::TryReadLittleEndian;
 using ludus::foundation::TryWriteLittleEndian;
@@ -202,16 +203,19 @@ TEST_CASE("one allocation prepares a catalog; leases and warm resolution allocat
 
 TEST_CASE("caller storage is copied; separate leases read safely during replacement", "[localization][lifetime]")
 {
-    std::vector<uint8> input(std::begin(kSourceCatalog), std::end(kSourceCatalog));
+    Array<uint8> input = Array<uint8>::FromRange(kSourceCatalog);
     Catalog active = Load(input);
-    input.assign(input.size(), 0);
+    for (uint8& value : input)
+    {
+        value = 0; // Overwrite the caller storage in place.
+    }
     MessageBinding binding;
     REQUIRE(active.BindMessage(localization_fixture::kMenuPlay, binding) == Status::Ok);
     std::atomic<bool> good{true};
-    std::vector<std::thread> readers;
+    Array<std::thread> readers;
     for (usize index = 0; index < 4; ++index)
     {
-        readers.emplace_back([lease = active, binding, &good]() noexcept {
+        readers.AddInPlace([lease = active, binding, &good]() noexcept {
             for (usize iteration = 0; iteration < 10000; ++iteration)
             {
                 // Stress concurrent retains/releases of separate immutable handles.
@@ -248,7 +252,7 @@ TEST_CASE("truncated unaligned and corrupt packages are bounded and transactiona
         REQUIRE(PrepareCatalog(std::span{kSourceCatalog}.first(length), heap.Domain, active, diagnostic) != Status::Ok);
         REQUIRE(diagnostic.Result != Status::Ok);
     }
-    std::vector<uint8> bytes(std::begin(kSourceCatalog), std::end(kSourceCatalog));
+    Array<uint8> bytes = Array<uint8>::FromRange(kSourceCatalog);
     const usize records = 48 + Word(bytes, 16) + Word(bytes, 20) + Word(bytes, 24);
     const usize text = Word(bytes, records + 8);
     const usize key = Word(bytes, records);
@@ -301,7 +305,7 @@ TEST_CASE("truncated unaligned and corrupt packages are bounded and transactiona
     ResolvedText old;
     REQUIRE(active.ResolveStatic(binding, old) == Status::Ok);
     REQUIRE(old.Text == "Play");
-    bytes.insert(bytes.begin(), 0xff);
+    bytes.InsertAt(0, 0xff);
     Catalog unaligned = Load(std::span<const uint8>{bytes}.subspan(1));
     REQUIRE(Resolve(unaligned, localization_fixture::kMenuPlay).Text == "Play");
 }
@@ -311,7 +315,7 @@ TEST_CASE("bounded mutation corpus never publishes an invalid lease", "[localiza
     // Exercise header/record arithmetic and UTF-8 boundaries under ASan/UBSan.
     for (usize offset = 0; offset < sizeof(kSourceCatalog); ++offset)
     {
-        std::vector<uint8> bytes(std::begin(kSourceCatalog), std::end(kSourceCatalog));
+        Array<uint8> bytes = Array<uint8>::FromRange(kSourceCatalog);
         bytes[offset] ^= 0xff;
         Catalog catalog;
         Diagnostic diagnostic;

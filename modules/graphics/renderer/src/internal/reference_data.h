@@ -10,6 +10,7 @@
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/graphics/renderer/reference.hpp>
 
+#include "../../shaders/renderer_gpu_preview_layout.h"
 #include "environment_data.h"
 
 namespace ludus::graphics::renderer::internal
@@ -188,6 +189,19 @@ struct ReferenceState final
 ReferenceRandom(const ReferenceJob& job, const ReferencePath& path, uint16 dimension) noexcept
 {
     return math::SampleFloat01(job.Key, {path.Pixel, path.Sample, dimension});
+}
+static_assert(LUDUS_PATH_RANDOM_FIRST_BOUNCE_DIMENSION +
+                      LUDUS_REFERENCE_MAX_DEPTH * LUDUS_PATH_RANDOM_DIMENSIONS_PER_BOUNCE - 1 <=
+                  math::RandomMaxDimension,
+              "every admitted bounce dimension must fit addressed-random layout v1");
+static_assert(LUDUS_GPU_PREVIEW_MAX_DEPTH <= LUDUS_REFERENCE_MAX_DEPTH, "GPU preview mirrors reference addresses");
+// Dimension `slot` of scattering event `depth`. Admission bounds MaxDepth by
+// LUDUS_REFERENCE_MAX_DEPTH, so the result never narrows a wider value.
+[[nodiscard]] inline uint16 ReferenceBounceDimension(uint32 depth, uint32 slot) noexcept
+{
+    LUDUS_ASSERT(depth < LUDUS_REFERENCE_MAX_DEPTH && slot < LUDUS_PATH_RANDOM_DIMENSIONS_PER_BOUNCE);
+    return static_cast<uint16>(LUDUS_PATH_RANDOM_FIRST_BOUNCE_DIMENSION +
+                               depth * LUDUS_PATH_RANDOM_DIMENSIONS_PER_BOUNCE + slot);
 }
 [[nodiscard]] inline math::Vector3 ReferenceNormalize(math::Vector3 v) noexcept
 {

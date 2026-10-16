@@ -82,6 +82,10 @@ Different nonzero domain IDs produce distinct keys within one root seed. This
 does not promise statistical independence or collision freedom across different
 root seeds. Random keys and sampled values are not unique object IDs.
 
+Shader kernels can regenerate the same addressed samples with FoundationMath's
+`math.slang`; the [architecture contract](../../architecture/randomness.md#gpu-addressed-sampling)
+lists its functions, address limits and current backend evidence.
+
 ## Select the output and handle failure
 
 - `SampleUInt32(key, address)` returns raw bits.

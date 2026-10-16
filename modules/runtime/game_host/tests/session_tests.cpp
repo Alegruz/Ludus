@@ -10,6 +10,7 @@
 #include "internal/protocol_codec.h"
 
 #include <ludus/foundation/base/config.h>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/runtime/game_host/host.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -19,13 +20,13 @@
 #include <string>
 #include <thread>
 #include <utility>
-#include <vector>
 
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 using namespace ludus::runtime::game_host;
+using ludus::foundation::Array;
 using protocol::CommandKind;
 using protocol::EncodeFrame;
 using protocol::FrameReader;
@@ -62,7 +63,7 @@ private:
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void SendCommand(int fd, const Message& m)
 {
-    std::vector<ludus::foundation::uint8> frame;
+    Array<ludus::foundation::uint8> frame;
     Message command = m;
     command.SetUint("protocol", protocol::kProtocolVersion);
     command.SetHexId("session", CurrentSession);
@@ -79,9 +80,9 @@ void SendCommand(int fd, const Message& m)
     }
     REQUIRE(EncodeFrame(command.Serialize(), frame));
     std::size_t written = 0;
-    while (written < frame.size())
+    while (written < frame.GetSize())
     {
-        const ssize_t n = ::write(fd, frame.data() + written, frame.size() - written);
+        const ssize_t n = ::write(fd, frame.GetData() + written, frame.GetSize() - written);
         REQUIRE(n > 0);
         written += static_cast<std::size_t>(n);
     }
@@ -91,9 +92,9 @@ void SendCommand(int fd, const Message& m)
 // frames survive across calls. Uses poll with a timeout so a quiet channel
 // never blocks the test.
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-std::vector<Message> DrainEvents(int fd, FrameReader& reader, int budgetMs)
+Array<Message> DrainEvents(int fd, FrameReader& reader, int budgetMs)
 {
-    std::vector<Message> events;
+    Array<Message> events;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(budgetMs);
     while (std::chrono::steady_clock::now() < deadline)
     {
@@ -123,7 +124,7 @@ std::vector<Message> DrainEvents(int fd, FrameReader& reader, int budgetMs)
                         {
                             (void)m.GetHexId("generation", CurrentGeneration);
                         }
-                        events.push_back(m);
+                        events.Add(m);
                     }
                 }
             }
@@ -132,7 +133,7 @@ std::vector<Message> DrainEvents(int fd, FrameReader& reader, int budgetMs)
     return events;
 }
 
-bool HasEvent(const std::vector<Message>& events, const char* event)
+bool HasEvent(const Array<Message>& events, const char* event)
 {
     for (const Message& m : events)
     {
@@ -145,7 +146,7 @@ bool HasEvent(const std::vector<Message>& events, const char* event)
     return false;
 }
 
-bool HasReloadPhase(const std::vector<Message>& events, const char* phase)
+bool HasReloadPhase(const Array<Message>& events, const char* phase)
 {
     for (const Message& m : events)
     {
@@ -159,7 +160,7 @@ bool HasReloadPhase(const std::vector<Message>& events, const char* phase)
     return false;
 }
 
-bool HasStatus(const std::vector<Message>& events, uint64 request, const char* status)
+bool HasStatus(const Array<Message>& events, uint64 request, const char* status)
 {
     for (const auto& event : events)
     {
@@ -175,22 +176,22 @@ bool HasStatus(const std::vector<Message>& events, uint64 request, const char* s
 // Replies are asynchronous: wait for their identity rather than assuming a
 // host thread is scheduled within a 50 ms observation window on a CI runner.
 template <typename Predicate>
-std::vector<Message> AwaitEvents(int fd, FrameReader& reader, const Predicate& complete)
+Array<Message> AwaitEvents(int fd, FrameReader& reader, const Predicate& complete)
 {
-    std::vector<Message> events;
+    Array<Message> events;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (!complete(events) && std::chrono::steady_clock::now() < deadline)
     {
-        const auto batch = DrainEvents(fd, reader, 20);
-        events.insert(events.end(), batch.begin(), batch.end());
+        const Array<Message> batch = DrainEvents(fd, reader, 20);
+        events.AddRange(batch);
     }
     REQUIRE(complete(events));
     return events;
 }
 
-std::vector<Message> AwaitStatus(int fd, FrameReader& reader, uint64 request)
+Array<Message> AwaitStatus(int fd, FrameReader& reader, uint64 request)
 {
-    return AwaitEvents(fd, reader, [request](const std::vector<Message>& events) {
+    return AwaitEvents(fd, reader, [request](const Array<Message>& events) {
         for (const auto& event : events)
         {
             uint64 id = 0;
@@ -203,9 +204,9 @@ std::vector<Message> AwaitStatus(int fd, FrameReader& reader, uint64 request)
     });
 }
 
-std::vector<Message> AwaitEvent(int fd, FrameReader& reader, const char* event)
+Array<Message> AwaitEvent(int fd, FrameReader& reader, const char* event)
 {
-    return AwaitEvents(fd, reader, [event](const std::vector<Message>& events) { return HasEvent(events, event); });
+    return AwaitEvents(fd, reader, [event](const Array<Message>& events) { return HasEvent(events, event); });
 }
 } // namespace
 
@@ -335,7 +336,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
         message.SetHexId("request", request);
         return message;
     };
-    auto expectStatus = [](const std::vector<Message>& events, uint64 request, std::string_view expected) {
+    auto expectStatus = [](const Array<Message>& events, uint64 request, std::string_view expected) {
         bool found = false;
         for (const auto& event : events)
         {
@@ -355,17 +356,17 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
         SendCommand(sv[0], command("ReadProperties", request));
         auto events = AwaitStatus(sv[0], reader, request);
         expectStatus(events, request, "Ok");
-        std::vector<Message> properties;
+        Array<Message> properties;
         for (const auto& event : events)
         {
-            std::vector<Message> rows;
+            Array<Message> rows;
             uint64 id = 0;
             if (event.GetHexId("request", id) && id == request && event.GetRecords("properties", rows))
             {
-                properties.insert(properties.end(), rows.begin(), rows.end());
+                properties.AddRange(rows);
             }
         }
-        REQUIRE(properties.size() == 3);
+        REQUIRE(properties.GetSize() == 3);
         return properties;
     };
     const auto before = read(2);
@@ -383,7 +384,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
     label.SetHexId("revision", revision);
     label.SetUint("kind", 4);
     label.SetString("value", "edited é");
-    auto batch = [&](uint64 request, const std::vector<Message>& edits) {
+    auto batch = [&](uint64 request, const Array<Message>& edits) {
         auto message = command("ApplyEdits", request);
         message.SetUint("schema_epoch", 0);
         message.SetUint("schema_version", 1);
@@ -395,7 +396,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
     SendCommand(sv[0], batch(3, {speed, bad}));
     expectStatus(AwaitStatus(sv[0], reader, 3), 3, "InvalidRequest");
     auto unchanged = read(4);
-    for (usize i = 0; i < before.size(); ++i)
+    for (usize i = 0; i < before.GetSize(); ++i)
     {
         CHECK(unchanged[i].Serialize() == before[i].Serialize());
     }
@@ -463,7 +464,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
 namespace
 {
 // Pull a uint field out of the newest Status CommandResult in a drained batch.
-bool LatestStatusUint(const std::vector<Message>& events, const char* field, ludus::foundation::uint64& out)
+bool LatestStatusUint(const Array<Message>& events, const char* field, ludus::foundation::uint64& out)
 {
     bool found = false;
     for (const Message& m : events)

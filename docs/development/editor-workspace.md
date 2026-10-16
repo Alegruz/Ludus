@@ -838,7 +838,7 @@ indirect transport, soft area shadows or spectral PBRT parity. See the owning
 Optional GPU path tracing remains a separate renderer API.
 
 Qt Quick's native surface is embedded in the World splitter and uses the basic
-owner-thread render loop. The adapter admits Qt's exact device and queue, imports
+owner-thread render loop. The adapter admits the device and queue Qt Quick renders with, imports
 its RGBA8 texture, and retires replaced reads only after Qt submits the consumer
 frame. Resize, scene replacement, Stop and source invalidation release texture
 leases before renderer/device cleanup. Camera and splitter restoration keep the
