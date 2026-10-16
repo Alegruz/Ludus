@@ -4,6 +4,7 @@
 
 #include <new>
 
+#include <QApplication>
 #include <QComboBox>
 #include <QGuiApplication>
 #include <QLabel>
@@ -585,11 +586,17 @@ private:
 PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, bool isAutomatic)
     : QWidget(parentOrNull), Preview_(preview)
 {
+    LUDUS_REQUIRE(preview != nullptr);
     mState.Reset(new State);
     setMinimumSize(160, 160);
     setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     setFocusPolicy(Qt::StrongFocus);
-    setToolTip(QStringLiteral("Drag to orbit · middle/Shift-drag to pan · wheel to zoom · double-click to frame all"));
+    mNavigationTimer.setInterval(16);
+    connect(&mNavigationTimer, &QTimer::timeout, this, [this]() { advanceNavigation(); });
+    connect(preview, &RenderPreview::Stopped, this, [this]() { stopNavigation(); });
+    setToolTip(QStringLiteral(
+        "Right-drag to look · hold right mouse + WASD/QE to fly · Alt/Option-left-drag to orbit · middle-drag to pan · "
+        "wheel to dolly (right mouse: speed) · F frames selection · Home frames all"));
     mState->Preview = preview;
     mState->IsAutomatic = isAutomatic;
     mState->CanShowFrames = isAutomatic;
@@ -661,6 +668,7 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
 }
 PreviewViewport::~PreviewViewport()
 {
+    stopNavigation();
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     if (mState->Preview.isNull() == false)
     {
@@ -705,12 +713,30 @@ bool PreviewViewport::eventFilter(QObject* watched, QEvent* event)
             case QEvent::MouseButtonPress:
                 mousePressEvent(static_cast<QMouseEvent*>(event));
                 return true;
+            case QEvent::MouseButtonRelease:
+                mouseReleaseEvent(static_cast<QMouseEvent*>(event));
+                return true;
+            case QEvent::KeyPress:
+                keyPressEvent(static_cast<QKeyEvent*>(event));
+                return event->isAccepted();
+            case QEvent::KeyRelease:
+                keyReleaseEvent(static_cast<QKeyEvent*>(event));
+                return event->isAccepted();
+            case QEvent::FocusOut:
+                if (QApplication::focusWidget() != this)
+                {
+                    stopNavigation();
+                }
+                break;
+            case QEvent::WindowDeactivate:
+                stopNavigation();
+                break;
             case QEvent::MouseMove:
                 mouseMoveEvent(static_cast<QMouseEvent*>(event));
                 return true;
             case QEvent::MouseButtonDblClick:
-                mouseDoubleClickEvent(static_cast<QMouseEvent*>(event));
-                return true;
+                event->ignore();
+                return false;
             case QEvent::Wheel:
                 wheelEvent(static_cast<QWheelEvent*>(event));
                 return true;
@@ -719,7 +745,31 @@ bool PreviewViewport::eventFilter(QObject* watched, QEvent* event)
         }
     }
 #endif
+    if (event->type() == QEvent::WindowDeactivate)
+    {
+        stopNavigation();
+    }
     return QWidget::eventFilter(watched, event);
+}
+foundation::float32 PreviewViewport::getDrawableHeight() const noexcept
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mState->Window != nullptr)
+    {
+        return static_cast<foundation::float32>(mState->Window->height());
+    }
+    if (mState->CanvasOrNull != nullptr)
+    {
+        return static_cast<foundation::float32>(mState->CanvasOrNull->height());
+    }
+#endif
+#if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
+    if (mState->SoftwareCanvasOrNull != nullptr)
+    {
+        return static_cast<foundation::float32>(mState->SoftwareCanvasOrNull->height());
+    }
+#endif
+    return static_cast<foundation::float32>(height());
 }
 void PreviewViewport::resizeSurface()
 {

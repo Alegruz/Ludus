@@ -227,7 +227,8 @@ class RequiredGateTests(unittest.TestCase):
                             butler)
         self.assertIsNotNone(runners)
         self.assertEqual(json.loads(runners.group(1)), ["ubuntu-24.04"])
-        self.assertIn("macos-14", json.loads(runners.group(2)))
+        self.assertEqual(json.loads(runners.group(2)),
+                         ["ubuntu-24.04", "macos-15", "macos-15-intel"])
 
     def results(self, native_required=True, tier=ci_scope.FULL_TIER):
         def expected(name):

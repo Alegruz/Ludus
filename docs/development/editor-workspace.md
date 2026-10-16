@@ -528,9 +528,10 @@ Build the native editor using [Enable the rendered authoring surface](#enable-th
 1. Open a writable **live-edit-game** sample and select **World**.
 2. Open `authoring/rendering.world.json`. Its persistent 3D viewport starts inside
    the World workspace. Asset validation runs in an owned worker; the editor
-   remains responsive during bounded file reads/decoding. Drag in the viewport
-   to orbit, middle-drag or Shift-drag to pan, scroll to zoom, and double-click
-   to frame all visible objects.
+   remains responsive during bounded file reads/decoding. Hold right mouse to look
+   and fly with WASD/QE; Alt/Option-left-drag orbits and middle-drag pans. Scroll
+   to dolly, press **F** with the viewport focused to frame the hierarchy selection,
+   or **Home** to frame all visible objects.
 3. Select **Starter Cube** in World. Edit Position/rotation/scale or Renderable
    tint, visibility, mesh and color texture. Valid inspector buffers update the
    viewport after a short debounce, before **Apply Changes** commits the edit.
@@ -539,7 +540,7 @@ Build the native editor using [Enable the rendered authoring surface](#enable-th
    **Tint…** opens a display-sRGB picker and fills pending linear RGB values;
    Apply/Reset still own the transaction, while numeric fields remain available.
    **Save World** persists the applied data. Invalid fields stay in the inspector.
-4. Expand **Camera and diagnostics**. Use editor orbit/distance or select
+4. Expand **Camera and diagnostics**. Use editor camera controls or select
    **Preview Camera** to see its authored pose and lens. **Frame all visible
    objects** explicitly recenters/rescales editor navigation without moving saved
    objects or cameras. Applied object transforms preserve the existing editor
@@ -561,8 +562,9 @@ also pauses World rendering and resumes it when the operation returns to Idle. P
 results from reopening or publishing into another document. Failed GPU setup
 stops the surface with feedback and preserves World edits; resuming retries.
 
-Reopening a project restores its last World, selection, orbit center, distance,
-yaw/pitch, authored camera selection, splitter sizes, active tab and dock layout.
+Reopening a project restores its last World, selection, editor camera pose/lens
+and focus distance, authored camera selection, splitter sizes, active tab and dock
+layout.
 These preferences live beside the editor's local `workspace.json`, in `projects/`
 files keyed by the canonical project root. They do not alter World camera entities
 or project documents. Missing Worlds and incompatible or invalid preferences
@@ -572,6 +574,58 @@ project assets. Unsaved inspector buffers are not part of this preference file.
 Browser builds and native builds without `LUDUS_EDITOR_RENDER_PREVIEW` explain
 why rendering is unavailable. The game adapter chooses the trusted preview for
 the open World; it does not introduce another authoring workspace.
+
+### World viewport navigation
+
+The editor owns a separate camera controller and publishes a validated C0
+pose/lens sample to the renderer. Navigation never changes an authored camera,
+World Save/Undo history, or simulation state. Starting navigation from an
+**authored camera** adopts its currently visible pose and lens, including roll;
+it does not jump back to an old editor orbit. The first nonzero gesture detaches
+that preview. Zero-motion input leaves the selected camera unchanged.
+
+| Input, with the viewport focused | Action |
+| --- | --- |
+| Right-drag | Look around from the current eye |
+| Hold right mouse + WASD | Fly forward/backward and sideways |
+| Q / E while flying | Move down/up along world Y |
+| Shift while flying | Four-times movement speed |
+| Wheel while holding right mouse | Adjust fly speed without dollying |
+| Alt/Option + left-drag | Orbit around the current focus pivot |
+| Middle-drag | Pan in the camera plane |
+| Wheel / high-resolution trackpad scroll | Proportional dolly; orthographic views change visible span |
+| F | Frame the selected rendered World entity |
+| Home / **Frame all visible objects** | Fit all extracted visible geometry |
+| Escape, right-button release, focus loss or hiding the viewport | Stop fly movement and release mouse capture |
+
+Plain left-drag is reserved for selection/tools. Double-click no longer resets
+the entire scene. An absent, hidden or non-renderable selection makes **F** a
+no-op. Framing uses transformed mesh bounds, fits both viewport axes, and
+preserves orientation. Pan uses the current lens, focus distance and drawable
+height, so resizing and display scaling do not change the intended displacement.
+Fractional pointer/scroll input is retained rather than rounded to mouse notches.
+On Cocoa and X11, fly look recenters the captured pointer and restores its starting
+position on release. Wayland forbids pointer warping through this Qt API, so it
+uses the delivered drag motion; continuous look at the screen edge still needs a
+compositor-supported relative-pointer integration.
+
+Focus distance is independent of the scene radius. The numerical safety range
+is `0.000001`–`10000000` world units, with origin-zero camera coordinates bounded
+to `10000000` units per component; rejected updates preserve the accepted camera.
+Framing/dollying adapts the perspective near plane for close inspection. The
+**Camera and diagnostics** controls expose absolute focus distance, and project
+preferences retain the owning camera pose/lens and pivot distance. Existing
+orbit-only preferences are migrated on load.
+
+This is editor navigation using C0 fixed publications, not an implementation of
+the proposed C1 director, transitions, damping, or C2 collision. Mouse displacement
+is applied once per event; fly movement integrates presentation elapsed time and
+caps a single update at 100 ms rather than integrating the entire duration of a UI
+stall. Navigation
+continues to use the current project's extracted World and existing GPU frame
+ownership; pending or failed scene preparation retains the last drawable view.
+
+The control vocabulary is adapted from Epic Games' [Viewport Controls](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-controls-in-unreal-engine).
 
 ### Audience tasks and acceptance cases
 
@@ -808,11 +862,11 @@ renders the same raster viewport into its two display images, and copies the
 latest completed image back to the CPU in bands that each fit one RHI transfer
 slice. A plain widget paints that `QImage`. The renderer keeps drawing into the
 other image while one is being copied, and the GUI thread only polls, so no call
-waits for the GPU. Orbit, pan, zoom and double-click framing work as in the shared
-path; resizing recreates the offscreen targets. The headless device admits the
-same storage budgets and raster profile as the shared device, so Lit shadow atlases
-fit on both paths. The copy costs some latency and bandwidth, and the frame is
-capped at 1024 pixels on its long side, the same as the shared path. Set
+waits for the GPU. [World navigation controls](#world-viewport-navigation) work as
+in the shared path; resizing recreates the offscreen targets. The headless device
+admits the same storage budgets and raster profile as the shared device, so Lit
+shadow atlases fit on both paths. The copy costs some latency and bandwidth, and the
+frame is capped at 1024 pixels on its long side, the same as the shared path. Set
 `LUDUS_EDITOR_VIEWPORT=offscreen` to force this path for testing.
 
 Offscreen Qt plugins without that variable, or machines with no Vulkan driver,

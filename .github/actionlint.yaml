@@ -1,0 +1,6 @@
+# actionlint configuration for ./scripts/check --tooling.
+self-hosted-runner:
+  # Device lane runners of the performance workflow; see
+  # docs/development/runtime-profiling.md#controlled-device-lane.
+  labels:
+    - ludus-perf

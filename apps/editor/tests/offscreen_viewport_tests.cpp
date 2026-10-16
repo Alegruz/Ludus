@@ -174,8 +174,8 @@ TEST_CASE("Lit shading with many shadowed lights renders through the offscreen V
     preview.SetShading(PreviewShading::Lit);
     preview.Resize(96, 64);
     REQUIRE(preview.Start() == true);
-    // Qt older than 6.6 presents Linux Vulkan through this device. It must carry
-    // the same lighting budgets as the Qt-shared device or the shadow atlas is refused.
+    // The Linux readback fallback presents through this device. It must carry the
+    // same lighting budgets as the Qt-shared device or the shadow atlas is refused.
     if (preview.AdmitOffscreenDevice() == false)
     {
         SKIP("No Vulkan device (install lavapipe for this smoke test)");
