@@ -1,5 +1,12 @@
 #include "internal/renderer_workspace.h"
 
+#include "internal/render_preview.h"
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+#    include "editor_renderer_static.h"
+#    include "internal/render_graph_preview.h"
+#    include "renderer_composite.h"
+#endif
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -14,6 +21,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
@@ -41,6 +49,61 @@ const QString HELPER_KEY = QStringLiteral("renderGraph/helper");
 const QString COMPILER_KEY = QStringLiteral("renderGraph/compiler");
 const QString VALIDATOR_KEY = QStringLiteral("renderGraph/validator");
 const QString SPIRV_CROSS_KEY = QStringLiteral("renderGraph/spirvCross");
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+/// Preview service period, about one 60 Hz display refresh.
+constexpr int32 PREVIEW_INTERVAL_MILLISECONDS = 16;
+#endif
+
+/// Paints the last presented preview frame, letterboxed to its aspect ratio.
+class PreviewImage final : public QWidget
+{
+public:
+    explicit PreviewImage(QWidget* parentOrNull) : QWidget(parentOrNull)
+    {
+        setObjectName(QStringLiteral("renderGraphPreviewImage"));
+        setMinimumSize(160, 120);
+        setAttribute(Qt::WA_OpaquePaintEvent);
+    }
+    void SetImage(const QImage& image)
+    {
+        mImage = image;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(9, 12, 15));
+        if (mImage.isNull() == true)
+        {
+            return;
+        }
+        const QSize size = mImage.size().scaled(this->size(), Qt::KeepAspectRatio);
+        const QRect target(QPoint((width() - size.width()) / 2, (height() - size.height()) / 2), size);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.drawImage(target, mImage);
+    }
+
+private:
+    QImage mImage;
+};
+
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+bool AreMatricesEqual(const math::Matrix4& left, const math::Matrix4& right)
+{
+    for (usize i = 0; i < 4; ++i)
+    {
+        const math::Vector4& a = left.Columns[i];
+        const math::Vector4& b = right.Columns[i];
+        if (a.X != b.X || a.Y != b.Y || a.Z != b.Z || a.W != b.W)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
 
 QStringList GetChoices(const QString& field)
 {
@@ -187,7 +250,8 @@ RendererWorkspace::RendererWorkspace(const ToolingPaths& tooling, QWidget* paren
       mEdgeTo(new QLineEdit(this)), mSourceFile(new QComboBox(this)), mSource(new QPlainTextEdit(this)),
       mPlan(new QPlainTextEdit(this)), mHelper(new QLineEdit(this)), mCompiler(new QLineEdit(this)),
       mValidator(new QLineEdit(this)), mSpirvCross(new QLineEdit(this)), mDiagnostics(new QListWidget(this)),
-      mStatus(new QLabel(this))
+      mStatus(new QLabel(this)), mCanvas(new RenderGraphCanvas(mDocument, this)), mPreviewImage(new PreviewImage(this)),
+      mPreviewStatus(new QLabel(this)), mPreviewButton(new QPushButton(QStringLiteral("&Preview Runtime"), this))
 {
     setObjectName(QStringLiteral("rendererWorkspace"));
     QPushButton* open = new QPushButton(QStringLiteral("&Open Graph..."), this);
@@ -292,18 +356,33 @@ RendererWorkspace::RendererWorkspace(const ToolingPaths& tooling, QWidget* paren
                                                   "project; saved sources are never modified by a build."),
                                    this));
 
+    // Preview: the cooked runtime generation on the World viewport device (RG3b).
+    QWidget* previewPage = new QWidget(this);
+    QVBoxLayout* previewLayout = new QVBoxLayout(previewPage);
+    mPreviewButton->setObjectName(QStringLiteral("renderGraphPreview"));
+    mPreviewButton->setToolTip(QStringLiteral("Stage the last cooked .lurgrt beside the drawing generation; it is "
+                                              "shown only after it activates and renders the World extraction."));
+    mPreviewStatus->setObjectName(QStringLiteral("renderGraphPreviewStatus"));
+    mPreviewStatus->setWordWrap(true);
+    previewLayout->addWidget(mPreviewButton);
+    previewLayout->addWidget(mPreviewStatus);
+    previewLayout->addWidget(mPreviewImage, 1);
+
     mTabs->addTab(mInspector, QStringLiteral("Inspector"));
     mTabs->addTab(sourcePage, QStringLiteral("Source"));
     mTabs->addTab(mPlan, QStringLiteral("Plan"));
     mTabs->addTab(buildPage, QStringLiteral("Build Settings"));
+    mTabs->addTab(previewPage, QStringLiteral("Preview"));
 
     mDiagnostics->setObjectName(QStringLiteral("renderGraphDiagnostics"));
     mStatus->setObjectName(QStringLiteral("renderGraphStatus"));
     mStatus->setWordWrap(true);
     QSplitter* horizontal = new QSplitter(Qt::Horizontal, this);
     horizontal->addWidget(mTree);
+    horizontal->addWidget(mCanvas);
     horizontal->addWidget(mTabs);
-    horizontal->setStretchFactor(1, 1);
+    horizontal->setStretchFactor(1, 2);
+    horizontal->setStretchFactor(2, 1);
     QSplitter* vertical = new QSplitter(Qt::Vertical, this);
     vertical->addWidget(horizontal);
     vertical->addWidget(mDiagnostics);
@@ -342,7 +421,49 @@ RendererWorkspace::RendererWorkspace(const ToolingPaths& tooling, QWidget* paren
         mSelectedNode = current->data(0, NODE_ROLE).toString();
         renderInspector();
         renderEdges();
+        renderCanvas();
     });
+    connect(mCanvas, &RenderGraphCanvas::NodeSelected, this, [this](const QString& node) {
+        mSelectedFile = mCanvas->GetFile();
+        mSelectedConfiguration = mCanvas->GetConfiguration();
+        mSelectedNode = node;
+        renderTree();
+    });
+    connect(mCanvas,
+            &RenderGraphCanvas::MoveRequested,
+            this,
+            [this](const QVector<RenderGraphNodePosition>& positions) {
+                documentEdited(mDocument.MoveNodes(mCanvas->GetFile(), mCanvas->GetConfiguration(), positions));
+            });
+    connect(mCanvas, &RenderGraphCanvas::ConnectRequested, this, [this](const QString& from, const QString& to) {
+        documentEdited(mDocument.Connect(mCanvas->GetFile(), mCanvas->GetConfiguration(), from, to));
+    });
+    connect(mCanvas, &RenderGraphCanvas::DisconnectRequested, this, [this](const QString& from, const QString& to) {
+        documentEdited(mDocument.Disconnect(mCanvas->GetFile(), mCanvas->GetConfiguration(), from, to));
+    });
+    connect(mCanvas, &RenderGraphCanvas::RemoveRequested, this, [this](const QString& node) {
+        if (node == mSelectedNode)
+        {
+            mSelectedNode.clear();
+        }
+        documentEdited(mDocument.RemoveNode(mCanvas->GetFile(), mCanvas->GetConfiguration(), node));
+    });
+    connect(mCanvas, &RenderGraphCanvas::LinkRejected, this, [this](const QString& reason) {
+        mStatus->setText(QStringLiteral("Link rejected - %1").arg(reason));
+    });
+    connect(mCanvas, &RenderGraphCanvas::SubgraphActivated, this, &RendererWorkspace::openSubgraph);
+    connect(mPreviewButton, &QPushButton::clicked, this, [this]() { static_cast<void>(PreviewRuntime()); });
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    namespace host = render_graph_packages::editor_renderer_static;
+    mPreviewOrNull = new RenderGraphPreview({host::INTERFACE_IDENTITY.GetData(), host::INTERFACE_IDENTITY.GetSize()},
+                                            shaders::renderer_composite::Vertex(),
+                                            shaders::renderer_composite::Fragment(),
+                                            this);
+    connect(mPreviewOrNull, &RenderGraphPreview::Changed, this, &RendererWorkspace::renderPreview);
+    connect(mPreviewOrNull, &RenderGraphPreview::FramePresented, this, &RendererWorkspace::renderPreview);
+    mPreviewTimer.setInterval(PREVIEW_INTERVAL_MILLISECONDS);
+    connect(&mPreviewTimer, &QTimer::timeout, this, &RendererWorkspace::ServicePreview);
+#endif
     connect(mLayoutX, &QSpinBox::editingFinished, this, [this]() {
         if (mSelectedNode.isEmpty() == false)
         {
@@ -399,6 +520,7 @@ RendererWorkspace::RendererWorkspace(const ToolingPaths& tooling, QWidget* paren
     }
     connect(&mJob, &RenderGraphJob::Finished, this, &RendererWorkspace::AcceptResult);
     renderStatus();
+    renderPreview();
 }
 
 RendererWorkspace::~RendererWorkspace() = default;
@@ -824,6 +946,7 @@ void RendererWorkspace::renderTree()
     mSourceFile->blockSignals(false);
     renderInspector();
     renderEdges();
+    renderCanvas();
 }
 
 void RendererWorkspace::renderInspector()
@@ -982,6 +1105,7 @@ void RendererWorkspace::renderStatus()
     mValidate->setEnabled(isOpen);
     mBuild->setEnabled(isOpen);
     mCook->setEnabled(isOpen);
+    mPreviewButton->setEnabled(isOpen == true && mPreviewOrNull != nullptr);
 }
 
 void RendererWorkspace::replaceSelectedField(const QString& field, const QJsonValue& value)
@@ -1146,5 +1270,157 @@ QString RendererWorkspace::GetRuntimePackagePath() const
 QString RendererWorkspace::GetStatusText() const
 {
     return mStatus->text();
+}
+
+void RendererWorkspace::renderCanvas()
+{
+    QString configuration = mSelectedConfiguration;
+    QJsonObject graph;
+    if (configuration.isEmpty() == true && mDocument.GetGraph(mSelectedFile, graph) == true)
+    {
+        // A selected file shows its authored default configuration.
+        configuration = graph.value(QStringLiteral("default")).toString();
+    }
+    mCanvas->ShowConfiguration(mDocument.IsLoaded() == true ? mSelectedFile : QString(), configuration);
+    mCanvas->SelectNode(mSelectedNode);
+}
+
+void RendererWorkspace::openSubgraph(const QString& asset, const QString& configuration)
+{
+    if (mDocument.GetFiles().contains(asset) == false)
+    {
+        mStatus->setText(QStringLiteral("Subgraph source %1 is not part of this package.").arg(asset));
+        return;
+    }
+    // Navigate canvas, tree and Source tab to the referenced asset's configuration.
+    mSelectedFile = asset;
+    mSelectedConfiguration = configuration;
+    mSelectedNode.clear();
+    mSourceFile->setCurrentText(asset);
+    renderTree();
+    renderSource();
+    mStatus->setText(QStringLiteral("Showing subgraph %1#%2.").arg(asset, configuration));
+}
+
+void RendererWorkspace::SetPreviewSource(RenderPreview* sourceOrNull)
+{
+    if (mPreviewSourceOrNull != nullptr)
+    {
+        disconnect(mPreviewSourceOrNull, nullptr, this, nullptr);
+    }
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mPreviewOrNull != nullptr && sourceOrNull != mPreviewSourceOrNull)
+    {
+        mPreviewOrNull->Detach();
+    }
+#endif
+    mPreviewSourceOrNull = sourceOrNull;
+    mPreviewDeviceSerial = 0;
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mPreviewSourceOrNull != nullptr && mPreviewOrNull != nullptr)
+    {
+        // Release generations before RenderPreview destroys the shared device.
+        connect(mPreviewSourceOrNull, &RenderPreview::DeviceStopping, this, [this]() {
+            mPreviewOrNull->Detach();
+            mPreviewDeviceSerial = 0;
+        });
+    }
+#endif
+    if (mPreviewSourceOrNull != nullptr)
+    {
+        connect(mPreviewSourceOrNull, &QObject::destroyed, this, [this]() {
+            mPreviewSourceOrNull = nullptr;
+            mPreviewDeviceSerial = 0;
+        });
+    }
+    renderPreview();
+}
+
+bool RendererWorkspace::PreviewRuntime()
+{
+    if (mPreviewOrNull == nullptr)
+    {
+        mStatus->setText(QStringLiteral("The render-graph preview needs the native editor built with "
+                                        "LUDUS_EDITOR_RENDER_PREVIEW."));
+        renderPreview();
+        return false;
+    }
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mDocument.IsLoaded() == false)
+    {
+        return false;
+    }
+    const RenderGraphPreviewLoad loaded = mPreviewOrNull->Load(GetRuntimePackagePath());
+    mPreviewTimer.start();
+    ServicePreview();
+    return loaded == RenderGraphPreviewLoad::Staged || loaded == RenderGraphPreviewLoad::Waiting;
+#else
+    return false;
+#endif
+}
+
+void RendererWorkspace::ServicePreview()
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mPreviewOrNull == nullptr)
+    {
+        return;
+    }
+    RenderGraphPreview& preview = *mPreviewOrNull;
+    if (mPreviewSourceOrNull != nullptr && mPreviewSourceOrNull->HasDevice() == true &&
+        (preview.IsAttached() == false || mPreviewSourceOrNull->GetDeviceSerial() != mPreviewDeviceSerial))
+    {
+        preview.Detach();
+        if (preview.Attach(mPreviewSourceOrNull->GetDevice(), mPreviewSourceOrNull->GetSurface()) == true)
+        {
+            mPreviewDeviceSerial = mPreviewSourceOrNull->GetDeviceSerial();
+            mPreviewSceneIdentity.clear();
+        }
+    }
+    const QSize target = preview.GetTargetSize();
+    if (mPreviewSourceOrNull != nullptr && preview.IsAttached() == true && target.isEmpty() == false)
+    {
+        // The World viewport's current camera or orbit, at the graph's exported extent.
+        graphics::renderer::ViewDescription view;
+        QString error;
+        const RenderScene& scene = mPreviewSourceOrNull->Scene();
+        if (mPreviewSourceOrNull->DescribeView(static_cast<uint32>(target.width()),
+                                               static_cast<uint32>(target.height()),
+                                               view,
+                                               error) == true &&
+            (scene.Identity != mPreviewSceneIdentity ||
+             AreMatricesEqual(view.WorldToClip, mPreviewWorldToClip) == false))
+        {
+            RenderGraphExtraction extraction;
+            if (MakeRenderGraphExtraction(scene, view, ++mPreviewRevision, extraction, error) == true)
+            {
+                preview.SetExtraction(extraction);
+            }
+            else
+            {
+                mPreviewStatus->setText(error);
+            }
+            mPreviewSceneIdentity = scene.Identity;
+            mPreviewWorldToClip = view.WorldToClip;
+        }
+    }
+    preview.Tick();
+#endif
+}
+
+void RendererWorkspace::renderPreview()
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mPreviewOrNull != nullptr)
+    {
+        static_cast<PreviewImage*>(mPreviewImage)->SetImage(mPreviewOrNull->GetImage());
+        mPreviewStatus->setText(mPreviewOrNull->GetStatus());
+        mPreviewButton->setEnabled(mDocument.IsLoaded());
+        return;
+    }
+#endif
+    mPreviewButton->setEnabled(false);
+    mPreviewStatus->setText(QStringLiteral("The render-graph preview needs the native editor built with "
+                                           "LUDUS_EDITOR_RENDER_PREVIEW and pinned shader tools."));
 }
 } // namespace ludus::editor

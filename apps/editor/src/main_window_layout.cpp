@@ -199,6 +199,8 @@ void MainWindow::BuildUi()
     WorkTabs_->addTab(Scripts_, QStringLiteral("&Scripts"));
     Renderer_ = new RendererWorkspace(Controller_->Tooling(), WorkTabs_);
     WorkTabs_->addTab(Renderer_, QStringLiteral("&Renderer"));
+    // The render-graph preview borrows the World viewport's device and extraction.
+    Renderer_->SetPreviewSource(&World_->GetRenderPreview());
     Configuration_ = new ConfigurationWorkspace(WorkTabs_);
     WorkTabs_->addTab(Configuration_, QStringLiteral("&Configuration"));
 

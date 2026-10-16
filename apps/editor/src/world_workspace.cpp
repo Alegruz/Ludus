@@ -1679,6 +1679,10 @@ bool WorldWorkspace::ConfirmDiscard()
     Changed(QStringLiteral("Changes discarded."));
     return true;
 }
+RenderPreview& WorldWorkspace::GetRenderPreview() noexcept
+{
+    return Render_->Preview();
+}
 bool WorldWorkspace::StartPreview()
 {
     if (!IsWorldDemo(Document_) || !Apply())
