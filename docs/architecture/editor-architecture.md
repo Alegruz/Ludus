@@ -146,8 +146,10 @@ inspection and version activation are owned by the
 [render graph authoring architecture](render-graph-authoring.md). Shader source
 authors provide computations and requirements; the graph owns resource wiring.
 Preview and live execution share the cooked Renderer/RHI contract, while keeping
-their process, scene and resource-instance ownership explicit. This is future S5
-work with RG0-RG4 acceptance gates, not delivered by the current scene adapter.
+their process, scene and resource-instance ownership explicit. RG3a delivers a
+Renderer tab with typed graph/source drafts, undo, explicit save, mapped
+diagnostics and shared CLI jobs; its node canvas and live in-editor preview are
+RG3b. See [edit and reload graphs](../development/render-graph-authoring.md#edit-and-reload-graphs-rg3).
 
 ## Performance and observability
 

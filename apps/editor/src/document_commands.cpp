@@ -3,6 +3,7 @@
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
 #include "internal/content_browser.h"
+#include "internal/renderer_workspace.h"
 #include "internal/script_workspace.h"
 #include "internal/world_workspace.h"
 
@@ -46,10 +47,12 @@ void MainWindow::RenderDocumentActions()
     const bool configuration = area == Configuration_;
     const bool scripts = area == Scripts_;
     const bool world = area == World_;
+    const bool isRenderer = area == Renderer_;
     SaveAction_->setText(project         ? QStringLiteral("&Save Project Settings")
                          : audio         ? QStringLiteral("&Save Audio")
                          : world         ? QStringLiteral("&Save World")
                          : scripts       ? QStringLiteral("&Save Script Asset")
+                         : isRenderer    ? QStringLiteral("&Save Render Graph")
                          : configuration ? QStringLiteral("&Save Preferences")
                                          : QStringLiteral("&Save"));
     // Clean project saves are available too: the focused argument delegate may
@@ -58,11 +61,12 @@ void MainWindow::RenderDocumentActions()
                              Controller_->State().Draft.SourceDir != Controller_->State().Saved.SourceDir;
     SaveAction_->setToolTip(rootBlocked ? QStringLiteral("Finish or cancel content work before changing its root.")
                                         : QString());
-    SaveAction_->setEnabled(project   ? Controller_->Caps().CanEdit && !rootBlocked
-                            : audio   ? Audio_->CanSave()
-                            : world   ? World_->CanSave()
-                            : scripts ? Scripts_->CanSave()
-                                      : configuration && Configuration_->Preview() != nullptr);
+    SaveAction_->setEnabled(project      ? Controller_->Caps().CanEdit && rootBlocked == false
+                            : audio      ? Audio_->CanSave()
+                            : world      ? World_->CanSave()
+                            : scripts    ? Scripts_->CanSave()
+                            : isRenderer ? Renderer_->CanSave()
+                                         : configuration && Configuration_->Preview() != nullptr);
 #if defined(Q_OS_WASM)
     if (project || configuration)
     {
@@ -86,12 +90,14 @@ void MainWindow::RenderDocumentActions()
     else
     {
         const bool inProject = project && (focus == nullptr || ProjectSettings_->isAncestorOf(focus));
-        UndoAction_->setEnabled(world     ? World_->CanUndo()
-                                : scripts ? Scripts_->CanUndo()
-                                          : inProject && Controller_->CanUndoProject());
-        RedoAction_->setEnabled(world     ? World_->CanRedo()
-                                : scripts ? Scripts_->CanRedo()
-                                          : inProject && Controller_->CanRedoProject());
+        UndoAction_->setEnabled(world        ? World_->CanUndo()
+                                : scripts    ? Scripts_->CanUndo()
+                                : isRenderer ? Renderer_->CanUndo()
+                                             : inProject && Controller_->CanUndoProject());
+        RedoAction_->setEnabled(world        ? World_->CanRedo()
+                                : scripts    ? Scripts_->CanRedo()
+                                : isRenderer ? Renderer_->CanRedo()
+                                             : inProject && Controller_->CanRedoProject());
     }
 }
 
@@ -117,6 +123,10 @@ void MainWindow::OnUndoRequested()
     else if (WorkTabs_->currentWidget() == Scripts_)
     {
         Scripts_->Undo();
+    }
+    else if (WorkTabs_->currentWidget() == Renderer_)
+    {
+        Renderer_->Undo();
     }
     else if (WorkTabs_->currentWidget() == ProjectSettings_ && UndoAction_->isEnabled())
     {
@@ -147,6 +157,10 @@ void MainWindow::OnRedoRequested()
     else if (WorkTabs_->currentWidget() == Scripts_)
     {
         Scripts_->Redo();
+    }
+    else if (WorkTabs_->currentWidget() == Renderer_)
+    {
+        Renderer_->Redo();
     }
     else if (WorkTabs_->currentWidget() == ProjectSettings_ && RedoAction_->isEnabled())
     {

@@ -7,12 +7,17 @@
 
 #include <ludus/foundation/base/compiler.h>
 
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/filesystem/filesystem.hpp>
 #include <ludus/graphics/renderer/render_graph.hpp>
+#include <ludus/graphics/renderer/render_graph_activation.hpp>
 #include <ludus/graphics/renderer/views.hpp>
 #include <ludus/graphics/rhi/device.h>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <new>
 
 using namespace ludus::foundation;
 namespace renderer = ludus::graphics::renderer;
@@ -85,6 +90,24 @@ struct GraphGpuFixture final
         REQUIRE(rhi::backend::ReadHeadlessPixels(Pixels.AsSpan()) == true);
     }
 };
+/// Read the build-tree runtime generation cooked by ludus_compile_render_graph(... RUNTIME_PACKAGE).
+core::UniquePtr<renderer::RenderGraphPackage> LoadSurfacePackage()
+{
+    filesystem::Directory directory;
+    REQUIRE(directory.Open(LUDUS_RG3_SURFACE_DIRECTORY).Succeeded() == true);
+    filesystem::File file;
+    REQUIRE(directory.OpenRead("rg2_surface.lurgrt", file).Succeeded() == true);
+    Array<uint8> bytes;
+    REQUIRE(bytes.TryResize(static_cast<usize>(file.Size())) == true);
+    const filesystem::ReadResult read = file.ReadAt(0, bytes.AsSpan());
+    REQUIRE(read.Outcome.Succeeded() == true);
+    REQUIRE(read.BytesRead == bytes.GetSize());
+    renderer::RenderGraphPackage* allocationOrNull = new (std::nothrow) renderer::RenderGraphPackage;
+    core::UniquePtr<renderer::RenderGraphPackage> package{allocationOrNull};
+    REQUIRE(package.Get() != nullptr);
+    REQUIRE(package->Decode({bytes.GetData(), bytes.GetSize()}) == renderer::RenderGraphPackageStatus::Ready);
+    return package;
+}
 } // namespace
 TEST_CASE("RG2 cooked graph renders extracted geometry and follows camera/instance changes", "[render-graph][gpu]")
 {
@@ -244,4 +267,68 @@ TEST_CASE("RG2 depth-only export samples actual opaque geometry depth", "[render
     displayDepth();
     CHECK(fixture.Pixels[centerPixel] >= 127);
     CHECK(fixture.Pixels[centerPixel] <= 128);
+}
+TEST_CASE("RG3 runtime generation renders the same pixels as its compiled header across activation",
+          "[render-graph][gpu][activation]")
+{
+    GraphGpuFixture fixture;
+    fixture.Items[0].Material.Color = {.25F, .5F, .75F, 1};
+    REQUIRE(fixture.Graph.Initialize(fixture.Device,
+                                     packages::rg2_surface::MakePlan(),
+                                     packages::rg2_surface::MakePrograms(shaders::renderer_composite::Vertex(),
+                                                                         shaders::renderer_composite::Fragment())) ==
+            rhi::RasterStatus::Ready);
+    fixture.Update(1);
+    fixture.Render();
+    const StaticArray<uint8, PIXEL_BYTES> compiled = fixture.Pixels;
+    fixture.Graph.Reset();
+    renderer::RenderGraphActivation activation;
+    REQUIRE(activation.Initialize(fixture.Device,
+                                  {packages::rg2_surface::INTERFACE_IDENTITY.GetData(),
+                                   packages::rg2_surface::INTERFACE_IDENTITY.GetSize()},
+                                  shaders::renderer_composite::Vertex(),
+                                  shaders::renderer_composite::Fragment()) == rhi::RasterStatus::Ready);
+    const rhi::RasterStatus staged = activation.Stage(LoadSurfacePackage());
+    REQUIRE((staged == rhi::RasterStatus::Ready || staged == rhi::RasterStatus::Pending));
+    rhi::RasterStatus polled = activation.Poll();
+    for (usize attempt = 0; polled == rhi::RasterStatus::Pending && attempt < 1000; ++attempt)
+    {
+        polled = activation.Poll();
+    }
+    REQUIRE(polled == rhi::RasterStatus::Ready);
+    REQUIRE(activation.GetReport().ActiveGeneration == 1);
+    // Stage a second decoded generation, then activate it at a frame boundary.
+    renderer::RenderGraphReport report;
+    REQUIRE(activation.Update({fixture.Meshes.GetData(), fixture.Meshes.GetSize()},
+                              {fixture.Items.GetData(), fixture.Items.GetSize()},
+                              {fixture.Cameras.GetData(), fixture.Cameras.GetSize()},
+                              1,
+                              renderer::RenderGraphCoveragePolicy::RejectIncomplete,
+                              report) == rhi::RasterStatus::Ready);
+    const rhi::RasterStatus restaged = activation.Stage(LoadSurfacePackage());
+    REQUIRE((restaged == rhi::RasterStatus::Ready || restaged == rhi::RasterStatus::Pending));
+    for (usize attempt = 0; activation.GetReport().ActiveGeneration != 2 && attempt < 1000; ++attempt)
+    {
+        REQUIRE(activation.Poll() == rhi::RasterStatus::Ready);
+        if (activation.GetReport().Candidate == renderer::RenderGraphCandidateState::NeedsUpdate)
+        {
+            REQUIRE(activation.Update({fixture.Meshes.GetData(), fixture.Meshes.GetSize()},
+                                      {fixture.Items.GetData(), fixture.Items.GetSize()},
+                                      {fixture.Cameras.GetData(), fixture.Cameras.GetSize()},
+                                      1,
+                                      renderer::RenderGraphCoveragePolicy::RejectIncomplete,
+                                      report) == rhi::RasterStatus::Ready);
+        }
+    }
+    REQUIRE(activation.GetReport().ActiveGeneration == 2);
+    renderer::RenderGraph* activeOrNull = activation.GetActiveOrNull();
+    REQUIRE(activeOrNull != nullptr);
+    rhi::SubmissionToken completion;
+    REQUIRE(activeOrNull->Render(fixture.Surface, WIDTH, HEIGHT, completion) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::backend::ReadHeadlessPixels(fixture.Pixels.AsSpan()) == true);
+    for (usize i = 0; i < PIXEL_BYTES; ++i)
+    {
+        REQUIRE(fixture.Pixels[i] == compiled[i]);
+    }
+    activation.Reset();
 }

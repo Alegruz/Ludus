@@ -1,8 +1,9 @@
-add_library(ludus_graphics_renderer STATIC src/render_graph.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/static_lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp)
+add_library(ludus_graphics_renderer STATIC src/render_graph.cpp src/render_graph_activation.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/static_lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp)
 add_library(Ludus::GraphicsRenderer ALIAS ludus_graphics_renderer)
 set_target_properties(ludus_graphics_renderer PROPERTIES EXPORT_NAME GraphicsRenderer)
 target_sources(ludus_graphics_renderer PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include FILES
     include/ludus/graphics/renderer/render_graph.hpp
+    include/ludus/graphics/renderer/render_graph_activation.hpp
     include/ludus/graphics/renderer/renderer.hpp
     include/ludus/graphics/renderer/views.hpp
     include/ludus/graphics/renderer/overlays.hpp
@@ -25,7 +26,7 @@ install(FILES include/ludus/graphics/renderer/lighting_layout.h shaders/recipes.
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     # Exercise the production renderer/RHI registry with the existing deterministic backend.
-    add_executable(ludus_renderer_tests tests/renderer_tests.cpp tests/reference_backend.cpp src/render_graph.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/static_lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp tests/views_tests.cpp tests/static_lighting_tests.cpp tests/render_graph_tests.cpp
+    add_executable(ludus_renderer_tests tests/renderer_tests.cpp tests/reference_backend.cpp src/render_graph.cpp src/render_graph_activation.cpp src/renderer.cpp src/viewport.cpp src/views.cpp src/overlays.cpp src/lighting.cpp src/static_lighting.cpp src/environment.cpp src/reference_bsdf.cpp src/reference_scene.cpp src/reference_path.cpp tests/views_tests.cpp tests/static_lighting_tests.cpp tests/render_graph_tests.cpp tests/render_graph_activation_tests.cpp
         ../rhi/src/rhi.cpp ../rhi/src/device.cpp ../rhi/src/profile.cpp ../rhi/src/raster.cpp ../rhi/tests/reference_raster.cpp ../rhi/src/ray_unsupported.cpp)
     target_include_directories(ludus_renderer_tests PRIVATE include ../rhi/include ../rhi/src ../rhi/tests "${PROJECT_SOURCE_DIR}/tests/sdk_consumer")
     target_link_libraries(ludus_renderer_tests PRIVATE Ludus::RenderGraphFormat Ludus::Platform Ludus::FoundationContainers Ludus::FoundationMath Ludus::Resources Ludus::FoundationHash Catch2::Catch2WithMain)
@@ -88,8 +89,13 @@ if(TARGET ludus_renderer_render_tests)
         file(COPY "${input}/" DESTINATION "${staged}" PATTERN "*.in" EXCLUDE)
         configure_file("${input}/main.lushader.json.in" "${staged}/main.lushader.json" @ONLY)
         ludus_compile_render_graph(TARGET ludus_renderer_render_tests NAME rg2_${kind}
-            MANIFEST "${staged}/main.lushader.json")
+            MANIFEST "${staged}/main.lushader.json" RUNTIME_PACKAGE)
     endforeach()
+    # RG3 loads the same cooked surface generation at runtime and compares pixels with its header.
+    cmake_path(GET rg2_surface_RUNTIME_PACKAGE PARENT_PATH rg3_surface_directory)
+    target_compile_definitions(ludus_renderer_render_tests PRIVATE
+        LUDUS_RG3_SURFACE_DIRECTORY="${rg3_surface_directory}")
+    target_link_libraries(ludus_renderer_render_tests PRIVATE Ludus::FoundationFilesystem)
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME rg2_depth_display RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/rg2/depth_display.slang" VERTEX VSMain FRAGMENT PSMain)
 endif()
