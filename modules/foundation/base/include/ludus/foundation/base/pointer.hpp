@@ -19,7 +19,7 @@ namespace ludus::foundation::core
 {
 /// @brief Ordinary `delete` destruction protocol for one complete, non-array object.
 ///
-/// The primary template marks itself with `IS_ORDINARY_DELETE`, which is what
+/// The primary template declares `OrdinaryDeleteTag`, which is what
 /// permits implicit `UniquePtr<Derived>` to `UniquePtr<Base>` conversion.
 /// Native specializations (for example the Wayland object deleters) supply their
 /// own `operator()` for incomplete external types and deliberately omit the
@@ -31,7 +31,7 @@ template <typename ElementType>
 struct DefaultDeleter
 {
     /// @brief Identifies the audited ordinary-`delete` protocol of the primary template.
-    static constexpr bool IS_ORDINARY_DELETE = true;
+    using OrdinaryDeleteTag = void;
 
     /// @brief Destroys `pointerOrNull` with ordinary `delete`.
     /// @param pointerOrNull Object created by ordinary non-array `new` for exactly this
@@ -67,8 +67,8 @@ namespace ludus::foundation::core::detail
 {
 // The primary DefaultDeleter's audited ordinary-delete protocol for ElementType.
 template <typename DeleterType, typename ElementType>
-concept OrdinaryDeleter = std::is_same_v<DeleterType, DefaultDeleter<ElementType>> &&
-                          requires { requires DeleterType::IS_ORDINARY_DELETE == true; };
+concept OrdinaryDeleter =
+    std::is_same_v<DeleterType, DefaultDeleter<ElementType>> && requires { typename DeleterType::OrdinaryDeleteTag; };
 
 // Bare Release() is an audited escape only for stateless members of the
 // DefaultDeleter family, including native specializations.
