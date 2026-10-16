@@ -421,17 +421,17 @@ constexpr usize WORKLOAD_COUNT =
 #endif
 
 const StaticArray<Workload, WORKLOAD_COUNT> WORKLOADS = {{
-    {.Name = "idle", .Run = RunIdle},
-    {.Name = "system-small-churn", .Run = RunSystemSmallChurn},
-    {.Name = "system-large-blocks", .Run = RunSystemLargeBlocks},
-    {.Name = "system-remote-free", .Run = RunSystemRemoteFree},
-    {.Name = "array-append-unreserved", .Run = RunArrayAppendUnreserved},
-    {.Name = "array-append-reserved", .Run = RunArrayAppendReserved},
-    {.Name = "array-append-aligned64", .Run = RunArrayAppendAligned64},
+    { .Name = "idle", .Run = RunIdle },
+    { .Name = "system-small-churn", .Run = RunSystemSmallChurn },
+    { .Name = "system-large-blocks", .Run = RunSystemLargeBlocks },
+    { .Name = "system-remote-free", .Run = RunSystemRemoteFree },
+    { .Name = "array-append-unreserved", .Run = RunArrayAppendUnreserved },
+    { .Name = "array-append-reserved", .Run = RunArrayAppendReserved },
+    { .Name = "array-append-aligned64", .Run = RunArrayAppendAligned64 },
 #if LUDUS_PROFILING_ENABLED
-    {.Name = "trace-emit-1-thread", .Run = RunTraceEmitOneThread},
-    {.Name = "trace-emit-4-threads", .Run = RunTraceEmitFourThreads},
-    {.Name = "trace-session-setup", .Run = RunTraceSessionSetup},
+    { .Name = "trace-emit-1-thread", .Run = RunTraceEmitOneThread },
+    { .Name = "trace-emit-4-threads", .Run = RunTraceEmitFourThreads },
+    { .Name = "trace-session-setup", .Run = RunTraceSessionSetup },
 #endif
 }};
 
