@@ -325,3 +325,50 @@ intentional-failure regressions verify diagnostics and failing exit codes.
 `python tools/check_build_time_includes.py` runs before CI compilation and rejects
 standard formatting in owned sources and heavy headers in public module headers.
 Concepts, traits and explicitly approved low-level operations remain permitted.
+
+## Native C++ module scanning
+
+Ludus uses no C++20 named modules or `import std`. With Ninja and C++23, CMake
+3.28+ (policy CMP0155) still runs `clang-scan-deps` on every C++ source and
+collates each target's results before that target compiles. The root
+`CMakeLists.txt` disabled scanning only for Emscripten; it now sets
+`CMAKE_CXX_SCAN_FOR_MODULES OFF` for every engine target.
+
+Measured with `./scripts/profile-build macos-clang-development` (RelWithDebInfo,
+tests enabled, ccache off) on a 10-core Apple M5 host. Four before/after pairs
+ran interleaved, three with `--no-time-trace` and one with time traces. After
+each clean build, `core.h` was touched and the tree rebuilt to measure the
+inner loop.
+
+| Measurement | Scanning on | Scanning off |
+| --- | ---: | ---: |
+| Clean-build Ninja edges | 1559 | 543 |
+| Compiler invocations (`.o`) | 382 | 382 |
+| Scan and collation CPU, clean build | 103–129 s | 0 |
+| Ninja edges after touching `core.h` | 1046 | 349 |
+| Scan and collation CPU after touching `core.h` | 75–104 s | 0 |
+| Configure, median of five interleaved runs | 5.40 s | 5.15 s |
+
+The removed edges are 375 `.ddi` scans, 375 `.modmap` files, and 133 each of
+the per-target `CXX.dd` and `CXXModules.json` collation outputs. Their CPU time
+comes from the scanning-on runs' own `.ninja_log` and adds 11–15% to compile CPU
+for a clean build and 9–16% after touching `core.h`.
+
+No wall-time improvement is claimed. The host was shared with other builds
+(load average 9–28), and the same 382 compilations summed between 757 s and
+1250 s across runs. Clean-build wall time was 72–108 s with scanning and
+60–108 s without, and the paired differences changed sign. At full local
+parallelism the removed work mostly overlaps compilation; it matters most with
+few jobs, such as CI's `CMAKE_BUILD_PARALLEL_LEVEL=2`. Compare the CI job
+summaries' build wall time before and after this change.
+
+The ClangBuildAnalyzer aggregate gated by the build-time budget is essentially
+unaffected: the time-trace pair recorded 718 and 715 compilation events. Their
+frontend totals (423.5 s and 386.1 s) moved with their backend totals (276.5 s
+and 249.0 s), which scanning does not touch, so the difference is host load.
+No budget changes.
+
+`compile_commands.json` entries no longer reference generated `.modmap`
+response files. Game projects configured through the installed SDK keep CMake's
+default and still scan. Re-enable scanning for any target that adopts named
+modules.
