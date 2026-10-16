@@ -73,11 +73,8 @@ struct RenderPreview::GpuResources final
     bool IsBakePublished = false;
     ~GpuResources() noexcept
     {
-        if (BakeWorker.Get() != nullptr)
-        {
-            BakeWorker->requestInterruption();
-            BakeWorker.Reset();
-        }
+        // Cancels and drains an in-flight bake before the borrowed scene is released.
+        BakeWorker.Reset();
         Bake.Reset();
         Viewport.Reset();
         Renderer.Reset();
@@ -289,9 +286,11 @@ bool RenderPreview::beginResourceRestart() noexcept
     candidate->Device = Device_;
     candidate->Source = Scene_;
     candidate->LightingKey = preview_lighting::MakeKey(Scene_);
-    if (mResources.Get() != nullptr && mResources->BakeWorker.Get() != nullptr)
+    // Cancel and drain the obsolete bake now: the preview's JobSystem runs one bake
+    // at a time, and a retired generation can outlive this call.
+    if (mResources.Get() != nullptr)
     {
-        mResources->BakeWorker->requestInterruption();
+        mResources->BakeWorker.Reset();
     }
     if (mHasPendingFrame == true)
     {
@@ -1282,23 +1281,29 @@ void RenderPreview::serviceStaticLighting()
         description.SceneRevision = resources.Lighting.SceneRevision;
         description.DependencyRevision = resources.Lighting.DependencyRevision;
         description.Surfaces = {resources.Lighting.Surfaces.GetData(), count};
+        if (mHasBakeJobs == false)
+        {
+            mHasBakeJobs = mBakeJobs.Initialize({ .WorkerCount = STATIC_LIGHTING_WORKER_COUNT }) ==
+                           foundation::threading::JobStatus::Ok;
+        }
         resources.BakeWorker.Reset(new (std::nothrow) StaticLightingJob(resources.Source, description));
         resources.HasBakeStarted = true;
-        if (resources.BakeWorker.Get() == nullptr)
+        if (mHasBakeJobs == false || resources.BakeWorker.Get() == nullptr ||
+            resources.BakeWorker->Start(mBakeJobs) != rhi::RasterStatus::Pending)
         {
+            resources.BakeWorker.Reset();
             resources.HasBakeFailed = true;
-            return;
+            FreshReport_ = true;
         }
-        resources.BakeWorker->start();
         return;
     }
     if (resources.BakeWorker.Get() != nullptr)
     {
-        if (resources.BakeWorker->wait(0) == false)
+        const rhi::RasterStatus status = resources.BakeWorker->Poll();
+        if (status == rhi::RasterStatus::Pending)
         {
             return;
         }
-        const rhi::RasterStatus status = resources.BakeWorker->GetStatus();
         if (status != rhi::RasterStatus::Ready)
         {
             resources.HasBakeFailed = true;
