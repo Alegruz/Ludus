@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from .package_limits import MAX_NATIVE_INSPECTION_OUTPUT_BYTES
 from .release_model import fail
 
 # Declared external ABI baseline, not a sweep of the producer machine. GPU and
@@ -49,10 +50,10 @@ def validate_native(root: Path, entry_point: str) -> list[str]:
                                         env=env, timeout=30, check=False)
             except (OSError, subprocess.TimeoutExpired):
                 fail("native inspection failed or timed out", "InvalidPackage")
-            if result.returncode or output.tell() > 8 * 1024 * 1024:
+            if result.returncode or output.tell() > MAX_NATIVE_INSPECTION_OUTPUT_BYTES:
                 fail(f"cannot inspect ELF file {path.relative_to(root)}", "InvalidPackage")
             output.seek(0)
-            report = output.read(8 * 1024 * 1024).decode("utf-8", errors="replace")
+            report = output.read(MAX_NATIVE_INSPECTION_OUTPUT_BYTES).decode("utf-8", errors="replace")
         if "ELF64" not in report or "Advanced Micro Devices X86-64" not in report:
             fail("native payload contains a non-x64 ELF", "InvalidPackage")
         if re.search(r"\.(?:debug|zdebug)[._]", report):

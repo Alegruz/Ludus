@@ -8,7 +8,7 @@ add_library(Ludus::SceneCook ALIAS ludus_scene_cook)
 set_target_properties(ludus_scene_cook PROPERTIES EXPORT_NAME SceneCook)
 target_sources(ludus_scene_cook PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
     FILES include/ludus/content/scene_cook/scene_cook.h include/ludus/content/scene_cook/scene_assets.h
-    include/ludus/content/scene_cook/best_effort_import.h)
+    include/ludus/content/scene_cook/best_effort_import.h include/ludus/content/scene_cook/limits.h)
 target_link_libraries(ludus_scene_cook
     PUBLIC Ludus::Content Ludus::FoundationContainers Ludus::FoundationStrings
     PRIVATE Ludus::SceneFormat Ludus::FoundationMath Ludus::FoundationParsingJson ludus_stb_image)

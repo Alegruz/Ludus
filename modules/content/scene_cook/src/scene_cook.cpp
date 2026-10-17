@@ -8,7 +8,9 @@
 // Every arithmetic step mirrors the CPython 3.12 reference in float64 order,
 // including Neumaier-compensated sum(), so outputs are byte-identical.
 
+#include <ludus/content/scene_cook/limits.h>
 #include <ludus/content/scene_cook/scene_cook.h>
+#include <ludus/content/scene_format/limits.h>
 #include <ludus/content/scene_format/luscn.h>
 
 #include "native_files.h"
@@ -920,7 +922,7 @@ ApplyCamera(CookContext& inoutContext, const Command& command, SceneState& inout
 {
     Failure& errors = inoutContext.Errors;
     Bytes raw;
-    if (inoutContext.ReadBounded("scene-v4.pbrt", usize{1024} * 1024, raw) == false)
+    if (inoutContext.ReadBounded("scene-v4.pbrt", MAX_REFERENCE_DOCUMENT_BYTES, raw) == false)
     {
         return false;
     }
@@ -1416,11 +1418,11 @@ struct PlyHeader final
     const uint8 bits = data[16];
     const uint8 flags = data[17];
     if (colorMapType != 0 || kind != 2 || (bits != 24 && bits != 32) || (flags & 0xC0) != 0 || width == 0 ||
-        width > 4096 || height == 0 || height > 4096)
+        width > format::MAX_TEXTURE_DIMENSION || height == 0 || height > format::MAX_TEXTURE_DIMENSION)
     {
         return errors.FailInvalid("only bounded uncompressed true-color TGA is supported");
     }
-    if (width * height * 4 > usize{16} * 1024 * 1024)
+    if (width * height * format::TEXEL_BYTES > format::MAX_TEXTURE_BYTES)
     {
         return errors.FailInvalid("decoded texture byte limit");
     }
@@ -1430,7 +1432,7 @@ struct PlyHeader final
     {
         return errors.FailInvalid("truncated TGA");
     }
-    if (outImage.Rgba.TryResize(width * height * 4) == false)
+    if (outImage.Rgba.TryResize(width * height * format::TEXEL_BYTES) == false)
     {
         return errors.FailOutOfMemory();
     }
@@ -2347,7 +2349,7 @@ struct Cooker final
             for (const AtlasPiece& piece : pieces)
             {
                 CookedVertices += 3;
-                if (CookedVertices > 500000)
+                if (CookedVertices > format::MAX_VERTICES)
                 {
                     return errors.Fail(Status::Limit, "expanded vertex limit");
                 }
@@ -2385,7 +2387,7 @@ struct Cooker final
             return false;
         }
         decoded += inoutCooker.Images[i].Rgba.GetSize();
-        if (decoded > usize{32} * 1024 * 1024)
+        if (decoded > format::MAX_TOTAL_TEXTURE_BYTES)
         {
             return errors.FailInvalid("decoded texture byte limit");
         }
@@ -2897,7 +2899,7 @@ void WriteHexString(PythonJsonWriter& inoutJson, const Digest& digest) noexcept
         return false;
     }
     Bytes license;
-    if (inoutContext.ReadBounded("LICENSE.txt", usize{1024} * 1024, license) == false)
+    if (inoutContext.ReadBounded("LICENSE.txt", MAX_LICENSE_BYTES, license) == false)
     {
         return false;
     }

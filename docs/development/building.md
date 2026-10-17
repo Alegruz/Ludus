@@ -590,6 +590,14 @@ annotations at the RHI shader interface boundary. Existing violations are
 migration debt and cannot excuse newly added violations; no debt manifest is
 regenerated. This is a lexical check: it does not resolve C++ types, prove a
 coordinate transform, judge an exception's reason, or validate a native binding.
+The gate also rejects recognizable copies of the 500,000-vertex ceiling and
+1/4/8/16/32/64 MiB capacities in scene-cooker implementation files, Content's
+native file adapter and the Editor's scene composer. It recognizes decimal byte
+counts, ordinary `1024 * 1024` expressions (including `usize{...}`) and `<< 20`.
+Comments, strings, directives, unchanged lines, owner headers and test fixtures
+are excluded. It does not evaluate arbitrary C++ expressions or establish that
+the selected constant represents the right policy; review those semantics using
+[limit ownership](../architecture/content-resources.md#limit-ownership).
 Formatting, compilation, independent shader reflection and semantic review
 remain necessary. Shader entry-point renames must update every source and
 installed-SDK cook call; shared includes must be installed and appear in compiler

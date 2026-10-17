@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ludus/content/content.h>
+#include <ludus/content/scene_cook/limits.h>
 #include <ludus/foundation/containers/array.hpp>
 
 #include <string_view>
@@ -17,8 +18,6 @@ namespace ludus::content::scene_cook
 {
 /// Profile identifier of the cooked bundle layout and manifest.
 inline constexpr std::string_view PROFILE = "pbrt-reference-v1";
-/// Largest source file admitted by the cooker (bundles are bounded by scene_format::MAX_BUNDLE_BYTES).
-inline constexpr usize MAX_SOURCE_BYTES = usize{64} * 1024 * 1024;
 
 /// @brief Cooperative cancellation hook polled between bounded work units.
 struct Cancellation final

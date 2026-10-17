@@ -119,6 +119,28 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
         )
 
     if Path(path).suffix in CPP:
+        # A narrow changed-line guard for the consolidated admission paths.
+        # Other spellings, derived expressions and unrelated policies still need review.
+        if (
+            path.startswith("modules/content/scene_cook/src/")
+            or path in {"modules/content/src/files.cpp", "apps/editor/src/render_scene.cpp"}
+        ):
+            suffix = r"[uUlL]*"
+            integer = r"(?:usize\s*\{\s*)?{number}" + suffix + r"\s*\}?"
+            kibibyte = integer.replace("{number}", "1024")
+            mebibytes = integer.replace("{number}", "(?:1|4|8|16|32|64)")
+            patterns = (
+                r"(?<![\w.])(?:500000|1048576|4194304|8388608|16777216|33554432|67108864)" + suffix + r"(?![\w.])",
+                r"(?<![\w.])" + mebibytes + r"\s*\*\s*" + kibibyte + r"\s*\*\s*1024" + suffix + r"(?![\w.])",
+                r"(?<![\w.])" + kibibyte + r"\s*\*\s*1024" + suffix + r"(?![\w.])",
+                r"(?<![\w.])" + mebibytes + r"\s*<<\s*20" + suffix + r"(?![\w.])",
+            )
+            for match in re.finditer("|".join(patterns), code):
+                # Do not mistake the tail of an unrelated product (e.g. 256 MiB)
+                # for an independently written 1 MiB policy.
+                if code[:match.start()].rstrip().endswith("*"):
+                    continue
+                report(match.start(), "reuse the owning admission-limit constant instead of a duplicated capacity literal")
         for offset, _, message in pointer_findings(code):
             report(offset, message)
         for match in re.finditer(r"!(?!=)|\bnot\b", code):

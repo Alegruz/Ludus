@@ -1,6 +1,7 @@
 // Golden and behaviour tests for the native scene asset catalog (scene_assets.py port).
 
 #include <ludus/content/content.h>
+#include <ludus/content/scene_cook/limits.h>
 #include <ludus/content/scene_cook/scene_assets.h>
 #include <ludus/content/scene_cook/scene_cook.h>
 #include <ludus/content/scene_format/luscn.h>
@@ -1287,4 +1288,36 @@ TEST_CASE("Malformed v3 source fields never publish a candidate catalog", "[scen
         REQUIRE(ReadCatalog(root, after, error));
         CHECK(ToText(before) == ToText(after));
     }
+}
+
+TEST_CASE("Scene catalog reads admit their byte ceiling and reject overflow without replacing output",
+          "[scene_assets][limits]")
+{
+    const std::filesystem::path work = MakeWorkDirectory();
+    std::filesystem::create_directories(work / "assets");
+    const std::filesystem::path path = work / "assets/catalog.json";
+    constexpr std::string_view EMPTY_CATALOG = "{\"resources\":{},\"version\":1}\n";
+    std::string input(EMPTY_CATALOG);
+    input.resize(MAX_CATALOG_BYTES, ' ');
+    {
+        std::ofstream file(path, std::ios::binary);
+        file.write(input.data(), static_cast<std::streamsize>(input.size()));
+        file.close();
+        REQUIRE(file.good() == true);
+    }
+    Array<uint8> catalog;
+    AssetError error;
+    REQUIRE(ReadCatalog(work.string(), catalog, error) == true);
+    CHECK(ToText(catalog) == EMPTY_CATALOG);
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::app);
+        file.put(' ');
+        file.close();
+        REQUIRE(file.good() == true);
+    }
+    CHECK(ReadCatalog(work.string(), catalog, error) == false);
+    CHECK(error.Code == AssetErrorCode::AssetCorrupt);
+    CHECK(ToText(catalog) == EMPTY_CATALOG);
+    std::error_code ignored;
+    std::filesystem::remove_all(work, ignored);
 }
