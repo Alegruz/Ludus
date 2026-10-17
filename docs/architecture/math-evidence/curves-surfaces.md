@@ -9,7 +9,7 @@ patch topology and CPU surface meshes. See the
 
 ## G4 patch topology and CPU surface meshes
 
-Implementation date: 2026-10-17. Base: `c3de79d` (`develop` after G2). Scope:
+Implementation date: 2026-10-17. Base: `c3de79d` (`develop` after G2; rebased onto `6615a2c` before review). Scope:
 FoundationGeometry `surface.hpp` and `tessellation.hpp`, their implementation
 and tests, a `WorkLimits::MaxPatches` field, and the SDK-consumer and Wasm probe
 exercise. The G2 box helpers moved into a shared private
