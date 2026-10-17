@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from formatting import format_source
+from formatting import FormattingError, format_source
 from analysis_inventory import compilation_entries, inventory, request_codemodel, SOURCE_ROOTS
 from quality_process import ANALYSIS_SECONDS, LANE_BYTES, LOG_BYTES, LogBudget, run_bounded
 
@@ -1629,6 +1629,8 @@ def run_format_check(root: Path, *, fix: bool) -> None:
             formatted = format_source(source, path, clang_format)
         except subprocess.CalledProcessError as exc:
             raise EngineError(exc.stderr) from exc
+        except FormattingError as exc:
+            raise EngineError(str(exc)) from exc
         if source == formatted:
             continue
         if fix:

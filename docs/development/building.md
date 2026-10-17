@@ -534,7 +534,11 @@ The formatter uses clang-format 23 and preserves compact designated initializers
 on one line (`value = { .A = 0, .B = 1 };`). Multiline initializers place the
 opening brace on its own line, with one member per line and a trailing comma.
 Clang-format 23 alone cannot express the opening-brace rule, so run the project
-command for both applying and checking formatting.
+command for both applying and checking formatting. The brace normalization
+changes only whitespace: where clang-format keeps a closing brace on the last
+member's line, such as an initializer in a ternary operand, that list keeps
+clang-format's layout. If normalization would change any other token, the
+formatter reports an error and leaves the file unchanged.
 
 Local `./init.sh` enables the pre-commit formatter. To enable it in an existing
 checkout, run `./scripts/install-hooks`. It formats only staged C/C++ in
@@ -577,6 +581,12 @@ foundational header (`core.h`/`config.h`/`compiler.h`/`types.h`) pulls a
 string/container/heavy STL header, or if any public header pulls a heavy STL or
 private `internal/` header. Header self-sufficiency (every public header
 compiles standalone) is checked by the `ludus_header_self_sufficiency` CTest.
+Its probes run concurrently; `LUDUS_HEADER_CHECK_JOBS` bounds the compiler
+processes (default: the CPUs available to the test). Every header keeps the
+flags reconstructed from `compile_commands.json` and its own failure report.
+The test's 600 s CTest timeout only detects a hung compiler: probe wall time
+follows host load, so heavily shared hosts need the headroom. Header parse cost
+is budgeted by `config/build_budget.json`, not by this timeout.
 See `docs/architecture/foundational-headers.md` and ADR 0007.
 
 ## Foundational header

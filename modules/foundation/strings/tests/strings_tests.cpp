@@ -47,6 +47,14 @@ struct StringTableTestAccess final
     {
         return table.mState->Count;
     }
+    static usize SlotCapacity(const StringTable& table) noexcept
+    {
+        return table.mState->SlotCapacity;
+    }
+    static void SetSlot(StringTable& table, usize slot, StringIndex index) noexcept
+    {
+        table.mState->Slots[slot] = index.Value;
+    }
     static usize Allocated(const StringTable& table) noexcept
     {
         return table.mState->Allocated;
@@ -407,6 +415,126 @@ TEST_CASE("interning is exact through forced collisions, growth and freezing", "
     }
     REQUIRE(heap.LiveBytes == 0);
     REQUIRE_FALSE(heap.BadFree);
+}
+
+TEST_CASE("colliding probes wrap around the lookup array up to the load limit", "[strings][intern]")
+{
+    FaultHeap heap;
+    {
+        StringTable table;
+        REQUIRE(CreateTable({}, heap.Domain, table) == StringStatus::Ok);
+        StringTableTestAccess::ForceCollisions(table);
+        constexpr usize kNameCount = 11;
+        const std::string_view names[kNameCount] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"};
+        // The empty entry and these names occupy exactly the 3/4 load limit. All
+        // share one start slot, so the later probes wrap past the array's end.
+        const usize capacity = StringTableTestAccess::SlotCapacity(table);
+        REQUIRE(StringTableTestAccess::Count(table) + kNameCount == capacity - capacity / 4);
+        NameId ids[kNameCount]{};
+        for (usize i = 0; i < kNameCount; ++i)
+        {
+            REQUIRE(table.TryIntern(names[i], ids[i]) == StringStatus::Ok);
+        }
+        REQUIRE(StringTableTestAccess::SlotCapacity(table) == capacity);
+        NameId found;
+        for (usize i = 0; i < kNameCount; ++i)
+        {
+            REQUIRE(table.TryFind(names[i], found) == StringStatus::Ok);
+            REQUIRE(found == ids[i]);
+        }
+        NameId preserved = ids[0];
+        REQUIRE(table.TryFind("absent", preserved) == StringStatus::NotFound);
+        REQUIRE(preserved == ids[0]);
+        // One more colliding entry grows the lookup array and rehashes every entry.
+        NameId grown;
+        REQUIRE(table.TryIntern("absent", grown) == StringStatus::Ok);
+        REQUIRE(StringTableTestAccess::SlotCapacity(table) == capacity * 2);
+        for (usize i = 0; i < kNameCount; ++i)
+        {
+            REQUIRE(table.TryFind(names[i], found) == StringStatus::Ok);
+            REQUIRE(found == ids[i]);
+        }
+        REQUIRE(table.TryFind("absent", found) == StringStatus::Ok);
+        REQUIRE(found == grown);
+    }
+    REQUIRE(heap.LiveBytes == 0);
+    REQUIRE(heap.BadFree == false);
+}
+
+TEST_CASE("full lookup arrays fail lookups explicitly and leave the table intact", "[strings][intern]")
+{
+    FaultHeap heap;
+    {
+        StringTable table;
+        REQUIRE(CreateTable({}, heap.Domain, table) == StringStatus::Ok);
+        StringTableTestAccess::ForceCollisions(table);
+        NameId player;
+        REQUIRE(table.TryIntern(kPlayer.Spelling, player) == StringStatus::Ok);
+        NameId enemy;
+        REQUIRE(table.TryIntern("enemy", enemy) == StringStatus::Ok);
+        // Corrupt the lookup array so that no slot is empty: every slot names
+        // "player" except the last slot probed from the shared colliding hash.
+        const usize capacity = StringTableTestAccess::SlotCapacity(table);
+        const usize start = static_cast<usize>(StringTableTestAccess::ConstantHash({})) & (capacity - 1);
+        for (usize slot = 0; slot < capacity; ++slot)
+        {
+            StringTableTestAccess::SetSlot(table, slot, player.Index);
+        }
+        StringTableTestAccess::SetSlot(table, (start + capacity - 1) & (capacity - 1), enemy.Index);
+        const uint32 count = StringTableTestAccess::Count(table);
+        const usize allocated = StringTableTestAccess::Allocated(table);
+        const usize allocations = heap.Allocations;
+
+        NameId found;
+        REQUIRE(table.TryFind("enemy", found) == StringStatus::Ok);
+        REQUIRE(found == enemy);
+        REQUIRE(table.TryFind("player", found) == StringStatus::Ok);
+        REQUIRE(found == player);
+        NameId preserved = player;
+        REQUIRE(table.TryFind("absent", preserved) == StringStatus::ProbeExhausted);
+        REQUIRE(preserved == player);
+        REQUIRE(table.TryIntern("absent", preserved) == StringStatus::ProbeExhausted);
+        REQUIRE(preserved == player);
+        REQUIRE(StringTableTestAccess::Count(table) == count);
+        REQUIRE(StringTableTestAccess::Allocated(table) == allocated);
+        REQUIRE(heap.Allocations == allocations);
+        REQUIRE(table.TryIntern("enemy", found) == StringStatus::Ok);
+        REQUIRE(found == enemy);
+        std::string_view spelling;
+        REQUIRE(table.TryResolve(player, spelling) == StringStatus::Ok);
+        REQUIRE(spelling == "player");
+        REQUIRE(table.TryResolve(enemy, spelling) == StringStatus::Ok);
+        REQUIRE(spelling == "enemy");
+
+        FrozenStringTable frozen;
+        REQUIRE(table.TryFreeze(frozen) == StringStatus::Ok);
+        REQUIRE(frozen.TryFind("absent", preserved) == StringStatus::ProbeExhausted);
+        REQUIRE(preserved == player);
+        REQUIRE(frozen.TryFind("enemy", found) == StringStatus::Ok);
+        REQUIRE(found == enemy);
+        REQUIRE(heap.Allocations == allocations);
+    }
+    {
+        // Distinct real hashes take the hash-mismatch path through every slot.
+        StringTable table;
+        REQUIRE(CreateTable({}, heap.Domain, table) == StringStatus::Ok);
+        NameId player;
+        REQUIRE(table.TryIntern(kPlayer.Spelling, player) == StringStatus::Ok);
+        const usize capacity = StringTableTestAccess::SlotCapacity(table);
+        for (usize slot = 0; slot < capacity; ++slot)
+        {
+            StringTableTestAccess::SetSlot(table, slot, player.Index);
+        }
+        NameId found;
+        REQUIRE(table.TryFind("player", found) == StringStatus::Ok);
+        REQUIRE(found == player);
+        NameId preserved = player;
+        REQUIRE(table.TryFind("absent", preserved) == StringStatus::ProbeExhausted);
+        REQUIRE(table.TryIntern("absent", preserved) == StringStatus::ProbeExhausted);
+        REQUIRE(preserved == player);
+    }
+    REQUIRE(heap.LiveBytes == 0);
+    REQUIRE(heap.BadFree == false);
 }
 
 TEST_CASE("table limits admit duplicates and failures consume no indices", "[strings][allocation]")

@@ -342,17 +342,20 @@ inner loop.
 
 | Measurement | Scanning on | Scanning off |
 | --- | ---: | ---: |
-| Clean-build Ninja edges | 1559 | 543 |
+| Clean-build `.ninja_log` entries | 1559 | 543 |
 | Compiler invocations (`.o`) | 382 | 382 |
-| Scan and collation CPU, clean build | 103–129 s | 0 |
-| Ninja edges after touching `core.h` | 1046 | 349 |
-| Scan and collation CPU after touching `core.h` | 75–104 s | 0 |
+| Scan and collation CPU, clean build | 72–91 s | 0 |
+| `.ninja_log` entries after touching `core.h` | 1046 | 349 |
+| Scan and collation CPU after touching `core.h` | 51–76 s | 0 |
 | Configure, median of five interleaved runs | 5.40 s | 5.15 s |
 
-The removed edges are 375 `.ddi` scans, 375 `.modmap` files, and 133 each of
-the per-target `CXX.dd` and `CXXModules.json` collation outputs. Their CPU time
-comes from the scanning-on runs' own `.ninja_log` and adds 11–15% to compile CPU
-for a clean build and 9–16% after touching `core.h`.
+The removed entries are 375 `.ddi` scans, 375 `.modmap` files, and 133 each of
+the per-target `CXX.dd` and `CXXModules.json` collation outputs, written by 375
+scan and 133 collation commands. Their CPU time comes from the scanning-on runs'
+own `.ninja_log`, counting each command once: one collation writes its target's
+`CXX.dd`, `CXXModules.json` and all of its `.modmap` files. Scanning and
+collation add 8–10% to compile CPU for a clean build and 6–10% after touching
+`core.h`.
 
 No wall-time improvement is claimed. The host was shared with other builds
 (load average 9–28), and the same 382 compilations summed between 757 s and

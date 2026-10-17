@@ -1,0 +1,8 @@
+#pragma once
+#include <string_view>
+namespace ludus::world_demo::tests
+{
+// Committed stage-3 identity inputs, embedded at configure time.
+inline constexpr std::string_view IDENTITY_MIGRATION = R"json(@LUDUS_IDENTITY_MIGRATION@)json";
+inline constexpr std::string_view WORLD_SCHEMA = R"json(@LUDUS_WORLD_SCHEMA@)json";
+} // namespace ludus::world_demo::tests
