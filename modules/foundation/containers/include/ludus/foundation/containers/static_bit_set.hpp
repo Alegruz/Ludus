@@ -86,13 +86,7 @@ class StaticBitSet
 public:
     /// Bits stored per word.
     static constexpr usize BITS_PER_WORD = 64;
-    // Thanks to LLVM's DynamicStaticInitializersCheck (18.1.8): its value-dependent
-    // guard precedes the constexpr check, so the web SDK reports these constants.
-    // constexpr forbids dynamic initialization; keep the suppression on only the
-    // three dependent initializers, as in relocation.hpp.
-    // https://github.com/llvm/llvm-project/blob/llvmorg-18.1.8/clang-tools-extra/clang-tidy/bugprone/DynamicStaticInitializersCheck.cpp
     /// Number of words holding the bits; 0 when BitCount is 0.
-    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static constexpr usize WORD_COUNT = (BitCount + BITS_PER_WORD - 1) / BITS_PER_WORD;
 
     /// Every bit reset.
@@ -375,11 +369,9 @@ public:
     }
 
 private:
-    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static constexpr usize TAIL_BITS = BitCount % BITS_PER_WORD;
     // A zero-bit set stores one always-zero word so every operation compiles
     // without a separate specialization; WORD_COUNT stays 0 for all logic.
-    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static constexpr usize STORAGE_WORD_COUNT = WORD_COUNT == 0 ? 1 : WORD_COUNT;
 
     [[nodiscard]] static constexpr uint64 bitMask(usize index) noexcept
