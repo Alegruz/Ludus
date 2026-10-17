@@ -1,0 +1,58 @@
+{
+  "format": "ludus.identity-migration",
+  "version": 1,
+  "documents": [
+    {
+      "path": "levels/first-room.world.json",
+      "document": "47d75e49-fcdf-44eb-9e4e-dcac13fb7bce",
+      "objects": [
+        {
+          "legacy_id": "exit-a",
+          "object": "e661ba3d-93b7-493a-ac2f-90f834d57739"
+        },
+        {
+          "legacy_id": "floor",
+          "object": "63b28be4-9f51-4c86-af5b-e6cd91ed370a"
+        },
+        {
+          "legacy_id": "guard-a",
+          "object": "a44df0b2-9ab5-4cf5-85e4-4e352f04ae23"
+        },
+        {
+          "legacy_id": "level-settings",
+          "object": "2d8db2dc-29ab-445e-bb64-3b837da57f6e"
+        },
+        {
+          "legacy_id": "player-start",
+          "object": "60c5a647-c8b2-4bf5-bfd7-298254d56942"
+        }
+      ]
+    },
+    {
+      "path": "levels/second-room.world.json",
+      "document": "5f6fb820-71b9-4fa9-ba40-cae310cb5fc9",
+      "objects": [
+        {
+          "legacy_id": "exit-a",
+          "object": "9da03bff-653d-4505-a75b-3d8980ffb2f6"
+        },
+        {
+          "legacy_id": "floor",
+          "object": "bfafff76-5f53-4753-a81a-032c2d9f45e6"
+        },
+        {
+          "legacy_id": "guard-a",
+          "object": "298a3aaa-d3ef-4e3e-b5e2-ee68705ff70a"
+        },
+        {
+          "legacy_id": "level-settings",
+          "object": "0cd3dbe2-d94c-434b-9fc3-5971700efee6"
+        },
+        {
+          "legacy_id": "player-start",
+          "object": "cd2ec83b-c905-4024-b390-23eeac807d34"
+        }
+      ]
+    }
+  ]
+}

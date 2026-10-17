@@ -10,6 +10,8 @@
 //   ludus-cook scene dump     PROJECT LEVEL [--json]
 //   ludus-cook scene assemble PROJECT LEVEL OUTPUT [--json]
 //   ludus-cook scene publish  PROJECT LEVEL OUTPUT [--json]
+//   ludus-cook identity migrate ROOT MANIFEST WORLD...
+//   ludus-cook identity apply   ROOT MANIFEST SCHEMA WORLD OUTPUT
 //
 // `cook` writes OUTPUT/scene.luscn, OUTPUT/manifest.json and OUTPUT/LICENSE.txt
 // and prints the manifest. `pbrt` writes OUTPUT/scene.luscn,
@@ -17,9 +19,16 @@
 // --dry-run only parses and plans and prints the report. Every `scene` command prints the level's dump (the
 // level, its exact resident closure and byte total); --json prints it on one
 // line with "schema": 1, or the error as {"schema": 1, "error": {...}}.
+// `identity migrate` mints UUIDs once for version-1 World documents and atomically
+// creates MANIFEST; it never replaces an existing manifest or edits a World.
+// `identity apply` replays MANIFEST to create the version-2 World record OUTPUT,
+// minting nothing; it never replaces an existing file. Paths are relative to ROOT
+// (docs/architecture/object-handles-uuid.md#stage-3-uuid-authoring-records).
 // Exit status: 0 success, 1 failure, 2 usage, 3 missing host facilities,
 // 130 cancelled.
 
+#include <ludus/content/identity_records/migration_manifest.h>
+#include <ludus/content/identity_records/world_records.h>
 #include <ludus/content/scene_cook/best_effort_import.h>
 #include <ludus/content/scene_cook/scene_assets.h>
 #include <ludus/content/scene_cook/scene_cook.h>
@@ -73,7 +82,9 @@ int PrintUsage() noexcept
              "       ludus-cook scene new PROJECT LEVEL [--name NAME] [--json]\n"
              "       ludus-cook scene {open|dump} PROJECT LEVEL [--json]\n"
              "       ludus-cook scene import PROJECT LEVEL SOURCE [--json]\n"
-             "       ludus-cook scene {assemble|publish} PROJECT LEVEL OUTPUT [--json]\n");
+             "       ludus-cook scene {assemble|publish} PROJECT LEVEL OUTPUT [--json]\n"
+             "       ludus-cook identity migrate ROOT MANIFEST WORLD...\n"
+             "       ludus-cook identity apply ROOT MANIFEST SCHEMA WORLD OUTPUT\n");
     return EXIT_USAGE;
 }
 
@@ -275,6 +286,145 @@ int RunScene(int argc, char** argv) noexcept
     }
     return EXIT_OK;
 }
+namespace identity_records = ludus::content::identity_records;
+
+int ReportIdentityFailure(const identity_records::IdentityRecordError& error) noexcept
+{
+    WriteAll(2, "error [");
+    WriteAll(2, identity_records::GetIdentityRecordStatusName(error.Status));
+    WriteAll(2, "]: ");
+    WriteAll(2, error.Message.View());
+    WriteAll(2, "\n");
+    return error.Status == identity_records::IdentityRecordStatus::EntropyUnavailable ? EXIT_UNAVAILABLE : EXIT_FAILED;
+}
+
+/// Read one file below ROOT, describing a failure in `outError`.
+[[nodiscard]] bool ReadIdentityInput(std::string_view root,
+                                     std::string_view path,
+                                     usize cap,
+                                     ludus::content::Bytes& outBytes,
+                                     identity_records::IdentityRecordError& outError) noexcept
+{
+    const ludus::content::Status status = ludus::content::ReadFile(root, path, cap, outBytes);
+    if (status == ludus::content::Status::Ok)
+    {
+        return true;
+    }
+    outError.Status = status == ludus::content::Status::Limit ? identity_records::IdentityRecordStatus::Limit
+                                                              : identity_records::IdentityRecordStatus::IoError;
+    const bool isSet = outError.Message.Set(path);
+    static_cast<void>(isSet);
+    return false;
+}
+
+int RunIdentityMigrate(int argc, char** argv) noexcept
+{
+    if (argc < 6)
+    {
+        return PrintUsage();
+    }
+    const std::string_view root = argv[3];
+    const std::string_view manifestPath = argv[4];
+    identity_records::IdentityRecordError error;
+    ludus::content::Bytes existing;
+    if (ludus::content::ReadFile(root, manifestPath, identity_records::MAX_MANIFEST_BYTES, existing) !=
+        ludus::content::Status::NotFound)
+    {
+        // Checked before minting; PublishMigrationManifest still refuses a manifest that appears later.
+        error.Status = identity_records::IdentityRecordStatus::AlreadyExists;
+        const bool isSet =
+            error.Message.Set("the manifest already exists (or cannot be inspected); it is never regenerated");
+        static_cast<void>(isSet);
+        return ReportIdentityFailure(error);
+    }
+    const usize count = static_cast<usize>(argc - 5);
+    Array<ludus::content::Bytes> documents;
+    Array<identity_records::MigrationSource> sources;
+    if (documents.TryResize(count) == false || sources.TryResize(count) == false)
+    {
+        error.Status = identity_records::IdentityRecordStatus::OutOfMemory;
+        return ReportIdentityFailure(error);
+    }
+    for (usize i = 0; i < count; ++i)
+    {
+        const std::string_view path = argv[5 + i];
+        if (ReadIdentityInput(root, path, identity_records::MAX_WORLD_DOCUMENT_BYTES, documents[i], error) == false)
+        {
+            return ReportIdentityFailure(error);
+        }
+        sources[i] = { .Path = path, .WorldJson = documents[i].String() };
+    }
+    const ludus::foundation::identity::EntropySource entropy = ludus::platform::GetSystemEntropySource();
+    identity_records::MigrationManifest manifest;
+    if (identity_records::GenerateMigrationManifest({sources.GetData(), sources.GetSize()}, entropy, manifest, error) !=
+            identity_records::IdentityRecordStatus::Success ||
+        identity_records::PublishMigrationManifest(root, manifestPath, manifest, error) !=
+            identity_records::IdentityRecordStatus::Success)
+    {
+        return ReportIdentityFailure(error);
+    }
+    return EXIT_OK;
+}
+
+int RunIdentityApply(int argc, char** argv) noexcept
+{
+    if (argc != 8)
+    {
+        return PrintUsage();
+    }
+    const std::string_view root = argv[3];
+    const std::string_view worldPath = argv[6];
+    const std::string_view outputPath = argv[7];
+    identity_records::IdentityRecordError error;
+    ludus::content::Bytes manifestJson;
+    ludus::content::Bytes schemaJson;
+    ludus::content::Bytes worldJson;
+    if (ReadIdentityInput(root, argv[4], identity_records::MAX_MANIFEST_BYTES, manifestJson, error) == false ||
+        ReadIdentityInput(root, argv[5], identity_records::MAX_WORLD_SCHEMA_BYTES, schemaJson, error) == false ||
+        ReadIdentityInput(root, worldPath, identity_records::MAX_WORLD_DOCUMENT_BYTES, worldJson, error) == false)
+    {
+        return ReportIdentityFailure(error);
+    }
+    identity_records::MigrationManifest manifest;
+    Array<identity_records::EntityReferenceProperty> references;
+    ludus::content::Bytes output;
+    if (manifest.Read(manifestJson.String(), error) != identity_records::IdentityRecordStatus::Success ||
+        identity_records::ReadEntityReferenceProperties(schemaJson.String(), references, error) !=
+            identity_records::IdentityRecordStatus::Success ||
+        identity_records::ApplyWorldMigration(manifest,
+                                              { .Path = worldPath, .WorldJson = worldJson.String() },
+                                              {references.GetData(), references.GetSize()},
+                                              output,
+                                              error) != identity_records::IdentityRecordStatus::Success)
+    {
+        return ReportIdentityFailure(error);
+    }
+    // A null expected digest creates OUTPUT and refuses to replace any existing file, including WORLD.
+    const ludus::content::Status saved = ludus::content::SaveFile(root, outputPath, output.Data(), nullptr);
+    if (saved != ludus::content::Status::Ok)
+    {
+        error.Status = saved == ludus::content::Status::Conflict ? identity_records::IdentityRecordStatus::AlreadyExists
+                                                                 : identity_records::IdentityRecordStatus::IoError;
+        const bool isSet = error.Message.Set(outputPath);
+        static_cast<void>(isSet);
+        return ReportIdentityFailure(error);
+    }
+    return EXIT_OK;
+}
+
+int RunIdentity(int argc, char** argv) noexcept
+{
+    const std::string_view action = argc >= 3 ? std::string_view(argv[2]) : std::string_view{};
+    if (action == "migrate")
+    {
+        return RunIdentityMigrate(argc, argv);
+    }
+    if (action == "apply")
+    {
+        return RunIdentityApply(argc, argv);
+    }
+    return PrintUsage();
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -290,6 +440,10 @@ int main(int argc, char** argv)
     if (argc >= 2 && std::string_view(argv[1]) == "scene")
     {
         return RunScene(argc, argv);
+    }
+    if (argc >= 2 && std::string_view(argv[1]) == "identity")
+    {
+        return RunIdentity(argc, argv);
     }
     return PrintUsage();
 }

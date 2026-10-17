@@ -6,8 +6,10 @@
 entropy adapters in Platform. Stage 2 is implemented: `EntityRegistry` issues
 world tokens and advances generations through FoundationIdentity, while audio and
 RHI keep their own sources for the reasons recorded in the
-[implementation sequence](#implementation-sequence). The UUID content workflow
-is proposed.
+[implementation sequence](#implementation-sequence). Stage 3 is implemented:
+version-2 World records and a one-time migration manifest give World objects
+committed UUIDs ([UUID authoring records](#stage-3-uuid-authoring-records)).
+Durable binding, duplication and restore (stage 4) are proposed.
 
 **Audience:** Engine, gameplay, tools, content, and SDK contributors.
 
@@ -705,6 +707,8 @@ and reserved capacity on each target before optimizing them.
    once, atomically, and preserve names as readable labels. Existing v1 inputs
    continue to work through their current loader; do not mint unstable UUIDs on
    every v1 load or silently rewrite those files.
+   *Implemented* for World documents; see
+   [UUID authoring records](#stage-3-uuid-authoring-records).
 4. Add durable binding, graph duplication, and two-pass restore in tools/content.
    Integrate stable editor selection and stale operation checks through the
    current staged-world and gameplay-reload boundaries. This does not by itself
@@ -716,6 +720,142 @@ and reserved capacity on each target before optimizing them.
 Each stage is independently reviewable. The reference review records the design
 before chapter reading, the adopted refinements, and historical mechanisms that
 would weaken Ludus's present guarantees.
+
+## Stage 3: UUID authoring records
+
+`Ludus::ContentIdentity` (`modules/content/identity_records`) defines the records,
+the migration manifest and their codecs. The `ludus-cook identity` commands are
+its only production entry points. It is an in-tree tools library: it is not
+installed with the SDK until an SDK consumer needs it.
+
+**Version-2 World records.** Version 2 keeps the version-1 World envelope and
+component values, and adds durable identity. An abridged example, with most
+component properties omitted:
+
+```json
+{
+  "version": 2,
+  "schema": "ludus.world-demo.v1",
+  "document": "0b7e8c1d-2f43-4a96-9d51-6c2e4f8a1b3d",
+  "entities": [
+    {
+      "uuid": "5d1f0e7a-93c2-4b8e-a4f6-1e2d3c4b5a69",
+      "label": "guard-a",
+      "name": "guard-a",
+      "components": {
+        "enemy": { "target": "8a2b4c6d-1e3f-4a5b-9c7d-2e4f6a8b0c1d", "speed": 2 }
+      }
+    }
+  ]
+}
+```
+
+- `document` is the World document's `AssetId`.
+- `uuid` is each entity's `SourceObjectId`. It is the entity's identity, so
+  renaming `label` or `name` never changes it.
+- `label` is the version-1 `id`, kept as a readable, unique, scoped label for
+  inspection and diagnostics.
+- Each `entity`-typed property stores the target's `uuid`. An empty string still
+  means no target.
+
+Authored records carry no `InstanceId`. A standalone level's instance scope belongs
+to its placement or save, as described in
+[authoring and prefab instances](#authoring-and-prefab-instances). Stage 4 forms
+`PersistentObjectKey` values from that scope and these `SourceObjectId` values.
+
+**Migration manifest.** One committed JSON file maps every scoped ID of a set of
+version-1 documents to its UUIDs. The format is
+`ludus.identity-migration` version 1. Paths are relative to the content root
+given to the tool. Documents are sorted by path and objects by legacy ID, so the
+canonical file diffs cleanly:
+
+```json
+{
+  "format": "ludus.identity-migration",
+  "version": 1,
+  "documents": [
+    {
+      "path": "levels/first-room.world.json",
+      "document": "0b7e8c1d-2f43-4a96-9d51-6c2e4f8a1b3d",
+      "objects": [
+        { "legacy_id": "guard-a", "object": "5d1f0e7a-93c2-4b8e-a4f6-1e2d3c4b5a69" }
+      ]
+    }
+  ]
+}
+```
+
+The reader rejects:
+
+- unknown or duplicate members and an unsupported format or version;
+- unsorted or repeated entries and invalid paths or legacy IDs;
+- any UUID that is not a nonnil version-4 value;
+- any UUID that appears twice anywhere in the manifest.
+
+Legacy IDs follow the Editor's World ID rule (1–64 ASCII letters, digits, `_`,
+`-`, `.` or `:`). The world-demo sample's IDs, including the Editor's truncated
+`entity-` and `settings-` forms, are a subset.
+
+**Generate once.** `ludus-cook identity migrate ROOT MANIFEST WORLD...` works in
+this order:
+
+1. It refuses to run when the manifest already exists.
+2. It reads the entity IDs of the listed version-1 documents.
+3. It mints one document UUID and one object UUID per entity with
+   `TryGenerateUuidV4` and `GetSystemEntropySource()`, in path order and then
+   legacy-ID order.
+4. It creates the manifest atomically through `content::SaveFile` with no expected
+   digest.
+
+Each candidate is checked against every identity already in the manifest. A
+colliding candidate is replaced at most four times before the command reports
+`identity-conflict`. If entropy is unavailable, nothing is minted or written and
+the command exits with status 3; there is no fallback generator. Publication never
+replaces an existing manifest, even one that appears during the command. Run the
+command once per content root and commit the result. Tests call
+`GenerateMigrationManifest` with controlled `EntropySource` values.
+
+**Replay, never re-mint.** `ludus-cook identity apply ROOT MANIFEST SCHEMA WORLD OUTPUT`
+creates the version-2 record at OUTPUT from a version-1 document, the committed
+manifest and the World schema. The schema identifies the `entity`-typed properties.
+Replay is pure: the same inputs always produce identical bytes, and it mints
+nothing. The command never replaces an existing file, so it cannot overwrite the
+version-1 source. It refuses inputs that the manifest does not describe exactly:
+
+- `stale-manifest`: an entity has no committed UUID, or a manifest object has no
+  entity.
+- `unresolved-reference`: a reference names an ID that is not in the document.
+- `unsupported`: the document uses the Editor's `scene` extension. Its parent
+  links are not migrated yet.
+
+**Version-1 compatibility.** Version-1 Worlds still load through their existing
+loaders. Loading one never mints identities, and nothing rewrites it implicitly.
+The world-demo sample commits
+[`identity-migration.json`](../../apps/world_demo/levels/identity-migration.json)
+for its two rooms, and its levels stay version 1. `ReadWorldLevel` accepts both
+versions:
+
+- For version 2 it records the document, settings, actor and collision UUIDs.
+- It resolves each UUID target back to its label. Runtime lookup, validation and
+  the replay hash are therefore identical for both versions.
+
+`ludus_world_identity_tests` replays the committed manifest against the committed
+rooms. `ludus_content_identity_tests` covers:
+
+- deterministic manifest replay and canonical output;
+- create-once atomic publication;
+- unavailable, partially failing and colliding entropy;
+- schema rejection and stale manifests.
+
+**Not yet implemented:**
+
+- The Editor opens and saves only version-1 Worlds. Converting the committed
+  sample levels waits for Editor version-2 support.
+- A document gains entities after its manifest is committed: replay reports
+  `stale-manifest`. Extending a committed manifest needs an explicit operation
+  that mints only the missing identities.
+- The `.lulevel` scene workflow already stores UUIDs, and the cooked LUSCN format
+  keeps its 64-bit scoped source IDs. Neither is part of this migration.
 
 ## Research after the initial implementation
 
