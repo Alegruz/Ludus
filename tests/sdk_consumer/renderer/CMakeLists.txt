@@ -99,3 +99,39 @@ if(NOT EMSCRIPTEN)
     ludus_compile_renderer_shaders(TARGET ludus_sdk_renderer_authored_consumer SHADERS
         renderer_flat renderer_composite renderer_output renderer_shadow renderer_authored renderer_authored_shadow)
 endif()
+
+# RG3: the installed render-graph helper cooks one offscreen graph into a compiled header and its
+# `.lurgrt` runtime generation, here for this platform's only native or browser target. The consumer
+# activates the generation twice and requires byte-identical exported pixels (render_graph_runtime.cpp).
+if(EMSCRIPTEN)
+    set(RG2_TEST_PROFILES "[\"wgsl\"]")
+elseif(APPLE)
+    set(RG2_TEST_PROFILES "[\"metal\"]")
+else()
+    set(RG2_TEST_PROFILES "[\"spirv\"]")
+endif()
+set(rg3_input "${CMAKE_CURRENT_SOURCE_DIR}/../rg2/offscreen")
+set(rg3_staged "${CMAKE_CURRENT_BINARY_DIR}/rg3-inputs/offscreen")
+file(COPY "${rg3_input}/" DESTINATION "${rg3_staged}" PATTERN "*.in" EXCLUDE)
+configure_file("${rg3_input}/main.lushader.json.in" "${rg3_staged}/main.lushader.json" @ONLY)
+add_executable(ludus_sdk_render_graph_runtime_consumer ../render_graph_runtime.cpp)
+target_link_libraries(ludus_sdk_render_graph_runtime_consumer PRIVATE Ludus::GraphicsRenderer Ludus::FoundationTime)
+target_compile_options(ludus_sdk_render_graph_runtime_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
+ludus_compile_renderer_shaders(TARGET ludus_sdk_render_graph_runtime_consumer SHADERS renderer_composite)
+ludus_compile_render_graph(TARGET ludus_sdk_render_graph_runtime_consumer NAME rg3_runtime
+    MANIFEST "${rg3_staged}/main.lushader.json" RUNTIME_PACKAGE)
+set(rg3_embedded "${CMAKE_CURRENT_BINARY_DIR}/rg3-embedded")
+add_custom_command(OUTPUT "${rg3_embedded}/rg3_runtime_package.h"
+    COMMAND "${CMAKE_COMMAND}" "-DINPUT=${rg3_runtime_RUNTIME_PACKAGE}"
+        "-DOUTPUT=${rg3_embedded}/rg3_runtime_package.h" -DNAME=RG3_RUNTIME_PACKAGE
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_bytes.cmake"
+    DEPENDS "${rg3_runtime_RUNTIME_PACKAGE}" "${CMAKE_CURRENT_SOURCE_DIR}/embed_bytes.cmake"
+    VERBATIM)
+file(MAKE_DIRECTORY "${rg3_embedded}")
+target_sources(ludus_sdk_render_graph_runtime_consumer PRIVATE "${rg3_embedded}/rg3_runtime_package.h")
+target_include_directories(ludus_sdk_render_graph_runtime_consumer PRIVATE "${rg3_embedded}")
+if(EMSCRIPTEN)
+    target_link_options(ludus_sdk_render_graph_runtime_consumer PRIVATE -fno-exceptions -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
+    set_target_properties(ludus_sdk_render_graph_runtime_consumer PROPERTIES OUTPUT_NAME render-graph-runtime SUFFIX ".js")
+    configure_file(../render-graph-runtime.html render-graph-runtime.html COPYONLY)
+endif()

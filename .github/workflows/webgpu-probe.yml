@@ -201,7 +201,7 @@ jobs:
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
           out/host-tools/venv/bin/cmake --build out/build/raster-web-sdk --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
-      - name: Build installed L0/L1/L2/L3/L4 renderer browser SDK consumers
+      - name: Build installed L0/L1/L2/L3/L4 renderer and RG3 runtime browser SDK consumers
         run: |
           out/host-tools/venv/bin/cmake --install out/build/web-emscripten-development --prefix "$PWD/out/install/raster-web-sdk"
           . out/host-tools/emsdk/emsdk_env.sh
@@ -236,6 +236,9 @@ jobs:
             out/build/renderer-web-sdk/renderer-scaling.js
             out/build/renderer-web-sdk/renderer-scaling.wasm
             out/build/renderer-web-sdk/renderer-scaling.html
+            out/build/renderer-web-sdk/render-graph-runtime.js
+            out/build/renderer-web-sdk/render-graph-runtime.wasm
+            out/build/renderer-web-sdk/render-graph-runtime.html
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
@@ -624,6 +627,9 @@ jobs:
       - name: Test installed L0/L1/L2/L3/L4 renderer against direct and cross-backend image oracles
         if: matrix.suite == 'baseline'
         run: node tests/sdk_consumer/renderer-browser-test.mjs out/renderer-web-sdk-consumer out/browser-qa/results/renderer
+      - name: Activate an installed RG3 runtime generation on WebGPU and compare its exported pixels
+        if: matrix.suite == 'baseline'
+        run: node tests/sdk_consumer/render-graph-runtime-browser-test.mjs out/renderer-web-sdk-consumer out/browser-qa/results/render-graph-runtime
       - name: Verify L5 renderer scaling browser pixels
         if: matrix.suite == 'scaling'
         run: node tests/sdk_consumer/renderer-scaling-browser-test.mjs out/renderer-web-sdk-consumer out/browser-qa/results/renderer-l5
