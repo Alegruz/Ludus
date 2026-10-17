@@ -107,3 +107,40 @@ clamp, hidden reset, return-to-visible baseline and regression.
 
 The Linux reference profile, sanitizer execution, browser presets and build budget
 are validated by the pull request's CI tiers.
+
+## Integer simulation driver
+
+October 16, 2026. Scope: the [integer simulation driver stage](../architecture/high-resolution-time.md#implementation-before-research).
+The world reference `TickDriver` replaces its `float64` seconds debt (with its
+`1e-12` epsilon and `std::fmod` trimming) by a checked `uint64` phase. Each frame
+adds accepted nanoseconds times the tick rate; one tick consumes exactly 10^9
+units. Whole ticks beyond the catch-up budget are counted as discarded ticks,
+separately from the FrameClock clamp, which remains the only clamp. The accepted,
+clamped, excluded and regression diagnostics are unchanged. A checked
+`TickPolicy` validates the rate, catch-up budget and the
+`MaximumFrameDelta * rate + 10^9 - 1` bound when configured.
+
+Tests in `apps/world_demo/tests/simulation_tests.cpp` (`[frame]`) drive
+synthetic timestamps at a 2^62 ns epoch:
+
+| Behavior | Evidence |
+| --- | --- |
+| Partition independence | 1.234567891 s split into 1 ms, rounded 60 Hz and 144 Hz frames, 50 ms frames, alternating 1 ns/49 ms frames and two pseudo-random partitions of 1 ns to 50 ms: every run yields 74 ticks, a 74,073,460-unit remainder and no discarded tick. |
+| Exact 60 Hz | One second in seven partitions (including 16,666,666 ns, 16,666,667 ns, 30 Hz and pseudo-random frames) yields exactly 60 ticks with a zero remainder; the previous test's 59-60 tolerance is now exactly 60. 25 ms yields one tick and alpha exactly 0.5. |
+| Clamp and catch-up loss | A 2 s stall clamps exactly 1.75 s; its 15 ticks of debt run four and discard 11. 70 ms then carries 0.2 tick; 100 ms more runs four and discards two. Accepted phase equals run plus discarded ticks plus the remainder. A one-tick budget discards five of six ticks. The largest remainder (10^9 - 1 at 1 Hz) interpolates below one. |
+| Configuration and overflow | A zero rate, a zero budget, a multiplication overflow and an addition-bound overflow (one rate unit above the limit) return `InvalidConfiguration` and preserve the previous policy. The exact limit is accepted and repeated clamped frames keep the phase exact without overflow. Configure drops the carried phase and frame baseline. |
+| Failure and exhaustion | An invalid tick input faults the driver with the world still at tick zero. A world at the last representable tick completes it, the next tick returns `IdentityExhausted`, and the driver stops in Faulted with no further ticks or single step. |
+
+| Validation (macOS arm64 host, pinned Clang 18, warnings as errors) | Result |
+| --- | --- |
+| Development full build with `-DLUDUS_BUILD_WORLD_DEMO=ON` | Passed, warning-clean. |
+| `ctest --preset macos-clang-development --no-tests=error` | 100 of 102 passed. As in the frame integration run, the Cocoa window suite fails without `LUDUS_TEST_COCOA=1` in a WindowServer session, and the header self-sufficiency gate exceeded its fixed 120 s timeout at a host load average above 170; this change adds no public header. |
+| World reference | `ludus_world_demo_tests` (27 cases, 11 `[frame]`) and allocation tests passed. `--headless` completed 120 ticks; `--frames 3` presented three native frames. |
+| `python3 scripts/python/source_policy.py --base origin/develop` | Passed. |
+| `./scripts/check --format` | Passed, including the include boundary, naming scopes and container policy. |
+| clang-tidy 18 on the changed world reference sources | No findings. |
+| ASan/UBSan execution | Not run locally: the Clang 18 ASan runtime hangs at startup on this macOS 26.6 host (see above). |
+| Documentation: `check-docs`, strict MkDocs build, `test_docs.py`, `test_wiki.py` | Passed. `check-wiki --documentation-only` reported only the absent generated API reference, which requires the Doxygen bootstrap. |
+
+The Linux reference profile, sanitizer execution, browser presets and build budget
+are validated by the pull request's CI tiers.
