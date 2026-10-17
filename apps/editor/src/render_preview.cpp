@@ -1,14 +1,20 @@
 #include "internal/render_preview.h"
 #include "internal/preview_gpu_generation.h"
+#include "internal/preview_lighting.h"
 #include "internal/static_lighting_job.h"
 
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/scalar.hpp>
+
+#include <ludus/content/scene_format/luscn.h>
+
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
 #include <ludus/graphics/rhi/rhi.h>
+
 #include <new>
 
 #include <QElapsedTimer>
