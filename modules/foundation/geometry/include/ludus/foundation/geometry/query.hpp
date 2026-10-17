@@ -96,6 +96,7 @@ public:
     [[nodiscard]] usize GetCapacity() const noexcept;
 
 private:
+    /// Lets the projection search use the reserved storage; an implementation detail, not a public API.
     friend struct internal::ProjectionAccess;
 
     core::Array<ProjectionInterval> mIntervals;

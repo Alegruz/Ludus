@@ -116,15 +116,15 @@ Host: macOS 26 on arm64 with the pinned host tools (Clang/LLVM 18.1.8), preset
 
 | Check | Result |
 | --- | --- |
-| Full `macos-clang-development` build | Geometry library, tests and allocation probe built with no warnings; the full-tree rebuild did not finish before hand-off, so CI is authoritative |
-| `ludus_foundation_geometry_tests` | Passed: 45 test cases, 108,122 assertions (rerun after the final formatting-only change not completed locally) |
+| Full `macos-clang-development` build | Passed with no compiler warnings; the only linker warnings are the existing Homebrew Qt deployment-target notices from editor targets |
+| `ludus_foundation_geometry_tests` | Passed: 45 test cases, 108,122 assertions |
 | `ludus_geometry_alloc_tests` | Passed: 4 test cases; every frame and sweep-plan allocation failure injected |
 | Fixture generator self-tests (`test_fixtures.py`) and committed header | Passed: 17 tests, header current |
 | Pinned clang-tidy on every new translation unit | Passed after documented `bugprone-easily-swappable-parameters` suppressions |
-| Format, naming (`check_naming.py`) and changed-line source policy | Format and naming passed; changed-line source policy not completed locally |
-| Header self-sufficiency and foundational include gate | Foundational include gate passed; header self-sufficiency not completed locally |
+| Format, naming (`check_naming.py`) and changed-line source policy | Passed against the `c3de79d` branch point |
+| Header self-sufficiency and foundational include gate | Passed: 171 public headers compile standalone; foundational include boundary OK |
 | Docs index, strict MkDocs, `check-wiki --documentation-only`, docs/wiki regressions | Passed |
-| API reference with pinned Doxygen | Not run locally; every new public declaration has a Doxygen comment, and CI runs the API gate |
+| API reference with pinned Doxygen | Not run locally. The first CI run found one gap, the undocumented `ProjectionAccess` friend declaration, which now has a comment |
 | ASan/UBSan | Not run locally: Clang 18 ASan deadlocks at startup on this macOS 26 host (see [building](../../development/building.md)), so the CI sanitizer lanes are required |
 | Wasm math probe, installed SDK consumer, build-time budget | Not run locally (no Emscripten SDK). The SDK consumer now bakes frames, projects a point and emits a ribbon; these run in CI |
 
