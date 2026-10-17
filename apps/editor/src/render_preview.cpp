@@ -1,5 +1,5 @@
 #include "internal/render_preview.h"
-#include "internal/preview_lighting.h"
+#include "internal/preview_gpu_generation.h"
 #include "internal/static_lighting_job.h"
 
 #include <ludus/foundation/math/projection.hpp>
@@ -12,18 +12,6 @@
 #include <new>
 
 #include <QElapsedTimer>
-
-#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-#    include "renderer_clustered_authored.h"
-#    include "renderer_clustered_authored_shadow.h"
-#    include "renderer_composite.h"
-#    include "renderer_flat.h"
-#    include "renderer_lit.h"
-#    include "renderer_lit_shadow.h"
-#    include "renderer_material.h"
-#    include "renderer_output.h"
-#    include "renderer_shadow.h"
-#endif
 
 namespace ludus::editor
 {
@@ -40,56 +28,6 @@ bool Accepted(rhi::RasterStatus s) noexcept
 }
 #endif
 } // namespace
-// A generation stays alive until Qt releases every display-image lease. The
-// viewport must retire before its renderer and externally owned textures.
-struct RenderPreview::GpuResources final
-{
-    rhi::DeviceHandle Device{};
-    rr::Renderer Renderer;
-    rr::RasterViewport Viewport;
-    rhi::TextureHandle Textures[8]{};
-    uint32 ExternalLeases = 0;
-    RenderScene Source;
-    QByteArray LightingKey;
-    preview_lighting::Inputs Lighting;
-    rr::EnvironmentMap Environment;
-    bool HasEnvironment = false;
-    rr::ShadowAtlas Shadows;
-    rr::Snapshot Casters;
-    foundation::StaticArray<rr::MaterialVersion, content::scene_format::MAX_OBJECTS> CasterMaterials{};
-    foundation::StaticArray<rr::MaterialVersion, content::scene_format::MAX_OBJECTS> BakedMaterials{};
-    foundation::StaticArray<rhi::TextureHandle, content::scene_format::MAX_OBJECTS> BakeTextures{};
-    foundation::UniquePtr<StaticLightingJob> BakeWorker;
-    foundation::UniquePtr<rr::StaticLightingBake> Bake;
-    rr::Snapshot BakedSnapshot;
-    rhi::SubmissionToken ShadowProducer;
-    uint32 LightingStage = 0;
-    usize MaterialCursor = 0;
-    usize BakeUploadCursor = 0;
-    usize BakeMaterialCursor = 0;
-    bool IsShadowFrameOpen = false;
-    bool HasBakeStarted = false;
-    bool HasBakeFailed = false;
-    bool HasBakeSnapshot = false;
-    bool IsBakePublished = false;
-    ~GpuResources() noexcept
-    {
-        // Cancels and drains an in-flight bake before the borrowed scene is released.
-        BakeWorker.Reset();
-        Bake.Reset();
-        Viewport.Reset();
-        Renderer.Reset();
-        Environment.Reset();
-        for (rhi::TextureHandle& texture : BakeTextures)
-        {
-            static_cast<void>(rhi::Destroy(Device, texture));
-        }
-        for (rhi::TextureHandle& texture : Textures)
-        {
-            static_cast<void>(rhi::Destroy(Device, texture));
-        }
-    }
-};
 struct RenderPreview::Residency final
 {
     QSharedPointer<resources::SceneDefinition> Definition;
@@ -207,7 +145,6 @@ bool RenderPreview::SetScene(const RenderScene& scene)
         return true;
     }
     const bool sameResources = preview_lighting::MakeKey(Scene_) == preview_lighting::MakeKey(scene);
-    const bool sameGeometry = sameResources;
     if (Scene_.Identity.isEmpty() && !RestoredOrbit_)
     {
         OrbitCenter_ = scene.Center;
@@ -258,13 +195,9 @@ bool RenderPreview::SetScene(const RenderScene& scene)
     Frames_ = 0;
     if (OwnsDevice_)
     {
-        if (sameResources == true && Phase_ >= 5 && mHasPreparationFailed == false)
+        if (sameResources == true && mResources.Get() != nullptr && mResources->IsPrepared() == true &&
+            mHasPreparationFailed == false)
         {
-            if (!sameGeometry)
-            {
-                (void)mResources->Renderer.Release(Snapshot_);
-                Phase_ = 4;
-            }
             ViewDirty_ = true;
         }
         else
@@ -289,16 +222,13 @@ bool RenderPreview::beginResourceRestart() noexcept
     {
         return false;
     }
-    foundation::UniquePtr<GpuResources> candidate;
-    candidate.Reset(new (std::nothrow) GpuResources);
+    foundation::UniquePtr<PreviewGpuGeneration> candidate;
+    candidate.Reset(new (std::nothrow) PreviewGpuGeneration(Device_, Scene_, mShading));
     if (candidate.Get() == nullptr)
     {
         fail(QStringLiteral("GPU preview staging allocation failed. Previous view retained."));
         return false;
     }
-    candidate->Device = Device_;
-    candidate->Source = Scene_;
-    candidate->LightingKey = preview_lighting::MakeKey(Scene_);
     // Cancel and drain the obsolete bake now: the preview's JobSystem runs one bake
     // at a time, and a retired generation can outlive this call.
     if (mResources.Get() != nullptr)
@@ -318,24 +248,12 @@ bool RenderPreview::beginResourceRestart() noexcept
     }
     mResources.Swap(candidate);
     mHasViewport = false;
+    mHasPreparedView = false;
     mProducer = {};
     mIsAwaitingProducer = false;
     mNeedsResourceRestart = false;
-    LightingInitialized_ = false;
-    for (rr::Mesh& mesh : Meshes_)
-    {
-        mesh = {};
-    }
-    for (rr::MaterialVersion& material : Materials_)
-    {
-        material = {};
-    }
-    Program_ = {};
-    Snapshot_ = {};
     Report_ = {};
-    Phase_ = 0;
     Frames_ = 0;
-    AssetsCreated_ = false;
     ViewDirty_ = true;
     return true;
 }
@@ -837,6 +755,7 @@ void RenderPreview::resetFrames() noexcept
     }
     mRetiredResources.Reset();
     mHasViewport = false;
+    mHasPreparedView = false;
     mProducer = {};
     mIsAwaitingProducer = false;
 }
@@ -896,302 +815,20 @@ void RenderPreview::fail(const QString& message)
 bool RenderPreview::prepare()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    auto advance = [this](rhi::RasterStatus status) {
-        if (!Accepted(status))
-        {
-            return false;
-        }
-        ++Phase_;
-        return true;
-    };
-    if (Phase_ == 0)
+    const PreviewPreparationStatus status = mResources->Prepare(Surface_, Status_);
+    if (status == PreviewPreparationStatus::Failed)
     {
-        rr::Limits limits;
-        limits.Views = rr::SHADOW_REGION_CAPACITY * 2 + 8;
-        limits.Materials = content::scene_format::MAX_OBJECTS * 3;
-        limits.Snapshots = 8;
-        limits.HostBytes = usize{128} * 1024 * 1024;
-        return advance(mResources->Renderer.Initialize(Device_,
-                                                       ludus::shaders::renderer_flat::Vertex(),
-                                                       ludus::shaders::renderer_flat::Fragment(),
-                                                       limits));
+        return false;
     }
-    if (Phase_ == 1)
+    if (status == PreviewPreparationStatus::Pending)
     {
-        const rhi::RasterStatus s = mResources->Renderer.Poll();
-        return s == rhi::RasterStatus::Pending ||
-               (s == rhi::RasterStatus::Ready &&
-                advance(mResources->Renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
-                                                             ludus::shaders::renderer_composite::Fragment())));
-    }
-    if (Phase_ == 2)
-    {
-        const rhi::RasterStatus s = mResources->Renderer.PollViews();
-        if (s == rhi::RasterStatus::Ready)
-        {
-            if (!LightingInitialized_)
-            {
-                const rhi::RasterStatus lighting =
-                    mResources->Renderer.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
-                                                            ludus::shaders::renderer_output::Fragment(),
-                                                            ludus::shaders::renderer_shadow::Fragment());
-                if (!Accepted(lighting))
-                {
-                    return false;
-                }
-                LightingInitialized_ = true;
-            }
-            const rhi::RasterStatus lighting = mResources->Renderer.PollLighting();
-            if (lighting == rhi::RasterStatus::Pending)
-            {
-                return true;
-            }
-            if (lighting != rhi::RasterStatus::Ready)
-            {
-                return false;
-            }
-            if (Scene_.Lit == true && mShading == PreviewShading::Lit)
-            {
-                return advance(mResources->Renderer.PrewarmLitProgram(
-                    ludus::shaders::renderer_clustered_authored::Vertex(),
-                    ludus::shaders::renderer_clustered_authored::Fragment(),
-                    ludus::shaders::renderer_clustered_authored_shadow::Fragment(),
-                    Program_));
-            }
-            return advance(
-                usesLitMaterials() == true
-                    ? mResources->Renderer.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
-                                                             ludus::shaders::renderer_lit::Fragment(),
-                                                             ludus::shaders::renderer_lit_shadow::Fragment(),
-                                                             Program_)
-                    : mResources->Renderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
-                                                                  ludus::shaders::renderer_material::Fragment(),
-                                                                  Program_));
-        }
-        return s == rhi::RasterStatus::Pending ||
-               (s == rhi::RasterStatus::Ready &&
-                advance(mResources->Renderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
-                                                                    ludus::shaders::renderer_material::Fragment(),
-                                                                    Program_)));
-    }
-    if (Phase_ == 3)
-    {
-        const rhi::RasterStatus programStatus = mResources->Renderer.GetStatus(Program_);
-        if (programStatus == rhi::RasterStatus::Pending)
-        {
-            return true;
-        }
-        if (programStatus != rhi::RasterStatus::Ready)
-        {
-            return false;
-        }
-        if (!AssetsCreated_)
-        {
-            for (int32 i = 0; i < Scene_.Meshes.size(); ++i)
-            {
-                const auto& mesh = Scene_.Meshes[i];
-                rr::MeshDescription description;
-                Array<math::Vector3> positions;
-                Array<math::Vector3> normals;
-                Array<math::Vector2> uvs;
-                Array<math::Vector2> bakeUvs;
-                Array<uint32> indices;
-                if (Scene_.Lit)
-                {
-                    const resources::SceneMesh& source = Scene_.Definition->Meshes[static_cast<usize>(i)];
-                    const usize count = source.Indices.GetSize();
-                    content::scene_format::BakeChartLayout layout;
-                    if (count > content::scene_format::MAX_VERTICES ||
-                        content::scene_format::TryMakeBakeChartLayout(static_cast<uint32>(count / 3), layout) ==
-                            false ||
-                        positions.TryResize(count) == false || normals.TryResize(count) == false ||
-                        uvs.TryResize(count) == false || bakeUvs.TryResize(count) == false ||
-                        indices.TryResize(count) == false)
-                    {
-                        return false;
-                    }
-                    for (usize vertex = 0; vertex < count; ++vertex)
-                    {
-                        const uint32 index = source.Indices[vertex];
-                        positions[vertex] = source.Positions[index];
-                        normals[vertex] = source.Normals[index];
-                        uvs[vertex] = source.Texcoords[index];
-                        indices[vertex] = static_cast<uint32>(vertex);
-                        if (content::scene_format::TryGetBakeChartUv(layout,
-                                                                     static_cast<uint32>(vertex / 3),
-                                                                     static_cast<uint32>(vertex % 3),
-                                                                     bakeUvs[vertex].X,
-                                                                     bakeUvs[vertex].Y) == false)
-                        {
-                            return false;
-                        }
-                    }
-                    description.Positions = positions.GetData();
-                    description.VertexCount = count;
-                    description.Indices = indices.GetData();
-                    description.IndexCount = count;
-                    description.Texcoords = uvs.GetData();
-                    description.Normals = normals.GetData();
-                    description.BakeTexcoords = bakeUvs.GetData();
-                }
-                else
-                {
-                    description.Positions = mesh.Positions.constData();
-                    description.VertexCount = static_cast<usize>(mesh.Positions.size());
-                    description.Indices = mesh.Indices.constData();
-                    description.IndexCount = static_cast<usize>(mesh.Indices.size());
-                    description.Texcoords = mesh.Uvs.constData();
-                    description.Normals = mesh.Normals.isEmpty() ? nullptr : mesh.Normals.constData();
-                }
-                if (Accepted(mResources->Renderer.CreateMesh(description, Meshes_[i])) == false)
-                {
-                    return false;
-                }
-            }
-            for (int32 i = 0; i < Scene_.Textures.size(); ++i)
-            {
-                const auto& image = Scene_.Textures[i].Pixels;
-                if (!Accepted(
-                        rhi::CreateTexture(Device_,
-                                           {
-                                               .Width = static_cast<uint32>(image.width()),
-                                               .Height = static_cast<uint32>(image.height()),
-                                               .Format = rhi::RasterFormat::Rgba8Srgb,
-                                               .RetainCpuContent = false,
-                                           },
-                                           {
-                                               .Bytes = {image.constBits(), static_cast<usize>(image.sizeInBytes())},
-                                               .RowPitch = static_cast<usize>(image.bytesPerLine()),
-                                           },
-                                           mResources->Textures[i])))
-                {
-                    return false;
-                }
-            }
-            AssetsCreated_ = true;
-        }
-        for (int32 i = 0; i < Scene_.Meshes.size(); ++i)
-        {
-            const rhi::RasterStatus s = mResources->Renderer.GetStatus(Meshes_[i]);
-            if (!Accepted(s))
-            {
-                return false;
-            }
-            if (s == rhi::RasterStatus::Pending)
-            {
-                return true;
-            }
-        }
-        for (int32 i = 0; i < Scene_.Textures.size(); ++i)
-        {
-            const rhi::RasterStatus s = rhi::GetStatus(Device_, mResources->Textures[i]);
-            if (!Accepted(s))
-            {
-                return false;
-            }
-            if (s == rhi::RasterStatus::Pending)
-            {
-                return true;
-            }
-        }
-        if (Scene_.Lit == true && mShading == PreviewShading::Lit)
-        {
-            ++Phase_;
-            return true;
-        }
-        for (int32 i = 0; i < Scene_.Surfaces.size(); ++i)
-        {
-            const auto& surface = Scene_.Surfaces[i];
-            rr::MaterialDescription description;
-            if (surface.Texture >= 0)
-            {
-                description.Texture = mResources->Textures[surface.Texture];
-            }
-            description.Tint = surface.Tint;
-            if (mShading == PreviewShading::Solid)
-            {
-                description.Texture = {};
-                description.Tint = {.6F, .6F, .6F, 1};
-            }
-            description.Sampler.Filter = rhi::RasterFilter::Linear;
-            description.Sampler.U = description.Sampler.V =
-                surface.Repeat == true ? rhi::RasterAddress::Repeat : rhi::RasterAddress::Clamp;
-            rr::LitMaterialDescription lit;
-            lit.Surface = description;
-            lit.Surface.Sampler.Filter = rhi::RasterFilter::Linear;
-            lit.Surface.Sampler.U = lit.Surface.Sampler.V =
-                surface.Repeat ? rhi::RasterAddress::Repeat : rhi::RasterAddress::Clamp;
-            lit.Metallic = surface.Metallic;
-            lit.Roughness = surface.Roughness;
-            lit.Emission = surface.Emission;
-            rr::DirectLight previewLight;
-            if (mShading == PreviewShading::Solid)
-            {
-                // Explicit editor visualization; these values never enter the World.
-                previewLight.SourceId = 1;
-                previewLight.Intensity = 3;
-                previewLight.Direction = {.4F, -.8F, -.5F};
-                lit.Lights = &previewLight;
-                lit.LightCount = 1;
-                lit.Metallic = 0;
-                lit.Roughness = 1;
-                lit.Emission = {};
-                lit.EnvironmentIrradiance = {.5F, .5F, .5F};
-            }
-            rr::LightSelection selection;
-            if (Accepted(usesLitMaterials() == true
-                             ? mResources->Renderer.CreateLitMaterial(Program_, lit, Materials_[i], selection)
-                             : mResources->Renderer.CreateMaterial(Program_, description, Materials_[i])) == false)
-            {
-                return false;
-            }
-        }
-        ++Phase_;
-        return true;
-    }
-    if (Phase_ == 4)
-    {
-        if (Scene_.Lit == true && mShading == PreviewShading::Lit)
-        {
-            return prepareLighting();
-        }
-        rr::SceneItem items[128]{};
-        for (int32 i = 0; i < Scene_.Objects.size(); ++i)
-        {
-            const auto& object = Scene_.Objects[i];
-            auto& item = items[i];
-            item.Geometry = Meshes_[object.Mesh];
-            item.Transform = object.Transform;
-            item.Material.Color = mShading == PreviewShading::Solid ? math::Vector4{1, 1, 1, 1} : object.Tint;
-            item.SourceId = static_cast<uint64>(i) + 1;
-            if (Scene_.Lit || object.Texture >= 0)
-            {
-                const rhi::RasterStatus s = mResources->Renderer.GetStatus(Materials_[object.Surface]);
-                if (!Accepted(s))
-                {
-                    return false;
-                }
-                if (s == rhi::RasterStatus::Pending)
-                {
-                    return true;
-                }
-                item.Surface = Materials_[object.Surface];
-            }
-        }
-        if (Accepted(
-                mResources->Renderer.CreateSnapshot(items, static_cast<usize>(Scene_.Objects.size()), Snapshot_)) ==
-            false)
-        {
-            return false;
-        }
-        ++Phase_;
         return true;
     }
     if (Width_ == 0 || Height_ == 0 || mHasViewport == false)
     {
         return true;
     }
-    if (ViewDirty_)
+    if (ViewDirty_ == true)
     {
         rr::ViewDescription description;
         PreviewViewOptions options;
@@ -1204,270 +841,28 @@ bool RenderPreview::prepare()
         options.OrbitCenter = &OrbitCenter_;
         options.OrbitRadius = OrbitRadius_;
         options.EditorCameraOrNull = &mCameraController.GetSample();
-        if (!Scene_.View(options, description, Status_))
+        if (Scene_.View(options, description, Status_) == false)
         {
             return false;
         }
         Description_ = description;
-        if (Accepted(mResources->Viewport.Update(Snapshot_, description, Report_)) == false)
+        if (Accepted(mResources->Viewport.Update(mResources->GetSnapshot(), description, Report_)) == false)
         {
             return false;
         }
         ViewDirty_ = false;
         FreshReport_ = true;
-        Phase_ = 6;
+        mHasPreparedView = true;
     }
     return Accepted(pollViewport());
 #else
     return false;
 #endif
 }
-rhi::RasterStatus RenderPreview::createLightingMaterial(usize objectIndex,
-                                                        const rr::BakedLighting* bakeOrNull,
-                                                        bool hasShadows,
-                                                        rr::MaterialVersion& outMaterial)
-{
-#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    GpuResources& resources = *mResources;
-    const rr::StaticLightingSurfaceDescription& surface = resources.Lighting.Surfaces[objectIndex];
-    rr::LitMaterialDescription material;
-    if (surface.Texture != content::scene_format::NO_TEXTURE)
-    {
-        material.Surface.Texture = resources.Textures[surface.Texture];
-    }
-    material.Surface.Tint = surface.Tint;
-    material.Surface.UvTransform = surface.UvTransform;
-    material.Surface.Alpha = surface.Alpha;
-    material.Surface.AlphaCutoff = surface.AlphaCutoff;
-    material.Surface.Sampler.Filter = rhi::RasterFilter::Linear;
-    material.Surface.Sampler.U = material.Surface.Sampler.V =
-        surface.ShouldRepeatTexture == true ? rhi::RasterAddress::Repeat : rhi::RasterAddress::Clamp;
-    material.Metallic = surface.Metallic;
-    material.Roughness = surface.Roughness;
-    material.Emission = surface.Emission;
-    material.IsEmissionTwoSided = surface.IsEmissionTwoSided;
-    material.AreAuthoredInputsEnabled = true;
-    material.Clusters = &resources.Lighting.Clusters;
-    if (hasShadows == true)
-    {
-        material.Lights = resources.Lighting.Lights.Lights;
-        material.LightCount = resources.Lighting.Lights.Count;
-        material.Shadows = resources.Shadows;
-    }
-    if (resources.HasEnvironment == true)
-    {
-        material.EnvironmentOrNull = &resources.Environment;
-    }
-    else
-    {
-        const math::Vector3 radiance = resources.Source.Definition->Environment.Rgb;
-        material.EnvironmentIrradiance = radiance * math::kPiF;
-        material.EnvironmentRadiance = radiance;
-    }
-    if (bakeOrNull != nullptr)
-    {
-        material.Bake = *bakeOrNull;
-    }
-    rr::LightSelection report;
-    return resources.Renderer.CreateLitMaterial(Program_, material, outMaterial, report);
-#else
-    static_cast<void>(objectIndex);
-    static_cast<void>(bakeOrNull);
-    static_cast<void>(hasShadows);
-    static_cast<void>(outMaterial);
-    return rhi::RasterStatus::Unsupported;
-#endif
-}
-
-bool RenderPreview::prepareLighting()
-{
-#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    GpuResources& resources = *mResources;
-    const usize count = resources.Source.Definition->Objects.GetSize();
-    if (resources.LightingStage == 0)
-    {
-        const rhi::RasterStatus status =
-            preview_lighting::BuildInputs(resources.Source, resources.LightingKey, resources.Lighting);
-        if (status != rhi::RasterStatus::Ready)
-        {
-            Status_ = QStringLiteral("Authored lighting admission failed (%1); no lights were dropped.")
-                          .arg(static_cast<uint32>(status));
-            return false;
-        }
-        const resources::SceneEnvironment& environment = resources.Source.Definition->Environment;
-        if (environment.Width != 0)
-        {
-            Array<math::Vector4> pixels;
-            if (pixels.TryResize(environment.Pixels.GetSize()) == false)
-            {
-                return false;
-            }
-            for (usize i = 0; i < pixels.GetSize(); ++i)
-            {
-                const math::Vector3 rgb{environment.Pixels[i].X * environment.Rgb.X,
-                                        environment.Pixels[i].Y * environment.Rgb.Y,
-                                        environment.Pixels[i].Z * environment.Rgb.Z};
-                pixels[i] = {rgb.X, rgb.Y, rgb.Z, 1};
-            }
-            rr::EnvironmentDescription description;
-            description.PixelsOrNull = pixels.GetData();
-            description.Width = environment.Width;
-            description.Height = environment.Height;
-            description.FilterWidth = 64;
-            description.FilterSamples = 16;
-            description.CpuByteBudget = usize{256} * 1024 * 1024;
-            if (Accepted(resources.Environment.Initialize(Device_, description)) == false)
-            {
-                return false;
-            }
-            resources.HasEnvironment = true;
-        }
-        ++resources.LightingStage;
-    }
-    if (resources.HasEnvironment == true)
-    {
-        const rhi::RasterStatus status = resources.Environment.GetStatus();
-        if (status != rhi::RasterStatus::Ready)
-        {
-            return status == rhi::RasterStatus::Pending;
-        }
-    }
-    if (resources.LightingStage == 1)
-    {
-        while (resources.MaterialCursor < count)
-        {
-            if (Accepted(createLightingMaterial(resources.MaterialCursor,
-                                                nullptr,
-                                                false,
-                                                resources.CasterMaterials[resources.MaterialCursor])) == false)
-            {
-                return false;
-            }
-            ++resources.MaterialCursor;
-        }
-        StaticArray<rr::SceneItem, content::scene_format::MAX_OBJECTS> items{};
-        for (usize i = 0; i < count; ++i)
-        {
-            const rhi::RasterStatus ready = resources.Renderer.GetStatus(resources.CasterMaterials[i]);
-            if (ready != rhi::RasterStatus::Ready)
-            {
-                return ready == rhi::RasterStatus::Pending;
-            }
-            const resources::SceneObject& source = resources.Source.Definition->Objects[i];
-            items[i].Geometry = Meshes_[source.Mesh];
-            items[i].Transform = source.Transform;
-            items[i].SourceId = source.SourceId;
-            items[i].Surface = resources.CasterMaterials[i];
-            items[i].Material.Color = {1, 1, 1, 1};
-        }
-        if (Accepted(resources.Renderer.CreateSnapshot(items.GetData(), count, resources.Casters)) == false)
-        {
-            return false;
-        }
-        resources.MaterialCursor = 0;
-        ++resources.LightingStage;
-    }
-    if (resources.LightingStage == 2)
-    {
-        if (resources.Lighting.ShadowCount == 0)
-        {
-            resources.LightingStage = 4;
-        }
-        else
-        {
-            rr::ShadowAtlasDescription description;
-            description.Width = description.Height = preview_lighting::SHADOW_ATLAS_PIXELS;
-            description.Regions = resources.Lighting.Shadows.GetData();
-            description.Count = resources.Lighting.ShadowCount;
-            if (Accepted(resources.Renderer.PrepareShadowAtlas(resources.Casters, description, resources.Shadows)) ==
-                false)
-            {
-                return false;
-            }
-            ++resources.LightingStage;
-        }
-    }
-    if (resources.LightingStage == 3)
-    {
-        const rhi::RasterStatus ready = resources.Renderer.GetStatus(resources.Shadows);
-        if (ready != rhi::RasterStatus::Ready)
-        {
-            return ready == rhi::RasterStatus::Pending;
-        }
-        if (rhi::BeginFrame(Device_, Surface_) != rhi::DeviceStatus::Ready)
-        {
-            return false;
-        }
-        const rhi::RasterStatus drawn = resources.Renderer.DrawShadowAtlas(resources.Shadows);
-        const rhi::RasterStatus ended = rhi::EndFrame(Device_, resources.ShadowProducer);
-        if (drawn != rhi::RasterStatus::Ready)
-        {
-            return false;
-        }
-        if (ended == rhi::RasterStatus::Pending)
-        {
-            resources.IsShadowFrameOpen = true;
-            return true;
-        }
-        if (ended != rhi::RasterStatus::Ready)
-        {
-            return false;
-        }
-        ++resources.LightingStage;
-    }
-    if (resources.LightingStage == 4)
-    {
-        if (resources.Lighting.ShadowCount != 0)
-        {
-            const rhi::RasterStatus status = rhi::GetStatus(Device_, resources.ShadowProducer);
-            if (status != rhi::RasterStatus::Ready)
-            {
-                return status == rhi::RasterStatus::Pending;
-            }
-        }
-        while (resources.MaterialCursor < count)
-        {
-            if (Accepted(createLightingMaterial(resources.MaterialCursor,
-                                                nullptr,
-                                                true,
-                                                Materials_[resources.MaterialCursor])) == false)
-            {
-                return false;
-            }
-            ++resources.MaterialCursor;
-        }
-        StaticArray<rr::SceneItem, content::scene_format::MAX_OBJECTS> items{};
-        for (usize i = 0; i < count; ++i)
-        {
-            const rhi::RasterStatus ready = resources.Renderer.GetStatus(Materials_[i]);
-            if (ready != rhi::RasterStatus::Ready)
-            {
-                return ready == rhi::RasterStatus::Pending;
-            }
-            const resources::SceneObject& source = resources.Source.Definition->Objects[i];
-            items[i].Geometry = Meshes_[source.Mesh];
-            items[i].Transform = source.Transform;
-            items[i].SourceId = source.SourceId;
-            items[i].Surface = Materials_[i];
-            items[i].Material.Color = {1, 1, 1, 1};
-        }
-        if (Accepted(resources.Renderer.CreateSnapshot(items.GetData(), count, Snapshot_)) == false)
-        {
-            return false;
-        }
-        ++resources.LightingStage;
-    }
-    ++Phase_;
-    return true;
-#else
-    return false;
-#endif
-}
-
 void RenderPreview::serviceStaticLighting()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    GpuResources& resources = *mResources;
+    PreviewGpuGeneration& resources = *mResources;
     if (resources.HasBakeFailed == true || resources.IsBakePublished == true || Frames_ == 0)
     {
         return;
@@ -1575,7 +970,8 @@ void RenderPreview::serviceStaticLighting()
         bake.Transform = chart.Transform;
         bake.AreTriangleChartsEnabled = true;
         bake.HasStaticAreaDirect = true;
-        const rhi::RasterStatus status = createLightingMaterial(index, &bake, true, resources.BakedMaterials[index]);
+        const rhi::RasterStatus status =
+            resources.CreateLightingMaterial(index, &bake, true, resources.BakedMaterials[index]);
         if (Accepted(status) == false)
         {
             failBake();
@@ -1602,7 +998,7 @@ void RenderPreview::serviceStaticLighting()
         for (usize i = 0; i < count; ++i)
         {
             const resources::SceneObject& source = resources.Source.Definition->Objects[i];
-            items[i].Geometry = Meshes_[source.Mesh];
+            items[i].Geometry = resources.GetMesh(source.Mesh);
             items[i].Transform = source.Transform;
             items[i].SourceId = source.SourceId;
             items[i].Surface = resources.BakedMaterials[i];
@@ -1627,9 +1023,7 @@ void RenderPreview::serviceStaticLighting()
         failBake();
         return;
     }
-    static_cast<void>(resources.Renderer.Release(Snapshot_));
-    Snapshot_ = resources.BakedSnapshot;
-    resources.IsBakePublished = true;
+    resources.PublishBakedSnapshot();
     FreshReport_ = true;
 #endif
 }
@@ -1647,7 +1041,7 @@ rhi::RasterStatus RenderPreview::pollViewport()
     // RasterViewport has discarded the rejected pending view before returning.
     mResources->HasBakeFailed = true;
     FreshReport_ = true;
-    return mResources->Viewport.Update(Snapshot_, Description_, Report_);
+    return mResources->Viewport.Update(mResources->GetSnapshot(), Description_, Report_);
 }
 
 void RenderPreview::Tick()
@@ -1670,7 +1064,7 @@ void RenderPreview::Tick()
         if (ended == rhi::RasterStatus::Ready)
         {
             mResources->IsShadowFrameOpen = false;
-            mResources->LightingStage = 4;
+            mResources->LightingStage = PreviewLightingStage::Materials;
         }
         else if (ended != rhi::RasterStatus::Pending)
         {
@@ -1740,7 +1134,8 @@ void RenderPreview::Tick()
     {
         return;
     }
-    if (Phase_ >= 5 && (mHasViewport == false || Width_ != RequestedWidth_ || Height_ != RequestedHeight_))
+    if (mResources->IsPrepared() == true &&
+        (mHasViewport == false || Width_ != RequestedWidth_ || Height_ != RequestedHeight_))
     {
         if (mHasViewport == true)
         {
@@ -1763,7 +1158,7 @@ void RenderPreview::Tick()
         mHasViewport = true;
         ViewDirty_ = true;
     }
-    if (Phase_ == 6 && Scene_.Lit == true && mShading == PreviewShading::Lit)
+    if (mHasPreparedView == true && Scene_.Lit == true && mShading == PreviewShading::Lit)
     {
         serviceStaticLighting();
     }
@@ -1772,7 +1167,7 @@ void RenderPreview::Tick()
         fail(QStringLiteral("GPU renderer stopped or exceeded its supported profile. World edits are preserved."));
         return;
     }
-    if (Phase_ != 6 || mHasViewport == false)
+    if (mHasPreparedView == false || mHasViewport == false)
     {
         return;
     }

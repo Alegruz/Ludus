@@ -63,6 +63,18 @@ documents** index, and search. Do not create wiki mirrors or miscellaneous repor
 without a distinct reader need. Keep private material outside the published tree
 and run the required documentation checks before a PR.
 
+## Responsibility boundaries
+
+Follow [AGENTS.md's responsibility and refactoring rules](../../AGENTS.md#responsibility-boundaries-and-incremental-refactoring).
+Before extending a large file, identify its owning operation and state. Extract
+one private responsibility at a time with narrow contracts, named asynchronous
+states and focused production-path regressions. Header-included implementations
+and file splitting around an unchanged all-purpose state object do not establish
+boundaries. Preserve document history, transactional publication and GPU lifetime
+ownership. Size is a review signal, not a hard line-count target. The staged work
+and remaining preview/editor boundaries belong to the existing
+[editor GUI systems context](../../docs/architecture/editor-gui-systems.md#implementation-boundaries-and-refactoring).
+
 ## Other standing rules
 
 Apply [AGENTS.md's explicit-type and shader rules](../../AGENTS.md#explicit-types-and-shader-source)

@@ -1003,6 +1003,40 @@ RenderScene LoadLitStarterScene(Fixture& inoutFixture)
 }
 } // namespace
 
+TEST_CASE("Headless preview prepares authored lighting from the extracted World",
+          "[editor][preview-generation][lighting][gpu]")
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW) && defined(Q_OS_LINUX)
+    constexpr int32 PREPARATION_TIMEOUT_MILLISECONDS = 30000;
+    Fixture fixture;
+    const RenderScene scene = LoadLitStarterScene(fixture);
+    RenderPreview preview;
+    QSignalSpy failures(&preview, &RenderPreview::Failed);
+    bool isAdmitted = false;
+    QObject::connect(&preview, &RenderPreview::DeviceRequested, &preview, [&preview, &isAdmitted]() {
+        isAdmitted = preview.AdmitOffscreenDevice();
+    });
+    preview.Resize(64, 64);
+    REQUIRE(preview.SetScene(scene) == true);
+    preview.SetShading(PreviewShading::Lit);
+    const bool hasStarted = preview.Start();
+    if (isAdmitted == false)
+    {
+        SKIP("No headless Vulkan device; install lavapipe to exercise authored-light preparation");
+    }
+    REQUIRE(hasStarted == true);
+    const bool hasFrame =
+        QTest::qWaitFor([&preview]() { return preview.HasPendingFrame(); }, PREPARATION_TIMEOUT_MILLISECONDS);
+    INFO(preview.Status().toStdString());
+    REQUIRE(hasFrame == true);
+    CHECK(failures.count() == 0);
+    CHECK(preview.Report().Visible > 0);
+    CHECK(preview.Scene().Identity == scene.Identity);
+    preview.Stop();
+#else
+    SKIP("Headless authored-light preview requires the native Linux preview");
+#endif
+}
 TEST_CASE("Static lighting worker owns surface overrides until completed chart transfer",
           "[editor][render-authoring][lighting]")
 {

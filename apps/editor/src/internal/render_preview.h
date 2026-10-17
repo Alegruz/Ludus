@@ -3,9 +3,7 @@
 #include <ludus/foundation/base/compiler.h>
 #include <ludus/foundation/base/types.h>
 
-#include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/base/pointer.hpp>
-#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/foundation/threading/jobs.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
@@ -17,6 +15,7 @@
 #include <ludus/platform/native_window.h>
 
 #include "internal/editor_camera_controller.h"
+#include "internal/preview_shading.h"
 #include "internal/render_scene.h"
 
 #include <QJsonObject>
@@ -25,13 +24,7 @@
 
 namespace ludus::editor
 {
-// Editor-only visualization; does not modify authored materials or scene lights.
-enum class PreviewShading : foundation::uint8
-{
-    Solid,
-    Albedo,
-    Lit,
-};
+class PreviewGpuGeneration;
 // Main-thread renderer/device owner. Never destroys another preview's session.
 class RenderPreview final : public QObject
 {
@@ -160,31 +153,24 @@ private:
     // the resources so it outlives every bake that references it.
     foundation::threading::JobSystem mBakeJobs;
     bool mHasBakeJobs = false;
-    struct GpuResources;
-    foundation::UniquePtr<GpuResources> mResources;
-    foundation::UniquePtr<GpuResources> mRetiredResources;
+    foundation::UniquePtr<PreviewGpuGeneration> mResources;
+    foundation::UniquePtr<PreviewGpuGeneration> mRetiredResources;
     bool mNeedsResourceRestart = false;
     bool mHasPreparationFailed = false;
     [[nodiscard]] bool beginResourceRestart() noexcept;
     struct Residency;
     foundation::UniquePtr<Residency> Residency_;
-    bool LightingInitialized_ = false;
     graphics::renderer::ViewportFrame mPendingFrame;
     graphics::renderer::ViewportImage mPendingImage;
     graphics::rhi::SubmissionToken mProducer;
     bool mHasPendingFrame = false;
     bool mHasFrame = false;
     bool mHasViewport = false;
+    bool mHasPreparedView = false;
     bool mIsAwaitingProducer = false;
     [[nodiscard]] bool prepare();
-    [[nodiscard]] bool prepareLighting();
     void serviceStaticLighting();
     [[nodiscard]] graphics::rhi::RasterStatus pollViewport();
-    [[nodiscard]] graphics::rhi::RasterStatus
-    createLightingMaterial(foundation::usize objectIndex,
-                           const graphics::renderer::BakedLighting* bakeOrNull,
-                           bool hasShadows,
-                           graphics::renderer::MaterialVersion& outMaterial);
     void restartResources() noexcept;
     RenderScene Scene_;
     foundation::uint32 RequestedWidth_ = 640, RequestedHeight_ = 480;
@@ -195,15 +181,10 @@ private:
 
     graphics::rhi::DeviceHandle Device_{};
     graphics::rhi::SurfaceHandle Surface_{};
-    graphics::renderer::Mesh Meshes_[6]{};
-    foundation::StaticArray<graphics::renderer::MaterialVersion, content::scene_format::MAX_OBJECTS> Materials_{};
-    graphics::renderer::MaterialProgram Program_{};
-    graphics::renderer::Snapshot Snapshot_{};
     graphics::renderer::ViewReport Report_{};
     graphics::renderer::ViewDescription Description_{};
     foundation::math::Vector3 OrbitCenter_{};
     foundation::float32 OrbitRadius_ = 1;
-    foundation::uint32 Phase_ = 0;
     foundation::uint32 Width_ = 0, Height_ = 0;
     foundation::uint64 Frames_ = 0;
     foundation::int32 Camera_ = -1;
@@ -214,7 +195,6 @@ private:
     bool OwnsDevice_ = false;
     bool mIsStarting = false;
     foundation::uint64 mDeviceSerial = 0;
-    bool AssetsCreated_ = false;
     QTimer Timer_;
     QString Status_;
 };

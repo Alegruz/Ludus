@@ -137,6 +137,9 @@ qt_add_executable(ludus_editor
     ${editor_viewport_sources}
     src/render_scene.cpp
     src/render_preview.cpp
+    src/preview_gpu_generation.cpp
+    src/internal/preview_gpu_generation.h
+    src/internal/preview_shading.h
     src/editor_camera_controller.cpp
     src/static_lighting_job.cpp
     src/internal/static_lighting_job.h
@@ -277,6 +280,9 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         ${editor_viewport_sources}
         src/render_scene.cpp
         src/render_preview.cpp
+        src/preview_gpu_generation.cpp
+        src/internal/preview_gpu_generation.h
+        src/internal/preview_shading.h
         src/editor_camera_controller.cpp
         src/static_lighting_job.cpp
         src/internal/static_lighting_job.h
@@ -296,6 +302,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/world_workspace_tests.cpp
         tests/level_workspace_tests.cpp
         tests/render_authoring_tests.cpp
+        tests/preview_generation_tests.cpp
         tests/viewport_navigation_tests.cpp
         tests/world_demo_workspace_tests.cpp
         src/internal/controller.h
