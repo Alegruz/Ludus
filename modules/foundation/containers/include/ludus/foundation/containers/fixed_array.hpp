@@ -14,43 +14,13 @@
 #include <ludus/foundation/base/core.h>
 
 #include <ludus/foundation/containers/detail/contiguous_storage.hpp>
+#include <ludus/foundation/containers/detail/inline_slots.hpp>
 
 #include <span>
 #include <type_traits>
 
 namespace ludus::foundation::core
 {
-namespace detail
-{
-/// @brief Internal: uninitialized inline slots for FixedArray.
-///
-/// Constructing the union constructs no element; FixedArray begins and ends each element's lifetime explicitly.
-/// Trivially destructible exactly when ElementType is.
-template <typename ElementType, usize Count>
-union FixedArraySlots
-{
-    /// Internal: leaves every slot uninitialized.
-    FixedArraySlots() noexcept {}
-    /// Internal: trivial destruction for trivially destructible elements.
-    ~FixedArraySlots()
-        requires std::is_trivially_destructible_v<ElementType>
-    = default;
-    /// Internal: destroys no element; the owning FixedArray destroys its live prefix first.
-    ~FixedArraySlots() {}
-    FixedArraySlots(const FixedArraySlots&) = delete;
-    FixedArraySlots& operator=(const FixedArraySlots&) = delete;
-
-    /// Internal: raw slots; only the owner's live prefix holds objects.
-    ElementType Elements[Count];
-};
-
-/// Internal: zero-capacity storage holds no slots.
-template <typename ElementType>
-union FixedArraySlots<ElementType, 0>
-{
-};
-} // namespace detail
-
 /// @brief Bounded contiguous sequence in inline storage; never allocates.
 ///
 /// Elements [0, GetSize()) are live; the remaining Count - GetSize() slots are raw storage. Adding to a full array
@@ -509,7 +479,7 @@ private:
         mSize = count;
     }
 
-    detail::FixedArraySlots<ElementType, Count> mSlots;
+    detail::InlineSlots<ElementType, Count> mSlots;
     usize mSize = 0;
 };
 } // namespace ludus::foundation::core

@@ -7,12 +7,13 @@
 //
 // This is a private implementation header: it is never installed and never
 // included by a public header. All state is fixed and embedded; no method
-// allocates heap memory or takes a lock (K12). Bounded buffers use FixedArray,
-// whose inline storage never allocates.
+// allocates heap memory or takes a lock (K12). Bounded buffers use FixedArray
+// and RingBuffer, whose inline storage never allocates.
 
 #include <ludus/foundation/base/core.h>
 
 #include <ludus/foundation/containers/fixed_array.hpp>
+#include <ludus/foundation/containers/ring_buffer.hpp>
 #include <ludus/input/actions.h>
 #include <ludus/input/input_debug.h>
 #include <ludus/input/key.h>
@@ -170,30 +171,28 @@ public:
             return AdmissionStatus::RecoveredWithLoss;
         }
 
-        if (mPendingCount >= PendingCap)
-        {
-            // Bounded overflow (K07): discard the incomplete pending batch,
-            // snapshot live Down into the reset mailbox, suppress held keys, and
-            // keep focus. Live Down already reflects this record.
-            overflowRecover(ResetReason::Overflow);
-            return AdmissionStatus::RecoveredWithLoss;
-        }
-
-        const usize slot = (mPendingHead + mPendingCount) % PendingCap;
-        mPending[slot] = PendingTransition
+        // Accepted transitions are traced at step time (applyTransition) so the
+        // entry carries its assigned step id. Carry the record's native-time and
+        // source on the pending entry for that later trace.
+        const bool isQueued = mPending.TryAdd(PendingTransition
         {
             .Transition = record.Transition,
             .PhysicalKey = record.PhysicalKey,
             .Source = record.Source,
             .Sequence = sequence,
-        };
-        ++mPendingCount;
+            .HasNativeTime = record.HasNativeTime,
+            .NativeTimeMs = record.NativeTimeMs,
+        });
+        if (isQueued == false)
+        {
+            // Bounded overflow (K07): the full ring is unchanged. Discard the
+            // incomplete pending batch, snapshot live Down into the reset
+            // mailbox, suppress held keys, and keep focus. Live Down already
+            // reflects this record.
+            overflowRecover(ResetReason::Overflow);
+            return AdmissionStatus::RecoveredWithLoss;
+        }
         ++mCounters.Accepted;
-        // Accepted transitions are traced at step time (applyTransition) so the
-        // entry carries its assigned step id. Carry the record's native-time and
-        // source on the pending entry for that later trace.
-        mPending[slot].HasNativeTime = record.HasNativeTime;
-        mPending[slot].NativeTimeMs = record.NativeTimeMs;
         return AdmissionStatus::Accepted;
     }
 
@@ -264,12 +263,10 @@ public:
 
         // Reduce all queued transitions in order (K03): every pending event is
         // assigned to THIS step; none spill to later catch-up steps.
-        while (mPendingCount > 0)
+        while (mPending.IsEmpty() == false)
         {
-            const PendingTransition& pending = mPending[mPendingHead];
-            applyTransition(pending, stepId);
-            mPendingHead = (mPendingHead + 1) % PendingCap;
-            --mPendingCount;
+            applyTransition(mPending.GetFirst(), stepId);
+            mPending.RemoveFirst();
         }
 
         publishSnapshot(stepId);
@@ -371,8 +368,7 @@ public:
             mLiveDown[i] = false;
             mLiveSuppressed[i] = false;
         }
-        mPendingHead = 0;
-        mPendingCount = 0;
+        mPending.Clear();
         mMailbox = ResetMailbox{};
         mFocused = false;
         mSequence = 0;
@@ -420,12 +416,8 @@ private:
 
     void discardPending() noexcept
     {
-        if (mPendingCount > 0)
-        {
-            mCounters.DiscardedEvents += mPendingCount;
-        }
-        mPendingHead = 0;
-        mPendingCount = 0;
+        mCounters.DiscardedEvents += mPending.GetSize();
+        mPending.Clear();
     }
 
     void overflowRecover(ResetReason reason) noexcept
@@ -709,9 +701,7 @@ private:
     bool mFocused;
 
     // --- Pending ring ---------------------------------------------------
-    PendingTransition mPending[PendingCap];
-    usize mPendingHead;
-    usize mPendingCount;
+    foundation::RingBuffer<PendingTransition, PendingCap> mPending;
     uint64 mSequence;
 
     // --- Reset mailbox --------------------------------------------------

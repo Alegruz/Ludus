@@ -1,6 +1,6 @@
 # Container systems
 
-Status: M0 to M3 implemented. This design extends the implemented
+Status: M0 to M4 implemented. This design extends the implemented
 [contiguous containers](containers.md#34-ludus-native-taxonomy-and-api-authoritative-naming)
 and respects [memory ownership](memory-management.md). It does not replace
 those contracts. Types marked planned below are architectural decisions, not
@@ -70,7 +70,7 @@ through FoundationContainers' CMake header file set.
 | Growable contiguous sequence | `Array<T>` | Implemented; reserve/reuse; pointers move on growth |
 | Small or read-mostly ordered dictionary | `SortedMap<K, V, Compare>` | First increment; binary search, contiguous iteration, O(n) insert/remove |
 | Runtime size within a hard bound | `FixedArray<T, N>` | Implemented (M3); live prefix, no heap, full is a status |
-| FIFO with hard capacity | `RingBuffer<T>` | Planned; single owner, two spans for wrapped storage |
+| FIFO with hard capacity | `RingBuffer<T, N>` | Implemented (M4); inline storage, single owner, two spans for wrapped storage |
 | Dense index membership/flags | `BitSet`, `StaticBitSet<N>` | Planned; packed words, no proxy references |
 | Larger mutable dictionary | `HashMap<K, V, Hash, Equal>` | Planned; flat storage, measurement gates below |
 | Uniqueness without mapped values | `SortedSet<K>` / `HashSet<K>` | Planned; share the corresponding lookup policy |
@@ -192,14 +192,33 @@ buffer. They replace raw arrays with hand-maintained counts, and a full
 step-event buffer is asserted as unreachable by the reducer's capacity
 invariant.
 
-## Planned structures and decision gates
+## RingBuffer contract
 
-`RingBuffer` must construct only occupied slots, support
-non-default-constructible values, handle zero capacity, and have a `Try` full
-status distinct from OOM. A ring publishes only initialized payloads and exposes
-front/back spans rather than pretending wrapped storage is contiguous. Generic
-rings are single-owner; the existing MPSC/SPSC queues retain their specialized
-atomic publication/reclamation protocols.
+`RingBuffer<T, N>` (in `ring_buffer.hpp`) is a single-owner FIFO. M4's storage
+decision is that capacity is a compile-time constant and storage is inline, the
+same uninitialized slot union `FixedArray` uses (`detail/inline_slots.hpp`).
+It never allocates, which preserves the Input consumer's one creation-time
+allocation. A heap-backed ring whose capacity is chosen at run time remains
+gated on a consumer that needs it.
+
+Live elements occupy a possibly wrapped run starting at the head. Only those
+slots hold objects, so element types need only a nonthrowing destructor. A full
+ring rejects `TryAdd`/`TryAddInPlace` with no element changed and no argument
+consumed. Appending never moves a live element, so arguments may alias the
+ring, and a borrow stays valid until its element is removed. `RemoveFirst` is
+O(1); a drained ring restarts at the first slot so the next run is contiguous.
+Index 0 is always the oldest element. `GetLeadingSpan()` then `GetTrailingSpan()`
+visit the live elements in FIFO order without pretending wrapped storage is
+contiguous. Copies and moves preserve FIFO order and restart at the first slot.
+A moved-from ring is empty. `N == 0` is always full.
+
+The ring is not a concurrent queue: the audio, logging and profiling SPSC/MPSC
+queues keep their own atomic publication and reclamation protocols. The M4
+consumer is the Input reducer's pending-transition queue. Its overflow policy
+is unchanged: a rejected `TryAdd` leaves the queue untouched, then the reducer
+discards the batch and arms a reset.
+
+## Planned structures and decision gates
 
 `BitSet` uses `uint64` words, masks unused tail bits, specifies resize initialization
 and index bounds, and exposes test/set/reset plus word-oriented operations. Use
@@ -262,7 +281,7 @@ below determine which increments can proceed independently.
 | M1 | Restore migration and explicit allocation failure | Implemented | First-party `std::vector` uses were replaced with `Array`, including tests, tools and the exported Audio Gym API. Status-returning boundaries use fallible operations and preserve outputs on failure. `tools/check_container_policy.py` rejects new uses outside the benchmark/vendor exceptions; see [M1 consumer migration](#m1-consumer-migration). |
 | M2 | Complete existing container API documentation | Implemented | Every public `Array`, `StaticArray`, `SortedMap` and relocation-trait declaration has a Doxygen contract, and their 158 baseline entries were removed from `api-undocumented.json`. The [container guide](../wiki/guides/containers.md) covers selection, failure handling and borrow rules, and separates shipped types from planned ones. Strict wiki/API builds and coverage checks pass. |
 | M3 | `FixedArray<T, N>` and one Input migration | Implemented | `FixedArray` keeps a live prefix in inline raw storage, reports full explicitly and constructs only occupied slots ([contract](#fixedarray-contract)). The Input reducer's binding table and step-event buffer use it. Zero allocation, zero capacity, non-default/move-only values, aliasing, failure preservation and balanced lifetimes are tested, including against a seeded model. |
-| M4 | Single-owner `RingBuffer<T>` | Gated | Establish capacity/backing-storage ownership and select a FIFO consumer; Input's pending-transition ring is a candidate. Implement wrapped front/back spans and explicit full/empty behavior; model-test wraparound and lifetimes while preserving the consumer's overflow/reset policy. |
+| M4 | Single-owner `RingBuffer<T, N>` | Implemented | Inline storage with compile-time capacity was selected ([contract](#ringbuffer-contract)); a heap-backed run-time-capacity ring stays gated on a consumer. Wrapped leading/trailing spans and explicit full/empty behavior are implemented. The Input reducer's pending-transition queue uses it with its overflow/reset policy unchanged. Wraparound and lifetimes are model-tested. |
 | M5 | `BitSet` and `StaticBitSet<N>` | Gated | Select a flags/membership consumer and define resize initialization, bounds and word operations. Verify 0/1/63/64/65-bit boundaries, tail masking, shifts and fallible dynamic growth; measure storage/operation costs and migrate the selected consumer. |
 | M6 | Array allocation-domain integration | Planned; Memory prerequisites | Reuse FoundationMemory through the Array byte seam, then introduce domain ownership as a separately measured layout change. Test original-domain frees, copy/move/swap rules, nested owners, over-alignment and OOM preservation; version the SDK owning-layout boundary. |
 | M7 | `SortedSet<K>` | Gated | Identify an ordered uniqueness consumer. Reuse the ordering/equivalence contract and contiguous lifetime helpers; verify duplicate insertion consumes nothing, keys remain immutable through public access, and ordered output matches an independent model. |
@@ -316,9 +335,10 @@ or unrelated ownership types stays in their own workstreams.
 M2 documented the containers that existed when it landed. Every subsequent
 milestone includes Doxygen for its new/changed API and the relevant
 [guide](../wiki/guides/containers.md) update in the same change, including moving
-a type from its planned table to its shipped table. M3 delivered `FixedArray`.
-M4 and M5 may follow independently once their consumers are established; generic rings retain single-owner semantics and do not replace
-the audio/logging/profiling publication protocols.
+a type from its planned table to its shipped table. M3 delivered `FixedArray`
+and M4 delivered `RingBuffer`. M5 may follow once its consumer is established.
+Generic rings retain single-owner semantics and do not replace the
+audio/logging/profiling publication protocols.
 
 M6 follows the byte-boundary and attribution decisions in
 [Memory phases 1 and 2](memory-management.md#17-implementation-phases). Existing
