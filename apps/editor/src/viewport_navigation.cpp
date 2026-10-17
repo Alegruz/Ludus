@@ -90,11 +90,15 @@ void PreviewViewport::mouseMoveEvent(QMouseEvent* event)
     mLastPositionGlobal = event->globalPosition();
     const float32 deltaX = static_cast<float32>(delta.x());
     const float32 deltaY = static_cast<float32>(delta.y());
-    if (event->buttons().testFlag(Qt::MiddleButton) == true)
+    const bool isPrimaryDrag = event->buttons().testFlag(Qt::LeftButton);
+    const bool isOrbitModifier = event->modifiers().testFlag(Qt::AltModifier);
+    const bool isPanModifier = event->modifiers().testFlag(Qt::ShiftModifier);
+    if (event->buttons().testFlag(Qt::MiddleButton) == true ||
+        (isPrimaryDrag == true && isOrbitModifier == true && isPanModifier == true))
     {
         Preview_->Pan(deltaX, deltaY, getDrawableHeight());
     }
-    else if (event->buttons().testFlag(Qt::LeftButton) == true && event->modifiers().testFlag(Qt::AltModifier) == true)
+    else if (isPrimaryDrag == true && isOrbitModifier == true)
     {
         Preview_->Orbit(deltaX, deltaY);
     }

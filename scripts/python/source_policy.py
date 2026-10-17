@@ -58,7 +58,9 @@ def declaration_commas(code: str) -> list[int]:
     pattern = re.compile(
         r"(?:^|(?<=[;{}])|\bfor\s*\()\s*"
         r"(?:(?:const|static|constexpr|inline|volatile)\s+)*"
-        r"(?!return\b|else\b|case\b|using\b)"
+        # A namespace block has no terminating semicolon, so the scan would run
+        # past its closing brace into later template parameter lists.
+        r"(?!return\b|else\b|case\b|using\b|namespace\b)"
         r"[A-Za-z_]\w*(?:::\w+)*(?:<[^;{}]*?>)?(?:\s+|(?=[*&]))"
         r"[*&]*\s*[A-Za-z_]\w*\s*(?=[=,;\[{])",
     )

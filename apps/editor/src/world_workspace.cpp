@@ -3,6 +3,7 @@
 
 #include "internal/controller.h"
 #include "internal/editor_files.h"
+#include "internal/editor_identity.h"
 #include "internal/level_workspace.h"
 #include "internal/render_panel.h"
 #include "internal/world_demo_adapter.h"
@@ -20,6 +21,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QJsonDocument>
@@ -34,7 +36,7 @@
 #include <QSaveFile>
 #include <QScrollArea>
 #include <QSplitter>
-#include <QUuid>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace ludus::editor
@@ -93,29 +95,26 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     auto* intro = new QLabel(QStringLiteral("World — entities and project-defined components"), this);
     intro->setWordWrap(true);
     layout->addWidget(intro);
-    auto* help =
-        new QLabel(QStringLiteral("Create or open a world, import a scene, and edit placement and components together. "
-                                  "Projects may supply authoring/world.schema.json for gameplay fields. Runtime "
-                                  "binding belongs to the game."),
-                   this);
-    help->setWordWrap(true);
-    layout->addWidget(help);
-    auto* files = new QHBoxLayout;
+    intro->setToolTip(
+        QStringLiteral("Create or open a world, import a scene, and edit placement and components together. "
+                       "Projects may supply authoring/world.schema.json for gameplay fields. Runtime "
+                       "binding belongs to the game."));
+    QGridLayout* files = new QGridLayout;
     auto* create = new QPushButton(QStringLiteral("New World…"), this);
     create->setObjectName(QStringLiteral("worldNew"));
     auto* open = new QPushButton(QStringLiteral("Open World…"), this);
     open->setObjectName(QStringLiteral("worldOpen"));
     Recovery_ = new QPushButton(QStringLiteral("Restore Recovery"), this);
     Recovery_->setObjectName(QStringLiteral("worldRecover"));
-    files->addWidget(create);
-    files->addWidget(open);
-    files->addWidget(Recovery_);
+    files->addWidget(create, 0, 0);
+    files->addWidget(open, 0, 1);
+    files->addWidget(Recovery_, 0, 2);
     Import_ = new QPushButton(QStringLiteral("Import scene…"), this);
     Import_->setObjectName(QStringLiteral("worldImportScene"));
-    files->addWidget(Import_);
+    files->addWidget(Import_, 0, 3);
     CancelScene_ = new QPushButton(QStringLiteral("Cancel scene operation"), this);
     CancelScene_->setObjectName(QStringLiteral("worldCancelScene"));
-    files->addWidget(CancelScene_);
+    files->addWidget(CancelScene_, 1, 0, 1, 2);
     connect(CancelScene_, &QPushButton::clicked, this, [this]() {
         DemoPreview_.Stop();
         Scene_->CancelOperation();
@@ -153,8 +152,8 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     PreviewButton_->setObjectName(QStringLiteral("worldPreview"));
     PlayButton_ = new QPushButton(QStringLiteral("Play saved World"), this);
     PlayButton_->setObjectName(QStringLiteral("worldPlay"));
-    files->addWidget(PreviewButton_);
-    files->addWidget(PlayButton_);
+    files->addWidget(PreviewButton_, 1, 2);
+    files->addWidget(PlayButton_, 1, 3);
     connect(PreviewButton_, &QPushButton::clicked, this, [this]() { (void)StartPreview(); });
     connect(PlayButton_, &QPushButton::clicked, this, [this]() {
         if (Save() && !Dirty() && !SceneBusy())
@@ -164,7 +163,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
         }
     });
     connect(&DemoPreview_, &ScenePreview::Changed, this, &WorldWorkspace::WorldDemoChanged);
-    files->addStretch();
+    files->setColumnStretch(4, 1);
     layout->addLayout(files);
     QHBoxLayout* previewRow = new QHBoxLayout;
     ImportPreview_ = new QPlainTextEdit(this);
@@ -196,14 +195,28 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     ImportReport_->setObjectName(QStringLiteral("worldImportReport"));
     ImportReport_->setAccessibleName(QStringLiteral("Import report"));
     ImportReport_->setReadOnly(true);
+    ImportReport_->setMinimumHeight(100);
     ImportReport_->setMaximumHeight(160);
     ImportReport_->hide();
-    layout->addWidget(ImportReport_);
     PathLabel_ = new QLabel(this);
     PathLabel_->setTextFormat(Qt::PlainText);
     PathLabel_->setWordWrap(true);
     PathLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    layout->addWidget(PathLabel_);
+    QHBoxLayout* documentRow = new QHBoxLayout;
+    documentRow->addWidget(PathLabel_, 1);
+    mImportReportToggleOrNull = new QToolButton(this);
+    mImportReportToggleOrNull->setObjectName(QStringLiteral("worldImportReportToggle"));
+    mImportReportToggleOrNull->setText(QStringLiteral("Import report"));
+    mImportReportToggleOrNull->setCheckable(true);
+    mImportReportToggleOrNull->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    mImportReportToggleOrNull->setArrowType(Qt::RightArrow);
+    mImportReportToggleOrNull->hide();
+    documentRow->addWidget(mImportReportToggleOrNull);
+    layout->addLayout(documentRow);
+    connect(mImportReportToggleOrNull, &QToolButton::toggled, this, [this](bool isExpanded) {
+        ImportReport_->setVisible(isExpanded);
+        mImportReportToggleOrNull->setArrowType(isExpanded == true ? Qt::DownArrow : Qt::RightArrow);
+    });
     Render_ = new RenderPanel(this);
     layout->addWidget(Render_);
     connect(Render_, &RenderPanel::Starting, this, &WorldWorkspace::PreviewStarting);
@@ -212,8 +225,16 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     Split_ = split;
     split->setObjectName(QStringLiteral("worldSplitter"));
     layout->addWidget(split, 1);
-    auto* left = new QWidget(split);
-    auto* hierarchy = new QVBoxLayout(left);
+    QScrollArea* hierarchyScroll = new QScrollArea(split);
+    hierarchyScroll->setObjectName(QStringLiteral("worldHierarchyScroll"));
+    hierarchyScroll->setWidgetResizable(true);
+    hierarchyScroll->setMinimumWidth(130);
+    QWidget* left = new QWidget(hierarchyScroll);
+    QVBoxLayout* hierarchy = new QVBoxLayout(left);
+    // A docked workspace may be shorter than the hierarchy's controls. Scroll
+    // the contents instead of compressing styled button text below its hint.
+    hierarchy->setSizeConstraint(QLayout::SetMinimumSize);
+    hierarchyScroll->setWidget(left);
     Entities_ = new QListWidget(left);
     Entities_->setObjectName(QStringLiteral("worldEntities"));
     Entities_->setAccessibleName(QStringLiteral("World entities"));
@@ -249,10 +270,19 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
         Q_EMIT PreviewStarting();
     });
     auto* scroll = new QScrollArea(split);
+    scroll->setObjectName(QStringLiteral("worldInspectorScroll"));
     scroll->setWidgetResizable(true);
-    auto* inspector = new QWidget(scroll);
-    Inspector_ = new QVBoxLayout(inspector);
+    QWidget* inspector = new QWidget(scroll);
+    QVBoxLayout* inspectorLayout = new QVBoxLayout(inspector);
+    inspectorLayout->setSizeConstraint(QLayout::SetMinimumSize);
+    // Diagnostics belong to the scrollable inspector, so opening a long report
+    // cannot take height away from the viewport or hierarchy.
+    inspectorLayout->addWidget(ImportReport_);
+    QWidget* fields = new QWidget(inspector);
+    Inspector_ = new QVBoxLayout(fields);
+    Inspector_->setContentsMargins(0, 0, 0, 0);
     Inspector_->setSizeConstraint(QLayout::SetMinimumSize);
+    inspectorLayout->addWidget(fields, 1);
     scroll->setWidget(inspector);
     split->setStretchFactor(0, 1);
     split->setStretchFactor(1, 3);
@@ -326,7 +356,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     });
     connect(Add_, &QPushButton::clicked, this, [this]() {
         QString id, error;
-        if (!Document_.CreateEntity(error, QStringLiteral("Entity"), id))
+        if (Document_.CreateEntity(mEntropy, error, QStringLiteral("Entity"), id) == false)
         {
             Changed(error);
             return;
@@ -338,7 +368,7 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
     });
     connect(Duplicate_, &QPushButton::clicked, this, [this]() {
         QString id, error;
-        if (!Document_.DuplicateEntity(error, Selected_, id))
+        if (Document_.DuplicateEntity(mEntropy, error, Selected_, id) == false)
         {
             Changed(error);
             return;
@@ -556,7 +586,7 @@ bool WorldWorkspace::Open(const QString& path)
                                           QFileInfo(path).completeBaseName() + QStringLiteral(".world.json")
                                     : path;
     if ((legacy && !Inside(destination, false)) ||
-        !(legacy ? ImportWorldDemo(candidate, bytes, error) : candidate.Load(bytes, error)))
+        (legacy ? ImportWorldDemo(candidate, mEntropy, bytes, error) : candidate.Load(bytes, error)) == false)
     {
         Changed(error);
         return false;
@@ -571,7 +601,7 @@ bool WorldWorkspace::Open(const QString& path)
     WorldDocument currentDefinition;
     if (!LoadProjectSchema(currentDefinition, currentSchema, demo) || currentSchema != schema ||
         !Read(path, bytes, WorldDocument::MaxBytes) ||
-        !(legacy ? ImportWorldDemo(candidate, bytes, error) : candidate.Load(bytes, error)))
+        (legacy ? ImportWorldDemo(candidate, mEntropy, bytes, error) : candidate.Load(bytes, error)) == false)
     {
         Changed(QStringLiteral("Incoming world/schema changed while opening. Retry Open World."));
         return false;
@@ -643,6 +673,11 @@ bool WorldWorkspace::Create(const QString& path)
     Changed(QStringLiteral("New world. Add entities, then Save World to create the file."));
     return true;
 }
+void WorldWorkspace::SetEntropySource(const foundation::identity::EntropySource& entropy) noexcept
+{
+    mEntropy = entropy;
+    Scene_->SetEntropySource(entropy);
+}
 bool WorldWorkspace::SceneBusy() const noexcept
 {
     return Scene_ != nullptr && Scene_->Busy();
@@ -671,8 +706,14 @@ bool WorldWorkspace::StartSceneImport(const QString& source, bool isPreviewed)
     auto level = Document_.SceneLevel();
     if (level.isEmpty())
     {
+        QString levelId;
+        if (TryGenerateUuidText(mEntropy, levelId) == false)
+        {
+            Changed(DescribeEntropyUnavailable());
+            return false;
+        }
         level = QJsonObject{{QStringLiteral("version"), 1},
-                            {QStringLiteral("id"), QUuid::createUuid().toString(QUuid::WithoutBraces)},
+                            {QStringLiteral("id"), levelId},
                             {QStringLiteral("name"), QFileInfo(Path_).completeBaseName()},
                             {QStringLiteral("profile"), QStringLiteral("resident-reference-v1")},
                             {QStringLiteral("objects"), QJsonArray{}},
@@ -745,6 +786,8 @@ void WorldWorkspace::ClearImportState()
     ShowImportPreview(false);
     ImportReport_->clear();
     ImportReport_->hide();
+    mImportReportToggleOrNull->setChecked(false);
+    mImportReportToggleOrNull->hide();
 }
 void WorldWorkspace::ShowImportPreview(bool isAccepted)
 {
@@ -768,7 +811,8 @@ void WorldWorkspace::ShowImportReports()
     const QJsonObject reports = Scene_->ImportReports();
     const QString text = DescribeImportReports(QJsonObject{{QStringLiteral("import_reports"), reports}});
     ImportReport_->setPlainText(text);
-    ImportReport_->setVisible(text.isEmpty() == false);
+    mImportReportToggleOrNull->setVisible(text.isEmpty() == false);
+    ImportReport_->setVisible(text.isEmpty() == false && mImportReportToggleOrNull->isChecked() == true);
 }
 void WorldWorkspace::RefreshScene()
 {

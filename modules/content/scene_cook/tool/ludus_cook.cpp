@@ -23,6 +23,8 @@
 #include <ludus/content/scene_cook/best_effort_import.h>
 #include <ludus/content/scene_cook/scene_assets.h>
 #include <ludus/content/scene_cook/scene_cook.h>
+#include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
 
 #include <string_view>
 #include <unistd.h>
@@ -223,7 +225,9 @@ int RunScene(int argc, char** argv) noexcept
     {
         return PrintUsage();
     }
-    const AssetOptions options;
+    const ludus::foundation::identity::EntropySource entropy = ludus::platform::GetSystemEntropySource();
+    AssetOptions options;
+    options.EntropyOrNull = &entropy;
     AssetError error;
     Array<uint8> level;
     bool isOk = true;

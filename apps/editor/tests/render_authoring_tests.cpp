@@ -4,6 +4,7 @@
 #include "internal/preview_viewport.h"
 #include "internal/qt_numeric_stream.h"
 #include "internal/render_panel.h"
+#include "internal/render_preview.h"
 #include "internal/render_scene.h"
 #include "internal/static_lighting_job.h"
 #include "internal/workspace_style.h"
@@ -11,6 +12,7 @@
 
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/transform.hpp>
+#include <ludus/platform/entropy.h>
 
 #include <QApplication>
 #include <QCheckBox>
@@ -532,7 +534,10 @@ TEST_CASE("Duplicate textured objects share surfaces while distinct material cap
     for (int32 i = 0; i < 11; ++i)
     {
         QString id;
-        REQUIRE(f.World.DuplicateEntity(f.Error, QStringLiteral("starter.cube"), id));
+        REQUIRE(f.World.DuplicateEntity(ludus::platform::GetSystemEntropySource(),
+                                        f.Error,
+                                        QStringLiteral("starter.cube"),
+                                        id));
     }
     REQUIRE(RenderScene::Load(f.Root, f.World, f.Scene, f.Error));
     CHECK(f.Scene.Objects.size() == 12);
@@ -975,6 +980,85 @@ TEST_CASE("Deindexed emitter meshes split into connected planar area proxies wit
           ludus::graphics::rhi::RasterStatus::Ready);
     CHECK(lights.Count == original.Count);
 }
+
+TEST_CASE("Zero-area emitter triangles add no area proxy and do not reject the emitter",
+          "[editor][render-authoring][lighting]")
+{
+    // Imported PBRT emitters (staircase2's lamp) carry collapsed triangles beside
+    // their real faces. They emit nothing and must not disable Lit shading.
+    ludus::resources::SceneMesh mesh;
+    const math::Vector3 positions[] = {
+        {0, 0, 0},
+        {1, 0, 0},
+        {1, 1, 0},
+        {0, 0, 0},
+        {1, 1, 0},
+        {0, 1, 0},
+        // Collapsed onto the shared edge, and onto one point.
+        {0, 0, 0},
+        {1, 1, 0},
+        {.5F, .5F, 0},
+        {1, 0, 0},
+        {1, 0, 0},
+        {1, 0, 0},
+    };
+    REQUIRE(mesh.Positions.TryAddRange(positions));
+    for (uint32 i = 0; i < mesh.Positions.GetSize(); ++i)
+    {
+        REQUIRE(mesh.Indices.TryAdd(i));
+    }
+    rr::LightSelection lights;
+    uint32 added = 99;
+    REQUIRE(AppendPreviewAreaLights(mesh, {}, {4, 2, 1}, false, 42, 100, lights, added) ==
+            ludus::graphics::rhi::RasterStatus::Ready);
+    REQUIRE(added == 1);
+    REQUIRE(lights.Count == 1);
+    CHECK(lights.Lights[0].Kind == rr::LightKind::AreaOneSided);
+    CHECK(lights.Lights[0].Intensity == Catch::Approx(4.0F));
+    // An emitter whose every triangle is collapsed contributes no proxy.
+    ludus::resources::SceneMesh collapsed;
+    const math::Vector3 point[] = {{2, 2, 2}, {2, 2, 2}, {2, 2, 2}};
+    REQUIRE(collapsed.Positions.TryAddRange(point));
+    for (uint32 i = 0; i < collapsed.Positions.GetSize(); ++i)
+    {
+        REQUIRE(collapsed.Indices.TryAdd(i));
+    }
+    added = 99;
+    REQUIRE(AppendPreviewAreaLights(collapsed, {}, {4, 2, 1}, false, 43, 100, lights, added) ==
+            ludus::graphics::rhi::RasterStatus::Ready);
+    CHECK(added == 0);
+    CHECK(lights.Count == 1);
+    // Geometry whose area overflows binary32 is still rejected and preserves both outputs.
+    collapsed.Positions[0] = {3.0e38F, 0, 0};
+    collapsed.Positions[1] = {0, 3.0e38F, 0};
+    added = 77;
+    CHECK(AppendPreviewAreaLights(collapsed, {}, {4, 2, 1}, false, 43, 100, lights, added) ==
+          ludus::graphics::rhi::RasterStatus::InvalidDescription);
+    CHECK(added == 77);
+    CHECK(lights.Count == 1);
+}
+
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+TEST_CASE("A stopped GPU preview shows its failure in place of the viewport placeholder",
+          "[editor][render-authoring][viewport]")
+{
+    RenderPreview preview;
+    PreviewViewport viewport(&preview);
+    viewport.ClearFrame(QStringLiteral("Import a reference scene to render it here."));
+    const QString failure =
+        QStringLiteral("Authored lighting admission failed (6); no lights were dropped. World edits are preserved.");
+    Q_EMIT preview.Failed(failure);
+    bool isFailureShown = false;
+    bool isPlaceholderShown = false;
+    for (const QLabel* label : viewport.findChildren<QLabel*>())
+    {
+        isFailureShown = isFailureShown || label->text() == failure;
+        isPlaceholderShown = isPlaceholderShown || label->text().startsWith(QStringLiteral("Import a reference"));
+    }
+    CHECK(isFailureShown == true);
+    CHECK(isPlaceholderShown == false);
+}
+#endif
 
 namespace
 {

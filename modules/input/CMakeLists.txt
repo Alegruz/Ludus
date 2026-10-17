@@ -34,12 +34,14 @@ target_include_directories(
 )
 
 # Input publicly depends on FoundationBase for the fixed-width vocabulary and
-# UniquePtr. FoundationContainers (StaticArray) and FoundationLogging are private
+# UniquePtr, and on FoundationMemory for the DomainDeleter of its reducer owner.
+# FoundationContainers (StaticArray) and FoundationLogging are private
 # implementation details and must not leak into the installed interface.
 target_link_libraries(
     ludus_input
     PUBLIC
         Ludus::FoundationBase
+        Ludus::FoundationMemory
     PRIVATE
         Ludus::FoundationContainers
         Ludus::FoundationLogging

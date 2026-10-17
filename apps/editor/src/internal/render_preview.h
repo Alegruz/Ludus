@@ -32,6 +32,22 @@ enum class PreviewShading : foundation::uint8
     Albedo,
     Lit,
 };
+/// Lifecycle of the Lit static-lighting bake for the current scene and shading.
+enum class PreviewBakeState : foundation::uint8
+{
+    Idle,      ///< No bake for this view: not Lit, not started yet, or no lit scene.
+    Running,   ///< The CPU bake is evaluating; CancelBake stops it.
+    Baked,     ///< Baked lighting is published in the viewport.
+    Failed,    ///< The bake or its upload failed; direct lighting is retained.
+    Cancelled, ///< The user cancelled; direct lighting is retained and RestartBake can resume.
+};
+/// Input problems the running or completed bake tolerated, for the user to review.
+struct PreviewBakeNotice final
+{
+    foundation::uint32 SkippedTriangleCount = 0; ///< Zero-area triangles skipped across all objects.
+    foundation::uint32 AffectedObjectCount = 0;  ///< Objects with at least one skipped triangle.
+    QString AffectedObjects;                     ///< Display names with per-object counts, comma separated.
+};
 // Main-thread renderer/device owner. Never destroys another preview's session.
 class RenderPreview final : public QObject
 {
@@ -131,6 +147,16 @@ public:
         return mDeviceSerial;
     }
     [[nodiscard]] graphics::rhi::RasterStatus PinDevice(graphics::rhi::NativeDeviceLease& outLease) noexcept;
+    /// Current bake lifecycle; Idle outside Lit shading of a lit scene.
+    [[nodiscard]] PreviewBakeState GetBakeState() const noexcept;
+    /// Copies what the bake tolerated once its preparation completed.
+    /// @return True when the notice holds at least one skipped triangle.
+    [[nodiscard]] bool GetBakeNotice(PreviewBakeNotice& outNotice) const;
+    /// Stops a Running bake cooperatively; direct lighting and the camera stay as they are.
+    void CancelBake() noexcept;
+    /// Starts the bake again after CancelBake.
+    /// @return False unless the bake is Cancelled.
+    [[nodiscard]] bool RestartBake() noexcept;
     [[nodiscard]] LUDUS_INLINE bool HasPendingFrame() const noexcept
     {
         return mHasPendingFrame;
@@ -145,6 +171,8 @@ Q_SIGNALS:
     void DeviceStopping();
     void Stopped();
     void Failed(const QString& error);
+    /// Emitted when GetBakeState or GetBakeNotice changes.
+    void BakeChanged();
 
 private:
     [[nodiscard]] bool beginNavigation();
@@ -160,6 +188,10 @@ private:
     // the resources so it outlives every bake that references it.
     foundation::threading::JobSystem mBakeJobs;
     bool mHasBakeJobs = false;
+    // Collects the bake's tolerated-input notice once preparation completes.
+    void updateBakeNotice();
+    // Refreshes the status line and tells observers the bake state or notice changed.
+    void markBakeChanged();
     struct GpuResources;
     foundation::UniquePtr<GpuResources> mResources;
     foundation::UniquePtr<GpuResources> mRetiredResources;
@@ -217,5 +249,7 @@ private:
     bool AssetsCreated_ = false;
     QTimer Timer_;
     QString Status_;
+    /// Reason recorded by the preparation stage that rejected the current generation, if any.
+    QString mPreparationFailure;
 };
 } // namespace ludus::editor

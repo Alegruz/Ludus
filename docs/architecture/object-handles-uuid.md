@@ -1,8 +1,13 @@
 # Object handles and persistent UUID architecture
 
-**Status:** Proposed architecture and implementation contract. Existing entity,
-audio, and RHI identity mechanisms remain implemented as described below. The
-shared identity module and UUID content workflow are proposed.
+**Status:** Architecture and implementation contract. Stage 1 of the
+[implementation sequence](#implementation-sequence) is implemented as
+[FoundationIdentity](../modules/foundation/identity.md), with native and browser
+entropy adapters in Platform. Stage 2 is implemented: `EntityRegistry` issues
+world tokens and advances generations through FoundationIdentity, while audio and
+RHI keep their own sources for the reasons recorded in the
+[implementation sequence](#implementation-sequence). The UUID content workflow
+is proposed.
 
 **Audience:** Engine, gameplay, tools, content, and SDK contributors.
 
@@ -50,7 +55,7 @@ permits measured storage optimizations without changing those contracts.
 
 | Facility | Current behavior | Design treatment |
 | --- | --- | --- |
-| [EntityId](../../modules/gameplay/world/include/ludus/gameplay/world/entity_id.h) and [EntityRegistry](../../modules/gameplay/world/src/entity_registry.cpp) | A nonzero process-issued world token, slot, generation, pending-destroy flag, creation sequence, and structural revision. Exhausted generations retire; initialization reserves capacity. | Preserve these guarantees and the public representation. |
+| [EntityId](../../modules/gameplay/world/include/ludus/gameplay/world/entity_id.h) and [EntityRegistry](../../modules/gameplay/world/src/entity_registry.cpp) | A nonzero process-issued world token, slot, generation, pending-destroy flag, creation sequence, and structural revision. Exhausted generations retire; initialization reserves capacity. | Preserve these guarantees and the public representation. Since stage 2 the token and generation rules come from FoundationIdentity. |
 | [ComponentPool](../../modules/gameplay/world/include/ludus/gameplay/world/component_pool.hpp) | Dense values and full owner IDs, sparse slot lookup, exact owner equality, swap removal, preallocated storage, phase restrictions. | Preserve. Identity allocation does not replace component storage. |
 | [Audio handles](../../modules/audio/include/ludus/audio/audio_types.h) and [bookkeeping](../../modules/audio/src/internal/handles.hpp) | Typed `uint32` session/slot/generation values, process-issued sessions, generation exhaustion, subsystem-specific asynchronous ownership. | Reuse contracts where compatible; preserve the current sentinel and concurrency rules. |
 | [RHI handles](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Separate shader/uniform/pipeline types with private `uint32` IDs and backend-owned validation. | Review backend issuance, session rejection, and retirement before a dedicated migration. A small public ID alone does not establish its implementation policy. |
@@ -588,9 +593,113 @@ and reserved capacity on each target before optimizing them.
 
 1. Add the pure identity values/codecs and lifetime source with tests and SDK
    header checks. Leave existing public types and formats unchanged.
+   *Implemented* in [FoundationIdentity](../modules/foundation/identity.md),
+   including the injected entropy-source seam. `Ludus::PlatformEntropy` supplies the
+   production source (`GetSystemEntropySource`): `getentropy` on macOS/Linux and
+   a guarded Web Crypto `crypto.getRandomValues` bridge in browsers. Emscripten's
+   own `getentropy` is not used because a missing Web Crypto object raises a
+   JavaScript exception instead of reporting failure.
+
+   **SceneCook entropy decision.** SceneCook mints level, import-namespace and
+   object UUIDs through `TryGenerateUuidV4`, the only UUIDv4 construction path;
+   its private helper no longer calls `getentropy` or sets version bits itself.
+   The source is injected through `AssetOptions::EntropyOrNull`, and SceneCook
+   acquires no entropy of its own. A null or failing source reports
+   `AssetErrorCode::MissingTools` before any level is returned or catalog
+   published. The adapter is a separate `Ludus::PlatformEntropy` target
+   (`ludus/platform/entropy.h`, FoundationBase and FoundationIdentity only), which
+   `Ludus::Platform` re-exports. The `ludus-cook` CLI links that target, so a
+   command-line tool does not link window backends, AppKit or Wayland. The
+   Editor already links Platform and passes the same source, which also replaces
+   the cooker's unguarded `getentropy` call in browser builds.
+
+   **Editor entropy decision.** The Editor mints World entity IDs, world-demo
+   settings-entity IDs and new 3D-level IDs through the same `TryGenerateUuidV4`
+   path; Qt's `QUuid::createUuid()` is no longer a parallel generator. The World
+   and level workspaces hold an `EntropySource`, defaulting to
+   `GetSystemEntropySource()`, and pass it to `WorldDocument` entity creation and
+   duplication and to every SceneCook operation; Editor tests inject failing or
+   fixed sources through the same seam. Existing text forms are unchanged:
+   canonical lowercase UUID text for live-edit entities and level IDs, and the
+   world-demo sample's truncated `entity-` (24 UUID characters) and `settings-`
+   (22) forms, which fit its 32-byte name field. Those truncated forms are
+   legacy sample identifiers, not UUIDs, and remain so until the stage 3 authoring
+   records replace them. When entropy is unavailable, the operation fails before
+   the document, history or workspace changes and shows that reason in the status
+   line; there is no fallback.
+
+   Alternatives considered: linking SceneCook to `Ludus::Platform` would make a
+   content library depend on windowing. A tools-owned copy of the adapter would
+   duplicate the browser guard. A default system source inside SceneCook would
+   hide an OS dependency in the cooker and let tests reach real entropy by
+   omission. `AssetOptions::UuidsOrNull` is kept only so golden tests can replay
+   the Python reference's sequential, non-v4 identifiers verbatim. Tests that need
+   new identities inject controlled entropy, and no replay source is a production default.
 2. Align duplicate generation/token helpers behind existing subsystem facades
    where policies actually match. Validate old-world, old-audio-session, and RHI
    session rejection independently. Preserve audio callback and RHI fence protocols.
+   *Implemented.* Only the world registry's policy matched, so only it moved.
+
+   **World registry.** `EntityRegistry` dropped its private `gNextWorld` counter
+   and release arithmetic. `TryInitialize` takes its world token from
+   `TryIssueLifetimeId`, and `TryRelease` advances the slot with
+   `AdvanceGeneration`. The old and shared policies are identical: tokens start at
+   1, the last token is `UINT64_MAX - 1` (`LAST_LIFETIME_ID`, pinned by a
+   `static_assert`), and the next initialization reports `IdentityExhausted`
+   without wrapping. Generations start at 1, and a slot released at `UINT32_MAX`
+   (`TERMINAL_GENERATION`) is retired and still counts against capacity. The token
+   is still issued last, so a failed initialization consumes none. `EntityId`, the
+   registry headers and its statuses are unchanged; GameplayWorld links
+   FoundationIdentity privately. One intentional difference: world tokens now share
+   the process counter with other FoundationIdentity owners, so two consecutive
+   worlds need not receive consecutive tokens. Nothing relies on that; consumers
+   such as the camera's discontinuity revision need only uniqueness.
+
+   **Reload limitation.** The counter is process-wide only within one linked
+   image. Registries are created today by host-side code (the world demo model and
+   the script-interaction fixture), and `ludus_add_game` links a reloadable
+   gameplay module only to the header-only `Ludus::GameApi`. A project that also
+   links `Ludus::GameplayWorld` into its `_module` gets a private copy of the
+   counter, as it already did of the old `gNextWorld`. Its worlds could then reuse
+   a token held by a host world, and owner equality would no longer separate them.
+   Until a gameplay module must own a registry, keep registries in the host or
+   shipping executable. The supported fix is a host issuance entry in the
+   versioned GameApi service table that the module calls in place of its copy.
+   Adding that entry is an ABI change and is not part of stage 2.
+
+   **Audio stays separate.** Its policy does not match, and the design keeps its
+   ABI and sentinel until a deliberate migration. Public clip, stream, voice and
+   modifier handles store a `uint32` session, so the `uint64` lifetime source could
+   only feed it by truncation, which would reuse values. `SessionSource` also issues
+   `0xFFFFFFFF` as its last session. Within a session, `SlotGeneration` stores 0 for
+   a free slot and `0xFFFFFFFF` as the stored "exhausted" state, so the last live
+   generation is `0xFFFFFFFE`. FoundationIdentity keeps generations across the free
+   state and issues `TERMINAL_GENERATION` as a live value. The render-side control
+   owner compares these values in voice and modifier commands, and the stop and
+   terminal mailboxes use 0 to mean "no generation". Changing the encoding would
+   therefore change the audio callback protocol.
+
+   **RHI stays separate.** Device owners come from `DeviceOwnerSequence`, a
+   facade-thread counter rather than an atomic one. It issues through `UINT64_MAX`,
+   one value past `LAST_LIFETIME_ID`. `CreateDevice` checks for exhaustion before
+   startup and takes the token only after startup succeeds, so a failed or
+   unsupported startup consumes none. Legacy shader, uniform and pipeline IDs share
+   one `uint32` process counter that stops instead of wrapping, and session release
+   clears every stored ID before backend teardown. Portable lifetime records use
+   `uint64` generations in which 0 marks an exhausted slot. Moving any of these
+   would change public statuses or RHI-owned representation, and the device fence
+   and completion protocols depend on the current release order. Stage 2 reviewed
+   them in place and made no RHI changes.
+
+   **Rejection tests.** Each subsystem has a regression for a rebuilt successor
+   whose slots and generations coincide with the old ones, so only the owner field
+   separates the two. A world rebuilt in the same `EntityRegistry` object rejects
+   the old entity in its registry, its new component pool and the old world's
+   pool (`ludus_gameplay_world_tests`). A second `AudioSystem` rejects clip,
+   voice, stream and modifier handles of an ended session (`ludus_audio_tests`). A
+   second RHI device rejects every resource kind of a destroyed session: status,
+   update, pipeline composition, draw and destroy (`ludus_rhi_lifecycle_tests`).
+   In every case the successor's live objects in the reused slots are unaffected.
 3. Introduce versioned UUID authoring records and an explicit migration manifest
    mapping existing scoped strings to committed UUIDs. Generate that manifest
    once, atomically, and preserve names as readable labels. Existing v1 inputs

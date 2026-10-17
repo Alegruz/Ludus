@@ -83,6 +83,43 @@ class NativePrerequisiteTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), "compiler-ran")
 
+    def test_macos_profile_can_disable_editor_packages_and_initialization(self):
+        action = (self.ROOT / ".github/actions/macos-setup/action.yml").read_text()
+        install = action.split("    - name: Install upstream Clang 18 and native prerequisites\n", 1)[1]
+        install = install.split("      run: |\n", 1)[1].split("    - name:", 1)[0]
+        initialize = action.split("    - name: Prepare pinned native dependencies\n", 1)[1]
+        initialize = initialize.split("      run: |\n", 1)[1].split("    - name:", 1)[0]
+        self.assertRegex(action, r"editor:\n    description: [^\n]+\n    default: 'true'")
+        workflow = (self.ROOT / ".github/workflows/performance.yml").read_text()
+        profile_setup = workflow.split("      - name: Prepare macOS tools and the Profile preset\n", 1)[1]
+        self.assertIn("editor: 'false'", profile_setup.split("      - name:", 1)[0])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, body in (("brew", 'printf "%s\\n" "$@"'), ("git", "exit 0"),
+                               ("init.sh", 'printf "%s\\n" "$@" > "$INVOCATION_LOG"')):
+                tool = root / name
+                tool.write_text("#!/bin/sh\n" + body + "\n")
+                tool.chmod(0o755)
+            invocation = root / "initialization"
+            for editor, preset in (("false", "macos-clang-profile"), ("true", "macos-clang-development")):
+                with self.subTest(editor=editor, preset=preset):
+                    environment = {**os.environ, "PATH": str(root), "WITH_EDITOR": editor,
+                                   "PRESET": preset, "INVOCATION_LOG": str(invocation)}
+                    result = subprocess.run(["/bin/bash", "-e", "-c", install], cwd=root,
+                                            env=environment, check=True, capture_output=True, text=True)
+                    packages = result.stdout.splitlines()
+                    for package in ("qtbase", "qtdeclarative"):
+                        self.assertEqual(package in packages, editor == "true")
+                    for package in ("llvm@18", "ccache"):
+                        self.assertIn(package, packages)
+                    subprocess.run(["/bin/bash", "-e", "-c", initialize], cwd=root,
+                                   env=environment, check=True, capture_output=True)
+                    arguments = invocation.read_text().splitlines()
+                    self.assertEqual("--with-editor" in arguments, editor == "true")
+                    self.assertEqual(arguments[arguments.index("--preset") + 1], preset)
+                    for argument in ("--locked", "--with-tests", "--no-system-install", "--preset-only"):
+                        self.assertIn(argument, arguments)
+
     def test_cache_report_survives_missing_prerequisite_and_reports_when_available(self):
         workflow = (self.ROOT / ".github/workflows/ci.yml").read_text()
         commands = [line.strip().removeprefix("run: ") for line in workflow.splitlines()

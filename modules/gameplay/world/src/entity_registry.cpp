@@ -1,14 +1,21 @@
-#include <atomic>
-#include <limits>
 #include <ludus/gameplay/world/entity_registry.h>
+
+#include <ludus/foundation/identity/handle.hpp>
+#include <ludus/foundation/identity/lifetime.hpp>
+
+#include <limits>
 #include <utility>
+
+// World tokens and slot generations follow the shared FoundationIdentity policy
+// (docs/architecture/object-handles-uuid.md, implementation stage 2): one process
+// lifetime token per initialized registry, never reused, and generations that
+// retire at TERMINAL_GENERATION instead of wrapping.
 namespace ludus::gameplay::world
 {
 using namespace foundation;
-namespace
-{
-std::atomic<uint64> gNextWorld{1};
-}
+// The shared source keeps EntityRegistry's original terminal: the last world token
+// is UINT64_MAX - 1, and the next initialization reports IdentityExhausted.
+static_assert(identity::LAST_LIFETIME_ID == std::numeric_limits<uint64>::max() - 1);
 EntityRegistry::EntityRegistry(EntityRegistry&& other) noexcept
 {
     *this = Move(other);
@@ -43,17 +50,18 @@ Status EntityRegistry::TryInitialize(uint32 capacity) noexcept
         [[maybe_unused]] const bool added = free.TryAdd(index - 1);
         LUDUS_ASSERT(added);
     }
-    auto identity = gNextWorld.load(std::memory_order_relaxed);
-    do
+    static_assert(Slot{}.Generation == identity::FIRST_GENERATION);
+    // Issue the token last so every earlier failure leaves the registry and the
+    // process source untouched. The source stops after LAST_LIFETIME_ID, so world
+    // tokens are never zero and never wrap.
+    uint64 world = 0;
+    if (identity::TryIssueLifetimeId(world) == identity::LifetimeIdStatus::IdentityExhausted)
     {
-        if (identity == std::numeric_limits<uint64>::max())
-        {
-            return Status::IdentityExhausted;
-        }
-    } while (!gNextWorld.compare_exchange_weak(identity, identity + 1, std::memory_order_relaxed));
+        return Status::IdentityExhausted;
+    }
     mSlots = Move(slots);
     mFree = Move(free);
-    mWorld = identity;
+    mWorld = world;
     mNextSequence = 1;
     mRevision = 0;
     mStructural = true;
@@ -140,11 +148,14 @@ Status EntityRegistry::TryRelease(EntityId entity) noexcept
     auto& slot = mSlots[entity.Slot];
     slot.Live = false;
     slot.Pending = false;
-    if (slot.Generation != std::numeric_limits<uint32>::max())
+    // A slot released at TERMINAL_GENERATION is retired: it keeps its final
+    // generation, never returns to the free list, and still counts against capacity.
+    const identity::GenerationStatus advanced = identity::AdvanceGeneration(slot.Generation);
+    LUDUS_ASSERT(advanced != identity::GenerationStatus::InvalidGeneration);
+    if (advanced == identity::GenerationStatus::Advanced)
     {
-        ++slot.Generation;
-        [[maybe_unused]] const bool added = mFree.TryAdd(entity.Slot);
-        LUDUS_ASSERT(added);
+        [[maybe_unused]] const bool isAdded = mFree.TryAdd(entity.Slot);
+        LUDUS_ASSERT(isAdded);
     }
     ++mRevision;
     return Status::Success;

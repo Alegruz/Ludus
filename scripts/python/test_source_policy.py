@@ -67,6 +67,7 @@ class SourcePolicyTests(unittest.TestCase):
                 "for (uint first = 0, second = 1; first < 2; ++first) {}",
                 "uint first = 0; uint second = 1, third = 2;",
                 "Handle* first = nullptr, second = nullptr;",
+                "namespace detail\n{\nuint first, second;\n}",
             ]:
                 with self.subTest(text=text, suffix=suffix):
                     self.assertTrue(self.diagnose(text, suffix))
@@ -80,6 +81,8 @@ class SourcePolicyTests(unittest.TestCase):
             "for (uint i = 0; i < 2; ++i, Update()) {}",
             "uint value = [] { return F(1, 2); }();",
             '// uint first, second;\nconst char* text = "uint first, second;";',
+            "namespace detail\n{\nvoid F();\n}\ntemplate <typename A, usize B>\nclass C\n{\n};",
+            "namespace a::b\n{\n}\ntemplate <typename A, typename B>\nusing Pair = Make<A, B>;",
         ]:
             with self.subTest(text=text):
                 self.assertFalse(self.diagnose(text))

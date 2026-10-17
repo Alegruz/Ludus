@@ -1,12 +1,5 @@
 #include "uuid.h"
 
-#include <ludus/foundation/base/config.h>
-
-#include <unistd.h>
-#if LUDUS_TARGET_OS == LUDUS_OS_MACOS
-#    include <sys/random.h>
-#endif
-
 namespace ludus::content::scene_cook::detail
 {
 namespace
@@ -280,19 +273,6 @@ bool MakeNameUuid(const Uuid& space, std::string_view name, Uuid& outValue) noex
         value.Bytes[i] = digest[i];
     }
     value.Bytes[6] = static_cast<uint8>((value.Bytes[6] & 0x0f) | 0x50);
-    value.Bytes[8] = static_cast<uint8>((value.Bytes[8] & 0x3f) | 0x80);
-    outValue = value;
-    return true;
-}
-
-bool MakeRandomUuid(Uuid& outValue) noexcept
-{
-    Uuid value;
-    if (getentropy(value.Bytes, UUID_BYTES) != 0)
-    {
-        return false;
-    }
-    value.Bytes[6] = static_cast<uint8>((value.Bytes[6] & 0x0f) | 0x40);
     value.Bytes[8] = static_cast<uint8>((value.Bytes[8] & 0x3f) | 0x80);
     outValue = value;
     return true;

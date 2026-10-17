@@ -8,6 +8,8 @@
 
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/borrowed_view.hpp>
+#include <ludus/foundation/containers/fixed_array.hpp>
 #include <ludus/foundation/containers/relocation.hpp>
+#include <ludus/foundation/containers/ring_buffer.hpp>
 #include <ludus/foundation/containers/sorted_map.hpp>
 #include <ludus/foundation/containers/static_array.hpp>

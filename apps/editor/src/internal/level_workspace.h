@@ -1,5 +1,10 @@
 #pragma once
 
+#include <ludus/foundation/base/core.h>
+
+#include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
+
 #include "internal/controller.h"
 #include "internal/render_preview.h"
 #include "internal/world_document.h"
@@ -95,6 +100,15 @@ public:
     {
         WorldSnapshot_ = world;
     }
+    /// Replace the entropy source that mints new level IDs and that SceneCook
+    /// operations receive. Production keeps platform::GetSystemEntropySource();
+    /// tests inject a controlled or failing source.
+    /// @pre No scene operation is running; its worker reads the source.
+    LUDUS_INLINE void SetEntropySource(const foundation::identity::EntropySource& entropy) noexcept
+    {
+        LUDUS_ASSERT(isOperationActive() == false);
+        mEntropy = entropy;
+    }
     [[nodiscard]] bool VerifyAssets(const QJsonObject& level);
     [[nodiscard]] bool Assemble(const QJsonObject& level);
     [[nodiscard]] bool ImportInto(const QJsonObject& level, const QString& source);
@@ -172,6 +186,7 @@ private:
     QThread* Operate_ = nullptr;
     /// Browser builds run scene operations on the GUI thread from a queued timer.
     bool mIsOperationQueued = false;
+    foundation::identity::EntropySource mEntropy = platform::GetSystemEntropySource();
     [[nodiscard]] bool isOperationActive() const noexcept
     {
         return Operate_ != nullptr || mIsOperationQueued == true;

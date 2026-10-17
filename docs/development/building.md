@@ -225,12 +225,61 @@ compiler detection and prints the init command needed to prepare that profile.
 
 Debug, Development, and ASan/UBSan builds are validated on Apple silicon.
 Native Cocoa integration tests require a WindowServer session and opt in with
-`LUDUS_TEST_COCOA=1`; deferred feature cases explicitly skip. On the validation
-host running macOS 26.6, Clang 18's ASan runtime deadlocks during initialization,
-before `main`, including in an independent probe. Sanitizer execution remains
-unverified on that host. The macOS 14 CI job runs the Cocoa lifecycle and keyboard
+`LUDUS_TEST_COCOA=1`; deferred feature cases explicitly skip. The pinned Clang 18
+sanitizer runtimes cannot start on macOS 26 or newer; see
+[macOS sanitizer runtimes](#macos-sanitizer-runtimes). The macOS 14 CI job runs the Cocoa lifecycle and keyboard
 tests, Metal lifecycle/rendering tests, native filesystem tests and Content read adapters with ASan/UBSan
 as well as the regular Development build.
+
+### macOS sanitizer runtimes
+
+On macOS 26 (Darwin 25) and newer, LLVM sanitizer runtimes before 22.1.3 fail
+during process start-up, before `main`. ASan (and therefore the
+`macos-clang-asan-ubsan` preset) spins forever; TSan crashes with `SIGSEGV`.
+Standalone UBSan is unaffected. Runtime options do not avoid it. The affected
+code always runs during initialization:
+
+- compiler-rt's `get_dyld_hdr()` locates dyld through
+  `dyld_shared_cache_iterate_text()` while it maps shadow memory.
+- On macOS 26 that function allocates (`_Block_copy`) and calls `dispatch_once`.
+  Both re-enter the half-initialized runtime.
+- ASan deadlocks on its own initialization lock. TSan dereferences a null
+  thread state in `SlotLock`.
+
+Andrew Haberlandt fixed this upstream in
+[llvm/llvm-project PR #182943](https://github.com/llvm/llvm-project/pull/182943)
+by using `_dyld_get_dyld_header()`. The fix was backported to LLVM 22.1.3.
+
+Measured on an Apple M5 with macOS 26.6 (25G72), building an empty `main` with
+each compiler:
+
+| Compiler | `-fsanitize=address,undefined` | `-fsanitize=thread` |
+| --- | --- | --- |
+| Homebrew LLVM 18.1.8 (pinned) | hangs | `SIGSEGV` |
+| Homebrew LLVM 21.1.8 | hangs | `SIGSEGV` |
+| Homebrew LLVM 22.1.8 | exits 0; detects a heap overflow | exits 0 |
+| Apple Clang 21 (Xcode CLT) | exits 0 | exits 0 |
+
+Before a sanitizer configuration adds any target, CMake builds a trivial
+program with the selected `-fsanitize` flags. It runs that program for at most
+10 seconds, killing its process group on timeout. If the program hangs, crashes
+or exits nonzero, configuration stops. The diagnostic names the known cause
+when it applies. Running the tests would otherwise hang every test process. A
+passing result is cached for that compiler, flag set and host OS version.
+
+On an affected Mac:
+
+- Treat the CI sanitizer jobs as authoritative. The macOS 14 and Linux runners
+  use the pinned LLVM 18 runtimes, which start there.
+- Run local onboarding validation without the sanitizer preset:
+  `./init.sh --validate --skip-sanitizers`.
+- `-DLUDUS_SANITIZER_RUNTIME_PROBE=OFF` disables the probe. Use it only to
+  investigate a runtime, because affected tests then hang again.
+
+Using a different LLVM for this preset is not supported. The repository pins
+LLVM 18 for compilation, formatting and analysis
+(`config/tool_versions.json`), so a newer toolchain would need to be adopted
+deliberately across all tools.
 
 Platform now provides [native Cocoa windows and keyboard input](../architecture/macos-platform.md).
 It publishes borrowed native handles and backing-pixel dimensions for the Metal backend. RHI supports Cocoa presentation and headless rendering,

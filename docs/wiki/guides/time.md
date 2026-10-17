@@ -1,5 +1,5 @@
 ---
-description: Measure monotonic intervals and use checked stopwatch, deadline and frame sampling values.
+description: Measure monotonic intervals, use checked stopwatch, deadline and frame sampling values, and pace native frame loops.
 ---
 
 # Use high-resolution time
@@ -179,6 +179,62 @@ on the next sample. A zero maximum delta deliberately freezes accepted time.
 When adopting this helper into an existing simulation driver, preserve its
 existing discard accounting and apply the frame clamp once.
 
+Read the timestamp once at the callback boundary, apply that callback's lifecycle
+resets, then sample. A browser stops animation callbacks for a hidden page, so a
+hidden frame may never arrive: reset on the platform's queued suspension signal
+instead (Ludus browser windows queue `InputReset` when hidden or blurred). Keep a
+high-water mark across resets if regressed samples are possible; otherwise the
+first sample after `Reset()` becomes a baseline below an earlier reading. The
+[world reference driver](../../examples/world-demo.md#edit-levels-and-gameplay)
+shows these rules with accepted, clamped and excluded totals.
+
+## Pace a native frame loop
+
+`Ludus::PlatformPacing` waits for the next frame in a native loop. Link it with
+`target_link_libraries(your_game PRIVATE Ludus::PlatformPacing)` and include
+`ludus/platform/frame_pacing.h`. Configure a `FramePacer` once, then call `Pace()`
+after each frame, before the next frame reads its timestamp:
+
+```cpp
+#include <ludus/platform/frame_pacing.h>
+
+namespace platform = ludus::platform;
+
+bool RunCappedLoop(bool (*runFrame)()) noexcept
+{
+    platform::FramePacer pacer;
+    // 30 frames per second; a frame more than four intervals late re-anchors the schedule.
+    if (pacer.Configure({ .Interval = {33'333'333}, .MaximumLateness = {133'333'332} }) != platform::PacingStatus::Ok)
+    {
+        return false;
+    }
+    const platform::PacingClock clock = platform::GetSystemPacingClock();
+    while (runFrame() == true)
+    {
+        (void)pacer.Pace(clock);
+    }
+    return true;
+}
+```
+
+The pacer keeps absolute targets. It rechecks the clock after every early or
+interrupted wake, and advances each target from the previous one, so oversleeping
+does not accumulate. A late frame starts at once; beyond the maximum lateness the
+schedule re-anchors rather than running missed frames back to back. Call `Reset()`
+at startup, session activation and resume from suspension. Simulation pause is
+not a pacing event.
+
+Pacing does not replace the swapchain. Native backends already block in
+presentation at the display rate, so an uncapped game may only need to pace frames
+that present nothing, as the [world reference](../../examples/world-demo.md) does.
+A cap that does not divide the display refresh rate produces uneven frame
+intervals. Browser builds must not pace: their wait reports `Unsupported`, and
+presentation callbacks already pace the page. The pacer never spins, and a wake
+can still be late under load; see the
+[architecture](../../architecture/high-resolution-time.md#native-frame-pacing) and
+[measurements](../../development/high-resolution-time-evidence.md#native-frame-pacing).
+Tests pass a `PacingClock` whose wait advances synthetic time instead of sleeping.
+
 ## Handle failures and debug surprising readings
 
 | Result or symptom | Meaning and recovery |
@@ -202,13 +258,16 @@ from host samples. Clock epochs are not persistent save/replay identities.
 | --- | --- |
 | Shared native/browser clock, checked arithmetic and owner-local helpers | Implemented; explicit public SDK component |
 | Logging/profiling clock producers | Use the shared source |
-| Frame-loop migration and rational integer fixed-step replacement | Planned; existing drivers retain their policies |
-| Bounded gameplay event queue and native frame pacing | Planned separate integrations |
+| Frame-loop migration | Implemented in the world reference and smoke applications; one `FrameClock` clamp per loop |
+| Rational integer fixed-step driver | Implemented in the world reference `TickDriver`: checked `uint64` phase, exact tick accounting, separate clamp and catch-up loss |
+| Native frame pacing | Implemented: `Ludus::PlatformPacing` `FramePacer` and system wait; the world reference paces idle frames and an optional cap |
+| Bounded gameplay event queue | Planned separate integration |
 | Editor Timing view and runtime timing telemetry | Proposed; no new timer controls or inspector ship with this slice |
 | Time scaling, additional platform/worker domains, GPU/audio/network clock integration | Separate requirements and validation needed |
 
 Existing Qt timers serve editor event-loop scheduling. A measurement API does
-not replace that scheduling role or guarantee a precise sleep/wakeup.
+not replace that scheduling role, and the native pacer does not guarantee a
+precise wakeup.
 
 ## Sources and further reading
 

@@ -1,8 +1,9 @@
 #include "internal/world_demo_adapter.h"
 
+#include "internal/editor_identity.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QUuid>
 
 namespace ludus::editor
 {
@@ -39,14 +40,17 @@ bool ProjectWorldDemo(const WorldDocument& document, world_demo::Level& output, 
     }
     return true;
 }
-bool ImportWorldDemo(WorldDocument& document, const QByteArray& source, QString& error)
+bool ImportWorldDemo(WorldDocument& inoutDocument,
+                     const foundation::identity::EntropySource& entropy,
+                     const QByteArray& source,
+                     QString& outError)
 {
     world_demo::Level level;
     const auto result =
         world_demo::ReadLevel({source.constData(), static_cast<foundation::usize>(source.size())}, level);
-    if (!IsWorldDemo(document) || result.Error != world_demo::LevelError::None)
+    if (IsWorldDemo(inoutDocument) == false || result.Error != world_demo::LevelError::None)
     {
-        error = QStringLiteral("Invalid legacy world-demo level; the current World was preserved.");
+        outError = QStringLiteral("Invalid legacy world-demo level; the current World was preserved.");
         return false;
     }
     QJsonArray entities;
@@ -101,7 +105,15 @@ bool ImportWorldDemo(WorldDocument& document, const QByteArray& source, QString&
         }
         if (used)
         {
-            settingsId = QStringLiteral("settings-") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(22);
+            // Keep the legacy `settings-` prefix within the sample's 32-byte name field.
+            constexpr qsizetype SETTINGS_UUID_CHARACTERS = 22;
+            QString uuid;
+            if (TryGenerateUuidText(entropy, uuid) == false)
+            {
+                outError = DescribeEntropyUnavailable();
+                return false;
+            }
+            settingsId = QStringLiteral("settings-") + uuid.left(SETTINGS_UUID_CHARACTERS);
         }
     }
     entities.append(
@@ -118,11 +130,12 @@ bool ImportWorldDemo(WorldDocument& document, const QByteArray& source, QString&
                                               {QStringLiteral("camera_x"), level.Camera.X},
                                               {QStringLiteral("camera_y"), level.Camera.Y},
                                               {QStringLiteral("vertical_extent"), level.VerticalExtent}}}}}});
-    return document.Load(QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
-                                                   {QStringLiteral("schema"), QStringLiteral("ludus.world-demo.v1")},
-                                                   {QStringLiteral("entities"), entities}})
-                             .toJson(),
-                         error);
+    return inoutDocument.Load(
+        QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+                                  {QStringLiteral("schema"), QStringLiteral("ludus.world-demo.v1")},
+                                  {QStringLiteral("entities"), entities}})
+            .toJson(),
+        outError);
 }
 bool CommitWorldDemoGesture(WorldDocument& document, const SceneSnapshot& projection, QString& error)
 {

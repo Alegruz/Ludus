@@ -818,8 +818,12 @@ the `ludus-cook scene` CLI and the native Editor, which runs it in process on a 
 thread. `assets/catalog.json` maps stable typed UUIDs
 (`mesh/<uuid>`, `material/<uuid>`, `texture/<uuid>`, and import/license records) to
 immutable `assets/objects/<artifact-key>.bin` files. UUIDs identify logical assets;
-they are not content digests. Reimporting the same source origin retains its UUID
-namespace and explicitly commits new artifact bindings. Separate source origins
+they are not content digests. New UUIDs are FoundationIdentity UUIDv4 values from
+the entropy source the caller passes in `AssetOptions::EntropyOrNull` (the CLI and
+Editor pass `ludus::platform::GetSystemEntropySource()`); without one, the operation
+fails with `MissingTools` (see [the UUID architecture](object-handles-uuid.md#implementation-sequence)).
+Reimporting the same source origin retains its UUID namespace and explicitly
+commits new artifact bindings. Separate source origins
 retain separate logical ownership even when immutable byte files can be shared.
 
 Artifact keys include source input digests, importer and publisher code digests,

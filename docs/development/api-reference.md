@@ -88,8 +88,11 @@ They expose vocabulary, not concrete configured values. Their `@...@` placeholde
 are explicitly identified on the reference landing page. Preprocessing is disabled
 to inventory native/browser declaration branches together; this is source reference,
 not a compiler-verified symbol set for a particular SDK profile. The renderer
-excludes private/protected members; `detail`/`internal` namespaces are excluded
-by Doxygen configuration. Whole-header source listings and private members are
+excludes private/protected members. `detail`/`internal` namespaces, their members
+and nested types are excluded by Doxygen configuration (`EXCLUDE_SYMBOLS` names both
+the namespace and its contents); coverage and rendering also skip any compound or
+member in such a scope, so these implementation helpers are neither counted as
+public API nor published. Whole-header source listings and private members are
 never rendered from the XML; public declaration initializers remain visible.
 
 ## Build and publication
@@ -166,7 +169,8 @@ out/wiki-venv/bin/python scripts/build-api --bootstrap --baseline-ref origin/mai
 The combined HTML checker checks API local links/assets/anchors and requires
 MkDocs search coverage for every wiki and API page.
 Tests inject missing headers, unknown generated inputs, removed descriptions,
-undocumented enum values, private members, overload/enum-value anchors,
+undocumented enum values, private members, `detail`/`internal` namespace
+members, overload/enum-value anchors,
 structured contracts and broken/unindexed generated pages.
 
 ## Consulted references

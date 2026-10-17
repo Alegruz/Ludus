@@ -2,6 +2,8 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/identity/uuid.hpp>
+
 #include "internal/document_history.h"
 
 #include <QByteArray>
@@ -60,8 +62,17 @@ public:
     }
     [[nodiscard]] QJsonObject Component(const QString& id) const;
     [[nodiscard]] QJsonObject Entity(const QString& id) const;
-    [[nodiscard]] bool CreateEntity(QString& error, const QString& name, QString& id);
-    [[nodiscard]] bool DuplicateEntity(QString& error, const QString& source, QString& id);
+    // New entity IDs are minted from `entropy` (see internal/editor_identity.h).
+    // When it is unavailable, the draft, history and `outId` stay unchanged and
+    // `outError` explains the failure; there is no fallback source.
+    [[nodiscard]] bool CreateEntity(const foundation::identity::EntropySource& entropy,
+                                    QString& outError,
+                                    const QString& name,
+                                    QString& outId);
+    [[nodiscard]] bool DuplicateEntity(const foundation::identity::EntropySource& entropy,
+                                       QString& outError,
+                                       const QString& source,
+                                       QString& outId);
     [[nodiscard]] bool RemoveEntity(const QString& id, QString& error);
     [[nodiscard]] bool RenameEntity(const QString& id, QString& error, const QString& name);
     [[nodiscard]] bool Attach(const QString& entity, QString& error, const QString& component);

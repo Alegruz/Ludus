@@ -1,5 +1,5 @@
 add_executable(ludus_web_platform_probe main.cpp)
-target_link_libraries(ludus_web_platform_probe PRIVATE Ludus::Platform)
+target_link_libraries(ludus_web_platform_probe PRIVATE Ludus::Platform Ludus::FoundationIdentity Ludus::FoundationContainers)
 ludus_apply_project_defaults(ludus_web_platform_probe)
 target_link_options(ludus_web_platform_probe PRIVATE
     -fno-exceptions -g0 -g2 -sENVIRONMENT=web,node -sALLOW_MEMORY_GROWTH=1

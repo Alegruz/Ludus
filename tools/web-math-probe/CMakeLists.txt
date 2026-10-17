@@ -1,5 +1,9 @@
-add_executable(ludus_web_math_probe main.cpp)
-target_link_libraries(ludus_web_math_probe PRIVATE Ludus::FoundationMath)
+# The installed-SDK Geometry exercise also runs here so the Wasm toolchain validates
+# FoundationGeometry's Certified distance map with the enclosure helper it relies on.
+add_executable(ludus_web_math_probe main.cpp "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/geometry.cpp")
+target_link_libraries(ludus_web_math_probe PRIVATE Ludus::FoundationMath Ludus::FoundationGeometry)
+# The enclosure oracle is shared with the native FoundationMath tests.
+target_include_directories(ludus_web_math_probe PRIVATE "${PROJECT_SOURCE_DIR}/modules/foundation/math/tests")
 ludus_apply_project_defaults(ludus_web_math_probe)
 # The checked math .cpp files already compile with -ffp-contract=off through the
 # library target; the probe only calls them. Keep exceptions off (engine policy).

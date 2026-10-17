@@ -1,9 +1,10 @@
 #include "internal/application.h"
 #include "internal/camera_view.h"
 #include "world_scene.h"
+#include <ludus/foundation/base/config.h>
 #include <ludus/foundation/logging/log_format.hpp>
-#include <ludus/foundation/profiling/clock.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
+#include <ludus/foundation/time/time.hpp>
 #include <ludus/input/actions.h>
 #include <ludus/platform/keyboard_sink.h>
 #include <span>
@@ -72,6 +73,9 @@ bool Application::Start(rhi::BackendSelection selection, const char* levelBytes,
     mFrame = {};
     mInputFrame = 0;
     mPresentedFrames = 0;
+    mPacedPresentedFrames = 0;
+    mPresentReturn = {};
+    mPacing.Reset();
     mHadFocus = false;
     if (!mInput.IsValid())
     {
@@ -126,7 +130,6 @@ bool Application::Start(rhi::BackendSelection selection, const char* levelBytes,
         mState = AppState::Failed;
         return false;
     }
-    mLastTime = profiling::NowTicks();
     mState = AppState::Loading;
     return true;
 }
@@ -193,7 +196,7 @@ void Application::BrowserInput(const platform::browser::WindowState& window) noe
             }
         }
         mInput.RequestReset(focused ? input::ResetReason::FocusEntered : input::ResetReason::FocusLost, baseline);
-        mSession.Driver.SetMode(mSession.Driver.GetMode());
+        mSession.Driver.Interrupt();
         mHadFocus = focused;
     }
     platform::browser::InputEvent event;
@@ -224,8 +227,11 @@ void Application::BrowserInput(const platform::browser::WindowState& window) noe
                     baseline.Keys[input::KeyIndex(key)] = window.Keys[index];
                 }
             }
+            // Platform queues InputReset when the page is hidden or blurred. A hidden page stops
+            // callbacks, so this queued reset also drops the frame baseline and hidden time never
+            // becomes catch-up ticks. Visibility events also fire on focus/resize refreshes.
             mInput.RequestReset(focused ? input::ResetReason::ExplicitLive : input::ResetReason::FocusLost, baseline);
-            mSession.Driver.SetMode(mSession.Driver.GetMode());
+            mSession.Driver.Interrupt();
         }
     }
     // Reconcile held states even when the platform event queue overflowed.
@@ -306,9 +312,27 @@ bool Application::Render(const platform::browser::WindowState& window) noexcept
     const auto end = rhi::EndFrameStatus();
     if (end == rhi::FrameStatus::Ready)
     {
+        // A diagnostic reading for --pacing-report, independent of the frame's one simulation timestamp.
+        mPresentReturn = foundation::time::Now();
         ++mPresentedFrames;
     }
     return end == rhi::FrameStatus::Ready || end == rhi::FrameStatus::Skipped;
+}
+platform::PaceResult Application::Pace(const platform::PacingClock& clock) noexcept
+{
+    const bool hasPresented = mPresentedFrames != mPacedPresentedFrames;
+    mPacedPresentedFrames = mPresentedFrames;
+#if LUDUS_TARGET_OS == LUDUS_OS_WEB
+    (void)hasPresented;
+    (void)clock;
+    return {};
+#else
+    if (mState == AppState::Stopped || mState == AppState::Failed)
+    {
+        return {};
+    }
+    return mPacing.EndFrame(hasPresented, clock);
+#endif
 }
 AppState Application::Frame() noexcept
 {
@@ -322,17 +346,17 @@ AppState Application::Frame() noexcept
         Shutdown();
         return mState;
     }
-    const auto now = profiling::NowTicks();
-    const float64 delta = now >= mLastTime ? static_cast<float64>(now - mLastTime) / 1000000000.0 : 0;
-    mLastTime = now;
+    // The one frame timestamp; lifecycle resets below apply before the driver samples it.
+    const foundation::time::Timestamp now = foundation::time::Now();
     if (mSession.PollLoad() != Status::Success)
     {
         LUDUS_LOG_ERROR(logging::LOG_CORE, "Level candidate failed; active world preserved");
     }
-    const bool activated = mSession.Activate();
-    if (activated)
+    // Session replacement resets the driver, so the replacement starts from a zero-elapsed baseline.
+    // Pacing restarts too: a slow activation frame is not judged against the loading schedule.
+    if (mSession.Activate() == true)
     {
-        mLastTime = now;
+        mPacing.Reset();
     }
     const auto startup = rhi::GetStartup();
     if (startup.State == rhi::StartupState::Failed || startup.State == rhi::StartupState::DeviceLost)
@@ -404,9 +428,21 @@ AppState Application::Frame() noexcept
         .Released = actions[2].Released,
         .Cancelled = actions[0].Cancelled || actions[1].Cancelled || actions[2].Cancelled,
     };
-    if (mSession.Driver.Advance(mSession.World(), activated ? 0.0 : delta, input, window.Visible) != Status::Success)
+    if (mSession.Driver.Advance(mSession.World(), now, input, window.Visible) != Status::Success)
     {
         LUDUS_LOG_ERROR(logging::LOG_CORE, "Simulation fault at tick {}", mSession.World().GetTick());
+    }
+    // Stalls and regressions stay visible in diagnostics even though the simulation discards them.
+    const foundation::time::FrameSample& frameSample = mSession.Driver.GetFrameSample();
+    if (frameSample.Status == foundation::time::TimeStatus::ClockRegression)
+    {
+        LUDUS_LOG_WARN(logging::LOG_CORE, "Frame clock regressed; no simulation time accepted");
+    }
+    else if (frameSample.Discarded.Nanoseconds != 0)
+    {
+        LUDUS_LOG_INFO(logging::LOG_CORE,
+                       "Frame stall discarded {} ns beyond the accepted delta",
+                       frameSample.Discarded.Nanoseconds);
     }
     if (mSession.Driver.GetMode() != Mode::Faulted)
     {

@@ -184,11 +184,42 @@ Patch samples include `DU`, `DV`, `DUU`, `DUV`, `DVV`. `TryPatchNormal` checks
 analytic `Cross(DU,DV)` and an explicit `PatchNormalPolicy`; zero/parallel
 partials are singular, and a caller can reject short or nearly parallel partials.
 Subdivision produces two/four rounded children in their own normalized domains,
-with matching stored split controls. Prepared paths, distance lookup, transported
-frames, adjacency, meshes and editor documents remain future work. See the
+with matching stored split controls. Prepared paths, tracks and distance maps
+live in [`Ludus::FoundationGeometry`](geometry.md); transported frames,
+adjacency, meshes and editor documents remain future work. See the
 [architecture](../../architecture/curves-surfaces.md),
 [frozen G0 contracts](../../decisions/0024-curves-surfaces-contracts.md) and
 [evidence](../../architecture/math-evidence/curves-surfaces.md).
+
+## Outward-rounded enclosures
+
+`enclosure.hpp` provides `Enclosure`, a closed float64 interval `[Lower, Upper]`,
+and `TryAddOutward`, `TrySubtractOutward`, `TryMultiplyOutward`,
+`TrySquareOutward` and `TrySquareRootOutward`. Each result contains the exact real
+result for every operand inside the inputs. The helpers round to nearest, as the
+process already does, then step each bound at most one float64 unit outward; the
+rounding mode is never changed. Sums and differences detect an exact result with
+an error-free transformation and stay tight; products and roots are always
+widened unless an operand is zero. Invalid or nonfinite bounds and overflow
+return a status and leave the output unchanged.
+
+```cpp
+#include <ludus/foundation/math/enclosure.hpp>
+using namespace ludus::foundation::math;
+
+Enclosure sum;
+if (IsSuccess(TryAddOutward(MakePointEnclosure(0.1), MakePointEnclosure(0.2), sum)))
+{
+    // sum.Upper == 0.1 + 0.2; sum.Lower is the next float64 below it.
+}
+```
+
+These enclosures are the reviewed outward-rounded arithmetic behind ADR 0024's
+Certified guarantee class. A 200,000-case corpus checks them against exact
+Dekker sums and products on the pinned native toolchain (`[enclosure]` tests)
+and on the pinned Emscripten toolchain (`ludus_web_math_corpus`). They are not a
+general interval library: there is no division, transcendental function or
+dependency tracking.
 
 ## GPU transfer
 

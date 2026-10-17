@@ -22,6 +22,8 @@ CASES = ("embedded-data-registration", "pinned-icu-cldr-unicode-versions", "cano
          "dynamic-format-measurements", "host-cleanup-releases-every-allocation")
 SWEEPS = ("nested-select-plural", "number-skeleton", "offset-plural-text", "host-initialization")
 ROOT = Path(__file__).resolve().parents[2]
+# ASan reports these signals itself; they are crashes, as on unsanitized builds.
+DEADLY_SIGNALS = ("SEGV", "BUS", "FPE", "ILL", "ABRT", "stack-overflow")
 
 
 def compressed(data: bytes) -> int:
@@ -42,18 +44,40 @@ def artifact(path: Path) -> dict:
     return result
 
 
+def classify_sanitizer(output: str) -> str | None:
+    """Name the first ASan/UBSan finding; a deadly signal under ASan stays a crash."""
+    report = re.search(r"ERROR: AddressSanitizer: ([\w-]+)", output)
+    if report is not None and report.group(1) not in DEADLY_SIGNALS:
+        return report.group(1)
+    if "runtime error:" in output:
+        return "undefined-behavior"
+    return None
+
+
 def run_point(command: list[str], index: int, fail_at: int) -> dict:
-    """Run one fail point in a fresh process; a crash is data, not a verifier error."""
+    """Run one fail point in a fresh process; a crash is data, not a verifier error.
+
+    Sanitized builds turn faults into reports and a nonzero exit. A null dereference
+    is still a crash, as without sanitizers. An ASan or UBSan finding is a
+    `sanitizer-report`. LeakSanitizer reports only at exit, after the point printed
+    its result, so that result is kept and the leak is recorded beside it.
+    """
     try:
         result = subprocess.run(command + ["sweep", str(index), str(fail_at)], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         return {"fail_at": fail_at, "outcome": "timeout"}
     match = re.search(r"L0 SWEEP (.*)$", result.stdout, re.MULTILINE)
-    if result.returncode != 0 or match is None:
-        return {"fail_at": fail_at, "outcome": "crash", "exit": result.returncode}
+    finding = classify_sanitizer(result.stdout)
+    has_leak_report = "ERROR: LeakSanitizer" in result.stdout
+    if finding is None and match is None and has_leak_report is True:
+        finding = "leak"
+    if finding is not None or match is None or (result.returncode != 0 and has_leak_report is False):
+        outcome = "crash" if finding is None else "sanitizer-report"
+        return {"fail_at": fail_at, "outcome": outcome, "exit": result.returncode, "sanitizer": finding}
     fields = dict(pair.split("=", 1) for pair in match.group(1).split())
     fields["fail_at"] = fail_at
+    fields["sanitizer-leak"] = has_leak_report
     if fields["denied"] == "0":
         fields["outcome"] = "control"
     elif fields["initialized"] == "false":
@@ -78,20 +102,26 @@ def sweep(command: list[str], points: dict[str, int]) -> dict:
             results = list(pool.map(lambda f, i=index: run_point(command, i, f), range(1, count + 2)))
             control = results[-1]
             assert control["outcome"] == "control" and control["correct"] == "true" and \
-                control["leaked-blocks"] == "0", f"{name}: control point is not clean: {control}"
+                control["leaked-blocks"] == "0" and control["sanitizer-leak"] is False, \
+                f"{name}: control point is not clean: {control}"
             failures = results[:-1]
             summary = {"allocation_points": count}
-            for outcome in ("crash", "timeout", "reported-initialization-failure", "reported-oom", "other-error",
-                            "absorbed", "wrong-output", "control"):
+            for outcome in ("crash", "sanitizer-report", "timeout", "reported-initialization-failure", "reported-oom",
+                            "other-error", "absorbed", "wrong-output", "control"):
                 summary[outcome] = sum(r["outcome"] == outcome for r in failures)
-            survived = [r for r in failures if r["outcome"] not in ("crash", "timeout")]
+            survived = [r for r in failures if r["outcome"] not in ("crash", "sanitizer-report", "timeout")]
             # A reported initialization failure has no formatter to recover.
             formatted = [r for r in survived if r["outcome"] != "reported-initialization-failure"]
             summary["sticky_after_failure"] = sum(r["recovered"] == "false" for r in formatted)
-            summary["leaking_after_cleanup"] = sum(r["leaked-blocks"] != "0" for r in survived)
+            summary["leaking_after_cleanup"] = sum(r["leaked-blocks"] != "0" or r["sanitizer-leak"] is True
+                                                   for r in survived)
+            summary["sanitizer_leak_reports"] = sum(r["sanitizer-leak"] is True for r in survived)
             summary["misreported_backend_codes"] = sorted({r["backend"] for r in survived
                                                            if r["outcome"] == "other-error"})
             summary["crash_points"] = [r["fail_at"] for r in failures if r["outcome"] == "crash"]
+            summary["crash_exit_codes"] = sorted({r["exit"] for r in failures if r["outcome"] == "crash"})
+            summary["sanitizer_report_points"] = {str(r["fail_at"]): r["sanitizer"] for r in failures
+                                                  if r["outcome"] == "sanitizer-report"}
             summary["wrong_output_points"] = [r["fail_at"] for r in failures if r["outcome"] == "wrong-output"]
             assert summary["control"] == 0, f"{name}: allocation count changed between runs"
             report[name] = summary
