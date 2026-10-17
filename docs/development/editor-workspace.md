@@ -478,6 +478,9 @@ self-references, and preserves references to other entities. New entity IDs are
 FoundationIdentity UUIDv4 text from the operating system's entropy source; if it
 is unavailable, Add and Duplicate change nothing and report that in the status
 line (see [the UUID architecture](../architecture/object-handles-uuid.md#implementation-sequence)).
+The Editor opens and saves version-1 Worlds only. Version-2 records with committed
+UUIDs are produced by `ludus-cook identity` and are not yet editable here; see
+[UUID authoring records](../architecture/object-handles-uuid.md#stage-3-uuid-authoring-records).
 
 Runtime integration stays game-owned: parse/validate into temporary owned data;
 create registry entities; map persisted IDs to new runtime handles; populate
@@ -859,7 +862,13 @@ Optional GPU path tracing remains a separate renderer API.
 Qt Quick's native surface is embedded in the World splitter and uses the basic
 owner-thread render loop. The adapter admits the device and queue Qt Quick renders with, imports
 its RGBA8 texture, and retires replaced reads only after Qt submits the consumer
-frame. Resize, scene replacement, Stop and source invalidation release texture
+frame. The scene graph samples only the active image, whose read stays open until
+a synchronized replacement takes its place; the replaced read is released at
+`afterFrameEnd` or on the next service tick, after Qt's submission either way.
+`QQuickWindow::grabWindow` synchronizes and renders without the frame signals and
+may itself promote the pending image; the same rule covers it. RHI and Qt submit
+on one serialized queue, so a lease error would show a newer frame, never torn
+pixels. Resize, scene replacement, Stop and source invalidation release texture
 leases before renderer/device cleanup. Camera and splitter restoration keep the
 existing project-local preferences. The native child surface follows Qt window
 container stacking rules; widgets cannot overlay it arbitrarily.
@@ -888,6 +897,11 @@ scene graph and frame leases persist, so presentation resumes from the same GPU
 textures without readback. Releasing a swapchain makes Qt wait for the device to
 go idle, as it already does on resize. Newer Qt releases and X11 keep Qt's own
 hide/show handling.
+
+Qt 6.4's `grabWindow` interprets every non-BGRA8 swapchain readback as 8-bit RGBA.
+On GNOME Wayland, Mesa offers Intel GPUs an RGBA16F swapchain first, so grabs there
+look striped although the screen is correct. On X11, grabs match `xwd` captures of
+the window exactly; use X11 for pixel evidence.
 
 If no adapter can present to the window with a shareable device, the viewport
 falls back to an offscreen path. The engine creates its own headless Vulkan device,

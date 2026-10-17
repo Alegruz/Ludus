@@ -8,6 +8,7 @@
 #include <ludus/foundation/containers/ring_buffer.hpp>
 #include <ludus/foundation/containers/sorted_map.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/containers/static_bit_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -201,6 +202,22 @@ TEST_CASE("RingBuffer never allocates, including wraparound, copies and moves", 
         ring.Clear();
         REQUIRE(moved.GetSize() == 16);
         REQUIRE(moved.GetFirst() == 984U);
+    }
+    REQUIRE(gCounters.news == 0);
+    REQUIRE(gCounters.deletes == 0);
+}
+
+TEST_CASE("StaticBitSet never allocates", "[alloc][bit-set]")
+{
+    TrackGuard guard;
+    {
+        ludus::foundation::StaticBitSet<200> bits;
+        bits.SetAll();
+        bits <<= 65;
+        bits.Flip(3);
+        const ludus::foundation::StaticBitSet<200> copy = ~bits;
+        REQUIRE((copy | bits).AreAllSet());
+        REQUIRE(bits.FindNextSet(0) == 3);
     }
     REQUIRE(gCounters.news == 0);
     REQUIRE(gCounters.deletes == 0);

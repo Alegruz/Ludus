@@ -196,23 +196,36 @@ targets, wait and early-wake counts, and an outcome (`Baseline`, `Waited`, `Late
 `Rescheduled`, `WaitFailed`, `WaitLimit`, `ClockRegression`, `Overflow`,
 `Disabled` or `InvalidClock`).
 
-The native clock reads `time::Now()` and waits with POSIX
-[`nanosleep(2)`](https://man7.org/linux/man-pages/man2/nanosleep.2.html), which
-may return early with `EINTR`. The wait is relative, but each one is recomputed
-from a fresh reading, so the target stays absolute in the FoundationTime domain
-and wake errors do not accumulate. An absolute OS wait (`clock_nanosleep` with
-`TIMER_ABSTIME`, `mach_wait_until`) would need proof that the OS timer uses the
-same clock as the hidden steady-clock backend; that proof is not required here.
-The cost is the gap between the reading and entering the sleep, which the
-measured wake lateness includes. Browser builds return a wait that reports
-`Unsupported`: browsers keep pacing with presentation callbacks
+The native clock reads `time::Now()` and waits for the interval remaining until
+the target, recomputed from a fresh reading before every wait, so the target
+stays absolute in the FoundationTime domain and wake errors do not accumulate.
+Linux sleeps with POSIX
+[`nanosleep(2)`](https://man7.org/linux/man-pages/man2/nanosleep.2.html). macOS
+waits on a one-shot `kevent64(2)` timer with `NOTE_CRITICAL`, which removes the
+kernel's timer-coalescing leeway; it falls back to `nanosleep(2)` if the thread's
+kqueue cannot be created. Both waits may return early with `EINTR`. The cost of a
+relative wait is the gap between the reading and arming the timer, which the
+measured wake lateness includes.
+
+An absolute OS wait needs proof that the OS timer uses the same clock as the
+hidden steady-clock backend. On macOS, libc++'s `steady_clock` was measured equal
+to `CLOCK_MONOTONIC_RAW` and Mach continuous time, while `mach_wait_until` uses
+Mach absolute time, which excludes system sleep and differed by about 29 hours on
+the test host; it is rejected. A Mach-continuous absolute kevent timer matches the
+domain but measured no better than the relative critical timer, so the clock
+interface stays relative. macOS has no `clock_nanosleep`. Browser builds return a
+wait that reports `Unsupported`: browsers keep pacing with presentation callbacks
 (`emscripten_set_main_loop` at the display rate) and never block or busy-wait.
 
-No spin phase exists. On the measured macOS host, the windowed application woke
-a nearly constant 1.0 ms after its target. The windowless process woke later as
-the interval grew, consistent with operating-system timer leeway. A constant
-offset shifts phase without making intervals uneven, so spinning would spend CPU
-time and battery for no interval benefit. See the [measurements](../development/high-resolution-time-evidence.md#native-frame-pacing).
+No spin phase exists. Before the zero-leeway wait, the windowed application on
+the measured macOS host woke a nearly constant 1.0 ms after its target and the
+windowless process woke later as the interval grew. Both matched the kernel's
+leeway tiers. With `NOTE_CRITICAL` the median wake is about 0.03 ms late in both
+modes; the remaining tail under heavy load is CPU scheduling, which a spin would
+compete for rather than remove. The zero-leeway wait gives up the kernel's power
+batching of one wake per frame; a loop that should save power while hidden or idle
+lowers its rate. See the [measurements](../development/high-resolution-time-evidence.md#native-frame-pacing)
+and the [wake leeway trial](../development/high-resolution-time-evidence.md#wake-leeway-trial).
 Adding a spin later requires a strict budget, a power policy and measurements
 showing it removes lateness that the OS wait leaves.
 
@@ -401,6 +414,43 @@ For each completed review or trial, record:
    overflow/regression and determinism checks for the affected behavior.
 6. Adopt/defer/reject decision and rationale, with links to evidence, the PR and
    any architecture/ADR changes. Credit consulted sources near affected code.
+
+#### Trial: native pacing wake leeway (October 17, 2026)
+
+Status: **Adopted** for macOS. The HR-02 and HR-06 sources remain **Queued**: the
+trial applied the methodology stated in their rows, without a full reading.
+
+1. Question (HR-03's, for desktop macOS): what makes native pacing wakes late,
+   and can it be reduced without a spin? Consulted Apple's XNU sources (tag
+   `xnu-12377.121.6`): `osfmk/kern/timer_call.c` (`timer_call_slop`,
+   `timer_compute_leeway`), `osfmk/arm/arm_timer.c` (`tcoal_prio_params_init`) and
+   `bsd/kern/kern_event.c` (`NOTE_CRITICAL` urgency). Ordinary user timers get
+   `min(interval >> shift, max)` leeway: interval / 8 up to 1 ms for timeshare
+   threads and interval / 4 up to 5 ms for the first latency-QoS tier. The
+   user-critical tier has none.
+2. Hypothesis: the measured 1.0 ms windowed and interval-proportional headless
+   offsets are this leeway. Thread QoS or a clock-matched absolute wait might
+   reduce it; zero leeway should remove it. Owner: `Ludus::PlatformPacing`.
+3. Prototype: one world demo binary whose wait and QoS were selected by an
+   experiment-only environment switch (not committed): `nanosleep` (baseline),
+   `QOS_CLASS_USER_INTERACTIVE`, kevent absolute Mach-continuous timer with
+   default leeway or `NOTE_CRITICAL`, and kevent relative timer with default
+   leeway or `NOTE_CRITICAL`.
+4. Baseline `16346bce` (develop), macOS 26.6, Apple M5, pinned Clang 18
+   Development. Two fully randomized blocks (seeds 20261017 and 20261018), 288
+   runs; see the [evidence](../development/high-resolution-time-evidence.md#wake-leeway-trial).
+5. Results: zero leeway cut windowed median lateness from 1.0-1.5 ms to 0.03 ms
+   (ratio 0.02-0.03, 95% CI upper bound 0.03) and frame-start p90 to within
+   0.03 ms of the cap. Headless median fell by 29-59% under one-minute load
+   averages of 10 to 157 on 10 cores. QoS (already user-interactive) and default-leeway
+   kevent timers had no effect. Absolute and relative critical timers were
+   indistinguishable. Process CPU time did not change measurably; power was not
+   measured.
+6. Decision: adopt a relative `NOTE_CRITICAL` kevent wait in macOS
+   `GetSystemPacingClock()` (ADR 0003 entry), keeping the relative clock interface,
+   absolute targets, no spin and the browser contract. Reject `mach_wait_until`
+   (different clock domain). Defer QoS changes and Linux absolute waits until a
+   launch context or Linux host shows lateness that they remove.
 
 Retain exception-free APIs, allocation-free timer values, explicit failure and
 separate CPU/simulation/presentation domains in every trial. Backend replacement,
