@@ -154,6 +154,8 @@ add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.
 add_subdirectory(modules/foundation/math)
+# FoundationGeometry (ADR 0024) depends on Base, Math and Containers only.
+add_subdirectory(modules/foundation/geometry)
 add_subdirectory(modules/gameplay/camera)
 add_subdirectory(modules/physics/fluid)
 add_subdirectory(modules/foundation/time)
@@ -336,7 +338,7 @@ write_basic_package_version_file(
 # --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
-    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
+    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationGeometry FoundationTime FoundationLogging
     FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat StringDictionaryFormat StringDictionary StringDictionaryWriter SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})

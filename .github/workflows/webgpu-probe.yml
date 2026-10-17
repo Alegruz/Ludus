@@ -50,6 +50,7 @@ on:
       - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
       - 'modules/foundation/math/**'
+      - 'modules/foundation/geometry/**'
       - 'tools/web-math-probe/**'
       - 'modules/localization/**'
       - 'tools/web-localization-probe/**'

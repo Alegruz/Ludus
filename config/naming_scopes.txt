@@ -12,6 +12,11 @@ modules/platform/tests/entropy_tests.cpp
 modules/foundation/math/include/ludus/foundation/math/summation.hpp
 modules/foundation/math/src/summation.cpp
 modules/foundation/math/tests/summation_tests.cpp
+modules/foundation/math/include/ludus/foundation/math/enclosure.hpp
+modules/foundation/math/src/enclosure.cpp
+modules/foundation/math/tests/enclosure_oracle.hpp
+modules/foundation/math/tests/enclosure_tests.cpp
+modules/foundation/geometry
 apps/editor/src/internal/import_report.h
 apps/editor/src/import_report.cpp
 apps/editor/tests/import_report_tests.cpp
