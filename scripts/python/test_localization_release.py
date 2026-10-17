@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -257,6 +258,22 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(release.descriptors(self.source, "game::l10n::test"), header)
         message(self.source, "hud/lives")["arguments"][0]["max"] = 100
         self.assertNotEqual(release.descriptors(self.source, "game::l10n::test"), header)
+
+    def test_combined_native_and_browser_fixture_has_unique_prerequisites(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "fixture.hpp"
+            subprocess.run([sys.executable, str(ROOT / "modules/localization/tests/generate_fixture.py"),
+                            str(output)], check=True, capture_output=True, text=True)
+            header = output.read_text()
+        includes = [line for line in header.splitlines() if line.startswith("#include ")]
+        self.assertEqual(len(includes), len(set(includes)))
+        self.assertIn("#include <ludus/localization/catalog.hpp>", includes)
+        self.assertIn("#include <string_view>", includes)
+        self.assertEqual(header.count("#pragma once"), 1)
+        for namespace in ("localization_fixture", "localization_corpus", "localization_release_fixture"):
+            self.assertIn(f"namespace {namespace}\n", header)
+        for name in ("kSourceCatalog", "kFrenchCatalog", "kFallbackCatalog", "kCorpusFrFr", "kReleaseFrCa"):
+            self.assertIn(f" {name}[]", header)
 
     def test_generated_symbol_collisions_fail(self):
         base = dict(self.source)

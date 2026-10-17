@@ -45,7 +45,10 @@ BOOTSTRAP_STATE_VERSION = 2
 # ClangBuildAnalyzer aggregates Clang -ftime-trace outputs into a single ranked
 # report. Pinned so the profiling harness is reproducible. It is fetched/built
 # on demand by `profile-build` only, never by init.sh.
-CLANG_BUILD_ANALYZER_VERSION = "1.5.0"
+# Thanks to Aras Pranckevičius and contributors, v1.6.0 updates simdjson for
+# newer compilers and accounts for Clang 19+ header trace events.
+# https://github.com/aras-p/ClangBuildAnalyzer/releases/tag/v1.6.0
+CLANG_BUILD_ANALYZER_VERSION = "1.6.0"
 CLANG_BUILD_ANALYZER_REPO = "https://github.com/aras-p/ClangBuildAnalyzer"
 
 PRESET_BUILD_TYPES: dict[str, str] = {
@@ -509,6 +512,35 @@ def link_or_replace_symlink(link_path: Path, target_path: Path) -> None:
     link_path.symlink_to(target_path)
 
 
+def homebrew_llvm_formulae(llvm_major: int) -> tuple[tuple[str, str], ...]:
+    """Return the Homebrew formulae providing the pinned LLVM and the executable that identifies each.
+
+    Homebrew ships LLD as a separate formula for the pinned LLVM, so both are required.
+    """
+    return ((f"llvm@{llvm_major}", "clang"), (f"lld@{llvm_major}", "ld.lld"))
+
+
+def check_homebrew_llvm_major(root: Path, formula: str, tool: Path, llvm_major: int) -> None:
+    """Reject a Homebrew ``formula`` whose ``tool`` reports an LLVM major other than ``llvm_major``.
+
+    Until Homebrew publishes a versioned formula for the newest LLVM major,
+    ``llvm@<major>`` and ``lld@<major>`` are aliases of the unversioned formulae,
+    so ``brew upgrade`` can silently move them to the next major. A missing
+    ``tool`` is left to the ordinary missing-tool diagnostics.
+    """
+    if not tool.is_file():
+        return
+    parts = version_tuple(executable_version(str(tool), ("--version",), root))
+    if parts and parts[0] != llvm_major:
+        raise EngineError(
+            f"Homebrew {formula} resolves to {tool.parent.parent} with LLVM {'.'.join(map(str, parts))}, "
+            f"but Ludus pins LLVM {llvm_major}.\n"
+            f"Homebrew aliases {formula} to its unversioned formula until a newer LLVM major ships, so "
+            "`brew upgrade` can move it. Install the versioned formulae once they exist "
+            f"(`brew install llvm@{llvm_major} lld@{llvm_major}`) and rerun ./init.sh. While the unversioned "
+            f"formulae still provide LLVM {llvm_major}, `brew pin llvm lld` prevents the move.")
+
+
 def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]]) -> None:
     if os.name == "nt":
         return
@@ -518,9 +550,12 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
     if platform.system() == "Darwin":
         brew = shutil.which("brew")
         if brew:
-            code, prefix = capture_command_quiet([brew, "--prefix", f"llvm@{clang_major}"], cwd=root)
-            if code == 0:
-                os.environ["PATH"] = str(Path(prefix.strip()) / "bin") + os.pathsep + os.environ.get("PATH", "")
+            for formula, tool in homebrew_llvm_formulae(clang_major):
+                code, prefix = capture_command_quiet([brew, "--prefix", formula], cwd=root)
+                if code == 0:
+                    bin_dir = Path(prefix.strip()) / "bin"
+                    check_homebrew_llvm_major(root, formula, bin_dir / tool, clang_major)
+                    os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
     specs: list[tuple[str, Sequence[str], str]] = [
         ("clang", (f"clang-{clang_major}", "clang"), minimum["clang"]),
         ("clang++", (f"clang++-{clang_major}", "clang++"), minimum["clang"]),
@@ -633,8 +668,8 @@ def configure_macos_sdk(root: Path, llvm_major: int) -> None:
         "Compiler/SDK compile-link validation failed before dependency downloads or HarfBuzz builds.\n"
         + "\n".join(failures) + "\nHow to fix:\n"
         f"  Install a macOS SDK compatible with Clang {llvm_major} "
-        "(macOS 26.5 passes the current math-header probe).\n"
-        "  SDKROOT=/absolute/path/to/MacOSX26.5.sdk ./init.sh\n"
+        "(the current Command Line Tools SDK passes the math-header probe with LLVM 23).\n"
+        "  SDKROOT=/absolute/path/to/MacOSX.sdk ./init.sh\n"
         "  If SDKROOT was set accidentally, unset SDKROOT and rerun ./init.sh to test installed sibling SDKs.\n"
         "Changing only the deployment target does not change the SDK headers.")
 
@@ -810,15 +845,19 @@ def print_missing_tool_help(name: str, version: str, path: str, minimum: str,
     print(f"Minimum required version: {minimum}")
     print("One-command onboarding command:")
     print("  ./init.sh")
-    if name != "Python" and llvm_major is not None:
+    if name != "Python" and llvm_major is not None and platform.system() == "Darwin":
+        formulae = " ".join(formula for formula, _ in homebrew_llvm_formulae(llvm_major))
+        print("Manual Homebrew install or upgrade (refresh first: stale formula metadata can install an older patch):")
+        print(f"  brew update && brew install {formulae} && brew upgrade {formulae}")
+    elif name != "Python" and llvm_major is not None:
         print("Manual Ubuntu fallback, if automatic sudo installation is unavailable:")
         print(
             "  sudo apt-get update && sudo apt-get install -y "
             f"git python3 python3-venv ca-certificates clang-{llvm_major} lld-{llvm_major} "
             f"clang-format-{llvm_major} clang-tidy-{llvm_major}"
         )
-        print("  If apt cannot find those packages, enable Ubuntu universe first:")
-        print("  sudo add-apt-repository -y universe && sudo apt-get update")
+        print("  If apt cannot find those packages, register the pinned apt.llvm.org suite first:")
+        print("  python3 scripts/python/llvm_apt_source.py && sudo apt-get update")
 
 
 def llvm_major_version(versions: dict[str, dict[str, str]]) -> int:
@@ -846,6 +885,10 @@ def host_is_ubuntu() -> bool:
 
 def python_venv_package_candidates() -> tuple[str, ...]:
     return (f"python{sys.version_info.major}.{sys.version_info.minor}-venv", "python3-venv")
+
+
+# Package groups served by apt.llvm.org when the Ubuntu archive lacks the pinned LLVM.
+LLVM_PACKAGE_GROUPS = frozenset(("Clang", "LLD", "clang-format", "clang-tidy"))
 
 
 def required_ubuntu_package_groups(root: Path, versions: dict[str, dict[str, str]]) -> list[AptPackageGroup]:
@@ -1088,6 +1131,16 @@ def install_ubuntu_system_prerequisites(root: Path, versions: dict[str, dict[str
     packages, missing_groups = resolve_apt_package_groups(root, package_groups)
     if missing_groups and host_is_ubuntu():
         enable_ubuntu_universe(root, prefix)
+        run([*prefix, "apt-get", "update"], cwd=root)
+        packages, missing_groups = resolve_apt_package_groups(root, package_groups)
+    if any(group.purpose in LLVM_PACKAGE_GROUPS for group in missing_groups) and host_is_ubuntu():
+        # The Ubuntu archive does not package the pinned LLVM major.
+        import llvm_apt_source
+        try:
+            llvm_apt_source.register(root, llvm_apt_source.os_release_codename(),
+                                     llvm_major_version(versions), list(prefix))
+        except llvm_apt_source.SourceError as error:
+            raise EngineError(str(error)) from error
         run([*prefix, "apt-get", "update"], cwd=root)
         packages, missing_groups = resolve_apt_package_groups(root, package_groups)
 
@@ -1491,10 +1544,11 @@ def command_init(args: argparse.Namespace) -> int:
             configure_system_tool_shims(root, versions)
             if system_prerequisites_need_install(root, versions):
                 brew = shutil.which("brew")
+                formulae = [formula for formula, _ in homebrew_llvm_formulae(llvm_major_version(versions))]
                 if not brew:
                     raise EngineError("macOS setup requires Homebrew and Xcode Command Line Tools; "
-                                      f"install llvm@{llvm_major_version(versions)} first")
-                run([brew, "install", f"llvm@{llvm_major_version(versions)}"], cwd=root)
+                                      f"install {' '.join(formulae)} first")
+                run([brew, "install", *formulae], cwd=root)
                 configure_system_tool_shims(root, versions)
         else:
             install_ubuntu_system_prerequisites(root, versions)
@@ -2129,12 +2183,37 @@ def command_install_sdk(args: argparse.Namespace) -> int:
 
 
 def clang_build_analyzer_dir(root: Path) -> Path:
-    return root / "out" / "host-tools" / "clang-build-analyzer"
+    return root / "out" / "host-tools" / f"clang-build-analyzer-{CLANG_BUILD_ANALYZER_VERSION}"
 
 
 def clang_build_analyzer_binary(root: Path) -> Path:
     suffix = ".exe" if os.name == "nt" else ""
     return clang_build_analyzer_dir(root) / "build" / f"ClangBuildAnalyzer{suffix}"
+
+
+def prepare_clang_build_analyzer_includes(source_dir: Path) -> None:
+    """Make the pinned host tool's standard dependencies explicit for libc++ 23.
+
+    Thanks to Doug Binks/enkiTS and LLVM's demangler contributors, as bundled
+    by Aras Pranckevičius in ClangBuildAnalyzer v1.6.0. Preserve their licensed
+    bodies; these marked edits only add the headers declaring existing uses.
+    https://github.com/aras-p/ClangBuildAnalyzer/tree/v1.6.0/src/external
+    """
+    profiles = (
+        ("enkiTS/TaskScheduler.cpp", '#include "TaskScheduler.h"\n', "#include <cstdlib>\n#include <type_traits>\n"),
+        ("llvm-Demangle/include/Utility.h", '#include "StringView.h"\n', "#include <exception>\n"),
+        ("llvm-Demangle/include/ItaniumDemangle.h", '#include "DemangleConfig.h"\n', "#include <type_traits>\n"),
+    )
+    marker = "// Ludus host-tool include profile: explicit standard dependencies.\n"
+    for name, anchor, includes in profiles:
+        path = source_dir / "src/external" / name
+        original = path.read_text()
+        replacement = anchor + marker + includes
+        if original.count(replacement) == 1:
+            continue
+        if original.count(anchor) != 1 or marker in original:
+            raise EngineError(f"ClangBuildAnalyzer include profile no longer matches {name}")
+        path.write_text(original.replace(anchor, replacement))
 
 
 def ensure_clang_build_analyzer(root: Path) -> Path:
@@ -2170,6 +2249,7 @@ def ensure_clang_build_analyzer(root: Path) -> Path:
             shutil.rmtree(source_dir)
         extracted.rename(source_dir)
 
+    prepare_clang_build_analyzer_includes(source_dir)
     build_dir = source_dir / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
     env = tool_env(root)
