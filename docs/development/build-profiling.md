@@ -79,6 +79,38 @@ before treating timing changes as include regressions.
 
 ## Baseline
 
+### LLVM 23 reference-toolchain calibration
+
+The compiler migration changes the reference measurement. These uncached
+Ubuntu 24.04 CI runs both used two build jobs and the complete Development
+graph, without PCH, source exclusions or reduced tests:
+
+| Measurement | LLVM 18, [run 39067596315](https://github.com/The-Ludus-Project/Ludus/actions/runs/39067596315) | LLVM 23.1.3, [run 39070823313](https://github.com/The-Ludus-Project/Ludus/actions/runs/39070823313) |
+| --- | ---: | ---: |
+| Ninja edges | 640 | 643 |
+| Build wall time | 263.56 s | 277.37 s |
+| Summed frontend parsing | 307.8 s | 367.2 s |
+| Summed backend/codegen | 175.6 s | 146.3 s |
+
+The build wall time differs by about 5.2%; frontend parsing differs by 19.3%.
+The compiler and analyzer versions differ, so these runs do not isolate a
+source include regression or establish a controlled optimization result.
+ClangBuildAnalyzer 1.6.0 also corrects duplicate frontend-file reporting and
+Clang 19+ header events; its compilation-event count is not directly comparable
+with the old report. Ninja edges identify the nearly unchanged build graph.
+
+Every reported project header passes its existing limit. The LLVM 23 report's
+largest include costs are Catch2's assertion header and standard string/span
+headers; no new heavy public include was introduced by the promotion repairs.
+The old 320-second aggregate had only about 4% headroom over the earlier
+307.8-second run. Recalibrate only that aggregate to 440 seconds, about 20%
+above the measured LLVM 23 baseline, following the existing calibration policy.
+Keep per-header limits, overrides, assertions, tests and profiling inputs
+unchanged. Verify the next complete LLVM 23 run and tighten the aggregate when
+comparable repeated profiles justify it; continue to fix avoidable includes.
+
+### Original small-graph baseline
+
 Captured with the pinned toolchain (Clang 18, libstdc++ 14, Ninja, lld) on the
 `linux-clang-profile` preset (RelWithDebInfo, `-ftime-trace` on, ccache off),
 clean build. Absolute seconds are host-dependent — treat the **ratios and the
