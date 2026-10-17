@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
 import difflib
 import hashlib
 import json
@@ -18,7 +19,7 @@ import urllib.request
 import venv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Iterator, Sequence
 
 from formatting import FormattingError, format_source
 from analysis_inventory import compilation_entries, inventory, request_codemodel, SOURCE_ROOTS
@@ -303,11 +304,64 @@ def managed_executable(root: Path, name: str) -> Path:
     return venv_bin_dir(root) / f"{name}{suffix}"
 
 
+# Opt-in Conan home shared by every checkout of this repository on the host
+# (for example concurrent agent worktrees), so third-party packages are built
+# once instead of once per checkout. See docs/development/building.md.
+SHARED_CONAN_HOME_VARIABLE = "LUDUS_CONAN_HOME"
+
+
+def shared_conan_root() -> Path | None:
+    value = os.environ.get(SHARED_CONAN_HOME_VARIABLE, "")
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise EngineError(f"{SHARED_CONAN_HOME_VARIABLE} must be an absolute path, not {value!r}")
+    if os.name == "nt":
+        raise EngineError(f"{SHARED_CONAN_HOME_VARIABLE} is supported on macOS and Linux hosts only")
+    return path
+
+
+def conan_home(root: Path) -> Path:
+    shared = shared_conan_root()
+    if shared is None:
+        return root / "out" / "conan" / "home"
+    # One home per pinned Conan version: checkouts on different pins must not
+    # migrate the same cache database back and forth.
+    return shared / ("conan-" + load_tool_versions(root)["managed"]["conan"])
+
+
+@contextlib.contextmanager
+def conan_cache_lock(root: Path) -> Iterator[None]:
+    """Serialize Conan cache writes when the Conan home is shared.
+
+    Conan 2 does not lock its package cache between processes, so exports,
+    lock creation and --build=missing installs from concurrent checkouts must
+    not overlap. A checkout-local home needs no lock."""
+    if shared_conan_root() is None:
+        yield
+        return
+    import fcntl
+
+    home = conan_home(root)
+    home.mkdir(parents=True, exist_ok=True)
+    with (home / ".ludus-cache.lock").open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(f"Waiting for another checkout to finish with the shared Conan cache: {home}", flush=True)
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def tool_env(root: Path) -> dict[str, str]:
     env = os.environ.copy()
     path_entries = [host_tools_bin_dir(root), venv_bin_dir(root)]
     env["PATH"] = os.pathsep.join(str(path) for path in path_entries) + os.pathsep + env.get("PATH", "")
-    env["CONAN_HOME"] = str(root / "out" / "conan" / "home")
+    env["CONAN_HOME"] = str(conan_home(root))
     env["CONAN_NON_INTERACTIVE"] = "1"
     return env
 
@@ -680,7 +734,7 @@ def managed_tool_statuses(root: Path, versions: dict[str, dict[str, str]]) -> li
 
 
 def project_state_statuses(root: Path) -> list[ToolStatus]:
-    installed_profile = root / "out" / "conan" / "home" / "profiles" / native_profile_name()
+    installed_profile = conan_profile_path(root)
     source_profile = root / "config" / "conan" / "profiles" / native_profile_name()
     lockfile = root / "conan.lock"
     environment = venv_dir(root)
@@ -1067,8 +1121,14 @@ def validate_managed_tools(root: Path, versions: dict[str, dict[str, str]]) -> N
         raise EngineError("project-managed tools are missing or do not match pinned versions")
 
 
+def conan_profile_path(root: Path) -> Path:
+    # The profile names this checkout's compiler, SDK and libc++ links, so it
+    # stays beside the checkout even when the Conan home is shared.
+    return root / "out" / "conan" / "profiles" / native_profile_name()
+
+
 def install_conan_profile(root: Path) -> Path:
-    destination = root / "out" / "conan" / "home" / "profiles" / native_profile_name()
+    destination = conan_profile_path(root)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(native_profile_contents(root), encoding="utf-8")
     print(f"Installed Conan profile: {destination}")
@@ -1098,13 +1158,48 @@ def clang_cxx(root: Path) -> Path:
 LOCAL_CONAN_RECIPES: tuple[str, ...] = ("third_party/harfbuzz", "third_party/catch2")
 
 
-def export_local_recipes(root: Path) -> None:
+def locked_recipe_revisions(root: Path) -> dict[str, set[str]]:
+    lockfile = root / "conan.lock"
+    try:
+        data = json.loads(lockfile.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise EngineError(f"failed to read {lockfile}: {exc}") from exc
+    result: dict[str, set[str]] = {}
+    for section in ("requires", "build_requires", "python_requires"):
+        for entry in data.get(section, []):
+            reference, _, revision = entry.partition("%")[0].partition("#")
+            if revision:
+                result.setdefault(reference, set()).add(revision)
+    return result
+
+
+def export_local_recipes(root: Path, *, locked: bool = False) -> None:
+    # A locked install must use the recipes in this checkout. A cache that
+    # already holds the pinned revision (a shared home, or one used by another
+    # branch) would otherwise hide a recipe edit that conan.lock lacks.
+    pinned = locked_recipe_revisions(root) if locked else {}
     for recipe in LOCAL_CONAN_RECIPES:
         recipe_dir = root / recipe
         if not (recipe_dir / "conanfile.py").is_file():
             continue
         print(f"Exporting local Conan recipe: {recipe}")
-        run([conan(root), "export", str(recipe_dir)], cwd=root, env=tool_env(root))
+        argv = [conan(root), "export", str(recipe_dir), "--format", "json"]
+        print(f"+ {command_line(argv)}", flush=True)
+        # Conan logs to stderr (left on the terminal) and prints the exported
+        # reference as JSON on stdout.
+        try:
+            completed = subprocess.run([str(arg) for arg in argv], cwd=str(root), env=tool_env(root),
+                                       check=False, text=True, stdout=subprocess.PIPE)
+        except OSError as exc:
+            raise EngineError(f"command not found while running: {command_line(argv)}") from exc
+        if completed.returncode != 0:
+            raise EngineError(f"command failed with exit code {completed.returncode}: {command_line(argv)}")
+        reference, _, revision = json.loads(completed.stdout)["reference"].partition("#")
+        expected = pinned.get(reference)
+        if expected is not None and revision not in expected:
+            raise EngineError(
+                f"conan.lock pins {reference}#{', #'.join(sorted(expected))}, but {recipe} exports "
+                f"#{revision}. Run ./init.sh without --locked to update conan.lock.")
 
 
 def prepare_conan_artifacts(
@@ -1125,16 +1220,20 @@ def prepare_conan_artifacts(
     install_managed_tools(root, versions)
     validate_managed_tools(root, versions)
     profile_path = install_conan_profile(root)
-    run(
-        [conan(root), "remote", "update", "conancenter", "--url", "https://center2.conan.io"],
-        cwd=root,
-        env=tool_env(root),
-    )
-    export_local_recipes(root)
-    if not locked:
-        create_conan_lock(root, profile_path)
-    for preset in presets:
-        conan_install_for_preset(root, profile_path, preset, locked=locked)
+    # Exporting makes this checkout's recipe revisions the latest in the cache,
+    # so a shared cache must not interleave another checkout's export before
+    # this one resolves its lock and installs.
+    with conan_cache_lock(root):
+        run(
+            [conan(root), "remote", "update", "conancenter", "--url", "https://center2.conan.io"],
+            cwd=root,
+            env=tool_env(root),
+        )
+        export_local_recipes(root, locked=locked)
+        if not locked:
+            create_conan_lock(root, profile_path)
+        for preset in presets:
+            conan_install_for_preset(root, profile_path, preset, locked=locked)
 
 
 def cmake_cache_value(cache_path: Path, name: str) -> str | None:
