@@ -58,7 +58,18 @@ performs the reset. A first callback starts the clock baseline without simulatin
 startup time. Accepted, clamped and lifecycle-excluded time remain visible to
 diagnostics. Do not busy-wait for
 the next tick, a GPU fence, browser readiness, or a worker result in a browser
-callback. The native outer loop may use its established pacing mechanism.
+callback.
+
+Pacing is presentation policy and never changes tick accounting. A browser frame
+runs in its presentation callback and never waits. The native outer loop calls a
+Platform [frame pacer](high-resolution-time.md#native-frame-pacing) after each
+frame, before the next frame reads its timestamp. The pacer waits for an absolute
+target with an operating-system wait and resets missed schedules beyond a bounded
+lateness. In the reference game, the FIFO swapchain paces presented frames;
+frames that present nothing (startup, loading, minimized) wait at an idle rate,
+and an optional frame-rate cap paces every frame. Session activation resets the
+pacer with the clock debt. Pause stops ticks but keeps presentation on its
+schedule.
 
 The session selects an explicit simulation mode. Menus and overlays route input
 before the gameplay bridge; an overlay cannot accidentally resume simulation.
