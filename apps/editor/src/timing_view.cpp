@@ -54,7 +54,7 @@ const QStringList& GetPaceOutcomeNames()
 struct TimingField final
 {
     const char* Key;
-    uint64 TimingSnapshot::*Member;
+    uint64 TimingSnapshot::* Member;
 };
 
 /// GameHost's numeric timing fields (WriteTimingRecord); last_outcome is read separately.

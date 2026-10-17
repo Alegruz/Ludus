@@ -172,6 +172,78 @@ class ToolchainPinTests(unittest.TestCase):
         with self.assertRaisesRegex(engine.EngineError, "minimum.clang"):
             engine.llvm_major_version({"minimum": {"clang": ""}})
 
+
+class ToolchainBootstrapTests(unittest.TestCase):
+    def test_macos_consumers_keep_the_configured_homebrew_compiler(self):
+        import re
+
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/ci.yml").read_text()
+        jobs = re.split(r"(?m)^  [a-z][a-z0-9_-]*:\n", workflow)[1:]
+        checked = 0
+        for job in jobs:
+            if re.search(r"runs-on: macos-", job) and "-DCMAKE_CXX_COMPILER=" in job:
+                self.assertNotIn("/usr/bin/clang++-", job)
+                self.assertIn('-DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++"', job)
+                checked += 1
+        self.assertGreater(checked, 0)
+
+    def test_trusted_workflow_installers_follow_the_checked_out_source_pin(self):
+        root = Path(__file__).resolve().parents[2]
+        installers = (
+            ("ci.yml", "Install pinned formatter and GUI test dependencies", ("clang-format", "clang-tidy")),
+            ("webgpu-probe.yml", "Prepare host tools and pinned SDK", ("clang", "clang-format", "clang-tidy")),
+            ("wiki.yml", "Install native tools for precompiled web samples", ("clang", "lld")),
+            ("project-sdk.yml", "Install native package inspection tools", ("clang",)),
+        )
+        for workflow, step_name, packages in installers:
+            chunks = (root / ".github/workflows" / workflow).read_text().split(f"      - name: {step_name}\n")[1:]
+            self.assertTrue(chunks, step_name)
+            for index, chunk in enumerate(chunks):
+                body = []
+                for line in chunk.split("        run: |\n", 1)[1].splitlines():
+                    if line.strip() and not line.startswith("          "):
+                        break
+                    body.append(line[10:])
+                # The browser step continues with SDK downloads after host tools.
+                script = "\n".join(body).split("python3 - <<", 1)[0]
+                for major in (18, 23):
+                    with self.subTest(workflow=workflow, step=index, major=major), \
+                            tempfile.TemporaryDirectory() as temporary:
+                        checkout = Path(temporary)
+                        (checkout / "config").mkdir()
+                        (checkout / "config/tool_versions.json").write_text(json.dumps(
+                            {"minimum": {"clang": f"{major}.1.3"}}))
+                        binaries = checkout / "bin"
+                        binaries.mkdir()
+                        (binaries / "python3").symlink_to(sys.executable)
+                        sudo = binaries / "sudo"
+                        sudo.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$APT_LOG"\n')
+                        sudo.chmod(0o755)
+                        if major == 23:
+                            helper = checkout / "scripts/python/llvm_apt_source.py"
+                            helper.parent.mkdir(parents=True)
+                            helper.write_text('import os\nfrom pathlib import Path\n'
+                                              'with Path(os.environ["APT_LOG"]).open("a") as stream:\n'
+                                              '    stream.write("register-source\\n")\n')
+                        log = checkout / "apt.log"
+                        github_environment = checkout / "github.env"
+                        environment = {**os.environ, "PATH": str(binaries) + os.pathsep + os.defpath,
+                                       "APT_LOG": str(log), "GITHUB_ENV": str(github_environment)}
+                        subprocess.run(["/bin/bash", "-e", "-c", script], cwd=checkout, env=environment,
+                                       check=True, capture_output=True, text=True)
+                        commands = log.read_text().splitlines()
+                        installed = next(line.split() for line in commands if line.startswith("apt-get install "))
+                        for package in packages:
+                            self.assertIn(f"{package}-{major}", installed)
+                            self.assertNotIn(f"{package}-{23 if major == 18 else 18}", installed)
+                        self.assertEqual("register-source" in commands, major == 23)
+                        if major == 23:
+                            self.assertEqual(commands[0], "register-source")
+                        if workflow == "ci.yml":
+                            self.assertIn(f"LUDUS_CI_LLVM_MAJOR={major}\n", github_environment.read_text())
+
+
 class NativePrerequisiteTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
@@ -631,7 +703,8 @@ class BrowserAnalysisTests(unittest.TestCase):
             self.assertIn("--warnings-as-errors=*", command)
             self.assertIn("--target=wasm32-unknown-emscripten", command)
             self.assertIn("-DWEB=1", command)
-            self.assertIn("-frelaxed-template-template-args", command)
+            self.assertIn("-std=c++23", command)
+            self.assertNotIn("-frelaxed-template-template-args", command)
             self.assertNotIn("object.o", command)
             self.assertNotIn("-c", command)
             self.assertNotIn("--use-port=emdawnwebgpu", command)
@@ -643,6 +716,59 @@ class BrowserAnalysisTests(unittest.TestCase):
         command = web_build.analysis_commands(root, entries, CLANG_TIDY, root / "sysroot")[0]
         self.assertEqual(command[2], source)
         self.assertIn(str(root / "include"), command)
+
+
+class BuildAnalyzerBootstrapTests(unittest.TestCase):
+    def test_include_profile_preserves_bodies_and_rejects_changed_anchors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            files = (
+                ("enkiTS/TaskScheduler.cpp", '#include "TaskScheduler.h"\n'),
+                ("llvm-Demangle/include/Utility.h", '#include "StringView.h"\n'),
+                ("llvm-Demangle/include/ItaniumDemangle.h", '#include "DemangleConfig.h"\n'),
+            )
+            for name, anchor in files:
+                path = source / "src/external" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("// upstream license\n" + anchor + "// unchanged body\n")
+            engine.prepare_clang_build_analyzer_includes(source)
+            patched = {name: (source / "src/external" / name).read_text() for name, _ in files}
+            engine.prepare_clang_build_analyzer_includes(source)
+            for name, anchor in files:
+                text = (source / "src/external" / name).read_text()
+                self.assertEqual(text, patched[name])
+                self.assertTrue(text.startswith("// upstream license\n" + anchor))
+                self.assertTrue(text.endswith("// unchanged body\n"))
+            path = source / "src/external" / files[0][0]
+            for changed in ("unrecognized source", files[0][1] * 2,
+                            patched[files[0][0]].replace("#include <cstdlib>\n", "")):
+                path.write_text(changed)
+                with self.assertRaisesRegex(engine.EngineError, "include profile no longer matches"):
+                    engine.prepare_clang_build_analyzer_includes(source)
+
+    def test_an_older_cached_binary_cannot_satisfy_the_current_pin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            old = root / "out/host-tools/clang-build-analyzer/build/ClangBuildAnalyzer"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"old analyzer")
+            source = engine.clang_build_analyzer_dir(root)
+            source.mkdir(parents=True)
+            (source / "CMakeLists.txt").touch()
+            binary = engine.clang_build_analyzer_binary(root)
+
+            def build(command, **kwargs):
+                if "--build" in command:
+                    binary.write_bytes(b"current analyzer")
+
+            with patch.object(engine, "run", side_effect=build) as run, \
+                    patch.object(engine, "prepare_clang_build_analyzer_includes"):
+                self.assertEqual(engine.ensure_clang_build_analyzer(root), binary)
+                self.assertEqual(binary.read_bytes(), b"current analyzer")
+                self.assertEqual(old.read_bytes(), b"old analyzer")
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(engine.ensure_clang_build_analyzer(root), binary)
+                self.assertEqual(run.call_count, 2)
 
 
 class ShaderBootstrapCacheTests(unittest.TestCase):

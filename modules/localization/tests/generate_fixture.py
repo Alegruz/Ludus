@@ -19,7 +19,24 @@ for message in translation["messages"]:
     message["text"] = translated.get(message["key"], message["source_text"])
     message["status"] = "approved"
 fallback = export_review(source, "ja-JP")
-lines = [bindings(source, "localization_fixture")]
+lines: list[str] = []
+includes: list[str] = []
+
+
+def append_bindings(header: str) -> None:
+    # Each cooker returns a standalone header. Combine their prerequisites once
+    # at the top so the assembled fixture remains clean under clang-tidy too.
+    for line in header.splitlines():
+        if line == "#pragma once":
+            continue
+        if line.startswith("#include "):
+            if line not in includes:
+                includes.append(line)
+        else:
+            lines.append(line)
+
+
+append_bindings(bindings(source, "localization_fixture"))
 
 
 def emit(name: str, value: bytes) -> None:
@@ -43,7 +60,7 @@ releases = (
 )
 for prefix, manifest, results, domain, namespace in releases:
     cooked = cook_release(manifest, RecordedProfileChecker(results), namespaces={domain: namespace})
-    lines.append(cooked["bindings"][0]["data"].decode("utf-8"))
+    append_bindings(cooked["bindings"][0]["data"].decode("utf-8"))
     for package in cooked["packages"]:
         emit(prefix + "".join(part.capitalize() for part in package["locale"].split("-")), package["data"])
-write_atomic(Path(sys.argv[1]), "\n".join(lines).encode("utf-8"))
+write_atomic(Path(sys.argv[1]), ("#pragma once\n\n" + "\n".join(includes) + "\n\n" + "\n".join(lines)).encode("utf-8"))
