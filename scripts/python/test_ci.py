@@ -20,6 +20,63 @@ import engine
 import web_build
 
 
+class ToolchainBootstrapTests(unittest.TestCase):
+    def test_trusted_workflow_installers_follow_the_checked_out_source_pin(self):
+        root = Path(__file__).resolve().parents[2]
+        installers = (
+            ("ci.yml", "Install pinned formatter and GUI test dependencies", ("clang-format", "clang-tidy")),
+            ("webgpu-probe.yml", "Prepare host tools and pinned SDK", ("clang", "clang-format", "clang-tidy")),
+            ("wiki.yml", "Install native tools for precompiled web samples", ("clang", "lld")),
+            ("project-sdk.yml", "Install native package inspection tools", ("clang",)),
+        )
+        for workflow, step_name, packages in installers:
+            chunks = (root / ".github/workflows" / workflow).read_text().split(f"      - name: {step_name}\n")[1:]
+            self.assertTrue(chunks, step_name)
+            for index, chunk in enumerate(chunks):
+                body = []
+                for line in chunk.split("        run: |\n", 1)[1].splitlines():
+                    if line.strip() and not line.startswith("          "):
+                        break
+                    body.append(line[10:])
+                # The browser step continues with SDK downloads after host tools.
+                script = "\n".join(body).split("python3 - <<", 1)[0]
+                for major in (18, 23):
+                    with self.subTest(workflow=workflow, step=index, major=major), \
+                            tempfile.TemporaryDirectory() as temporary:
+                        checkout = Path(temporary)
+                        (checkout / "config").mkdir()
+                        (checkout / "config/tool_versions.json").write_text(json.dumps(
+                            {"minimum": {"clang": f"{major}.1.3"}}))
+                        binaries = checkout / "bin"
+                        binaries.mkdir()
+                        (binaries / "python3").symlink_to(sys.executable)
+                        sudo = binaries / "sudo"
+                        sudo.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$APT_LOG"\n')
+                        sudo.chmod(0o755)
+                        if major == 23:
+                            helper = checkout / "scripts/python/llvm_apt_source.py"
+                            helper.parent.mkdir(parents=True)
+                            helper.write_text('import os\nfrom pathlib import Path\n'
+                                              'with Path(os.environ["APT_LOG"]).open("a") as stream:\n'
+                                              '    stream.write("register-source\\n")\n')
+                        log = checkout / "apt.log"
+                        github_environment = checkout / "github.env"
+                        environment = {**os.environ, "PATH": str(binaries) + os.pathsep + os.defpath,
+                                       "APT_LOG": str(log), "GITHUB_ENV": str(github_environment)}
+                        subprocess.run(["/bin/bash", "-e", "-c", script], cwd=checkout, env=environment,
+                                       check=True, capture_output=True, text=True)
+                        commands = log.read_text().splitlines()
+                        installed = next(line.split() for line in commands if line.startswith("apt-get install "))
+                        for package in packages:
+                            self.assertIn(f"{package}-{major}", installed)
+                            self.assertNotIn(f"{package}-{23 if major == 18 else 18}", installed)
+                        self.assertEqual("register-source" in commands, major == 23)
+                        if major == 23:
+                            self.assertEqual(commands[0], "register-source")
+                        if workflow == "ci.yml":
+                            self.assertIn(f"LUDUS_CI_LLVM_MAJOR={major}\n", github_environment.read_text())
+
+
 class NativePrerequisiteTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
