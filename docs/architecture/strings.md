@@ -1062,13 +1062,48 @@ installed SDK consumer cooks and reads a dictionary through the public headers.
 
 No content cooker, Resources decoder or snapshot consumes LUSTR yet, so this is
 not yet dictionary *adoption* in the sense of [migration phases](#migration-phases).
-Pairing it with a real indexed-content reader/cooker, its compatibility decision
-and reload retirement remains the next workstream.
+The [adoption survey](#dictionary-adoption-survey) found no current format that
+justifies it; adoption waits for one of the triggers listed there.
 
 The earlier documentation-only validation paragraph describes the design pass.
 Implementation validation is recorded in the pull request; architecture-wide
 performance targets and persisted formats remain proposals until their separate
 measurements and consumers exist.
+
+### Dictionary adoption survey
+
+A source survey on 2026-10-16 at `8f570f74` looked for one cooked format whose
+cooker can link `Ludus::StringDictionaryWriter`, whose runtime decoder retains a
+content snapshot, and whose records repeat spellings that a `StringIndex` could
+replace. None qualifies, so no consumer was adopted. Adding strings to a format
+only to exercise the dictionary would invent the need this phase must demonstrate.
+
+| Format | Producer and reader | Stored strings | Finding |
+| --- | --- | --- | --- |
+| LUSCN scene bundles | C++ scene cooker and Editor World composer; Resources decoder | None; identity is a `uint64` source ID and references are numeric | No spelling to index. No runtime or Editor consumer requests authored names |
+| `.lurgrt` render graph generations | Python package writer; Renderer activation | One entry-point name per stage, at most 16 stages of at most 63 ASCII bytes | Names repeat across targets, but deduplication saves at most about 1 KiB in packages up to 16 MiB, offset by the 64-byte dictionary header and directory. The reader already borrows each name without allocating. Adoption would need a second, Python LUSTR writer |
+| Static localization catalogs | Python cooker; `PrepareCatalog` | Unique key and text per record; domain and locales once | Keys are unique within a catalog, so only incidental text duplicates remain. [Localization](localization.md) owns this format and its leases |
+| Authored tuning and behavior state | Tooling and runtime encoders | None; numeric object, property and field identities | No spelling to index |
+| Content and scene-asset catalogs, level documents | C++ JSON readers and writers for tools and the Editor | Canonical JSON; scene-asset build records repeat source paths in each artifact's input digest map | Real repetition, but in authored on-disk JSON rather than indexed runtime content. A binary form is a storage redesign, not a dictionary adoption |
+| Reflection and script contract generators | Python generating C++ source | String literals in generated code | Compiled into the program; no cooked payload |
+
+Adopt LUSTR when one of these triggers exists, and pair it with the format
+version, old-version decision and reload retirement that the
+[cooked dictionary contract](#cooked-dictionaries-and-persistence) requires:
+
+- A cooked Resources dependency manifest. `DependencyGraph` edges repeat parent and
+  child resource IDs and property paths, but they are currently a copied runtime
+  setup description with no cooked form.
+- A binary scene-asset catalog for runtime or Editor loading, where build records
+  repeat source paths across artifacts.
+- Authored names in LUSCN or another indexed format, once a runtime or Editor
+  consumer needs them and the cooker can supply them deterministically.
+- A C++ cooker for render graph generations or localization catalogs whose measured
+  footprint or lookup cost shows a benefit over their current borrowed spellings.
+
+Each trigger needs a C++ producer that links the writer. A second writer in
+another language would need its own canonical-encoding agreement and
+cross-implementation golden tests before a format could rely on it.
 
 
 ### Remaining initial implementation
@@ -1081,7 +1116,7 @@ not a new build, sanitizer run, or performance result.
 | Workstream | Remaining delivery | Contract owner |
 | --- | --- | --- |
 | Cooked dictionaries | Implemented as LUSTR v1; see [cooked dictionary format, writer and reader](#cooked-dictionary-format-writer-and-reader). Remaining: adoption by the content consumer below | [Cooked dictionaries and persistence](#cooked-dictionaries-and-persistence) |
-| Content and symbol consumers | Pair the dictionary with a real indexed-content reader/cooker and retained snapshot; define safe reload retirement and compatibility. Bind literals during setup, cache IDs in an actual repeated-name consumer, and validate any generated closed symbol schema for collisions | [Migration phases](#migration-phases) and [literal descriptors](#literal-descriptors) |
+| Content and symbol consumers | Pair the dictionary with a real indexed-content reader/cooker and retained snapshot; define safe reload retirement and compatibility. The [2026-10-16 survey](#dictionary-adoption-survey) found no qualifying format; start when one of its triggers exists. Bind literals during setup, cache IDs in an actual repeated-name consumer, and validate any generated closed symbol schema for collisions | [Migration phases](#migration-phases) and [literal descriptors](#literal-descriptors) |
 | Mutable and bounded storage | Add explicit shrinking, checked byte-range erase, and named display truncation where required by the initial consumers; enforce their byte limits. Insert/replace and mutable write reservations still require a concrete consumer | [Mutable string storage](#mutable-string-storage) |
 | Text and formatting boundaries | Checked UTF-8 slicing, explicit display repair, counted `char8_t` adapters, strict native UTF-16 conversion at OS boundaries, and exception-free builder/bounded formatting adapters | [Bytes and Unicode](#bytes-and-unicode) and [bounded strings and construction](#bounded-strings-and-construction) |
 | Table completion | Checked resolution from table-local `StringIndex`, reservation for known content counts, explicit symbol-grammar adapters, and bounded lookup probing. Current public resolution accepts `NameId`; `FindSlot` has no explicit probe-count bound | [Interned names and indexed strings](#interned-names-and-indexed-strings) |
@@ -1104,9 +1139,9 @@ that separate system is not a prerequisite for the shipped string owners.
 
 Complete and validate the initial architecture before beginning the broader
 conference/journal review and improvement trials. The cooked dictionary writer,
-validating reader and v1 format exist; continue with the compatibility decision
-and one content consumer, then finish the required boundary APIs, diagnostics, and
-correctness evidence above. Required specification checks remain part of that
+validating reader and v1 format exist; the compatibility decision and one content
+consumer wait for an [adoption trigger](#dictionary-adoption-survey). Finish the
+required boundary APIs, diagnostics, and correctness evidence above. Required specification checks remain part of that
 implementation; optional research is not a prerequisite for delivering it.
 
 Record the validated engine revision and representative owner, intern-table,
