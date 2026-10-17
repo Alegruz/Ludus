@@ -8,11 +8,53 @@
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
 #include <ludus/graphics/rhi/rhi.h>
+#include <ludus/platform/frame_pacing.h>
 #include <string_view>
 namespace
 {
 constexpr ludus::foundation::uint64 HEADLESS_DEFAULT_TICKS = 120;
 constexpr ludus::foundation::usize MAX_TRACE_PATH_BYTES = 4096;
+// Windowed --pacing-report runs retain records for startup and loading iterations beyond --frames.
+constexpr ludus::foundation::usize PACING_REPORT_EXTRA_RECORDS = 1024;
+void LogDistribution([[maybe_unused]] std::string_view name,
+                     [[maybe_unused]] const ludus::world_demo::IntervalDistribution& distribution) noexcept
+{
+    LUDUS_LOG_INFO(ludus::foundation::logging::LOG_CORE,
+                   "Pacing {} ns: count={} min={} p50={} p90={} p99={} max={} mean={}",
+                   name,
+                   distribution.Count,
+                   distribution.Minimum,
+                   distribution.Median,
+                   distribution.Percentile90,
+                   distribution.Percentile99,
+                   distribution.Maximum,
+                   distribution.Mean);
+}
+// --pacing-report: log the outcome counts and distributions of one run (see the evidence page).
+bool LogPacingReport(const ludus::world_demo::PacingReport& report) noexcept
+{
+    ludus::world_demo::PacingSummary summary;
+    if (report.Summarize(summary) == false)
+    {
+        LUDUS_LOG_ERROR(ludus::foundation::logging::LOG_CORE, "Could not summarize the pacing report");
+        return false;
+    }
+    LUDUS_LOG_INFO(ludus::foundation::logging::LOG_CORE,
+                   "Pacing frames={} waited={} late={} rescheduled={} presentation-paced={} other={} "
+                   "early-wakes={} dropped={}",
+                   summary.Frames,
+                   summary.Waited,
+                   summary.Late,
+                   summary.Rescheduled,
+                   summary.PresentationPaced,
+                   summary.Other,
+                   summary.EarlyWakes,
+                   report.GetDroppedRecords());
+    LogDistribution("wake lateness", summary.WakeLateness);
+    LogDistribution("frame start interval", summary.FrameStart);
+    LogDistribution("present return interval", summary.PresentReturn);
+    return true;
+}
 // --trace-output arms a FoundationProfiling capture for the whole run. A
 // profiling-disabled (Release) build cannot honour it, so the request fails
 // instead of silently producing no trace for automated profiling.
@@ -109,6 +151,8 @@ int main(int argc, char** argv)
     bool headless = false;
     bool follow = false;
     uint64 frameLimit = 0;
+    uint64 frameRateLimit = 0;
+    bool isPacingReported = false;
     std::string_view traceOutput;
     for (int argument = 1; argument < argc; ++argument)
     {
@@ -128,6 +172,20 @@ int main(int argc, char** argv)
             {
                 return 1;
             }
+        }
+        else if (flag == "--frame-rate" && argument + 1 < argc)
+        {
+            // Native frame-rate cap; validated by LoopPacing (1 to MAXIMUM_FRAMES_PER_SECOND).
+            const std::string_view text(argv[++argument]);
+            if (ParseUint64(text.data(), text.size(), frameRateLimit) != NumberParseStatus::Success ||
+                frameRateLimit == 0 || frameRateLimit > MAXIMUM_FRAMES_PER_SECOND)
+            {
+                return 1;
+            }
+        }
+        else if (flag == "--pacing-report")
+        {
+            isPacingReported = true;
         }
         else if (flag == "--trace-output" && argument + 1 < argc)
         {
@@ -191,6 +249,21 @@ int main(int argc, char** argv)
         return 1;
     }
 #endif
+#if LUDUS_TARGET_OS == LUDUS_OS_WEB
+    // Browsers pace with presentation callbacks and never wait in the frame loop.
+    if (frameRateLimit != 0 || isPacingReported == true)
+    {
+        return 1;
+    }
+#endif
+    // A report needs a bounded run: --frames sets the presented (or headless) frame count.
+    PacingReport pacingReport;
+    if (isPacingReported == true && (frameLimit == 0 || pacingReport.Reserve(static_cast<usize>(frameLimit) +
+                                                                             PACING_REPORT_EXTRA_RECORDS) == false))
+    {
+        return 1;
+    }
+    const ludus::platform::PacingClock pacingClock = ludus::platform::GetSystemPacingClock();
     if (BeginRequestedTrace(traceOutput) == false)
     {
         return 1;
@@ -215,6 +288,13 @@ int main(int argc, char** argv)
         }
         // --frames selects the headless tick count; the reference run keeps 120.
         const uint64 tickCount = frameLimit != 0 ? frameLimit : HEADLESS_DEFAULT_TICKS;
+        // --frame-rate paces each headless iteration: a graphics-free measurement of operating-system
+        // waits. Pacing never changes the ticks run, so the replay hash is unchanged.
+        LoopPacing headlessPacing;
+        if (frameRateLimit != 0 && headlessPacing.Configure(static_cast<uint32>(frameRateLimit)) == false)
+        {
+            return 1;
+        }
         for (uint64 tick = 0; tick < tickCount; ++tick)
         {
             if (session.World().RunTick({ .Axis = {0.5F, 0} }) != Status::Success)
@@ -222,6 +302,18 @@ int main(int argc, char** argv)
                 return 1;
             }
             LUDUS_PROFILE_FRAME();
+            if (headlessPacing.HasLimit() == true)
+            {
+                const ludus::platform::PaceResult pace = headlessPacing.EndFrame(false, pacingClock);
+                if (isPacingReported == true)
+                {
+                    pacingReport.Record({ .Pace = pace, .PresentReturn = {}, .HasPresented = false });
+                }
+            }
+        }
+        if (isPacingReported == true && LogPacingReport(pacingReport) == false)
+        {
+            return 1;
         }
         LUDUS_LOG_INFO(ludus::foundation::logging::LOG_CORE,
                        "Headless reference: ticks={} hash={}",
@@ -232,23 +324,42 @@ int main(int argc, char** argv)
 #if LUDUS_TARGET_OS == LUDUS_OS_WEB
     (void)follow;
     (void)frameLimit;
+    (void)pacingClock;
     gApplication.SetCameraFollow(FollowCameraRequested());
     (void)gApplication.Start();
     emscripten_set_main_loop(Frame, 0, true);
 #else
     Application application;
     application.SetCameraFollow(follow);
+    if (application.SetFrameRateLimit(static_cast<uint32>(frameRateLimit)) == false)
+    {
+        return 1;
+    }
     if (!application.Start(ludus::graphics::rhi::BackendSelection::Auto,
                            levelSize != 0 ? levelBytes : nullptr,
                            levelSize))
     {
         return 1;
     }
+    uint64 presentedFrames = 0;
     while (application.Frame() != AppState::Stopped && application.GetState() != AppState::Failed)
     {
-        if (frameLimit != 0 && application.GetPresentedFrames() >= frameLimit)
+        const bool hasPresented = application.GetPresentedFrames() != presentedFrames;
+        presentedFrames = application.GetPresentedFrames();
+        if (frameLimit != 0 && presentedFrames >= frameLimit)
         {
             break;
+        }
+        // Wait for the next frame's target: the cap, or the idle rate when nothing was presented.
+        const ludus::platform::PaceResult pace = application.Pace(pacingClock);
+        if (isPacingReported == true)
+        {
+            pacingReport.Record(
+            {
+                .Pace = pace,
+                .PresentReturn = application.GetLastPresentReturn(),
+                .HasPresented = hasPresented,
+            });
         }
     }
     LUDUS_LOG_INFO(ludus::foundation::logging::LOG_CORE,
@@ -256,7 +367,8 @@ int main(int argc, char** argv)
                    application.GetPresentedFrames());
     const AppState state = application.GetState();
     application.Shutdown();
+    const bool isReportWritten = isPacingReported == false || LogPacingReport(pacingReport) == true;
     const bool isTraceWritten = WriteRequestedTrace(traceOutput);
-    return state == AppState::Failed || isTraceWritten == false ? 1 : 0;
+    return state == AppState::Failed || isTraceWritten == false || isReportWritten == false ? 1 : 0;
 #endif
 }

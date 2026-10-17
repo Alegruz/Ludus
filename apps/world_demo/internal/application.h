@@ -1,4 +1,5 @@
 #pragma once
+#include "frame_pacing.h"
 #include "world.h"
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/graphics/rhi/render.h>
@@ -40,6 +41,20 @@ public:
     {
         return mState;
     }
+    /// Select the native frame-rate cap; zero keeps swapchain pacing with idle waits (see LoopPacing).
+    /// @return false for an out-of-range cap, preserving the previous one.
+    [[nodiscard]] bool SetFrameRateLimit(uint32 framesPerSecond) noexcept
+    {
+        return mPacing.Configure(framesPerSecond);
+    }
+    /// Pace the native outer loop after Frame(). Browser builds, stopped and failed applications
+    /// return Disabled without waiting: browsers pace with presentation callbacks.
+    [[nodiscard]] platform::PaceResult Pace(const platform::PacingClock& clock) noexcept;
+    /// Reading taken when the latest presented frame's EndFrame returned (CPU side, not scanout).
+    [[nodiscard]] foundation::time::Timestamp GetLastPresentReturn() const noexcept
+    {
+        return mPresentReturn;
+    }
 
 private:
     [[nodiscard]] bool PrepareRenderer() noexcept;
@@ -53,7 +68,10 @@ private:
     graphics::rhi::ShaderHandle mFragment;
     graphics::rhi::UniformHandle mUniform;
     graphics::rhi::PipelineHandle mPipeline;
+    LoopPacing mPacing;
+    foundation::time::Timestamp mPresentReturn;
     uint64 mPresentedFrames = 0;
+    uint64 mPacedPresentedFrames = 0;
     uint64 mInputFrame = 0;
     bool mCreated = false;
     bool mRendererReady = false;

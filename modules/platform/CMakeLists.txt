@@ -13,6 +13,20 @@ target_sources(ludus_platform_entropy
 target_link_libraries(ludus_platform_entropy PUBLIC Ludus::FoundationBase Ludus::FoundationIdentity)
 ludus_apply_project_defaults(ludus_platform_entropy)
 
+# Native frame pacing is its own small target so frame loops and their tests can
+# use the policy without linking window backends
+# (docs/architecture/high-resolution-time.md, "Native frame pacing").
+add_library(ludus_platform_pacing STATIC)
+add_library(Ludus::PlatformPacing ALIAS ludus_platform_pacing)
+set_target_properties(ludus_platform_pacing PROPERTIES
+    OUTPUT_NAME ludus_platform_pacing EXPORT_NAME PlatformPacing)
+target_sources(ludus_platform_pacing
+    PRIVATE src/frame_pacing.cpp
+    PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
+        FILES include/ludus/platform/frame_pacing.h)
+target_link_libraries(ludus_platform_pacing PUBLIC Ludus::FoundationBase Ludus::FoundationTime)
+ludus_apply_project_defaults(ludus_platform_pacing)
+
 add_library(ludus_platform STATIC)
 add_library(Ludus::Platform ALIAS ludus_platform)
 
@@ -84,6 +98,7 @@ target_link_libraries(
     PUBLIC
         Ludus::FoundationBase
         Ludus::PlatformEntropy
+        Ludus::PlatformPacing
         Ludus::FoundationLogging
         # One-way dependency: Platform depends on Input for the normalized
         # keyboard record/sink vocabulary. Input never depends on Platform.
@@ -171,6 +186,13 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_platform_entropy_tests COMMAND ludus_platform_entropy_tests)
     set_tests_properties(ludus_platform_entropy_tests PROPERTIES LABELS "unit;platform;identity")
 
+    add_executable(ludus_platform_pacing_tests tests/frame_pacing_tests.cpp)
+    target_link_libraries(ludus_platform_pacing_tests PRIVATE Ludus::PlatformPacing Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_platform_pacing_tests)
+    ludus_enable_test_exceptions(ludus_platform_pacing_tests)
+    add_test(NAME ludus_platform_pacing_tests COMMAND ludus_platform_pacing_tests)
+    set_tests_properties(ludus_platform_pacing_tests PROPERTIES LABELS "unit;platform;time")
+
     add_executable(ludus_platform_cocoa_keymap_tests tests/cocoa_keymap_tests.cpp)
     target_include_directories(ludus_platform_cocoa_keymap_tests PRIVATE src)
     target_link_libraries(ludus_platform_cocoa_keymap_tests PRIVATE Ludus::Input Catch2::Catch2WithMain)
@@ -227,7 +249,7 @@ if(LUDUS_BUILD_TESTS AND LUDUS_PLATFORM_ENABLE_WAYLAND)
 endif()
 
 install(
-    TARGETS ludus_platform_entropy ludus_platform
+    TARGETS ludus_platform_entropy ludus_platform_pacing ludus_platform
     EXPORT LudusTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
