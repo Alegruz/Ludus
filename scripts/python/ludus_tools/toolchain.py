@@ -8,7 +8,7 @@ disagree, so a toolchain bump changes the JSON pin and this constant together.
 
 from __future__ import annotations
 
-PINNED_LLVM_MAJOR = 18
+PINNED_LLVM_MAJOR = 23
 
 
 def pinned_llvm_tool(tool: str) -> str:
