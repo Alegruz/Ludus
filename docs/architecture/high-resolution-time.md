@@ -1,8 +1,9 @@
 # High-resolution time
 
-Status: FoundationTime implementation slice and frame integration implemented;
-simulation and scheduling extensions below are proposed. Reviewed October 4, 2026;
-frame integration October 15, 2026. See [ADR 0017](../decisions/0017-foundation-time.md).
+Status: FoundationTime implementation slice, frame integration and the integer
+simulation driver implemented; scheduling and pacing extensions below are proposed.
+Reviewed October 4, 2026; frame integration October 15, 2026; integer simulation
+driver October 16, 2026. See [ADR 0017](../decisions/0017-foundation-time.md).
 
 ## Goals and independent baseline
 
@@ -133,17 +134,23 @@ discarded excess joins the existing discard total. The driver additionally
 reports accepted, clamped and lifecycle-excluded nanoseconds and a regression
 count. It keeps the highest observed timestamp across resets, so a regressed
 sample cannot become a baseline below it. The smoke application samples its own
-100 ms FrameClock the same way. Its float64 debt accumulator remains until the
-integer driver below replaces it.
+100 ms FrameClock the same way; it is a presentation loop without fixed ticks.
 
-A future integer fixed-step driver should retain a rational phase rather than
-rounding `1e9 / rate` to a nanosecond tick length. Accumulate `elapsed_ns * rate`
-in checked `uint64` phase units; one tick consumes exactly `1e9` phase units.
-Carry the remainder, bound catch-up, and report discarded whole ticks and the
-initial frame clamp separately. Validate the multiplication/addition bound at
-configuration. At 60 Hz, 1 second must produce exactly 60 ticks regardless of
-frame partitioning. Increment the completed tick only after a successful tick;
-exhaustion stops the session. Derive interpolation alpha from the remainder.
+The world reference integer fixed-step driver retains a rational phase rather
+than rounding `1e9 / rate` to a nanosecond tick length. It accumulates
+`elapsed_ns * rate` in checked `uint64` phase units; one tick consumes exactly
+`1e9` phase units. It carries the remainder, bounds catch-up, and reports
+discarded whole ticks separately from the initial frame clamp. A checked
+`TickPolicy` (rate, frame clamp, catch-up budget) validates at configuration that
+`MaximumFrameDelta * rate + 1e9 - 1`, the largest clamped frame plus the largest
+carried remainder, fits `uint64`; a zero rate, a zero catch-up budget or that
+overflow returns `InvalidConfiguration` and preserves the previous policy. At
+60 Hz, 1 second produces exactly 60 ticks regardless of frame partitioning. The
+world increments its completed tick only after a successful tick; a failed tick,
+including tick exhaustion, faults the driver and stops the session. Interpolation
+alpha is the remainder divided by `1e9`, bounded to [0, 1) after `float32`
+rounding. Lifecycle resets drop the sub-tick remainder with the frame baseline.
+
 Keep simulation time scaling explicit and rational, with an overflow policy and
 replay metadata, if a game actually requires it. Do not build a timer hierarchy
 or floating-point scale controls speculatively.
@@ -220,8 +227,9 @@ must stay separate from retained timing evidence.
 
 This PR implements Time, checked arithmetic, stopwatch, deadline and frame
 sampling; migrates logging/profiling producers; and adds native unit, installed
-SDK and pinned web semantic/header coverage. It does not implement the future
-queue, pacing, rational fixed-step replacement, scaling, GPU or network clocks.
+SDK and pinned web semantic/header coverage. Later stages migrated the frame
+loops and replaced the world reference float64 debt with the rational fixed-step
+driver. The future queue, pacing, scaling, GPU and network clocks remain unimplemented.
 
 Boundary tests cover max-value overflow, output preservation, zero/equal/reversed
 samples, one-nanosecond intervals at a large epoch, lifecycle failures, independent
@@ -249,7 +257,7 @@ and [ADR 0017](../decisions/0017-foundation-time.md) as the implementation basel
 | --- | --- | --- |
 | FoundationTime slice | Retain the shared source, checked arithmetic, stopwatch, deadline and frame helpers; document changed public APIs beside their declarations. | Existing native/browser semantic tests and installed-SDK coverage; updated Doxygen coverage for any changed API. |
 | Frame integration (implemented) | Migrate application loops to one explicit frame sample and wire lifecycle resets using the existing frame/simulation contract. | Integration tests for startup, pause/resume, visibility and session replacement, clock regression and accepted/discarded time; no duplicate clamp. See [validation evidence](../development/high-resolution-time-evidence.md#frame-integration). |
-| Integer simulation driver | Implement the rational phase accumulator described above, including checked configuration, catch-up bounds, interpolation and exhaustion. | Partition-independent tick/remainder accounting when no time is intentionally discarded, exact 60 Hz accounting over one second, explicit clamp/catch-up loss and failure tests. |
+| Integer simulation driver (implemented) | Implement the rational phase accumulator described above, including checked configuration, catch-up bounds, interpolation and exhaustion. | Partition-independent tick/remainder accounting when no time is intentionally discarded, exact 60 Hz accounting over one second, explicit clamp/catch-up loss and failure tests. See [validation evidence](../development/high-resolution-time-evidence.md#integer-simulation-driver). |
 | Pacing and inspection | Implement the agreed native pacing policy under Platform/RHI/application ownership; define runtime timing telemetry and the proposed editor Timing view under their existing owners. | Reproducible target/wake/presentation measurements, interruption/lateness and lifecycle tests; runtime-reported intervals/status across the editor process boundary. |
 
 The bounded gameplay queue, time scaling and additional clock domains remain

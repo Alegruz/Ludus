@@ -1,6 +1,6 @@
 # Container systems
 
-Status: M0 and M1 implemented. This design extends the implemented
+Status: M0, M1 and M2 implemented. This design extends the implemented
 [contiguous containers](containers.md#34-ludus-native-taxonomy-and-api-authoritative-naming)
 and respects [memory ownership](memory-management.md). It does not replace
 those contracts. Types marked planned below are architectural decisions, not
@@ -235,7 +235,7 @@ below determine which increments can proceed independently.
 | --- | --- | --- | --- |
 | M0 | Contiguous arrays and first ordered map | Implemented | `StaticArray`, `Array`, `SortedMap`, fallible insertion/append, GameHost resource bindings, model/lifetime/allocation tests, SDK probe and benchmark exist. Retain their contracts and scoped measurement evidence. |
 | M1 | Restore migration and explicit allocation failure | Implemented | First-party `std::vector` uses were replaced with `Array`, including tests, tools and the exported Audio Gym API. Status-returning boundaries use fallible operations and preserve outputs on failure. `tools/check_container_policy.py` rejects new uses outside the benchmark/vendor exceptions; see [M1 consumer migration](#m1-consumer-migration). |
-| M2 | Complete existing container API documentation | Planned | Add Doxygen contracts to the existing public container API, remove resolved entries from `api-undocumented.json`, and provide a wiki usage/selection guide distinguishing shipped APIs from plans. Strict wiki/API builds and coverage checks pass. |
+| M2 | Complete existing container API documentation | Implemented | Every public `Array`, `StaticArray`, `SortedMap` and relocation-trait declaration has a Doxygen contract, and their 158 baseline entries were removed from `api-undocumented.json`. The [container guide](../wiki/guides/containers.md) covers selection, failure handling and borrow rules, and separates shipped types from planned ones. Strict wiki/API builds and coverage checks pass. |
 | M3 | `FixedArray<T, N>` and one Input migration | Planned | Implement a live prefix in inline raw storage, explicit full status, and construction of occupied slots only. Migrate an Input binding or step-event buffer; verify zero allocation, zero capacity, non-default/move-only values, aliasing, failure preservation and balanced lifetimes. |
 | M4 | Single-owner `RingBuffer<T>` | Gated | Establish capacity/backing-storage ownership and select a FIFO consumer; Input's pending-transition ring is a candidate. Implement wrapped front/back spans and explicit full/empty behavior; model-test wraparound and lifetimes while preserving the consumer's overflow/reset policy. |
 | M5 | `BitSet` and `StaticBitSet<N>` | Gated | Select a flags/membership consumer and define resize initialization, bounds and word operations. Verify 0/1/63/64/65-bit boundaries, tail masking, shifts and fallible dynamic growth; measure storage/operation costs and migrate the selected consumer. |
@@ -288,9 +288,10 @@ records the commands and results. `./scripts/check --format` and the CI policy
 step run the gate. Replacing `std::string`, filesystem facilities, `std::array`
 or unrelated ownership types stays in their own workstreams.
 
-M2 can proceed independently. Every subsequent milestone includes Doxygen for its
-new/changed API and the relevant wiki/guide update in the same change; M2 is not
-permission to defer documentation for new features. M3 is the recommended next
+M2 documented the containers that existed when it landed. Every subsequent
+milestone includes Doxygen for its new/changed API and the relevant
+[guide](../wiki/guides/containers.md) update in the same change, including moving
+a type from its planned table to its shipped table. M3 is the recommended next
 new container. M4 and M5 may follow independently once their consumers
 are established; generic rings retain single-owner semantics and do not replace
 the audio/logging/profiling publication protocols.

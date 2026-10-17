@@ -101,12 +101,21 @@ Commit and publication sequence. Add a component pool's initialization, recipe
 insertion and destruction removal together. Gameplay uses player/enemy/exit
 capabilities rather than branching on recipe kinds after construction.
 
-`RunTick` advances exactly 1/60 second. The application reads one
-FoundationTime timestamp per callback and passes it to `TickDriver::Advance`.
-The driver owns the [FrameClock](../wiki/guides/time.md#keep-frame-stalls-visible):
-it accepts at most 250 ms per frame (`MAXIMUM_FRAME_DELTA`), runs at most four
-ticks, counts discarded time and retains fractional debt for interpolation. The
-FrameClock is the only clamp. Input edges survive zero-tick frames and apply once
+`RunTick` advances exactly 1/60 second (`TICKS_PER_SECOND`). The application
+reads one FoundationTime timestamp per callback and passes it to
+`TickDriver::Advance`. The driver owns the [FrameClock](../wiki/guides/time.md#keep-frame-stalls-visible):
+it accepts at most 250 ms per frame (`MAXIMUM_FRAME_DELTA`) and runs at most four
+ticks (`MAXIMUM_CATCH_UP_TICKS`). Debt is an integer phase: each frame adds
+accepted nanoseconds times the tick rate and a tick consumes `PHASE_UNITS_PER_TICK`
+(10^9), so one second at 60 Hz is exactly 60 ticks however it is split into frames.
+Whole ticks beyond the budget are counted by `GetDiscardedTicks()`, separately from
+`GetClampedTime()`; the sub-tick remainder (`GetTickPhase()`) carries and sets the
+interpolation alpha in [0, 1). The FrameClock is the only clamp. `Configure`
+accepts a `TickPolicy` (rate, clamp, budget) and returns `InvalidConfiguration`,
+keeping the previous policy, for a zero rate or budget or a phase that could
+overflow `uint64`. A different rate changes real-time speed, not `RunTick`'s
+step, so record the policy with replays. A failed tick, including tick-number
+exhaustion, publishes no tick and faults the driver. Input edges survive zero-tick frames and apply once
 during catch-up. Cancellation takes priority over presses; the bridge waits for
 neutral controls before rearming.
 

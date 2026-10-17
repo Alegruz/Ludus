@@ -1,5 +1,6 @@
 #include "internal/world.h"
 
+#include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/containers/sort.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
@@ -12,7 +13,6 @@ namespace ludus::world_demo
 {
 namespace
 {
-constexpr float64 TickDuration = 1.0 / 60.0;
 bool Finite(Vec2 value) noexcept
 {
     return std::isfinite(value.X) && std::isfinite(value.Y);
@@ -436,7 +436,7 @@ void GameWorld::MoveAndCollide() noexcept
         for (usize axis = 0; axis < 2; ++axis)
         {
             Vec2 proposed = transform->Current;
-            const float32 movement = (axis == 0 ? velocity.X : velocity.Y) / 60.0F;
+            const float32 movement = (axis == 0 ? velocity.X : velocity.Y) / static_cast<float32>(TICKS_PER_SECOND);
             float32& position = axis == 0 ? proposed.X : proposed.Y;
             position += movement;
             for (usize boxIndex = 0; boxIndex < mLevel.CollisionCount; ++boxIndex)
@@ -1111,10 +1111,40 @@ uint64 GameWorld::GetReplayHash() const noexcept
     }
     return hash;
 }
+Status TickDriver::Configure(const TickPolicy& policy) noexcept
+{
+    if (policy.TicksPerSecond == 0 || policy.MaximumCatchUpTicks == 0)
+    {
+        return Status::InvalidConfiguration;
+    }
+    // Advance adds at most one clamped frame to a remainder below one tick; that sum must fit.
+    uint64 largestPhase = 0;
+    if (foundation::TryMultiply(policy.MaximumFrameDelta.Nanoseconds, policy.TicksPerSecond, largestPhase) == false ||
+        foundation::TryAdd(largestPhase, PHASE_UNITS_PER_TICK - 1, largestPhase) == false)
+    {
+        return Status::InvalidConfiguration;
+    }
+    mPolicy = policy;
+    mFrameClock = foundation::time::FrameClock{policy.MaximumFrameDelta};
+    dropTiming();
+    return Status::Success;
+}
+float32 TickDriver::GetAlpha() const noexcept
+{
+    // The largest float32 below one: rounding (PHASE_UNITS_PER_TICK - 1) / PHASE_UNITS_PER_TICK
+    // to float32 would otherwise yield exactly one.
+    constexpr float32 LARGEST_ALPHA = 1.0F - 0x1.0p-24F;
+    if (mMode != Mode::Playing)
+    {
+        return 1.0F;
+    }
+    const float64 alpha = static_cast<float64>(mTickPhase) / static_cast<float64>(PHASE_UNITS_PER_TICK);
+    return foundation::math::Min(static_cast<float32>(alpha), LARGEST_ALPHA);
+}
 void TickDriver::dropTiming() noexcept
 {
     mFrameClock.Reset();
-    mDebt = 0;
+    mTickPhase = 0;
     mInput.Cancel();
 }
 void TickDriver::recordFrame(foundation::time::Duration interval) noexcept
@@ -1126,7 +1156,6 @@ void TickDriver::recordFrame(foundation::time::Duration interval) noexcept
     (void)foundation::time::TryAdd(mAccepted, mFrameSample.Elapsed, mAccepted);
     (void)foundation::time::TryAdd(mClamped, mFrameSample.Discarded, mClamped);
     (void)foundation::time::TryAdd(mExcluded, excluded, mExcluded);
-    mDiscarded += foundation::time::ToSeconds(mFrameSample.Discarded);
 }
 Status
 TickDriver::Advance(GameWorld& inoutWorld, foundation::time::Timestamp now, TickInput input, bool isVisible) noexcept
@@ -1159,26 +1188,32 @@ TickDriver::Advance(GameWorld& inoutWorld, foundation::time::Timestamp now, Tick
         mFrameSample = mFrameClock.Sample(now);
     }
     recordFrame(interval);
-    // The FrameClock is the only clamp; its discarded excess is already recorded.
-    mDebt += foundation::time::ToSeconds(mFrameSample.Elapsed);
-    usize count = 0;
-    while (mDebt + 1e-12 >= TickDuration && count < 4)
+    // The FrameClock is the only clamp; its discarded excess is already recorded. Configure proved that a
+    // clamped frame plus the carried remainder fits, so these checks only guard that invariant.
+    uint64 phase = 0;
+    if (foundation::TryMultiply(mFrameSample.Elapsed.Nanoseconds, mPolicy.TicksPerSecond, phase) == false ||
+        foundation::TryAdd(phase, mTickPhase, phase) == false)
+    {
+        SetMode(Mode::Faulted);
+        return Status::InvalidConfiguration;
+    }
+    mTickPhase = phase;
+    uint32 count = 0;
+    while (mTickPhase >= PHASE_UNITS_PER_TICK && count < mPolicy.MaximumCatchUpTicks)
     {
         const Status status = inoutWorld.RunTick(mInput.Consume());
         if (status != Status::Success)
         {
+            // The world did not publish the failed tick; the session stops with its debt dropped.
             SetMode(Mode::Faulted);
             return status;
         }
-        mDebt = foundation::math::Max(0.0, mDebt - TickDuration);
+        mTickPhase -= PHASE_UNITS_PER_TICK;
         ++count;
     }
-    if (mDebt >= TickDuration)
-    {
-        const auto remainder = std::fmod(mDebt, TickDuration);
-        mDiscarded += mDebt - remainder;
-        mDebt = remainder;
-    }
+    // Discard whole ticks beyond the catch-up budget; only the fractional remainder carries.
+    (void)foundation::TryAdd(mDiscardedTicks, mTickPhase / PHASE_UNITS_PER_TICK, mDiscardedTicks);
+    mTickPhase %= PHASE_UNITS_PER_TICK;
     return Status::Success;
 }
 Status TickDriver::Step(GameWorld& world) noexcept

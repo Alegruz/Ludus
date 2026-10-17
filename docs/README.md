@@ -58,6 +58,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Building Ludus](development/building.md)
 - [Building the browser editor](development/browser-editor.md)
 - [Checked drag and radial contact kernels](development/dynamics-kernels.md)
+- [Choose and use containers](wiki/guides/containers.md)
 - [Continuous integration](development/continuous-integration.md)
 - [Filesystem measurements](development/filesystem-benchmark.md)
 - [Game release setup, packaging and publishing](development/editor-game-releases.md)
