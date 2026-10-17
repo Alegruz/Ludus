@@ -61,9 +61,10 @@ Managed Conan moves to 2.33.0, the first release whose `settings.yml` lists clan
 - **clang-tidy.** `hicpp-exception-baseclass` is gone; its successor,
   `bugprone-std-exception-baseclass`, comes in through `bugprone-*`.
   `portability-avoid-pragma-once` contradicts the `#pragma once` convention and
-  is disabled. `bugprone-signed-bitwise` ignores positive integer literals, so
-  integer promotion of `byte >> 4` is not reported. New findings are fixed or
-  suppressed locally with a reason.
+  is disabled. `bugprone-signed-bitwise` is disabled: on macOS it reported 348
+  sites, and the 49 left after ignoring positive literals were all integer
+  promotion of unsigned bytes or C API flag macros defined as signed `int`.
+  Other new findings are fixed or suppressed at the site with a reason.
 - **Formatting.** clang-format 23 differs from 18 on a few constructs, so the
   repository is reformatted in a single commit alongside the pin.
 

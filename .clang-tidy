@@ -12,9 +12,15 @@
 # header-guard convention (AGENTS.md "Formatting and static analysis"), and
 # every supported compiler (Clang, Apple Clang, Emscripten) implements it.
 #
-# bugprone-signed-bitwise ignores positive integer literals: the operands of
-# `byte >> 4` or `0x80 | value` are promoted to int by the language, so a
-# literal operand is not a signedness defect. Signed variables remain reported.
+# bugprone-signed-bitwise (new in LLVM 23) is off. On the macOS inventory it
+# reported 348 sites; even ignoring positive literals, all 49 remaining were
+# integer promotion of unsigned bytes (`uint8 << 8` widens to int) or POSIX,
+# poll and FreeType flag macros that those C APIs define as signed int. None was
+# a signedness defect, and silencing them needs casts that obscure byte codecs.
+#
+# bugprone-invalid-enum-default-initialization (new) stays on but misreports
+# `Aggregate values[N]{}` as zero-initializing enum members that have default
+# member initializers; such sites carry a NOLINT naming that limitation.
 #
 # readability-simplify-boolean-expr is deliberately off: the house style
 # (AGENTS.md "Naming") writes `condition == false` and `condition == true`,
@@ -32,6 +38,7 @@ Checks: >
   performance-*,
   portability-*,
   -portability-avoid-pragma-once,
+  -bugprone-signed-bitwise,
   modernize-avoid-bind,
   modernize-use-default-member-init,
   modernize-use-nodiscard,
@@ -53,5 +60,3 @@ FormatStyle: file
 CheckOptions:
   - key: readability-braces-around-statements.ShortStatementLines
     value: '1'
-  - key: bugprone-signed-bitwise.IgnorePositiveIntegerLiterals
-    value: 'true'

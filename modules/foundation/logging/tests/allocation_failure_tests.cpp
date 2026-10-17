@@ -13,11 +13,10 @@ bool gFailBackendAllocation = false;
 
 // Injection applies only to the private backend's nothrow allocation. Other
 // test/runtime allocations retain the standard allocator and matching delete.
-// libc++ declares these replaceable functions with the reserved name `__sz`, so
-// a portable definition cannot match it; clang-tidy reports the declaration in
-// the libc++ header with this definition as its note.
-void* operator new(ludus::foundation::usize size, // NOLINT(readability-inconsistent-declaration-parameter-name)
-                   const std::nothrow_t&) noexcept
+// libc++ names the replaceable allocation functions' parameters with reserved
+// identifiers (`__sz`), so these replacements cannot match its declarations.
+// NOLINTBEGIN(readability-inconsistent-declaration-parameter-name)
+void* operator new(ludus::foundation::usize size, const std::nothrow_t&) noexcept
 {
     if (gFailBackendAllocation && size == sizeof(ludus::foundation::logging::internal::AsyncBackend))
     {
@@ -33,9 +32,7 @@ void* operator new(ludus::foundation::usize size, // NOLINT(readability-inconsis
     }
 }
 
-void* operator new(ludus::foundation::usize size, // NOLINT(readability-inconsistent-declaration-parameter-name)
-                   std::align_val_t alignment,
-                   const std::nothrow_t&) noexcept
+void* operator new(ludus::foundation::usize size, std::align_val_t alignment, const std::nothrow_t&) noexcept
 {
     if (gFailBackendAllocation && size == sizeof(ludus::foundation::logging::internal::AsyncBackend))
     {
@@ -50,6 +47,7 @@ void* operator new(ludus::foundation::usize size, // NOLINT(readability-inconsis
         return nullptr;
     }
 }
+// NOLINTEND(readability-inconsistent-declaration-parameter-name)
 
 TEST_CASE("Async owner allocation failure preserves synchronous logging", "[logging][allocation]")
 {
