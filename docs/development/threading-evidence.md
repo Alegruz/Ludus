@@ -179,7 +179,7 @@ out/build/t1-benchmark/modules/graphics/renderer/ludus_static_lighting_benchmark
 
 ## Execution traces (T2)
 
-MEASUREMENTS_PLACEHOLDER
+Tracing on/off timings are pending a low-load run on the reference machine.
 
 Correctness evidence, in the threading suites:
 
