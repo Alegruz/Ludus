@@ -253,7 +253,7 @@ TEST_CASE("The saddle's twisted bilinear interior has the tight 9/4 bound", "[ge
                                 nullptr) == GeometryStatus::Success);
     view = mesh.GetView();
     const SurfaceMeshPatch& patch = view.Patches[0];
-    // (9/4) / 2^(LevelU + LevelV) <= 0.01 first holds at a level sum of 8; ties alternate the direction.
+    // (9/4) / 2^(LevelU + LevelV) <= 0.01 first holds at a level sum of 8; near-ties refine the coarser direction.
     REQUIRE(patch.LevelU + patch.LevelV == 8);
     REQUIRE(patch.LevelU == patch.LevelV);
     REQUIRE(patch.PositionBound <= 0.01);

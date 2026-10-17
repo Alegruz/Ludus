@@ -192,8 +192,11 @@ private:
 /// @brief Select dyadic grid levels, verify their Certified error bounds and build a crack-free mesh.
 ///
 /// Every patch starts at level (0, 0). While its largest cell bound misses the
-/// profile, the direction whose refinement gives the smaller normalized bound is
-/// refined (ties refine u). Each shared edge then takes the larger of its two
+/// profile, the direction whose refinement gives the clearly smaller normalized
+/// bound is refined. When the two candidates agree within a relative 1e-9 (for
+/// example mirror-symmetric patches whose enclosures differ only by rounding), the
+/// coarser direction is refined, and u when both levels are equal, so isotropic
+/// patches stay balanced. Each shared edge then takes the larger of its two
 /// along-edge levels; patches whose levels changed are rechecked and refined
 /// again until all shared edges agree. Corner positions are the stored controls;
 /// edge samples are evaluated once on the canonical curve; interior samples on
