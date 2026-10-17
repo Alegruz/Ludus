@@ -19,11 +19,13 @@ bool NativeGate::Initialize() noexcept
         return false;
     }
 #if defined(LUDUS_THREADING_NATIVE_FAULT_TESTING)
-    const bool shouldFailCondition = test::ShouldFailConditionInitialization();
-#else
-    constexpr bool shouldFailCondition = false;
+    if (test::ShouldFailConditionInitialization() == true)
+    {
+        (void)pthread_mutex_destroy(&Mutex);
+        return false;
+    }
 #endif
-    if (shouldFailCondition == true || pthread_cond_init(&Condition, nullptr) != 0)
+    if (pthread_cond_init(&Condition, nullptr) != 0)
     {
         (void)pthread_mutex_destroy(&Mutex);
         return false;
