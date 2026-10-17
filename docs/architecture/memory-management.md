@@ -402,7 +402,9 @@ The later [smart pointer factory contract](smart-pointers.md#fallible-constructi
 refines this sketch to `TryCreateOwned<T>(domain, output, args...)` with an explicit
 status, an empty owning output on entry and output preservation on failure. It
 retains this exact-type domain/deletion rule and the existing unique-owner
-implementation. The shared facility proposed there handles independent CPU
+implementation. That exact-type factory is implemented in
+[owned_object.hpp](../../modules/foundation/memory/include/ludus/foundation/memory/owned_object.hpp).
+The shared facility proposed there handles independent CPU
 lifetimes; handles and resource leases retain their own subsystem contracts.
 
 `Destroy<T>(domain, pointer)` requires the exact originating type, original base address and domain as preconditions, destroys T, and frees its original layout. A raw pointer helper cannot generally detect an incorrect base-type cast, even for nonpolymorphic classes. Initial owning factory adapters therefore forbid converting ownership; do not promise compiler rejection of arbitrary raw-pointer misuse. Do not use `delete` on Memory-created objects. Prefer RAII at call sites, but first repair `UniquePtr` as identified in §2.4. A deleter adapter in Memory can carry the domain without Base depending on Memory. Moving/switching owners must transfer deleter state. Conversions require a creator-supplied destruction function that retains the dynamic type, original allocation address/layout, and domain; they cannot reconstruct those from a base pointer.

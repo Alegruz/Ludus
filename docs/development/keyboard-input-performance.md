@@ -24,14 +24,15 @@ the shape (bounded, no allocations) is the load-bearing result.
 
 | Component | Size |
 | --- | --- |
-| `sizeof(InputSystem)` public handle | 8 bytes (a `UniquePtr<Impl>`) |
+| `sizeof(InputSystem)` public handle | 16 bytes (a `UniquePtr<Impl, DomainDeleter<Impl>>`: object and domain) |
 | `Reducer<256,64,256>` (the heap-allocated `Impl`) | 16,136 bytes (15.8 KiB) |
 | `InputDebugTrace` (optional) | 16,424 bytes (16.0 KiB) |
 | Reducer + enabled trace | 31.8 KiB |
 
 31.8 KiB with the trace enabled is well under the ≤128 KiB per-instance planning
-target. The reducer storage is allocated exactly once (non-throwing `new`) at
-construction; the trace is a separate caller-owned object.
+target. The reducer storage is allocated exactly once at construction, through
+`TryCreateOwned` and the system allocation domain, and freed through that same
+domain; the trace is a separate caller-owned object.
 
 ## Allocations
 
