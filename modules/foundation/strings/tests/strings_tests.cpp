@@ -39,7 +39,7 @@ struct StringTableTestAccess final
         state.Entries[0].Hash = 7;
         for (usize i = 0; i < state.SlotCapacity; ++i)
         {
-            state.Slots[i] = 0xffffffffU;
+            state.Slots[i] = StringIndex::INVALID_VALUE;
         }
         state.Slots[7] = 0;
     }
