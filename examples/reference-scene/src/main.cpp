@@ -585,8 +585,8 @@ int Run(int argc, char** argv) noexcept
                                                 512};
     const Status enabled = viewport ? Status::Ready
                            : gpu    ? renderer.EnableGpuPreview(ludus::shaders::renderer_gpu_preview::Compute(),
-                                                             ludus::shaders::renderer_gpu_preview_image::Vertex(),
-                                                             ludus::shaders::renderer_gpu_preview_image::Fragment(),
+                                                                ludus::shaders::renderer_gpu_preview_image::Vertex(),
+                                                                ludus::shaders::renderer_gpu_preview_image::Fragment(),
                                                                 {usize{128} * 1024 * 1024, usize{128} * 1024 * 1024, 1})
                                     : renderer.EnableReferenceRendering(ludus::shaders::ray_query::Query(), options);
     if (enabled != Status::Ready)
