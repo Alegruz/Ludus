@@ -37,6 +37,14 @@ constexpr uint8 HOST_INTERFACE = 0xA5;
 constexpr uint8 OTHER_INTERFACE = 0x5A;
 constexpr std::string_view VERTEX_TEXT = "flat vertex fixture";
 constexpr std::string_view FRAGMENT_TEXT = "flat fragment fixture";
+constexpr std::string_view METAL_TEXT = "metal fixture";
+constexpr std::string_view GLSL_TEXT = "glsl es fixture";
+constexpr usize SPIRV_WORD_COUNT = 5;
+/// SPIR-V magic and version 1.3 lead; the rest set high bits and differ in every byte.
+constexpr StaticArray<uint32, SPIRV_WORD_COUNT> SPIRV_WORDS{
+    {0x07230203U, 0x00010300U, 0x80FF0001U, 0xFFFFFFFFU, 0x01020304U}};
+/// Bytes of a stage artifact whose length is not a whole number of SPIR-V words.
+constexpr std::string_view PARTIAL_WORD = "\x03\x02\x23\x07\x01\x03";
 
 /// Independent little-endian writer for the runtime_package.h layout.
 struct PackageWriter final
@@ -76,44 +84,52 @@ struct PackageOptions final
     uint32 Backing = 0;
     bool HasDepthStages = true;
 };
-void WriteStage(PackageWriter& inoutWriter, format::StageRole role, std::string_view text, std::string_view entry)
+/// Write one stage record; artifact holds the raw bytes for any target, including SPIR-V words.
+void WriteStage(PackageWriter& inoutWriter,
+                format::StageRole role,
+                format::ShaderTarget target,
+                std::string_view artifact,
+                std::string_view entry)
 {
     const bool isVertex = role == format::StageRole::ColorVertex || role == format::StageRole::DepthVertex;
     inoutWriter.WriteWord(static_cast<uint32>(role));
-    inoutWriter.WriteWord(static_cast<uint32>(format::ShaderTarget::Wgsl));
+    inoutWriter.WriteWord(static_cast<uint32>(target));
     inoutWriter.WriteWord(isVertex == true ? static_cast<uint32>(format::STATIC_INPUT_COUNT) : 0);
     inoutWriter.WriteWord(static_cast<uint32>(entry.size()));
-    inoutWriter.WriteWord(static_cast<uint32>(text.size()));
+    inoutWriter.WriteWord(static_cast<uint32>(artifact.size()));
     for (uint32 i = 0; isVertex == true && i < format::STATIC_INPUT_COUNT; ++i)
     {
         inoutWriter.WriteWord(i);
         inoutWriter.WriteWord(static_cast<uint32>(i == 0 ? format::InputFormat::Float3 : format::InputFormat::Float4));
     }
     inoutWriter.WritePadded(entry);
-    inoutWriter.WritePadded(text);
+    inoutWriter.WritePadded(artifact);
+}
+void WriteStage(PackageWriter& inoutWriter, format::StageRole role, std::string_view text, std::string_view entry)
+{
+    WriteStage(inoutWriter, role, format::ShaderTarget::Wgsl, text, entry);
 }
 /// One exported RGBA8 color plus its private depth, one camera and one ColorAndDepth pass.
-Array<uint8> MakePackageBytes(const PackageOptions& options)
+void WritePlan(PackageWriter& inoutWriter, const PackageOptions& options, uint32 stageCount)
 {
-    PackageWriter writer;
-    writer.WriteWord(format::PACKAGE_MAGIC);
-    writer.WriteWord(options.Version);
-    writer.WriteWord(2);
-    writer.WriteWord(1);
-    writer.WriteWord(1);
-    writer.WriteWord(options.HasDepthStages == true ? 4 : 2);
-    writer.WriteIdentity(options.Interface);
-    writer.WriteIdentity(options.Generation);
+    inoutWriter.WriteWord(format::PACKAGE_MAGIC);
+    inoutWriter.WriteWord(options.Version);
+    inoutWriter.WriteWord(2);
+    inoutWriter.WriteWord(1);
+    inoutWriter.WriteWord(1);
+    inoutWriter.WriteWord(stageCount);
+    inoutWriter.WriteIdentity(options.Interface);
+    inoutWriter.WriteIdentity(options.Generation);
     for (const uint32 aspect : {static_cast<uint32>(format::Aspect::Color), static_cast<uint32>(format::Aspect::Depth)})
     {
-        writer.WriteWord(WIDTH);
-        writer.WriteWord(HEIGHT);
-        writer.WriteWord(aspect);
-        writer.WriteWord(options.Backing);
-        writer.WriteWord(0);
-        writer.WriteWord(aspect == 0 ? 1 : 0);
+        inoutWriter.WriteWord(WIDTH);
+        inoutWriter.WriteWord(HEIGHT);
+        inoutWriter.WriteWord(aspect);
+        inoutWriter.WriteWord(options.Backing);
+        inoutWriter.WriteWord(0);
+        inoutWriter.WriteWord(aspect == 0 ? 1 : 0);
     }
-    writer.WriteWord(0);
+    inoutWriter.WriteWord(0);
     for (const uint32 value : {static_cast<uint32>(format::Technique::ColorAndDepth),
                                0U,
                                0U,
@@ -124,8 +140,13 @@ Array<uint8> MakePackageBytes(const PackageOptions& options)
                                static_cast<uint32>(format::Store::Store),
                                0U})
     {
-        writer.WriteWord(value);
+        inoutWriter.WriteWord(value);
     }
+}
+Array<uint8> MakePackageBytes(const PackageOptions& options)
+{
+    PackageWriter writer;
+    WritePlan(writer, options, options.HasDepthStages == true ? 4 : 2);
     WriteStage(writer, format::StageRole::ColorVertex, VERTEX_TEXT, "VertexMain");
     WriteStage(writer, format::StageRole::ColorFragment, FRAGMENT_TEXT, "FragmentMain");
     if (options.HasDepthStages == true)
@@ -133,6 +154,44 @@ Array<uint8> MakePackageBytes(const PackageOptions& options)
         WriteStage(writer, format::StageRole::DepthVertex, VERTEX_TEXT, "VertexMain");
         WriteStage(writer, format::StageRole::DepthFragment, FRAGMENT_TEXT, "FragmentMain");
     }
+    return Move(writer.Bytes);
+}
+/// Encode SPIRV_WORDS little-endian, independently of the decoder under test.
+Array<uint8> MakeSpirvBytes()
+{
+    PackageWriter writer;
+    for (const uint32 word : SPIRV_WORDS)
+    {
+        writer.WriteWord(word);
+    }
+    return Move(writer.Bytes);
+}
+std::string_view AsText(const Array<uint8>& bytes)
+{
+    return {reinterpret_cast<const char*>(bytes.GetData()), bytes.GetSize()};
+}
+/// Color-only generation carrying every artifact target for both stages, as a cook
+/// for Metal, Vulkan and the browser together would write it.
+Array<uint8> MakeMultiTargetPackageBytes(std::string_view vertexSpirv, bool hasFragmentSpirv)
+{
+    const Array<uint8> fragmentSpirv = MakeSpirvBytes();
+    PackageWriter writer;
+    WritePlan(writer, {}, hasFragmentSpirv == true ? 8 : 7);
+    WriteStage(writer, format::StageRole::ColorVertex, format::ShaderTarget::Metal, METAL_TEXT, "vertexMain");
+    WriteStage(writer, format::StageRole::ColorVertex, format::ShaderTarget::Spirv, vertexSpirv, "VertexMain");
+    WriteStage(writer, format::StageRole::ColorVertex, format::ShaderTarget::Wgsl, VERTEX_TEXT, "VertexMain");
+    WriteStage(writer, format::StageRole::ColorVertex, format::ShaderTarget::GlslEs, GLSL_TEXT, "main");
+    WriteStage(writer, format::StageRole::ColorFragment, format::ShaderTarget::Metal, METAL_TEXT, "fragmentMain");
+    if (hasFragmentSpirv == true)
+    {
+        WriteStage(writer,
+                   format::StageRole::ColorFragment,
+                   format::ShaderTarget::Spirv,
+                   AsText(fragmentSpirv),
+                   "FragmentMain");
+    }
+    WriteStage(writer, format::StageRole::ColorFragment, format::ShaderTarget::Wgsl, FRAGMENT_TEXT, "FragmentMain");
+    WriteStage(writer, format::StageRole::ColorFragment, format::ShaderTarget::GlslEs, GLSL_TEXT, "main");
     return Move(writer.Bytes);
 }
 core::UniquePtr<renderer::RenderGraphPackage> MakePackage(const PackageOptions& options)
@@ -320,6 +379,60 @@ TEST_CASE("RG3 malformed runtime packages reject without a partial generation", 
                              format::STAGE_FIELD_COUNT * sizeof(uint32) + 12 + 24;
     duplicate[firstStage + stageBytes] = 0;
     CHECK(DecodeBytes(duplicate) == renderer::RenderGraphPackageStatus::Malformed);
+}
+
+TEST_CASE("RG3 runtime packages decode SPIR-V words little-endian beside every text target",
+          "[render-graph][activation]")
+{
+    const Array<uint8> spirv = MakeSpirvBytes();
+    const Array<uint8> package = MakeMultiTargetPackageBytes(AsText(spirv), true);
+    // Decode from an odd address: words are read field by field, never by host-aligned loads.
+    Array<uint8> shifted;
+    shifted.Add(0);
+    for (const uint8 value : package)
+    {
+        shifted.Add(value);
+    }
+    renderer::RenderGraphPackage decoded;
+    REQUIRE(decoded.Decode({shifted.GetData() + 1, package.GetSize()}) == renderer::RenderGraphPackageStatus::Ready);
+    for (usize i = 0; i < shifted.GetSize(); ++i)
+    {
+        shifted[i] = 0;
+    }
+    const renderer::RenderGraphPrograms programs = decoded.GetPrograms({}, {});
+    for (const rhi::RasterShaderDescription* description : {&programs.ColorVertex, &programs.ColorFragment})
+    {
+        const rhi::ShaderDescription& artifact = description->Artifact;
+        REQUIRE(artifact.Spirv.size() == SPIRV_WORD_COUNT);
+        for (usize word = 0; word < SPIRV_WORD_COUNT; ++word)
+        {
+            CHECK(artifact.Spirv[word] == SPIRV_WORDS[word]);
+        }
+        CHECK(artifact.Msl == METAL_TEXT);
+        CHECK(artifact.GlslEs == GLSL_TEXT);
+        CHECK(artifact.GlslEsEntry == "main");
+    }
+    CHECK(programs.ColorVertex.Artifact.SpirvEntry == "VertexMain");
+    CHECK(programs.ColorFragment.Artifact.SpirvEntry == "FragmentMain");
+    CHECK(programs.ColorVertex.Artifact.MslEntry == "vertexMain");
+    CHECK(programs.ColorVertex.Artifact.Wgsl == VERTEX_TEXT);
+    CHECK(programs.ColorFragment.Artifact.Wgsl == FRAGMENT_TEXT);
+    CHECK(programs.ColorVertex.Artifact.Stage == rhi::ShaderStage::Vertex);
+    CHECK(programs.ColorFragment.Artifact.Stage == rhi::ShaderStage::Fragment);
+    // A color-only generation leaves both DepthOnly roles empty, like its compiled header.
+    CHECK(programs.DepthVertex.Artifact.Spirv.empty() == true);
+    CHECK(programs.DepthVertex.Inputs.empty() == true);
+    CHECK(programs.DepthFragment.Artifact.Stage == rhi::ShaderStage::Vertex);
+}
+
+TEST_CASE("RG3 SPIR-V artifacts reject partial words and unpaired stages", "[render-graph][activation]")
+{
+    const Array<uint8> spirv = MakeSpirvBytes();
+    CHECK(DecodeBytes(MakeMultiTargetPackageBytes(PARTIAL_WORD, true)) ==
+          renderer::RenderGraphPackageStatus::Malformed);
+    // Vulkan would find a vertex stage without its fragment stage.
+    CHECK(DecodeBytes(MakeMultiTargetPackageBytes(AsText(spirv), false)) ==
+          renderer::RenderGraphPackageStatus::Malformed);
 }
 
 TEST_CASE("RG3 first generation activates once its pipelines are ready", "[render-graph][activation]")

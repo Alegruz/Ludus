@@ -28,6 +28,7 @@ target_sources(
         src/cubic.cpp
         src/patch.cpp
         src/summation.cpp
+        src/enclosure.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
@@ -51,6 +52,7 @@ target_sources(
             include/ludus/foundation/math/dynamics.hpp
             include/ludus/foundation/math/cubic.hpp
             include/ludus/foundation/math/patch.hpp
+            include/ludus/foundation/math/enclosure.hpp
 )
 
 # Dependency direction: FoundationMath may use FoundationBase (types,
@@ -105,6 +107,7 @@ if(LUDUS_BUILD_TESTS)
             tests/bezier_tests.cpp
             tests/curves_surfaces_fixture_tests.cpp
             tests/summation_tests.cpp
+            tests/enclosure_tests.cpp
     )
     target_include_directories(ludus_foundation_math_tests PRIVATE tests src)
     target_link_libraries(

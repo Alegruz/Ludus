@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <ludus/foundation/identity/handle.hpp>
+#include <ludus/foundation/identity/lifetime.hpp>
 #include <ludus/gameplay/world/component_pool.hpp>
 #include <ludus/gameplay/world/entity_registry.h>
 #include <utility>
@@ -12,8 +14,8 @@ struct RegistryTestAccess final
     static EntityId RetireNext(EntityRegistry& registry) noexcept
     {
         const auto slot = registry.mFree.GetLast();
-        registry.mSlots[slot].Generation = std::numeric_limits<uint32>::max();
-        return {registry.mWorld, slot, std::numeric_limits<uint32>::max()};
+        registry.mSlots[slot].Generation = identity::TERMINAL_GENERATION;
+        return {registry.mWorld, slot, identity::TERMINAL_GENERATION};
     }
     static void ExhaustSequence(EntityRegistry& registry) noexcept
     {
@@ -80,6 +82,77 @@ TEST_CASE("Generation retirement and sequence exhaustion never reuse identity", 
     internal::RegistryTestAccess::ExhaustSequence(exhausted);
     REQUIRE(exhausted.TryCreate(entity) == Status::IdentityExhausted);
     REQUIRE(entity == retired);
+}
+TEST_CASE("Registries take world tokens from the shared process lifetime source", "[world]")
+{
+    uint64 before = 0;
+    REQUIRE(identity::TryIssueLifetimeId(before) == identity::LifetimeIdStatus::Success);
+    EntityRegistry registry;
+    REQUIRE(registry.TryInitialize(1) == Status::Success);
+    uint64 after = 0;
+    REQUIRE(identity::TryIssueLifetimeId(after) == identity::LifetimeIdStatus::Success);
+    // Nothing else issues tokens in this process, so the steps are exact. This also
+    // proves the registry and this test link one copy of the counter.
+    REQUIRE(registry.GetWorld() == before + 1);
+    REQUIRE(after == registry.GetWorld() + 1);
+
+    // Rejected initialization neither consumes a token nor replaces the current one.
+    EntityRegistry rejected;
+    REQUIRE(rejected.TryInitialize(0) == Status::InvalidConfiguration);
+    REQUIRE(rejected.GetWorld() == 0);
+    const uint64 world = registry.GetWorld();
+    REQUIRE(registry.TryInitialize(1) == Status::InvalidConfiguration);
+    REQUIRE(registry.GetWorld() == world);
+    uint64 next = 0;
+    REQUIRE(identity::TryIssueLifetimeId(next) == identity::LifetimeIdStatus::Success);
+    REQUIRE(next == after + 1);
+}
+TEST_CASE("Handles from an old world are rejected after the world is rebuilt", "[world]")
+{
+    EntityRegistry registry;
+    REQUIRE(registry.TryInitialize(2) == Status::Success);
+    ComponentPool<uint32> oldPool;
+    REQUIRE(oldPool.TryInitialize(registry) == Status::Success);
+    EntityId old;
+    REQUIRE(registry.TryCreate(old) == Status::Success);
+    REQUIRE(oldPool.TryInsert(registry, old, 7) == Status::Success);
+    const uint64 oldWorld = registry.GetWorld();
+
+    // Clearing and rebuilding takes a fresh lifetime; it never resets generations
+    // under the old world token.
+    registry = EntityRegistry{};
+    REQUIRE(registry.TryInitialize(2) == Status::Success);
+    ComponentPool<uint32> pool;
+    REQUIRE(pool.TryInitialize(registry) == Status::Success);
+    EntityId fresh;
+    REQUIRE(registry.TryCreate(fresh) == Status::Success);
+    REQUIRE(pool.TryInsert(registry, fresh, 11) == Status::Success);
+
+    // Same slot, generation and creation sequence: only the world token differs.
+    REQUIRE(fresh.Slot == old.Slot);
+    REQUIRE(fresh.Generation == old.Generation);
+    REQUIRE(registry.GetCreationSequence(fresh) == 1);
+    REQUIRE(fresh.World != oldWorld);
+    REQUIRE(fresh.World == registry.GetWorld());
+
+    REQUIRE_FALSE(registry.IsAlive(old));
+    REQUIRE_FALSE(registry.IsActive(old));
+    REQUIRE(registry.GetCreationSequence(old) == 0);
+    REQUIRE(registry.MarkPendingDestroy(old) == Status::InvalidEntity);
+    REQUIRE(registry.TryRelease(old) == Status::InvalidEntity);
+    REQUIRE(pool.Find(old) == nullptr);
+    REQUIRE(pool.TryInsert(registry, old, 9) == Status::InvalidEntity);
+    REQUIRE(pool.TryRemove(registry, old) == Status::InvalidEntity);
+
+    // A pool bound to the old world rejects the new world and keeps its old value.
+    REQUIRE(oldPool.Find(fresh) == nullptr);
+    REQUIRE(oldPool.TryInsert(registry, fresh, 3) == Status::InvalidEntity);
+    REQUIRE(oldPool.TryRemove(registry, fresh) == Status::InvalidEntity);
+
+    // None of the rejected calls disturbed the live incarnation in the same slot.
+    REQUIRE(registry.IsActive(fresh));
+    REQUIRE(*pool.Find(fresh) == 11);
+    REQUIRE(registry.GetStructuralRevision() == 1);
 }
 TEST_CASE("Sparse pool swap removal preserves exact owners and enforces phases", "[world]")
 {

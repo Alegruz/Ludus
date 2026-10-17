@@ -281,8 +281,10 @@ checked text slicing, normalization and SIMD validation are separate future APIs
 The file logger shares its base/active path allocation until rotation. The
 [SDK example](https://github.com/The-Ludus-Project/Ludus/blob/main/tests/sdk_consumer/strings.cpp)
 and native/browser tests exercise the public contracts. The cooked dictionary
-reader and writer are not yet adopted by a content cooker or snapshot; that
-integration, format adapters, debugger printers and an editor strings inspector
+reader and writer are not yet adopted by a content cooker or snapshot. The
+[adoption survey](../../architecture/strings.md#dictionary-adoption-survey) found
+no current format with a repeated-spelling need and lists the triggers for that
+integration. Format adapters, debugger printers and an editor strings inspector
 remain follow-on work.
 
 See the [implementation status](../../architecture/strings.md#implementation-status),

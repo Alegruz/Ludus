@@ -16,18 +16,24 @@ frame delta of 250 ms, and at most four catch-up ticks per presentation callback
 These are configurable application policies and must be recorded with replay
 metadata. They are not engine performance guarantees.
 
-Use a monotonic clock. Accumulate accepted elapsed time in `float64` seconds.
+Read the FoundationTime monotonic clock once per presentation callback and
+sample one [FrameClock](high-resolution-time.md#elapsed-time-state-and-failure-behavior)
+with the 250 ms cap; it is the only clamp. Accumulate accepted elapsed time as a
+[rational integer phase](high-resolution-time.md#frame-and-simulation-integration):
+each frame adds `elapsed_ns * rate` checked `uint64` units and one tick consumes
+exactly `1e9`, so tick counts never depend on how time was split into frames.
 While at least one tick remains and the catch-up budget allows it, execute one
-tick and subtract its fixed duration. Increment a `uint64` tick index only after
-a successful tick; exhaustion stops the session rather than wrapping.
+tick and subtract its phase. Increment a `uint64` tick index only after a
+successful tick; exhaustion stops the session rather than wrapping.
 
 After the budget is exhausted, discard remaining whole ticks and retain only the
-fractional remainder. Count all discarded time, including the initial frame-delta
-clamp. This policy deliberately slows simulation under sustained overload; it
-does not skip tick numbers or run physics with an enormous delta. Clamp negligible
-numeric drift at the accumulator boundary so render alpha stays in [0, 1).
-For example, 100 ms of debt permits four ticks and discards approximately two
-ticks. The [fixed-timestep reference](https://gafferongames.com/post/fix_your_timestep/)
+fractional remainder. Report the discarded whole ticks and the initial frame-delta
+clamp separately. This policy deliberately slows simulation under sustained
+overload; it does not skip tick numbers or run physics with an enormous delta.
+Render alpha is the remainder over one tick's phase, kept in [0, 1).
+For example, 100 ms of debt at 60 Hz is exactly six ticks: four run and two are
+discarded. Configuration rejects a zero rate or catch-up budget and any rate/clamp
+pair whose largest frame contribution plus remainder could overflow. The [fixed-timestep reference](https://gafferongames.com/post/fix_your_timestep/)
 explains why catch-up needs a bound and how interpolation decouples rendering.
 
 ```mermaid
@@ -45,11 +51,25 @@ flowchart TD
     Present --> Draw[Render and present or skip frame]
 ```
 
-Session transitions reset clock debt. Pause and browser suspension also reset it;
-resuming never catches up the time spent paused or hidden. A first callback starts
-the clock baseline without simulating elapsed startup time. Do not busy-wait for
+Session transitions reset clock debt and the frame baseline. Pause and browser
+suspension also reset both; resuming never catches up the time spent paused or
+hidden. A hidden browser page stops callbacks, so the input reset it queues
+performs the reset. A first callback starts the clock baseline without simulating elapsed
+startup time. Accepted, clamped and lifecycle-excluded time remain visible to
+diagnostics. Do not busy-wait for
 the next tick, a GPU fence, browser readiness, or a worker result in a browser
-callback. The native outer loop may use its established pacing mechanism.
+callback.
+
+Pacing is presentation policy and never changes tick accounting. A browser frame
+runs in its presentation callback and never waits. The native outer loop calls a
+Platform [frame pacer](high-resolution-time.md#native-frame-pacing) after each
+frame, before the next frame reads its timestamp. The pacer waits for an absolute
+target with an operating-system wait and resets missed schedules beyond a bounded
+lateness. In the reference game, the FIFO swapchain paces presented frames;
+frames that present nothing (startup, loading, minimized) wait at an idle rate,
+and an optional frame-rate cap paces every frame. Session activation resets the
+pacer with the clock debt. Pause stops ticks but keeps presentation on its
+schedule.
 
 The session selects an explicit simulation mode. Menus and overlays route input
 before the gameplay bridge; an overlay cannot accidentally resume simulation.

@@ -481,9 +481,10 @@ does with its pixel scopes.
 WGSL's ordinary integer vocabulary cannot reuse C++'s `uint64` multiplication,
 so `MultiplyWide` forms the 64-bit product from 16-bit limbs. The
 [WGSL specification](https://www.w3.org/TR/WGSL/#integer-types) defines these
-integer types. Each partial sum stays below 2^32. The renderer's GPU test
-`modules/graphics/renderer/tests/gpu_random_tests.cpp` runs a compute kernel
-over the following cases, which every backend must reproduce exactly:
+integer types. Each partial sum stays below 2^32. The compute kernel
+`tests/sdk_consumer/random_parity.slang` evaluates the cases built by
+`tests/sdk_consumer/random_parity_corpus.h`, which every backend must reproduce
+exactly:
 
 - the three pinned Random123 known answers and the Ludus v1 golden answers,
   including the forced-rejection address;
@@ -497,9 +498,15 @@ over the following cases, which every backend must reproduce exactly:
 - `MultiplyWide` over every pair of limb-edge values and exhaustive sweeps of
   each limb against an all-ones operand.
 
-The test runs on Metal (macOS) and Vulkan (Linux GPU CI) and skips only when no
-Metal adapter exists. The kernel also compiles to WGSL in native Linux builds,
-but no browser job executes it yet, so WebGPU parity is not yet claimed.
+The renderer's GPU test `modules/graphics/renderer/tests/gpu_random_tests.cpp`
+runs the corpus on Metal (macOS) and Vulkan (Linux GPU CI) and skips only when no
+Metal adapter exists. The installed-SDK fixture `tests/sdk_consumer/random_parity.cpp`
+runs the same corpus through WebGPU in the `Browser backends and packages`
+workflow: `tests/sdk_consumer/random-parity-browser-test.mjs` loads it in the
+pinned Chromium and requires every result word to match the CPU reference
+compiled into the same WebAssembly module. CI uses Chromium's SwiftShader
+adapter, so this establishes the WGSL translation and WebGPU compute path;
+hardware WebGPU adapters are not yet qualified.
 Benchmark the limb cost and register pressure before optimizing. Keep CPU parity
 required only for consumers that actually need it; any alternate cosmetic hash
 is a separately versioned visual algorithm, never an unnoticed replacement for
@@ -586,7 +593,7 @@ prove correctness or cryptographic quality.
 | Isolation | Add cosmetic draws, disable rendering/audio, add a dimension, and change unrelated domain content; existing authoritative choices remain unchanged |
 | Save/rollback/reload | Mid-sequence restore; policy/event/ID allocator restoration; duplicate owners and corrupt/unsupported manifests rejected without partial restore |
 | Weighted/policy | Exact small integer tickets and alias mass checks; zero/overflow weights; deterministic bags and content changes; policy statistical expectations tested separately |
-| Portability | Identical raw/mapping corpus on pinned native toolchain and pinned Emscripten; GPU known-answer, raw/float/bounded parity, retry-loop and limb-product corpus on Metal and Vulkan ([GPU addressed sampling](#gpu-addressed-sampling)); WebGPU execution and ARM qualification before claiming their parity |
+| Portability | Identical raw/mapping corpus on pinned native toolchain and pinned Emscripten; GPU known-answer, raw/float/bounded parity, retry-loop and limb-product corpus on Metal, Vulkan and WebGPU (Chromium SwiftShader against the WebAssembly CPU reference; [GPU addressed sampling](#gpu-addressed-sampling)); hardware WebGPU adapter and ARM qualification before claiming their parity |
 | Integration | Warning-clean builds, unit and ASan/UBSan tests, format/tidy, header/include/build-budget gates, installed SDK consumer |
 | Quality | Offline PractRand/TestU01 and targeted interleaved-domain/nearby-scope patterns, high/low bits, lane patterns; record tool versions, corpora, failures and data volume |
 
@@ -634,7 +641,7 @@ and its persistence protocol remain to be delivered.
 | Authored policies and planning models | Game/domain and tools | Persist the required bag/no-repeat/pity/cooldown or decision state; let planners read the same immutable outcome model without advancing live RNG; isolate rollout domains. |
 | Optional automatic seed acquisition | Platform and application setup | Add checked OS/browser secure bytes when automatic seeds are required; acquire and record one root seed; report failure without an implicit fallback. Explicit deterministic seeds remain valid. |
 | Observation and qualification | Runtime/tools and validation tooling | Add bounded logical-context tracing and per-owner raw-draw counts where needed; complete consumer save/isolation regressions, native/web acceptance and offline statistical qualification; record representative performance baselines before optimization. |
-| WebGPU parity execution | Graphics validation | Run the GPU addressed-random parity kernel in the browser WebGPU job and record its result before claiming WebGPU parity; the kernel already compiles to WGSL. |
+| Hardware WebGPU qualification | Graphics validation | Software-adapter WebGPU parity runs in the browser job. Run `tests/sdk_consumer/random-parity-browser-test.mjs` on representative hardware WebGPU adapters and record the results before claiming parity on them. |
 
 Deliver this work in the following order:
 
@@ -699,9 +706,9 @@ test results are evidence about the authors' implementations, not Ludus results.
 | OS CSPRNG everywhere | Correct source for security and root entropy. Simulation still needs explicit deterministic ownership and stable replay sampling. |
 | Global or automatic thread-local stream | Hidden coupling and schedule-dependent simulation results; excluded. |
 
-Core primitives, representative native/WebAssembly fixtures and Metal/Vulkan
-GPU parity are implemented. Game/world integration, broader acceptance evidence,
-performance baselines, WebGPU parity execution and statistical qualification
-remain work for the milestones above.
+Core primitives, representative native/WebAssembly fixtures and Metal, Vulkan
+and software-adapter WebGPU parity are implemented. Game/world integration,
+broader acceptance evidence, performance baselines, hardware WebGPU
+qualification and statistical qualification remain work for the milestones above.
 Complete the initial implementation before using the research backlog to propose
 measured improvements.

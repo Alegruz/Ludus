@@ -43,6 +43,15 @@ profiling-disabled Release build and is not available for the browser window.
 [Runtime profiling](../development/runtime-profiling.md) runs these modes on a
 schedule.
 
+The native loop is [paced](../architecture/high-resolution-time.md#native-frame-pacing).
+The FIFO swapchain paces presented frames. Frames that present nothing (startup,
+loading, a minimized window) wait at 60 Hz instead of polling. `--frame-rate N`
+caps every native frame at `N` per second (1 to 1000); with `--headless` it paces
+each tick iteration without changing the ticks run or the replay hash.
+`--pacing-report` logs wake lateness, frame-start intervals and EndFrame-return
+intervals at exit; it requires `--frames`. The browser build rejects both
+options, because its presentation callbacks already pace the page.
+
 For the browser, prepare `./init.sh --cli web-emscripten-development --preset-only`,
 enable `LUDUS_BUILD_WORLD_DEMO=ON` in that preset's local CMake cache, and run
 `./scripts/build web-emscripten-development`. Serve
@@ -101,13 +110,32 @@ Commit and publication sequence. Add a component pool's initialization, recipe
 insertion and destruction removal together. Gameplay uses player/enemy/exit
 capabilities rather than branching on recipe kinds after construction.
 
-`RunTick` advances exactly 1/60 second. The driver accepts at most 250 ms per frame,
-runs at most four ticks, counts discarded time and retains fractional debt for
-interpolation. Input edges survive zero-tick frames and apply once during catch-up.
-Cancellation takes priority over presses; the bridge waits for neutral controls
-before rearming. Pause, focus changes, hidden frames and activation reset clock
-debt. Focus changes preserve pause/fault mode. A simulation fault retains the
-previous render frame until restart and never publishes that tick's presentation.
+`RunTick` advances exactly 1/60 second (`TICKS_PER_SECOND`). The application
+reads one FoundationTime timestamp per callback and passes it to
+`TickDriver::Advance`. The driver owns the [FrameClock](../wiki/guides/time.md#keep-frame-stalls-visible):
+it accepts at most 250 ms per frame (`MAXIMUM_FRAME_DELTA`) and runs at most four
+ticks (`MAXIMUM_CATCH_UP_TICKS`). Debt is an integer phase: each frame adds
+accepted nanoseconds times the tick rate and a tick consumes `PHASE_UNITS_PER_TICK`
+(10^9), so one second at 60 Hz is exactly 60 ticks however it is split into frames.
+Whole ticks beyond the budget are counted by `GetDiscardedTicks()`, separately from
+`GetClampedTime()`; the sub-tick remainder (`GetTickPhase()`) carries and sets the
+interpolation alpha in [0, 1). The FrameClock is the only clamp. `Configure`
+accepts a `TickPolicy` (rate, clamp, budget) and returns `InvalidConfiguration`,
+keeping the previous policy, for a zero rate or budget or a phase that could
+overflow `uint64`. A different rate changes real-time speed, not `RunTick`'s
+step, so record the policy with replays. A failed tick, including tick-number
+exhaustion, publishes no tick and faults the driver. Input edges survive zero-tick frames and apply once
+during catch-up. Cancellation takes priority over presses; the bridge waits for
+neutral controls before rearming.
+
+Pause/resume, focus changes, queued browser input resets (hide or blur), hidden
+frames, faults and activation reset debt and the frame baseline, so the next Playing frame is a
+zero-elapsed baseline and never catches up excluded time. Focus changes preserve
+pause/fault mode. Diagnostics separate accepted time, time clamped by the frame
+cap, excluded lifecycle time and clock regressions; for a monotonic sequence the
+three totals equal the observed span. A regressed sample adds no time and cannot
+become a baseline below the highest observed reading. A simulation fault retains
+the previous render frame until restart and never publishes that tick's presentation.
 
 ## Ownership and limits
 

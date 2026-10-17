@@ -28,7 +28,12 @@ function(_ludus_apply_game_policy target)
         message(FATAL_ERROR "Gameplay toolchain must exactly match the SDK: ${Ludus_SDK_COMPILER_ID} ${Ludus_SDK_COMPILER_VERSION}")
     endif()
     target_compile_features(${target} PRIVATE cxx_std_23)
-    set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+    # Ludus uses no C++20 named modules. Left on, CMake (CMP0155) runs
+    # clang-scan-deps on every C++ source and collates each target before it
+    # compiles; see docs/development/build-profiling.md. Set per target rather
+    # than CMAKE_CXX_SCAN_FOR_MODULES so the project's own targets keep CMake's
+    # default. Set the property back ON for a game that adopts named modules.
+    set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF CXX_SCAN_FOR_MODULES OFF)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(${target} PRIVATE
             -fno-exceptions

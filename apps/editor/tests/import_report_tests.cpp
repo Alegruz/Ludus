@@ -4,7 +4,10 @@
 #include "internal/level_workspace.h"
 #include "internal/preview_viewport.h"
 #include "internal/render_panel.h"
+#include "internal/workspace_style.h"
 #include "internal/world_workspace.h"
+
+#include <ludus/foundation/base/types.h>
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -13,8 +16,11 @@
 #include <QJsonDocument>
 #include <QLabel>
 #include <QPlainTextEdit>
+#include <QPushButton>
+#include <QScrollArea>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -177,8 +183,10 @@ TEST_CASE("World shows the import preview, imports on confirmation and shows the
     REQUIRE(workspace.Create(QDir(root).filePath(QStringLiteral("main.world.json"))) == true);
     QPlainTextEdit* preview = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportPreview"));
     QPlainTextEdit* report = workspace.findChild<QPlainTextEdit*>(QStringLiteral("worldImportReport"));
+    QToolButton* reportToggle = workspace.findChild<QToolButton*>(QStringLiteral("worldImportReportToggle"));
     REQUIRE(preview != nullptr);
     REQUIRE(report != nullptr);
+    REQUIRE(reportToggle != nullptr);
 
     REQUIRE(workspace.PreviewImportScene(QDir(source).filePath(QStringLiteral("room.pbrt"))) == true);
     REQUIRE(WaitUntil([preview]() { return preview->isHidden() == false; }) == true);
@@ -187,13 +195,53 @@ TEST_CASE("World shows the import preview, imports on confirmation and shows the
 
     REQUIRE(workspace.ConfirmImportPreview() == true);
     CHECK(preview->isHidden() == true);
-    REQUIRE(WaitUntil([report]() { return report->isHidden() == false; }) == true);
+    REQUIRE(WaitUntil([reportToggle]() { return reportToggle->isHidden() == false; }) == true);
+    CHECK(report->isHidden() == true);
+    reportToggle->click();
+    CHECK(report->isHidden() == false);
     CHECK(report->toPlainText().contains(QStringLiteral("Cooked:")) == true);
+    reportToggle->click();
+    CHECK(report->isHidden() == true);
     CHECK(workspace.ConfirmImportPreview() == false); // The preview is consumed.
     // The imported scene is shown in the World viewport, not left behind the empty World panel.
     QWidget* viewport = workspace.findChild<QWidget*>(QStringLiteral("worldSceneViewport"));
     REQUIRE(viewport != nullptr);
     CHECK(viewport->isHidden() == false);
+    QPushButton* cancel = workspace.findChild<QPushButton*>(QStringLiteral("worldCancelScene"));
+    REQUIRE(cancel != nullptr);
+    // The stored report publishes before the last candidate operation releases
+    // its cancel row. Measure report expansion after that operation completes.
+    REQUIRE(WaitUntil([cancel]() { return cancel->isHidden() == true; }) == true);
+    ApplyWorkspaceStyle(&workspace);
+    workspace.show();
+    QScrollArea* hierarchy = workspace.findChild<QScrollArea*>(QStringLiteral("worldHierarchyScroll"));
+    REQUIRE(hierarchy != nullptr);
+    const QJsonObject original = workspace.Document().Draft();
+    for (const QSize size : {QSize(1100, 520), QSize(800, 400)})
+    {
+        workspace.resize(size);
+        reportToggle->setChecked(true);
+        QTest::qWait(40);
+        CHECK(workspace.size() == size);
+        CHECK(viewport->height() >= 160);
+        CHECK(workspace.rect().contains(viewport->mapTo(&workspace, viewport->rect().bottomRight())) == true);
+        const ludus::foundation::int32 viewportHeight = viewport->height();
+        for (const QString& name :
+             {QStringLiteral("worldAdd"), QStringLiteral("worldDuplicate"), QStringLiteral("worldDelete")})
+        {
+            QPushButton* button = workspace.findChild<QPushButton*>(name);
+            REQUIRE(button != nullptr);
+            hierarchy->ensureWidgetVisible(button);
+            QApplication::processEvents();
+            CHECK(button->height() >= button->sizeHint().height());
+            CHECK(hierarchy->viewport()->rect().contains(
+                      button->mapTo(hierarchy->viewport(), button->rect().center())) == true);
+        }
+        reportToggle->setChecked(false);
+        QTest::qWait(40);
+        CHECK(viewport->height() == viewportHeight);
+    }
+    CHECK(workspace.Document().Draft() == original);
     if (PreviewViewport::GetPresentation() == ViewportPresentation::OffscreenReadback)
     {
         // The engine-owned device renders offscreen and the copied frame replaces the placeholder.

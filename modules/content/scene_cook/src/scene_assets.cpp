@@ -2361,6 +2361,9 @@ AssembleLighting(std::string_view root, const Document& closure, Array<uint8>& o
 // ---------------------------------------------------------------------------
 // Import.
 
+/// A fresh logical identity: the caller's replay sequence verbatim, otherwise
+/// FoundationIdentity's UUIDv4 from the caller's entropy. SceneCook acquires no
+/// entropy itself; outValue is unchanged on failure.
 [[nodiscard]] bool NextUuid(const AssetOptions& options, Uuid& outValue, Failure& inoutFailure) noexcept
 {
     if (options.UuidsOrNull != nullptr && options.UuidsOrNull->Generate != nullptr)
@@ -2368,9 +2371,12 @@ AssembleLighting(std::string_view root, const Document& closure, Array<uint8>& o
         options.UuidsOrNull->Generate(options.UuidsOrNull->ContextOrNull, outValue.Bytes);
         return true;
     }
-    return MakeRandomUuid(outValue) == true
+    const foundation::identity::EntropySource unavailable;
+    const foundation::identity::EntropySource& entropy =
+        options.EntropyOrNull != nullptr ? *options.EntropyOrNull : unavailable;
+    return foundation::identity::TryGenerateUuidV4(entropy, outValue) == foundation::identity::UuidStatus::Success
                ? true
-               : inoutFailure.Fail(AssetErrorCode::MissingTools, "No operating system entropy source for UUIDs");
+               : inoutFailure.Fail(AssetErrorCode::MissingTools, "No entropy source for UUIDs");
 }
 
 /// prefix + str(uuid).

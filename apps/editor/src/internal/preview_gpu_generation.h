@@ -19,6 +19,7 @@
 #include <ludus/graphics/renderer/static_lighting.hpp>
 #include <ludus/graphics/renderer/viewport.hpp>
 
+#include "internal/preview_bake.h"
 #include "internal/preview_lighting.h"
 #include "internal/preview_shading.h"
 #include "internal/render_scene.h"
@@ -117,6 +118,9 @@ public:
     bool HasBakeFailed = false;
     bool HasBakeSnapshot = false;
     bool IsBakePublished = false;
+    bool IsBakeCancelled = false;
+    bool HasBakeNotice = false;
+    PreviewBakeNotice BakeNotice;
 
 private:
     enum class PreparationStage : foundation::uint8

@@ -1,7 +1,10 @@
 # High-resolution time
 
-Status: FoundationTime implementation slice; simulation and scheduling extensions
-below are proposed. Reviewed October 4, 2026. See [ADR 0017](../decisions/0017-foundation-time.md).
+Status: FoundationTime implementation slice, frame integration, the integer
+simulation driver and native frame pacing implemented; the scheduling queue,
+runtime timing telemetry and editor Timing view below are proposed. Reviewed
+October 4, 2026; frame integration October 15, 2026; integer simulation driver
+and native frame pacing October 16, 2026. See [ADR 0017](../decisions/0017-foundation-time.md).
 
 ## Goals and independent baseline
 
@@ -121,22 +124,117 @@ of OS sleep, define whether a suspended game catches up. On Linux,
 other clocks may include it. Do not promise uniform suspend behavior from the
 measurement API.
 
-The first slice leaves the existing [fixed-tick driver](frame-update.md) in place:
+The frame integration keeps the [fixed-tick driver](frame-update.md) policy:
 60 Hz by default, 250 ms clamp, four catch-up ticks and explicit discarded time.
-It inherits the shared source through Profiling. Do not clamp twice or lose its
-existing discard accounting when migrating it to FrameClock in a later PR.
+The world reference application reads `time::Now()` once per callback and passes
+that timestamp to its `TickDriver`, which owns the FrameClock. Every existing
+debt reset (pause/resume, focus changes, queued browser input resets, hidden
+frames, faults and session activation) also drops the frame baseline, so lifecycle resets cannot
+diverge between the clock and the driver. The FrameClock is the only clamp; its
+discarded excess joins the existing discard total. The driver additionally
+reports accepted, clamped and lifecycle-excluded nanoseconds and a regression
+count. It keeps the highest observed timestamp across resets, so a regressed
+sample cannot become a baseline below it. The smoke application samples its own
+100 ms FrameClock the same way; it is a presentation loop without fixed ticks.
 
-A future integer fixed-step driver should retain a rational phase rather than
-rounding `1e9 / rate` to a nanosecond tick length. Accumulate `elapsed_ns * rate`
-in checked `uint64` phase units; one tick consumes exactly `1e9` phase units.
-Carry the remainder, bound catch-up, and report discarded whole ticks and the
-initial frame clamp separately. Validate the multiplication/addition bound at
-configuration. At 60 Hz, 1 second must produce exactly 60 ticks regardless of
-frame partitioning. Increment the completed tick only after a successful tick;
-exhaustion stops the session. Derive interpolation alpha from the remainder.
+The world reference integer fixed-step driver retains a rational phase rather
+than rounding `1e9 / rate` to a nanosecond tick length. It accumulates
+`elapsed_ns * rate` in checked `uint64` phase units; one tick consumes exactly
+`1e9` phase units. It carries the remainder, bounds catch-up, and reports
+discarded whole ticks separately from the initial frame clamp. A checked
+`TickPolicy` (rate, frame clamp, catch-up budget) validates at configuration that
+`MaximumFrameDelta * rate + 1e9 - 1`, the largest clamped frame plus the largest
+carried remainder, fits `uint64`; a zero rate, a zero catch-up budget or that
+overflow returns `InvalidConfiguration` and preserves the previous policy. At
+60 Hz, 1 second produces exactly 60 ticks regardless of frame partitioning. The
+world increments its completed tick only after a successful tick; a failed tick,
+including tick exhaustion, faults the driver and stops the session. Interpolation
+alpha is the remainder divided by `1e9`, bounded to [0, 1) after `float32`
+rounding. Lifecycle resets drop the sub-tick remainder with the frame baseline.
+
 Keep simulation time scaling explicit and rational, with an overflow policy and
 replay metadata, if a game actually requires it. Do not build a timer hierarchy
 or floating-point scale controls speculatively.
+
+## Native frame pacing
+
+Pacing decides when a native frame loop starts its next frame. It is a
+presentation policy, separate from measurement (FoundationTime) and simulation
+(the fixed-step driver). `Ludus::PlatformPacing`, a small Platform target like
+`PlatformEntropy`, owns the policy value and the operating-system wait so a loop
+and its tests need no window backend. Each application chooses its schedule;
+FoundationTime gains no sleep, wait or callback. The RHI keeps swapchain queue
+depth and GPU completion: Vulkan and WebGPU present with FIFO, Metal uses
+`CAMetalLayer` display sync with two drawables, and each backend keeps two frames
+in flight. The pacer queries no refresh rate, changes no queue depth and waits on
+no fence.
+
+`FramePacer` is an owner-local, allocation-free value with a validated
+`PacingPolicy` (interval of 1 ns to 1 s, maximum lateness). It receives an
+injected `PacingClock`, a pair of function pointers for reading the clock and
+waiting, so unit tests replace both with synthetic time. Each `Pace()` call:
+
+1. Anchors a schedule at the current reading when none exists (startup, `Reset()`
+   or `Configure()`) and starts the frame at once.
+2. Otherwise compares the reading with the absolute target. While early, it asks
+   the clock to wait for the remaining interval and rereads the clock after every
+   return, whether the wait completed, woke early or was interrupted by a signal.
+   After eight early returns it starts the frame rather than looping further; a
+   failed or unsupported wait starts the frame early. Neither case spins.
+3. Advances the next target from the previous target, never from the wake time,
+   so an oversleep shifts one frame and is not inherited by the next.
+4. When a frame is already late, starts it at once. Up to the policy's maximum
+   lateness it skips missed targets and keeps the phase; beyond it, it re-anchors
+   the schedule at the frame's actual start. Missed targets never become a burst
+   of back-to-back frames.
+
+A reading below the previous reading, or a target more than two intervals away,
+cannot come from a monotonic clock, so the pacer re-anchors instead of waiting.
+With the one-second interval bound, no call requests more than two seconds of
+waiting. Each result reports the target, the wake reading, lateness, skipped
+targets, wait and early-wake counts, and an outcome (`Baseline`, `Waited`, `Late`,
+`Rescheduled`, `WaitFailed`, `WaitLimit`, `ClockRegression`, `Overflow`,
+`Disabled` or `InvalidClock`).
+
+The native clock reads `time::Now()` and waits with POSIX
+[`nanosleep(2)`](https://man7.org/linux/man-pages/man2/nanosleep.2.html), which
+may return early with `EINTR`. The wait is relative, but each one is recomputed
+from a fresh reading, so the target stays absolute in the FoundationTime domain
+and wake errors do not accumulate. An absolute OS wait (`clock_nanosleep` with
+`TIMER_ABSTIME`, `mach_wait_until`) would need proof that the OS timer uses the
+same clock as the hidden steady-clock backend; that proof is not required here.
+The cost is the gap between the reading and entering the sleep, which the
+measured wake lateness includes. Browser builds return a wait that reports
+`Unsupported`: browsers keep pacing with presentation callbacks
+(`emscripten_set_main_loop` at the display rate) and never block or busy-wait.
+
+No spin phase exists. On the measured macOS host, the windowed application woke
+a nearly constant 1.0 ms after its target. The windowless process woke later as
+the interval grew, consistent with operating-system timer leeway. A constant
+offset shifts phase without making intervals uneven, so spinning would spend CPU
+time and battery for no interval benefit. See the [measurements](../development/high-resolution-time-evidence.md#native-frame-pacing).
+Adding a spin later requires a strict budget, a power policy and measurements
+showing it removes lateness that the OS wait leaves.
+
+Reset the pacer when the old phase should not carry over: startup, session
+activation and resuming from suspension. Pausing the simulation does not affect
+presentation pacing; frames keep their schedule while ticks stop. Without an
+explicit reset, the lateness bound re-anchors after any long stall, so a missed
+lifecycle signal costs one unpaced frame, never a catch-up burst.
+
+The world reference loop owns a `LoopPacing` policy. Without a cap, the FIFO
+swapchain paces presented frames, and frames that present nothing wait at 60 Hz.
+Those frames include startup, pending pipelines, loading and minimized windows,
+which the native loop previously polled at full speed. A presented frame drops
+the idle schedule. `--frame-rate N` caps every frame (1 to 1000) with a
+four-interval lateness bound. Intervals are whole nanoseconds, so a 60 Hz cap is
+16,666,667 ns, about 20 ns per second slower than exact; the simulation's
+rational phase is unaffected. A cap that does not divide the display refresh rate
+beats against FIFO's vblank quantization on a fixed-refresh display: a 50 Hz cap
+on a 60 Hz display shows alternating one- and two-refresh frames. A
+variable-refresh display may follow the cap instead. Matching caps to a display and frame
+timing feedback (presentation timestamps, queue-depth control) remain RHI work;
+see HR-01 below.
 
 ## Future scheduling and frame pacing
 
@@ -159,13 +257,9 @@ in FoundationTime. A real-time async timeout service would need a separate
 ownership/cancellation/shutdown contract and would use CPU timestamps, not game
 entity tick deadlines.
 
-Frame pacing belongs to Platform/RHI/application policy. Prefer presentation
-callbacks on browsers; never busy-wait there. Native pacing may use an absolute
-monotonic target and an OS wait, rechecking after an early wake or interruption.
-Advance targets from the prior target to avoid relative-sleep drift and reset
-missed schedules after a bounded lateness policy. A measured optional short spin
-must have a strict budget and power policy. High-resolution measurement does not
-imply precise wakeups. Queue depth and GPU completion remain graphics policies.
+Frame pacing is implemented as described in [native frame pacing](#native-frame-pacing).
+High-resolution measurement does not imply precise wakeups. Queue depth and GPU
+completion remain graphics policies.
 
 ## Gems review and design changes
 
@@ -210,8 +304,10 @@ must stay separate from retained timing evidence.
 
 This PR implements Time, checked arithmetic, stopwatch, deadline and frame
 sampling; migrates logging/profiling producers; and adds native unit, installed
-SDK and pinned web semantic/header coverage. It does not implement the future
-queue, pacing, rational fixed-step replacement, scaling, GPU or network clocks.
+SDK and pinned web semantic/header coverage. Later stages migrated the frame
+loops, replaced the world reference float64 debt with the rational fixed-step
+driver and added native frame pacing. The future queue, timing telemetry, scaling,
+GPU and network clocks remain unimplemented.
 
 Boundary tests cover max-value overflow, output preservation, zero/equal/reversed
 samples, one-nanosecond intervals at a large epoch, lifecycle failures, independent
@@ -238,9 +334,10 @@ and [ADR 0017](../decisions/0017-foundation-time.md) as the implementation basel
 | Stage | Work before the improvement pass | Completion evidence |
 | --- | --- | --- |
 | FoundationTime slice | Retain the shared source, checked arithmetic, stopwatch, deadline and frame helpers; document changed public APIs beside their declarations. | Existing native/browser semantic tests and installed-SDK coverage; updated Doxygen coverage for any changed API. |
-| Frame integration | Migrate application loops to one explicit frame sample and wire lifecycle resets using the existing frame/simulation contract. | Integration tests for startup, pause/resume, visibility and session replacement, clock regression and accepted/discarded time; no duplicate clamp. |
-| Integer simulation driver | Implement the rational phase accumulator described above, including checked configuration, catch-up bounds, interpolation and exhaustion. | Partition-independent tick/remainder accounting when no time is intentionally discarded, exact 60 Hz accounting over one second, explicit clamp/catch-up loss and failure tests. |
-| Pacing and inspection | Implement the agreed native pacing policy under Platform/RHI/application ownership; define runtime timing telemetry and the proposed editor Timing view under their existing owners. | Reproducible target/wake/presentation measurements, interruption/lateness and lifecycle tests; runtime-reported intervals/status across the editor process boundary. |
+| Frame integration (implemented) | Migrate application loops to one explicit frame sample and wire lifecycle resets using the existing frame/simulation contract. | Integration tests for startup, pause/resume, visibility and session replacement, clock regression and accepted/discarded time; no duplicate clamp. See [validation evidence](../development/high-resolution-time-evidence.md#frame-integration). |
+| Integer simulation driver (implemented) | Implement the rational phase accumulator described above, including checked configuration, catch-up bounds, interpolation and exhaustion. | Partition-independent tick/remainder accounting when no time is intentionally discarded, exact 60 Hz accounting over one second, explicit clamp/catch-up loss and failure tests. See [validation evidence](../development/high-resolution-time-evidence.md#integer-simulation-driver). |
+| Pacing (implemented) | Implement the agreed [native pacing policy](#native-frame-pacing) under Platform/application ownership. | Reproducible target/wake/presentation measurements, interruption/lateness and lifecycle tests. See [validation evidence](../development/high-resolution-time-evidence.md#native-frame-pacing). |
+| Inspection | Define runtime timing telemetry and the proposed editor Timing view under their existing owners. | Runtime-reported intervals/status across the editor process boundary. |
 
 The bounded gameplay queue, time scaling and additional clock domains remain
 conditional extensions. Establish their requirements and ownership before
