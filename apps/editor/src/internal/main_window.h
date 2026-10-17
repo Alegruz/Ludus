@@ -39,6 +39,7 @@ class ConfigurationWorkspace;
 class ContentWorkspace;
 class ScriptWorkspace;
 class RendererWorkspace;
+class TimingPanel;
 class WorldWorkspace;
 class MainWindow : public QMainWindow
 {
@@ -127,6 +128,9 @@ private:
     QTabWidget* WorkTabs_ = nullptr;
     QDockWidget* InspectorDock_ = nullptr;
     QDockWidget* OutputDock_ = nullptr;
+    // Created with the other docks in BuildUi; never null afterwards.
+    QDockWidget* TimingDock_;
+    TimingPanel* Timing_;
     QToolBar* GameToolbar_ = nullptr;
 
     // Project lifecycle presentation; controller actions own all operations.
