@@ -71,6 +71,20 @@ struct StaticLightingChart final
     foundation::uint64 SceneRevision = 0;      ///< Must match the drawn extraction's revision.
     foundation::uint64 DependencyRevision = 0; ///< Must match the retained cooked dependency revision.
     foundation::math::Affine3 Transform{};     ///< Exact mesh-to-world used by the bake.
+    /// Zero-area triangles of this object that the bake skipped; their chart tiles hold zero irradiance.
+    foundation::uint32 SkippedTriangleCount = 0;
+};
+/// @brief Input problems the bake tolerated instead of failing, available once preparation completes.
+///
+/// A zero-area (collapsed) triangle covers no surface: it emits nothing, is never
+/// hit and has no normal to gather irradiance about. The bake keeps its chart tile,
+/// so chart layout and texture coordinates are unchanged, fills that tile with zero
+/// irradiance and leaves the triangle out of ray traversal and emitter selection.
+/// Non-finite geometry is not tolerated and still fails preparation.
+struct StaticLightingBakeDiagnostics final
+{
+    foundation::uint32 SkippedTriangleCount = 0; ///< Zero-area triangles skipped across all objects.
+    foundation::uint32 AffectedObjectCount = 0;  ///< Placed objects with at least one skipped triangle.
 };
 /// @brief Upper bound on StaticLightingScheduleDescription::RangeCount.
 inline constexpr foundation::uint32 MAX_STATIC_LIGHTING_RANGES = 1024;
@@ -117,7 +131,8 @@ struct StaticLightingBakeProgress final
 /// AreTriangleChartsEnabled and HasStaticAreaDirect, and DirectLightId=0.
 /// Area specular is outside this profile. Per-triangle centroid irradiance is
 /// coarse spatial reconstruction; sample count controls transport variance.
-/// No Renderer, GPU, Qt or native ray-query state is touched.
+/// No Renderer, GPU, Qt or native ray-query state is touched. Zero-area triangles
+/// are skipped and reported through GetDiagnostics rather than failing the bake.
 ///
 /// Two execution modes share the same transport and produce bit-identical charts:
 /// - Serial: Initialize, then Step until Ready, all on one thread.
@@ -213,6 +228,25 @@ public:
     ///         or InvalidState for a bake that was not submitted. Pending and
     ///         InvalidState preserve outProfile.
     [[nodiscard]] rhi::RasterStatus GetProfile(StaticLightingBakeProfile& outProfile) const noexcept;
+    /// @brief Reads the input problems preparation tolerated, such as skipped zero-area triangles.
+    ///
+    /// Available as soon as preparation completes, while ranges are still running, so
+    /// a caller can warn its user and offer Cancel before the bake finishes. Callable
+    /// on the owner thread at any time; it never blocks or touches jobs.
+    /// @param outDiagnostics Receives the counts on Ready; preserved otherwise.
+    /// @return Ready once preparation has succeeded; Pending while a scheduled
+    ///         preparation is unresolved; NotReady when preparation was cancelled or
+    ///         failed; InvalidState for an unbound bake.
+    [[nodiscard]] rhi::RasterStatus GetDiagnostics(StaticLightingBakeDiagnostics& outDiagnostics) const noexcept;
+    /// @brief Reads how many zero-area triangles of one placed object the bake skipped.
+    ///
+    /// Available under the same conditions as GetDiagnostics, so a caller can name the
+    /// affected objects while the bake runs. Callable on the owner thread; never blocks.
+    /// @param objectIndex Index into SceneDefinition::Objects.
+    /// @param outSkippedTriangleCount Receives the count on Ready; preserved otherwise.
+    /// @return As for GetDiagnostics, or InvalidDescription for an out-of-range index.
+    [[nodiscard]] rhi::RasterStatus GetSkippedTriangleCount(foundation::usize objectIndex,
+                                                            foundation::uint32& outSkippedTriangleCount) const noexcept;
 
 private:
     struct State;

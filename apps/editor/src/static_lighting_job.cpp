@@ -88,6 +88,15 @@ uint32 StaticLightingJob::GetProgressPercent() const noexcept
     return progress.TotalSamples == 0 ? 0
                                       : static_cast<uint32>(progress.CompletedSamples * 100 / progress.TotalSamples);
 }
+rhi::RasterStatus StaticLightingJob::GetDiagnostics(rr::StaticLightingBakeDiagnostics& outDiagnostics) const noexcept
+{
+    return mBake.Get() != nullptr ? mBake->GetDiagnostics(outDiagnostics) : rhi::RasterStatus::InvalidState;
+}
+rhi::RasterStatus StaticLightingJob::GetSkippedTriangleCount(usize objectIndex, uint32& outCount) const noexcept
+{
+    return mBake.Get() != nullptr ? mBake->GetSkippedTriangleCount(objectIndex, outCount)
+                                  : rhi::RasterStatus::InvalidState;
+}
 UniquePtr<rr::StaticLightingBake> StaticLightingJob::TakeBake() noexcept
 {
     LUDUS_REQUIRE(mStatus == rhi::RasterStatus::Ready);

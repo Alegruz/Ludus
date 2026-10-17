@@ -238,11 +238,27 @@ rhi::RasterStatus BuildReferenceBvh(ReferenceSceneData& scene) noexcept
     {
         return rhi::RasterStatus::OutOfMemory;
     }
+    // Zero-area triangles carry no surface: a ray cannot meaningfully hit one and
+    // its geometric normal is undefined. Leave them out of the hierarchy (the
+    // static bake keeps them only as empty chart tiles).
+    usize surfaceCount = 0;
     for (usize i = 0; i < count; ++i)
     {
-        scene.Order[i] = static_cast<uint32>(i);
+        if (scene.Triangles[i].Area > 0)
+        {
+            scene.Order[surfaceCount] = static_cast<uint32>(i);
+            ++surfaceCount;
+        }
     }
-    static_cast<void>(BuildNode(scene, 0, static_cast<uint32>(count), scratch.GetData()));
+    if (scene.Order.TryResize(surfaceCount) == false)
+    {
+        return rhi::RasterStatus::OutOfMemory;
+    }
+    if (surfaceCount == 0)
+    {
+        return rhi::RasterStatus::Ready;
+    }
+    static_cast<void>(BuildNode(scene, 0, static_cast<uint32>(surfaceCount), scratch.GetData()));
     scene.Bounds = scene.Nodes[0].Bounds;
     return rhi::RasterStatus::Ready;
 }
