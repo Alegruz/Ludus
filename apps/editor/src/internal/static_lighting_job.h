@@ -35,6 +35,12 @@ public:
     [[nodiscard]] graphics::rhi::RasterStatus Wait() noexcept;
     void RequestInterruption() noexcept;
     [[nodiscard]] foundation::uint32 GetProgressPercent() const noexcept;
+    // Tolerated input problems, Ready once preparation succeeded (see StaticLightingBake::GetDiagnostics).
+    [[nodiscard]] graphics::rhi::RasterStatus
+    GetDiagnostics(graphics::renderer::StaticLightingBakeDiagnostics& outDiagnostics) const noexcept;
+    // Zero-area triangles skipped in one placed object, under the same conditions.
+    [[nodiscard]] graphics::rhi::RasterStatus GetSkippedTriangleCount(foundation::usize objectIndex,
+                                                                      foundation::uint32& outCount) const noexcept;
     // Call only after Poll or Wait returned Ready.
     [[nodiscard]] foundation::UniquePtr<graphics::renderer::StaticLightingBake> TakeBake() noexcept;
 

@@ -12,6 +12,7 @@
 #include <new>
 
 #include <QElapsedTimer>
+#include <QStringList>
 
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
 #    include "renderer_clustered_authored.h"
@@ -92,6 +93,9 @@ struct RenderPreview::GpuResources final
     bool HasBakeFailed = false;
     bool HasBakeSnapshot = false;
     bool IsBakePublished = false;
+    bool IsBakeCancelled = false;
+    bool HasBakeNotice = false;
+    PreviewBakeNotice BakeNotice;
     ~GpuResources() noexcept
     {
         // Cancels and drains an in-flight bake before the borrowed scene is released.
@@ -1475,7 +1479,8 @@ void RenderPreview::serviceStaticLighting()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     GpuResources& resources = *mResources;
-    if (resources.HasBakeFailed == true || resources.IsBakePublished == true || Frames_ == 0)
+    if (resources.HasBakeFailed == true || resources.IsBakePublished == true || Frames_ == 0 ||
+        (resources.IsBakeCancelled == true && resources.BakeWorker.Get() == nullptr))
     {
         return;
     }
@@ -1498,21 +1503,29 @@ void RenderPreview::serviceStaticLighting()
         {
             resources.BakeWorker.Reset();
             resources.HasBakeFailed = true;
-            FreshReport_ = true;
         }
+        markBakeChanged();
         return;
     }
     if (resources.BakeWorker.Get() != nullptr)
     {
+        updateBakeNotice();
         const rhi::RasterStatus status = resources.BakeWorker->Poll();
         if (status == rhi::RasterStatus::Pending)
         {
             return;
         }
+        if (resources.IsBakeCancelled == true)
+        {
+            // A cancelled bake is discarded even if its last range finished first.
+            resources.BakeWorker.Reset();
+            markBakeChanged();
+            return;
+        }
         if (status != rhi::RasterStatus::Ready)
         {
             resources.HasBakeFailed = true;
-            FreshReport_ = true;
+            markBakeChanged();
             return;
         }
         resources.Bake = resources.BakeWorker->TakeBake();
@@ -1520,7 +1533,7 @@ void RenderPreview::serviceStaticLighting()
     }
     const auto failBake = [this, &resources]() {
         resources.HasBakeFailed = true;
-        FreshReport_ = true;
+        markBakeChanged();
     };
     while (resources.BakeUploadCursor < count)
     {
@@ -1637,10 +1650,124 @@ void RenderPreview::serviceStaticLighting()
     static_cast<void>(resources.Renderer.Release(Snapshot_));
     Snapshot_ = resources.BakedSnapshot;
     resources.IsBakePublished = true;
-    FreshReport_ = true;
+    markBakeChanged();
 #endif
 }
 
+void RenderPreview::updateBakeNotice()
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    GpuResources& resources = *mResources;
+    if (resources.HasBakeNotice == true || resources.BakeWorker.Get() == nullptr)
+    {
+        return;
+    }
+    rr::StaticLightingBakeDiagnostics diagnostics;
+    if (resources.BakeWorker->GetDiagnostics(diagnostics) != rhi::RasterStatus::Ready)
+    {
+        return;
+    }
+    PreviewBakeNotice notice;
+    notice.SkippedTriangleCount = diagnostics.SkippedTriangleCount;
+    notice.AffectedObjectCount = diagnostics.AffectedObjectCount;
+    QStringList names;
+    for (int32 i = 0; i < resources.Source.Objects.size(); ++i)
+    {
+        uint32 skipped = 0;
+        if (resources.BakeWorker->GetSkippedTriangleCount(static_cast<usize>(i), skipped) == rhi::RasterStatus::Ready &&
+            skipped != 0)
+        {
+            const PreviewObject& object = resources.Source.Objects[i];
+            names.append(QStringLiteral("%1 (%2)").arg(object.Name.isEmpty() ? object.Id : object.Name).arg(skipped));
+        }
+    }
+    notice.AffectedObjects = names.join(QStringLiteral(", "));
+    resources.BakeNotice = notice;
+    resources.HasBakeNotice = true;
+    markBakeChanged();
+#endif
+}
+void RenderPreview::markBakeChanged()
+{
+    FreshReport_ = true;
+    Q_EMIT BakeChanged();
+}
+PreviewBakeState RenderPreview::GetBakeState() const noexcept
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mResources.Get() == nullptr || Scene_.Lit == false || mShading != PreviewShading::Lit)
+    {
+        return PreviewBakeState::Idle;
+    }
+    const GpuResources& resources = *mResources;
+    if (resources.IsBakePublished == true)
+    {
+        return PreviewBakeState::Baked;
+    }
+    if (resources.IsBakeCancelled == true)
+    {
+        return PreviewBakeState::Cancelled;
+    }
+    if (resources.HasBakeFailed == true)
+    {
+        return PreviewBakeState::Failed;
+    }
+    return resources.BakeWorker.Get() != nullptr ? PreviewBakeState::Running : PreviewBakeState::Idle;
+#else
+    return PreviewBakeState::Idle;
+#endif
+}
+bool RenderPreview::GetBakeNotice(PreviewBakeNotice& outNotice) const
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (mResources.Get() == nullptr || mResources->HasBakeNotice == false ||
+        mResources->BakeNotice.SkippedTriangleCount == 0)
+    {
+        return false;
+    }
+    outNotice = mResources->BakeNotice;
+    return true;
+#else
+    static_cast<void>(outNotice);
+    return false;
+#endif
+}
+void RenderPreview::CancelBake() noexcept
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (GetBakeState() != PreviewBakeState::Running)
+    {
+        return;
+    }
+    // Ranges stop at their next sample boundary; Tick discards the result when Poll resolves.
+    mResources->BakeWorker->RequestInterruption();
+    mResources->IsBakeCancelled = true;
+    markBakeChanged();
+#endif
+}
+bool RenderPreview::RestartBake() noexcept
+{
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    if (GetBakeState() != PreviewBakeState::Cancelled || mResources->BakeWorker.Get() != nullptr)
+    {
+        return false;
+    }
+    // Cancellation happens before any chart upload, so only the CPU bake restarts.
+    GpuResources& resources = *mResources;
+    resources.IsBakeCancelled = false;
+    resources.HasBakeStarted = false;
+    resources.HasBakeNotice = false;
+    resources.BakeNotice = {};
+    markBakeChanged();
+    if (Running() == true)
+    {
+        Timer_.start();
+    }
+    return true;
+#else
+    return false;
+#endif
+}
 rhi::RasterStatus RenderPreview::pollViewport()
 {
     const rhi::RasterStatus status = mResources->Viewport.Poll();
@@ -1825,14 +1952,26 @@ void RenderPreview::Tick()
                                       .arg(mResources->Lighting.Lights.Count)
                                       .arg(mResources->Lighting.AreaCount)
                                       .arg(mResources->Lighting.ShadowCount)
-                                      .arg(mResources->IsBakePublished == true
-                                               ? QStringLiteral("static diffuse baked")
-                                               : (mResources->HasBakeFailed == true
-                                                      ? QStringLiteral("bake failed; direct lighting retained")
-                                                      : QStringLiteral("direct lighting; bake %1%")
-                                                            .arg(mResources->BakeWorker.Get() != nullptr
-                                                                     ? mResources->BakeWorker->GetProgressPercent()
-                                                                     : 0)))
+                                      .arg((mResources->IsBakePublished == true
+                                                ? QStringLiteral("static diffuse baked")
+                                                : (mResources->IsBakeCancelled == true
+                                                       ? QStringLiteral("bake cancelled; direct lighting retained")
+                                                       : (mResources->HasBakeFailed == true
+                                                              ? QStringLiteral("bake failed; direct lighting retained")
+                                                              : QStringLiteral("direct lighting; bake %1%")
+                                                                    .arg(mResources->BakeWorker.Get() != nullptr
+                                                                             ? mResources->BakeWorker
+                                                                                   ->GetProgressPercent()
+                                                                             : 0)))) +
+                                           (mResources->HasBakeNotice == true &&
+                                                    mResources->BakeNotice.SkippedTriangleCount != 0
+                                                ? QStringLiteral(" · skipped %1 zero-area triangles in %2 %3")
+                                                      .arg(mResources->BakeNotice.SkippedTriangleCount)
+                                                      .arg(mResources->BakeNotice.AffectedObjectCount)
+                                                      .arg(mResources->BakeNotice.AffectedObjectCount == 1
+                                                               ? QStringLiteral("object")
+                                                               : QStringLiteral("objects"))
+                                                : QString()))
                                 : (mShading == PreviewShading::Solid
                                        ? QStringLiteral(" · Solid: neutral preview shading")
                                        : QStringLiteral(" · Albedo: unlit surface colors")))

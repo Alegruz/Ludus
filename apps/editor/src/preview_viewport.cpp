@@ -7,8 +7,10 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPointer>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
@@ -610,12 +612,62 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     shading->addItem(QStringLiteral("Albedo — unlit surface colors"));
     shading->addItem(QStringLiteral("Lit — scene lighting"));
     shading->setToolTip(QStringLiteral("Solid uses an editor-only neutral material and preview light; Albedo shows "
-                                       "base colors without illumination. Lit shows emission; "
-                                       "imported emitting surfaces do not yet illuminate the room."));
+                                       "base colors without illumination. Lit shows authored lights, emitting surfaces "
+                                       "as shadowed area lights and, once baked, static diffuse lighting."));
     shading->setCurrentIndex(static_cast<foundation::int32>(preview->GetShading()));
-    mState->Layout->addWidget(shading);
-    connect(shading, &QComboBox::currentIndexChanged, this, [preview](foundation::int32 index) {
+    // One header row: shading, then what the Lit bake needs the user to know or decide.
+    QHBoxLayout* header = new QHBoxLayout;
+    header->setContentsMargins(0, 0, 0, 0);
+    header->addWidget(shading, 1);
+    QLabel* bakeNotice = new QLabel(this);
+    bakeNotice->setObjectName(QStringLiteral("viewportBakeNotice"));
+    // The header keeps its natural height; the frame below takes the remaining space.
+    bakeNotice->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    bakeNotice->hide();
+    header->addWidget(bakeNotice);
+    QPushButton* bakeAction = new QPushButton(this);
+    bakeAction->setObjectName(QStringLiteral("viewportBakeAction"));
+    bakeAction->hide();
+    header->addWidget(bakeAction);
+    mState->Layout->addLayout(header);
+    const auto updateBake = [preview, bakeNotice, bakeAction]() {
+        const PreviewBakeState state = preview->GetBakeState();
+        PreviewBakeNotice notice;
+        const bool hasNotice = preview->GetBakeNotice(notice) == true && state != PreviewBakeState::Idle;
+        bakeNotice->setVisible(hasNotice);
+        if (hasNotice == true)
+        {
+            bakeNotice->setText(QStringLiteral("⚠ %1 collapsed triangles skipped").arg(notice.SkippedTriangleCount));
+            bakeNotice->setToolTip(
+                QStringLiteral("The static bake skipped %1 zero-area triangles in %2: %3. They cover no surface, so "
+                               "the baked lighting is unaffected; fix the meshes to remove this warning. Cancel the "
+                               "bake to keep direct lighting only.")
+                    .arg(notice.SkippedTriangleCount)
+                    .arg(notice.AffectedObjectCount == 1 ? QStringLiteral("1 object")
+                                                         : QStringLiteral("%1 objects").arg(notice.AffectedObjectCount))
+                    .arg(notice.AffectedObjects));
+        }
+        bakeAction->setVisible(state == PreviewBakeState::Running || state == PreviewBakeState::Cancelled);
+        bakeAction->setText(state == PreviewBakeState::Cancelled ? QStringLiteral("Bake again")
+                                                                 : QStringLiteral("Cancel bake"));
+        bakeAction->setToolTip(state == PreviewBakeState::Cancelled
+                                   ? QStringLiteral("Restart the static lighting bake for this scene.")
+                                   : QStringLiteral("Stop the static lighting bake; direct lighting stays visible."));
+    };
+    connect(preview, &RenderPreview::BakeChanged, this, updateBake);
+    connect(bakeAction, &QPushButton::clicked, this, [preview]() {
+        if (preview->GetBakeState() == PreviewBakeState::Cancelled)
+        {
+            static_cast<void>(preview->RestartBake());
+        }
+        else
+        {
+            preview->CancelBake();
+        }
+    });
+    connect(shading, &QComboBox::currentIndexChanged, this, [preview, updateBake](foundation::int32 index) {
         preview->SetShading(static_cast<PreviewShading>(index));
+        updateBake();
     });
     connect(preview, &RenderPreview::NavigationChanged, shading, [preview, shading]() {
         const QSignalBlocker blocker(shading);
