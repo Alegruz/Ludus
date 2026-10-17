@@ -3,7 +3,9 @@
 Typed runtime handle values, persistent UUID values and their codecs, slot
 generation advancement, and the process lifetime-token source. Link
 `Ludus::FoundationIdentity`; it depends only on FoundationBase and builds for
-native and browser targets. Engine code is exception-free and allocation-free.
+native and browser targets. Installed SDKs list it as the `FoundationIdentity`
+component, so a project descriptor may request it in `engine.components`.
+Engine code is exception-free and allocation-free.
 See the [architecture](../../architecture/object-handles-uuid.md) for the full
 identity and lifetime contract.
 
