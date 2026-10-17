@@ -244,9 +244,6 @@ named `Bake worker` tracks and the helping owner, the dispatch arrows and the
 ready-depth counter. The capture of sweep 1 holds 66 bakes: 66 preparation
 slices, 4,224 range slices and 4,290 `JobDispatch` flow ends, one for every job.
 
-A load-gated sweep (one-minute load below 4) is still pending. When it runs, its
-results will be added here as a separate sweep to narrow these intervals.
-
 Correctness evidence, in the threading suites:
 
 - `[threading][trace]` cases (0, 1 and 4 workers, helping and non-helping `Wait`, 20
