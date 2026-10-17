@@ -252,8 +252,8 @@ and Emscripten 4.0.23 in its bundled Node 22.16 (`web-emscripten-development`,
 `web-emscripten-release`). The pinned Clang 18 ASan runtime deadlocks during its
 own initialization on that macOS version, even for an empty program, so sanitized
 evidence comes from batched CI. Run
-[38973276690](https://github.com/The-Ludus-Project/Ludus/actions/runs/38973276690)
-repeated the probe on Ubuntu 24.04 x86_64 with `linux-clang-asan-ubsan` and
+[39026440464](https://github.com/The-Ludus-Project/Ludus/actions/runs/39026440464)
+(develop `ea1c7d6`) repeated the probe on Ubuntu 24.04 x86_64 with `linux-clang-asan-ubsan` and
 uploaded its `evidence.json` as `localization-l0-linux-sanitized-evidence`. The
 corpus run, cost measurements and host cleanup completed there without an ASan,
 UBSan or LeakSanitizer report; UBSan halts on its first finding
@@ -314,40 +314,39 @@ correct and leak-free.
 wasm32 Release shows the same classes with fewer crashes (1, 0, 1 and 1): a null
 read in linear memory does not trap, so the same defects continue silently.
 
-Ubuntu x86_64 under ASan/UBSan (`linux-clang-asan-ubsan`, the CI run above):
+Ubuntu x86_64 under ASan/UBSan (`linux-clang-asan-ubsan`, the CI run above).
+`verify.py` keeps a signal, including one that ASan reports (`SEGV`, `BUS`,
+`FPE`, `ILL`, `ABRT`, stack overflow), as `crash` with its exit code; any other
+ASan or UBSan finding is `sanitizer-report` with its kind; a LeakSanitizer report
+at exit keeps the point's result and counts as a leak after cleanup. UBSan halts
+on its first finding, so a sanitizer-report point never reformats or reaches
+`u_cleanup`, and Sticky and Leaks count only the points that ran to the end.
 
-| Sweep (Ubuntu ASan/UBSan) | Points | Abnormal exit | Reported OOM | Other error | Silent wrong output | Correct | Sticky |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Arabic nested select/plural | 161 | 18 | 83 | 31 | 7 | 22 | 64 |
-| French `::.0` with grouping | 61 | 36 | 18 | 0 | 1 | 6 | 0 |
-| Russian offset plural with text | 201 | 28 | 90 | 34 | 21 | 28 | 86 |
-| Host initialization and warm-up | 41 | 11 | 25 (init failed) | 0 | 0 | 5 | 0 |
+| Sweep (Ubuntu ASan/UBSan) | Points | Crash | Sanitizer report | Reported OOM | Other error | Silent wrong output | Correct | Sticky | Leaks after cleanup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Arabic nested select/plural | 161 | 0 | 2 UBSan | 83 | 47 | 7 | 22 | 80 | 16 |
+| French `::.0` with grouping | 61 | 0 | 21 UBSan | 31 | 0 | 1 | 8 | 6 | 15 |
+| Russian offset plural with text | 201 | 0 | 3 UBSan | 90 | 57 | 21 | 30 | 109 | 25 |
+| Host initialization and warm-up | 41 | 0 | 9 UBSan | 27 (init failed) | 0 | 0 | 5 | 0 | 2 |
 
-That run's `verify.py` recorded every nonzero exit, or a point without its result
-line, as `crash`. Under sanitizers that folds three things together: a fault that
-ASan reports before exiting with status 1, a halting UBSan finding, and a
-LeakSanitizer report at exit when ICU blocks are still live after `u_cleanup`.
-Its `leaking_after_cleanup` of 0 therefore means the leaking points never reached
-that count, not that the leaks disappeared, and the table has no leak column. The
-artifact supports this reading:
-
-- Every macOS crash point also exits abnormally here.
-- In the Arabic, Russian and host sweeps the additional abnormal exits (16, 25
-  and 2) equal the macOS points that leak after cleanup, and the other outcome
-  columns shrink by the same totals.
-- The French sweep adds 35 abnormal exits against 25 macOS leaks. The remaining
-  10 are sanitizer findings or crashes that the recorded artifact cannot separate.
+- No point crashes with a signal and ASan reports nothing. Every sanitizer report
+  is a UBSan runtime error, and every leak after cleanup is also a LeakSanitizer
+  report.
+- Arabic, Russian and host initialization match macOS in every other column; each
+  macOS crash count reappears as the same number of UBSan reports (2, 3 and 9).
+- French reports UBSan at points 8–27 and 30: by count, the macOS crash and 20
+  points that report OOM there. Those points never reach the clean reformat or
+  `u_cleanup`, so the French sticky and leak counts (6 and 15) exclude them;
+  macOS counts 12 and 25.
+- The 10 French exits that the earlier run
+  [38973276690](https://github.com/The-Ludus-Project/Ludus/actions/runs/38973276690)
+  could not attribute are UBSan findings. Its classifier recorded every nonzero
+  exit as `crash`; its 36 French exits contain these 21 UBSan points, and the
+  other 15 match the 15 LeakSanitizer reports, not 1 crash and 25 leaks.
 - The silent wrong outputs are the same fail points (7, 1 and 21) on macOS,
   wasm32 and sanitized Ubuntu. Those processes exit cleanly under ASan, UBSan and
   LeakSanitizer: ICU selects the wrong branch with a success status, which
   sanitized testing does not detect.
-
-`verify.py` now keeps these apart. A signal, including one that ASan reports
-(`SEGV`, `BUS`, `FPE`, `ILL`, `ABRT`, stack overflow), stays `crash` and its exit
-code is recorded; any other ASan or UBSan finding is `sanitizer-report` with its
-kind; a LeakSanitizer report keeps the point's result and counts as a leak after
-cleanup. Sanitized runs after this change record `crash_exit_codes`,
-`sanitizer_report_points` and `sanitizer_leak_reports` per sweep.
 
 Causes confirmed in the pinned sources:
 
@@ -404,8 +403,8 @@ the empty Japanese translation, plus a stale-import conflict.
 - **CAT/TMS profile:** unconfirmed (above).
 - **Platforms:** local native evidence is macOS arm64 Development; wasm32
   evidence runs in the SDK's Node. Ubuntu x86_64 ASan/UBSan evidence from batched
-  CI shows the same semantics and allocation-failure classes; its recorded crash
-  counts include sanitizer and leak reports (above). The pinned macOS ASan
+  CI shows the same semantics and allocation-failure classes, with UBSan reports
+  where macOS crashes and no ASan finding (above). The pinned macOS ASan
   runtime does not start on macOS 26.6. Windows, Android, iOS and real browsers
   have no L0 evidence.
 - **Recoverable allocation failure:** ICU4C 78.3 fails this gate. The defects
