@@ -18,6 +18,7 @@ from ludus_tools.package_web import WEB_POLICY, validate_web
 from ludus_tools.package_verify import inventory, file_digest, verify_package
 from ludus_tools.release_setup import setup_release, WORKFLOW
 from ludus_tools.sdkstore import SdkStore
+from ludus_tools.toolchain import pinned_llvm_tool
 from test_ludus_tools import _manifest_json
 
 
@@ -142,7 +143,7 @@ class BrowserTests(unittest.TestCase):
                 with self.assertRaises(ToolingError):
                     validate_web(payload, 'index.html')
 
-    @unittest.skipUnless(shutil.which('clang++-18') and shutil.which('cmake'), 'requires pinned native fixture tools')
+    @unittest.skipUnless(shutil.which(pinned_llvm_tool('clang++')) and shutil.which('cmake'), 'requires pinned native fixture tools')
     def test_cmake_build_install_failed_build_and_wrong_sdk(self):
         with tempfile.TemporaryDirectory() as temp:
             root = project(Path(temp) / 'game')
@@ -172,7 +173,7 @@ include(cmake/GameRelease.cmake)
 ''')
             (root / 'CMakePresets.json').write_text(json.dumps({'version': 6, 'configurePresets': [{
                 'name': 'web-emscripten-release', 'generator': 'Ninja', 'binaryDir': '${sourceDir}/out/build/web-emscripten-release',
-                'cacheVariables': {'CMAKE_BUILD_TYPE': 'Release', 'CMAKE_CXX_COMPILER': 'clang++-18', 'CMAKE_PREFIX_PATH': str(sdk)}}]}))
+                'cacheVariables': {'CMAKE_BUILD_TYPE': 'Release', 'CMAKE_CXX_COMPILER': pinned_llvm_tool('clang++'), 'CMAKE_PREFIX_PATH': str(sdk)}}]}))
             result = release.package_project(root, profile='web-release', version='0.1.0', store=SdkStore(Path(temp) / 'store'))
             self.assertEqual(verify_package(result)['manifest']['policy'], WEB_POLICY)
             (root / 'src/main.cpp').write_text('does not compile')

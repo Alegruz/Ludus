@@ -16,6 +16,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts" / "python"))
 from formatting import format_source  # noqa: E402
+from engine import pinned_llvm_tool  # noqa: E402
 
 
 def run(command: list[str], *, env: dict[str, str] | None = None) -> str:
@@ -68,12 +69,12 @@ def main() -> int:
         # tools/ is not included by the engine's format/tidy traversal. Apply
         # exactly the same formatter and checks to this standalone source.
         code = (source / "main.cpp").read_text()
-        if format_source(code, source / "main.cpp", "clang-format-18") != code:
+        if format_source(code, source / "main.cpp", pinned_llvm_tool(ROOT, "clang-format")) != code:
             raise RuntimeError("Probe formatting differs from the repository's formatter")
         run([str(emscripten / "em++"), "--use-port=emdawnwebgpu:cpp_bindings=false",
              "--cflags"], env=env)
         # Read compile_commands to retain the actual wasm sysroot and port
-        # includes. Clang-tidy 18 cannot interpret driver-only port options.
+        # includes. Clang-tidy cannot interpret driver-only port options.
         import shlex
         database = json.loads((build / "compile_commands.json").read_text())
         entry = database[0]
@@ -95,7 +96,7 @@ def main() -> int:
         headers = list(port_include.rglob("webgpu.h"))
         if len(headers) != 1:
             raise RuntimeError("Cannot locate pinned WebGPU headers; build the probe first")
-        run(["clang-tidy-18", "--warnings-as-errors=*", str(source / "main.cpp"), "--", *flags,
+        run([pinned_llvm_tool(ROOT, "clang-tidy"), "--warnings-as-errors=*", str(source / "main.cpp"), "--", *flags,
              "--target=wasm32-unknown-emscripten", f"--sysroot={sysroot}",
              "-DEMSCRIPTEN", "-isystem", str(sysroot / "include" / "compat"),
              "-isystem", str(sysroot / "include" / "c++" / "v1"),

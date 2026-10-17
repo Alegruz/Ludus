@@ -22,6 +22,7 @@ from .resolve import compute_stamp, write_stamp
 from .sdkstore import SdkStore
 from .descriptor import parse_descriptor_file
 from .native import validate_target
+from .toolchain import PINNED_LLVM_MAJOR
 
 OWNER = "ludus.dev/project-setup/1"
 
@@ -202,14 +203,17 @@ def spirv_validator(root: Path) -> Path:
 
 
 def verify_tool_versions(configured, root: Path, runner, env, identity=None):
-    pins = read_object(root / "config/tool_versions.json").get("managed", {})
-    expected = {"cmake": pins.get("cmake", "3.29.6"), "ninja": pins.get("ninja", "1.11.1.3").rsplit(".", 1)[0]}
+    versions = read_object(root / "config/tool_versions.json")
+    pins = versions.get("managed", {})
+    clang = versions.get("minimum", {}).get("clang", "")
+    expected = {"cmake": pins.get("cmake", "3.29.6"), "ninja": pins.get("ninja", "1.11.1.3").rsplit(".", 1)[0],
+                "compiler": clang.split(".", 1)[0] if clang else str(PINNED_LLVM_MAJOR)}
     for key, pattern in (("cmake", r"cmake version (\d+\.\d+\.\d+)"),
                          ("ninja", r"(\d+\.\d+\.\d+)"),
                          ("compiler", r"clang version (\d+)")):
         output = runner([str(configured[key]), "--version"], cwd=root, env=env)
         match = re.search(pattern, output)
-        wanted = "18" if key == "compiler" else expected[key]
+        wanted = expected[key]
         if not match or match.group(1) != wanted:
             raise ToolingError("MissingTools", f"{key} must use pinned version {wanted}; prepare the tooling checkout")
         if key == "compiler" and identity is not None:

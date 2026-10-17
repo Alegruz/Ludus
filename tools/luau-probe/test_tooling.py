@@ -55,7 +55,7 @@ class IntegrityTests(unittest.TestCase):
             options = ['-DCMAKE_CXX_COMPILER=/prepared/clang++', '-DCMAKE_MAKE_PROGRAM=/prepared/ninja']
             self.assertFalse(TOOL['host_cache_changed'](build, options))
             cache = build/'CMakeCache.txt'
-            cache.write_text('CMAKE_CXX_COMPILER:FILEPATH=clang++-18\nCMAKE_MAKE_PROGRAM:FILEPATH=/prepared/ninja\n')
+            cache.write_text('CMAKE_CXX_COMPILER:FILEPATH=clang++\nCMAKE_MAKE_PROGRAM:FILEPATH=/prepared/ninja\n')
             self.assertTrue(TOOL['host_cache_changed'](build, options))
             cache.write_text('CMAKE_CXX_COMPILER:FILEPATH=/prepared/clang++\nCMAKE_MAKE_PROGRAM:FILEPATH=/prepared/ninja\n')
             self.assertFalse(TOOL['host_cache_changed'](build, options))

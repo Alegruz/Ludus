@@ -7,12 +7,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import engine
 from formatting import format_source
 import pre_commit
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CLANG_FORMAT = shutil.which("clang-format-18")
+CLANG_FORMAT = shutil.which(engine.pinned_llvm_tool(ROOT, "clang-format"))
 
 
 @unittest.skipUnless(CLANG_FORMAT, "requires pinned clang-format 18")

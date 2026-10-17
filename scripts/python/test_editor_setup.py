@@ -13,6 +13,8 @@ from unittest.mock import patch
 import editor_setup as editor
 import engine
 
+LLVM_MAJOR = engine.pinned_llvm_major(engine.repo_root())
+
 
 class EditorSetupTests(unittest.TestCase):
     def setUp(self):
@@ -86,12 +88,14 @@ class EditorSetupTests(unittest.TestCase):
             tool.parent.mkdir(parents=True, exist_ok=True)
             tool.symlink_to("/usr/bin/true")
         engine.cmake(self.root).symlink_to(executable)
+        (self.root / "config").mkdir()
+        shutil.copyfile(engine.repo_root() / "config/tool_versions.json", self.root / "config/tool_versions.json")
         clangd = engine.host_tools_bin_dir(self.root) / "clangd"
-        clangd.write_text("#!/bin/sh\necho 'clangd version 18.1.8'\n")
+        clangd.write_text(f"#!/bin/sh\necho 'clangd version {LLVM_MAJOR}.1.8'\n")
         clangd.chmod(0o755)
         with patch.object(engine, "ensure_bootstrap_for_preset"), \
                 patch.object(engine, "cmake_cache_repair_reasons", return_value=[]), \
-                patch.object(engine, "executable_version", return_value="clang version 18.1.8"), \
+                patch.object(engine, "executable_version", return_value=f"clang version {LLVM_MAJOR}.1.8"), \
                 patch.object(editor, "inventory") as inventory, \
                 self.assertRaisesRegex(engine.EngineError, "configure preset .* unavailable"):
             editor.validate(self.root, self.preset)

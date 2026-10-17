@@ -217,9 +217,10 @@ def main() -> None:
     else:
         sys.path.insert(0, str(ROOT / "scripts/python"))
         from formatting import format_source
+        from engine import pinned_llvm_tool
         for path in (SOURCE / "uniform_layout.h", SOURCE / "native.cpp"):
             code = path.read_text()
-            formatted = format_source(code, path, "clang-format-18")
+            formatted = format_source(code, path, pinned_llvm_tool(ROOT, "clang-format"))
             if args.action == "format":
                 path.write_text(formatted)
             else:
@@ -240,7 +241,7 @@ def main() -> None:
                 if flag not in ("-c", entry["file"], "-ftime-trace") and not flag.startswith("@"):
                     flags.append(flag)
                 index += 1
-            run(["clang-tidy-18", "--warnings-as-errors=*",
+            run([pinned_llvm_tool(ROOT, "clang-tidy"), "--warnings-as-errors=*",
                  f"--header-filter=^{re.escape(str(ROOT))}/(tools/shader-probe|modules|apps)/.*",
                  str(SOURCE / "native.cpp"), "--", *flags])
 

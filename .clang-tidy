@@ -37,7 +37,9 @@ Checks: >
   readability-redundant-control-flow,
   readability-redundant-member-init
 WarningsAsErrors: ''
-HeaderFilterRegex: '(.*/)?(modules|apps|tools|tests|examples)/.*'
+# Match whole directory components: an unanchored 'tools/' also matched
+# out/host-tools/ (vendored libc++ headers on macOS).
+HeaderFilterRegex: '(^|.*/)(modules|apps|tools|tests|examples)/.*'
 FormatStyle: file
 CheckOptions:
   - key: readability-braces-around-statements.ShortStatementLines

@@ -43,18 +43,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     include(CheckCXXSourceCompiles)
     # Recheck after SDK/compiler changes, even when their cache paths are unchanged.
     unset(LUDUS_MACOS_SDK_MATH_WORKS CACHE)
+    # <cfloat> after <cmath> matches init's probe: C++23 libc++ 22 with the macOS 27
+    # SDK leaves it empty (llvm/llvm-project#175849).
     check_cxx_source_compiles("#include <cmath>
+#include <cfloat>
 #ifndef NAN
 #error LudusSDK_missing_NAN
 #endif
 #ifndef INFINITY
 #error LudusSDK_missing_INFINITY
 #endif
+#ifndef DBL_MAX_10_EXP
+#error LudusSDK_missing_DBL_MAX_10_EXP
+#endif
 int main() { volatile double value = NAN; return std::isnan(value) ? 0 : 1; }"
         LUDUS_MACOS_SDK_MATH_WORKS)
     if(NOT LUDUS_MACOS_SDK_MATH_WORKS)
         ludus_dependency_error("macOS dependencies" "compatible compiler, libc++ and SDK headers"
-            "The NAN/INFINITY compile-link probe failed (the same contract HarfBuzz needs). Compiler: '${CMAKE_CXX_COMPILER}'; SDK: '${CMAKE_OSX_SYSROOT}'. See CMakeFiles/CMakeConfigureLog.yaml for compiler output."
+            "The NAN/INFINITY/<cfloat> compile-link probe failed (the contract HarfBuzz and Catch2 need). Compiler: '${CMAKE_CXX_COMPILER}'; SDK: '${CMAKE_OSX_SYSROOT}'. See CMakeFiles/CMakeConfigureLog.yaml for compiler output."
             "${setup_recovery}\n  Init tests installed SDKs before building dependencies. If SDKROOT is explicitly set, unset it or select a compatible installed SDK. A deployment-target change alone does not change SDK headers.")
     endif()
 endif()

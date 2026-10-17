@@ -26,6 +26,7 @@ def cook():
     S1["verify"]()
     sys.path.insert(0, str(ROOT / "scripts/python"))
     from formatting import format_source
+    from engine import pinned_llvm_tool
     generator = runpy.run_path(str(ROOT / "tools/script-cook/session.py"), run_name="s2_cooker")
     WORK.mkdir(parents=True, exist_ok=True)
     cache = None
@@ -43,7 +44,7 @@ def cook():
             (S1["WORK"] / "cooked/contract.d.luau").read_text(),
             sha((S1["MANIFEST"]).read_bytes()), json.loads((S1["WORK"] / "host.json").read_text()), cache)
         header = output / "packages.h"
-        header.write_text(format_source(header.read_text(), header, "clang-format-18"))
+        header.write_text(format_source(header.read_text(), header, pinned_llvm_tool(ROOT, "clang-format")))
         record = {"inputs": inputs(), "host": json.loads((S1["WORK"] / "host.json").read_text()),
                   "outputs": {str(p.relative_to(output)): sha(p.read_bytes()) for p in output.rglob("*") if p.is_file()}}
         (output / "evidence.json").write_text(json.dumps(record, indent=2) + "\n")
@@ -69,10 +70,11 @@ def check(preset, fix):
     S1["check"](preset, fix)
     sys.path.insert(0, str(ROOT / "scripts/python"))
     from formatting import format_source
+    from engine import pinned_llvm_tool
     for source in sorted((ROOT / "tools/script-session").glob("*")):
         if source.suffix not in (".cpp", ".h"): continue
         text = source.read_text()
-        formatted = format_source(text, source, "clang-format-18")
+        formatted = format_source(text, source, pinned_llvm_tool(ROOT, "clang-format"))
         if fix: source.write_text(formatted)
         else: require(text == formatted, f"Format {source} using script-session check --fix")
     if fix: return
@@ -81,7 +83,7 @@ def check(preset, fix):
         if "/tools/script-session/" not in entry["file"]: continue
         if preset.startswith("web-"):
             from web_build import analysis_commands
-            command = analysis_commands(ROOT, [entry], "clang-tidy-18",
+            command = analysis_commands(ROOT, [entry], pinned_llvm_tool(ROOT, "clang-tidy"),
                 ROOT / "out/host-tools/emsdk/upstream/emscripten/cache/sysroot")[0]
             run([flag for flag in command if flag != "-sSUPPORT_LONGJMP=wasm"])
         else:
@@ -92,7 +94,7 @@ def check(preset, fix):
                 if flag == "-o": index += 2; continue
                 if flag not in ("-c", entry["file"]) and not flag.startswith("@"): clean.append(flag)
                 index += 1
-            run(["clang-tidy-18", entry["file"], "--quiet", "--warnings-as-errors=*", "--", *clean])
+            run([pinned_llvm_tool(ROOT, "clang-tidy"), entry["file"], "--quiet", "--warnings-as-errors=*", "--", *clean])
 
 
 def main():

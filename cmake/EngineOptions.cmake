@@ -91,3 +91,16 @@ function(ludus_configure_project_options target_name)
         endif()
     endif()
 endfunction()
+
+# Read the LLVM major pinned by config/tool_versions.json (minimum.clang) so
+# compiler gates follow the single toolchain pin instead of a literal.
+function(ludus_get_pinned_llvm_major output)
+    set(pin "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/tool_versions.json")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${pin}")
+    file(READ "${pin}" document)
+    string(JSON clang ERROR_VARIABLE pin_error GET "${document}" minimum clang)
+    if(pin_error OR NOT clang MATCHES "^([0-9]+)\\.")
+        message(FATAL_ERROR "config/tool_versions.json must pin minimum.clang as a version")
+    endif()
+    set(${output} "${CMAKE_MATCH_1}" PARENT_SCOPE)
+endfunction()

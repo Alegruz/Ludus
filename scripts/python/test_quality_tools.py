@@ -15,6 +15,8 @@ from unittest.mock import patch
 import engine
 import tooling_quality as quality
 
+LLVM_MAJOR = engine.pinned_llvm_major(engine.repo_root())
+
 
 class QualityToolsTests(unittest.TestCase):
     def setUp(self):
@@ -105,11 +107,11 @@ class QualityToolsTests(unittest.TestCase):
         self.assertIn("invalid_quality_event", result.stdout + result.stderr)
 
     def test_real_analyzer_rejects_known_null_dereference(self):
-        executable = shutil.which("clang-tidy-18") or shutil.which("clang-tidy")
+        executable = shutil.which(f"clang-tidy-{LLVM_MAJOR}") or shutil.which("clang-tidy")
         if not executable:
             self.skipTest("Reference clang-tidy unavailable")
         version = subprocess.run([executable, "--version"], capture_output=True, text=True, check=True)
-        self.assertIn("version 18.", version.stdout)
+        self.assertIn(f"version {LLVM_MAJOR}.", version.stdout)
         source = self.root / "fault.cpp"
         source.write_text("int Fault() { int* value = nullptr; return *value; }\n")
         result = subprocess.run([executable, f"--config-file={engine.repo_root() / 'config/clang-analyzer.yml'}",
@@ -118,7 +120,7 @@ class QualityToolsTests(unittest.TestCase):
         self.assertIn("clang-analyzer-core.NullDereference", result.stdout + result.stderr)
 
     def test_real_analyzer_respects_owned_moved_state_contract(self):
-        executable = shutil.which("clang-tidy-18") or shutil.which("clang-tidy")
+        executable = shutil.which(f"clang-tidy-{LLVM_MAJOR}") or shutil.which("clang-tidy")
         if not executable:
             self.skipTest("Reference clang-tidy unavailable")
         source = self.root / "moved.cpp"

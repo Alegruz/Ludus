@@ -28,15 +28,16 @@ def validate(root: Path, preset: str) -> Path:
     for tool in (engine.clang_cxx(root), engine.ninja(root), engine.cmake(root)):
         if not tool.is_file() or not os.access(tool, os.X_OK):
             raise engine.EngineError(f"Missing tool {tool}; run ./init.sh")
+    llvm_major = engine.pinned_llvm_major(root)
     compiler_version = engine.executable_version(str(engine.clang_cxx(root)), ("--version",), root)
-    if not engine.version_tuple(compiler_version) or engine.version_tuple(compiler_version)[0] != 18:
-        raise engine.EngineError("Editor requires reference Clang 18")
+    if not engine.version_tuple(compiler_version) or engine.version_tuple(compiler_version)[0] != llvm_major:
+        raise engine.EngineError(f"Editor requires reference Clang {llvm_major}")
     clangd = engine.host_tools_bin_dir(root) / "clangd"
     if not clangd.is_file() or not os.access(clangd, os.X_OK):
-        raise engine.EngineError("Missing clangd-18; install it and rerun ./init.sh")
+        raise engine.EngineError(f"Missing clangd-{llvm_major}; install it and rerun ./init.sh")
     result = subprocess.run([str(clangd), "--version"], text=True, capture_output=True, timeout=15)
-    if result.returncode or not re.search(r"\bclangd version 18\.", result.stdout):
-        raise engine.EngineError("Editor requires reference clangd 18")
+    if result.returncode or not re.search(rf"\bclangd version {llvm_major}\.", result.stdout):
+        raise engine.EngineError(f"Editor requires reference clangd {llvm_major}")
     # CMake owns inheritance and host conditions. JSON parsing alone cannot
     # establish whether a preset is actually selectable.
     for kind in ("configure", "build", "test"):

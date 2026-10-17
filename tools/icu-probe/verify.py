@@ -22,6 +22,11 @@ CASES = ("embedded-data-registration", "pinned-icu-cldr-unicode-versions", "cano
          "dynamic-format-measurements", "host-cleanup-releases-every-allocation")
 SWEEPS = ("nested-select-plural", "number-skeleton", "offset-plural-text", "host-initialization")
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/python"))
+from engine import pinned_llvm_tool  # noqa: E402
+
+LLVM_STRIP = pinned_llvm_tool(ROOT, "llvm-strip")
+
 # ASan reports these signals itself; they are crashes, as on unsanitized builds.
 DEADLY_SIGNALS = ("SEGV", "BUS", "FPE", "ILL", "ABRT", "stack-overflow")
 
@@ -33,7 +38,7 @@ def compressed(data: bytes) -> int:
 def artifact(path: Path) -> dict:
     data = path.read_bytes()
     result = {"bytes": len(data), "gzip_bytes": compressed(data), "sha256": hashlib.sha256(data).hexdigest()}
-    strip = shutil.which("llvm-strip-18") or shutil.which("strip")
+    strip = shutil.which(LLVM_STRIP) or shutil.which("strip")
     if path.suffix not in (".js", ".wasm") and strip is not None:
         with tempfile.TemporaryDirectory() as directory:
             copy = Path(directory) / path.name
