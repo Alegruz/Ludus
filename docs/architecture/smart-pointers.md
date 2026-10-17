@@ -4,9 +4,13 @@ Status: Implementation contract, reviewed against HEAD `1e6bd1a` on 2026-10-06.
 Slice 1 (unique correctness) is implemented in
 [pointer.hpp](../../modules/foundation/base/include/ludus/foundation/base/pointer.hpp)
 with [ownership tests](../../modules/foundation/base/tests/pointer_tests.cpp) and
-the `ludus_pointer_diagnostics` negative-compilation gate. The allocation domain
-and shared string were already implemented. Domain object factories and general
-shared/weak owners are future work. No performance results accompany this design.
+the `ludus_pointer_diagnostics` negative-compilation gate. Slice 2 (domain object
+ownership) is implemented in
+[owned_object.hpp](../../modules/foundation/memory/include/ludus/foundation/memory/owned_object.hpp)
+with [factory tests](../../modules/foundation/memory/tests/owned_object_tests.cpp);
+`InputSystem`'s reducer storage is its first migrated consumer. The allocation
+domain and shared string were already implemented. General shared/weak owners
+are future work. No performance results accompany this design.
 
 Use **unique ownership by default, atomic shared ownership for independent
 overlapping lifetimes, and explicit handles and leases for managed objects**.
@@ -25,7 +29,8 @@ design and the changes made after reading the relevant Gems chapters.
 ## Current implementation and immediate repairs
 
 The first four rows record the defects found at review time and their slice 1
-repair; the remaining rows describe existing facilities later slices build on.
+repair; the remaining rows describe existing facilities later slices build on,
+and the slice 2 factory.
 
 | Inspected source | Finding and consequence |
 | --- | --- |
@@ -34,6 +39,7 @@ repair; the remaining rows describe existing facilities later slices build on.
 | Public `foundation::UniquePtr` alias | Exposed only `T`. **Repaired:** it is `UniquePtr<T, D = core::DefaultDeleter<T>>`, still naming the canonical `core::UniquePtr`. |
 | [Base CMake](../../modules/foundation/base/CMakeLists.txt) | Exported `pointer.hpp` without dedicated pointer tests. **Repaired:** [pointer_tests.cpp](../../modules/foundation/base/tests/pointer_tests.cpp) covers ownership and constraints; [pointer_compile_failures.cpp](../../modules/foundation/base/tests/pointer_compile_failures.cpp) holds the hard-error cases compiled by `ludus_pointer_diagnostics`. |
 | [AllocationDomain](../../modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp) | Already supplies immutable domain identity, fallible allocation and original-layout free. Object factories can use it without placing Memory below Base. |
+| [owned_object.hpp](../../modules/foundation/memory/include/ludus/foundation/memory/owned_object.hpp) | **Slice 2:** `TryCreateOwned<T>` and exact-type `DomainDeleter<T>` implement the factory contract below. [keyboard.cpp](../../modules/input/src/keyboard.cpp) creates and destroys the `InputSystem` reducer through the system domain; other `new`/`delete` pairs are unchanged. |
 | [SharedString](../../modules/foundation/strings/src/shared_string.cpp) | Already uses an immutable block, domain attribution, `uint64` atomic count and saturation pinning. Preserve its API and semantics; its private count helpers do not establish weak-promotion safety. |
 | [Wayland owners](../../modules/platform/include/ludus/platform/wayland/window.h), [Cocoa window factory](../../modules/platform/src/window_cocoa.mm), [Audio facade](../../modules/audio/src/facade.cpp) | Native deleter specializations and raw ownership transfers already exist. Preserve creator-specific destruction and audit the receiving protocol before changing factories. |
 
@@ -75,7 +81,7 @@ foundational vocabulary and lightweight type/utility facilities, never Memory,
 Logging, containers or private implementation headers. Do not add owners to
 `core.h`, a foundational header, or the PCH.
 
-Place domain object factories and `DomainDeleter<T>` in proposed
+Domain object factories and `DomainDeleter<T>` live in
 `foundation/memory/owned_object.hpp`. Place proposed `SharedPtr<T>` and
 `WeakPtr<T>` together in `foundation/memory/shared_ptr.hpp` in FoundationMemory.
 There is no new ownership module or dependency cycle.
@@ -159,7 +165,7 @@ incomplete external types.
 
 ## Fallible construction and domain lifetime
 
-Factories are `[[nodiscard]]` and `noexcept`. Use a small proposed
+Factories are `[[nodiscard]]` and `noexcept`. They return the small
 `OwnershipStatus` with `Ok`, `InvalidState`, `TooLarge`, and `OutOfMemory`.
 `TryCreateOwned<T>(domain, output, args...)` writes the existing unique template
 with `DomainDeleter<T>`; `TryMakeShared<T>(domain, output, args...)` writes the
@@ -171,7 +177,10 @@ and is preserved. All failures preserve output and acquire no ownership. Validat
 layout with checked `usize` arithmetic before allocation, request exact size and
 power-of-two alignment, and free through the original domain. A domain deleter
 for an exact type stores one domain pointer; its thunk knows `sizeof(T)` and
-`alignof(T)`.
+`alignof(T)`. `TooLarge` reports a size that an aligned backend cannot round up
+to its alignment within the signed address range. A default-constructed domain
+deleter has no domain: it exists only so an empty output can be declared, and
+invoking it terminates through `LUDUS_REQUIRE` instead of guessing a backend.
 
 Require nothrow construction for the forwarded arguments and nothrow destruction.
 Allocate before forwarding arguments; allocation failure does not consume move

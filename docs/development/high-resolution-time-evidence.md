@@ -144,3 +144,128 @@ synthetic timestamps at a 2^62 ns epoch:
 
 The Linux reference profile, sanitizer execution, browser presets and build budget
 are validated by the pull request's CI tiers.
+
+## Native frame pacing
+
+October 16, 2026. Scope: the pacing half of the
+[pacing and inspection stage](../architecture/high-resolution-time.md#implementation-before-research):
+`Ludus::PlatformPacing` (`FramePacer`, `GetSystemPacingClock()`) and the world
+reference `LoopPacing`. Runtime timing telemetry and the editor Timing view are
+separate later work.
+
+### Policy tests
+
+Unit tests use an injected `PacingClock`. Its wait advances a synthetic counter
+at a 2^62 ns epoch, so no test sleeps and results do not depend on host load.
+
+| Behavior | Evidence (`modules/platform/tests/frame_pacing_tests.cpp`) |
+| --- | --- |
+| Drift-free targets | 600 frames with a 2 ms oversleep on every wake keep every target on `epoch + k * 16,666,667` ns; each wake is exactly 2 ms late and lateness never accumulates. |
+| Interruption and early wakes | Two `Interrupted` returns re-wait for the remaining interval (three waits, wake exactly on target). A `Completed` wake 50 µs early waits 50 µs more. Persistent early wakes stop after eight attempts (`WaitLimit`), keep the phase, and the next target, less than two intervals away, is honored. |
+| Failed or unsupported waits | One wait, frame starts early (`WaitFailed`), phase kept, no spin. Browser builds always report `Unsupported`. |
+| Lateness | A 2.5-interval frame skips one target and keeps the grid. Arriving exactly on a target, or exactly at the four-interval bound, keeps the phase. One nanosecond beyond the bound re-anchors at the frame start, and later frames wait full intervals. A zero bound re-anchors after any lateness. |
+| Clock faults and limits | A reading below the previous one, before or during a wait, re-anchors without waiting. An unrepresentable next target drops the schedule. Zero and over-one-second intervals are rejected with the previous policy kept. |
+| Lifecycle | After 30 s of suspension, `Reset()` resumes from a baseline. Without it, the bound re-anchors and about 1,800 missed targets never run back to back. A 400 ms session-replacement frame re-anchors; reconfiguring drops the old phase. |
+
+World reference tests (`apps/world_demo/tests/frame_pacing_tests.cpp`) check the
+loop policy against the real `TickDriver` and `Session`. Without a cap, presented
+frames read no clock and never wait. Loading frames wait at 60 Hz, and presenting
+again drops the idle schedule. A 30 Hz cap feeds exactly 30 x 33,333,333 ns to the
+driver (59 ticks, none discarded). Pausing the simulation for 30 frames keeps
+every frame on its pacing target, and resuming drops only the driver baseline.
+Activation after a slow load resets to a baseline. The bounded `--pacing-report`
+summary has exact nearest-rank percentiles and counts dropped records.
+
+### Host measurements
+
+Method: `ludus_world_demo` Development build (pinned Clang 18, warnings as
+errors) at base revision `8f570f74` plus this change, on an Apple M5 MacBook
+(10 cores: 4 performance, 6 efficiency) running macOS 26.6. The built-in display's
+refresh mode was not queried; uncapped presents returning every 8.14 ms are
+consistent with 120 Hz. Each configuration ran three times in sequence, 600
+frames each, through the measurement script below. Load averages were recorded
+before and after each run. The one-minute load average was 50 to 42 for the
+headless runs and 38 to 27 for the windowed runs: five to three times the core
+count, from other worktrees' builds. No quieter host condition was available, so
+the data shows behavior under heavy load only.
+
+```bash
+B=out/build/macos-clang-development/apps/world_demo/ludus_world_demo
+for args in "--headless --frame-rate 30" "--headless --frame-rate 60" "--headless --frame-rate 120" \
+            "" "--frame-rate 60" "--frame-rate 50"; do
+  for rep in 1 2 3; do uptime; $B --frames 600 --pacing-report ${=args} 2>&1 | grep Pacing; done
+done
+```
+
+The script is written for zsh (`${=args}` splits words). Wake lateness is the
+final reading after the wait minus the absolute target, for `Waited` frames. The
+frame-start interval is wake to wake. The present-return interval is the time
+between readings taken when `EndFrame` returned `Ready`. That reading is CPU-side
+and excludes compositor and scanout time; it is not a photon or presentation
+timestamp. Values are in milliseconds and pool all three runs per configuration;
+p99 and maximum are given as the range across runs.
+
+| Configuration | Wake lateness p50 | p90 | p99 (range) | Frame start p50 / p90 | Present return p50 / p90 | Stalls |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Headless, 30 Hz cap | 4.25-4.90 | 5.71-7.07 | 10.3-19.9 | 33.31-33.34 / 36.8-37.0 | n/a | None. 0-2 `Late` per run. |
+| Headless, 60 Hz cap | 3.27-3.31 | 4.23-5.93 | 6.3-12.0 | 16.58-16.61 / 19.1-20.0 | n/a | None. 0-3 `Late` per run. |
+| Headless, 120 Hz cap | 1.65-1.67 | 1.96-2.05 | 2.4-4.7 | 8.32-8.33 / 9.7-9.8 | n/a | None. |
+| Window, uncapped (FIFO) | n/a | n/a | n/a | n/a | 8.14-8.15 / 9.26 | One 236 ms present return in run 1. |
+| Window, 60 Hz cap | 0.78-1.01 | 1.01-1.02 | 1.04-1.27 | 16.665-16.667 / 16.9-17.3 | 16.66-16.67 / 16.96-17.20 | Run 2: one 418 ms frame, two `Rescheduled`. |
+| Window, 50 Hz cap | 1.01 | 1.02 | 1.05-1.06 | 20.000 / 20.29-20.65 | 20.00 / 20.27-20.64 | Run 3: one 998 ms frame, two `Rescheduled`. |
+
+What the data shows:
+
+- **Absolute targets hold the requested rate.** Mean frame-start intervals were
+  33.34, 16.67-16.68, 8.33-8.34, 16.65 and 19.97 ms for the 30, 60, 120, 60
+  (windowed) and 50 Hz caps. Apart from the stalled runs, each mean is within
+  0.03 ms of its cap over 600 frames: late wakes did not accumulate.
+- **A wake is late by an offset that depends on process state, not by ~0.**
+  The windowless headless process woke later as the interval grew: 1.65 ms at
+  120 Hz, 3.3 ms at 60 Hz and 4.3-4.9 ms at 30 Hz (median lateness).
+  The windowed application woke a nearly constant 1.01 ms late (p90 1.02 ms),
+  under similar load. The interval-proportional and constant offsets suggest
+  operating-system timer leeway (coalescing) rather than CPU queueing alone. The
+  data does not identify the mechanism.
+- **A constant offset shifts phase; it does not add jitter.** The windowed 60 Hz
+  cap kept frame-start and present-return p90 within 0.3 to 0.6 ms of 16.667 ms.
+- **The lateness policy prevented bursts.** The 418 ms and 998 ms windowed stalls
+  produced two `Rescheduled` outcomes each and no back-to-back catch-up frames.
+  The 998 ms stall matches the Metal layer's one-second `nextDrawable` timeout,
+  but its cause was not traced. Skipped-target `Late` outcomes in the headless
+  runs show the in-bound case.
+- **On this display the 50 Hz cap was not quantized at the CPU side.** EndFrame
+  returns followed the cap at 20.0 ms rather than alternating 16.7 and 33.3 ms.
+  This is consistent with a variable-refresh display but does not show scanout.
+  A fixed-refresh display is not covered.
+
+What it does not show: wake-up behavior on an idle host, on Linux, on battery or
+power-saving modes, or with longer runs; actual presentation (photon) times;
+latency from input to display; the cause of either offset. Three sequential runs
+per configuration on a shared, loaded host only supports the coarse conclusions
+above. HR-02's methodology (randomized order, more executions, confidence
+intervals) applies before using these numbers for any comparison.
+
+No spin is implemented. The dominant lateness here is a systematic offset that
+shifts phase evenly. Removing about 1 ms per frame by spinning would keep a core
+busy for roughly 6 percent of each 60 Hz frame and does not change interval
+evenness. That trade is not justified by this data. Reducing timer leeway (thread
+QoS, absolute OS waits) is a candidate experiment, not adopted behavior.
+
+### Validation
+
+| Validation (macOS arm64 host, pinned Clang 18, warnings as errors) | Result |
+| --- | --- |
+| Development full build with `-DLUDUS_BUILD_WORLD_DEMO=ON` and `ctest --preset macos-clang-development --no-tests=error` | Build passed, warning-clean. 105 of 106 tests passed, including the header self-sufficiency gate with the new public header. The Cocoa window suite fails without `LUDUS_TEST_COCOA=1` in a WindowServer session, as in earlier stages. |
+| `ludus_platform_pacing_tests` | 12 cases (3,778 assertions) passed. |
+| `ludus_world_demo_pacing_tests`, `ludus_world_demo_tests` | 6 and 27 cases passed. |
+| World reference | `--headless` hash `7529209811830740537` is unchanged with `--frame-rate 60`; windowed `--frames 600` runs above presented every frame. |
+| `python3 scripts/python/source_policy.py --base origin/develop` | Passed. |
+| `./scripts/check --format` | Passed, including the include boundary, naming scopes (the new Platform files are adopted) and container policy. |
+| clang-tidy 18 on the new and changed sources | No findings. |
+| Documentation: `check-docs`, strict MkDocs build, `test_docs.py`, `test_wiki.py` | Passed. |
+| `scripts/build-api --bootstrap` | 166 headers; no new documentation gaps (the new public header is fully documented). |
+| ASan/UBSan execution | Not run locally: the Clang 18 ASan runtime hangs at startup on this macOS 26.6 host (see above). |
+
+The Linux reference profile, sanitizer execution, browser presets, installed SDK
+and build budget are validated by the pull request's CI tiers.

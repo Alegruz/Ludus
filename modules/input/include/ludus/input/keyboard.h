@@ -14,8 +14,9 @@
 // embedded. Fallible configuration (ReplaceBindings) reports failure explicitly
 // and leaves the old state intact; it never throws.
 
-#include <ludus/foundation/base/pointer.hpp> // ludus::foundation::core::UniquePtr
+#include <ludus/foundation/base/pointer.hpp> // ludus::foundation::UniquePtr
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/memory/owned_object.hpp> // ludus::foundation::DomainDeleter
 #include <ludus/input/actions.h>
 #include <ludus/input/key.h>
 #include <ludus/input/keyboard_event.h>
@@ -193,10 +194,11 @@ public:
 
 private:
     struct Impl;
-    // All reducer storage lives in Impl. It is allocated exactly once with a
-    // non-throwing new at construction (the only allocation in the system) and
-    // freed at destruction. No hot-path allocation ever occurs. The concrete
-    // size is reported in the performance notes (M4).
-    ludus::foundation::core::UniquePtr<Impl> mImpl;
+    // All reducer storage lives in Impl. It is created exactly once through the
+    // system allocation domain at construction (the only allocation in the
+    // system) and freed through that same domain at destruction. No hot-path
+    // allocation ever occurs. The concrete size is reported in the performance
+    // notes (M4).
+    ludus::foundation::UniquePtr<Impl, ludus::foundation::DomainDeleter<Impl>> mImpl;
 };
 } // namespace ludus::input

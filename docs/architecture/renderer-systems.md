@@ -2177,6 +2177,17 @@ touched there. Keep the input scene's texture storage immutable and alive until
 the bake is destroyed. Composition must discard results with obsolete exact
 revisions before publication.
 
+Input flaws that cannot change the result are tolerated and reported, not fatal.
+A zero-area (collapsed) triangle covers no surface: it is left out of the BVH,
+emitter selection and probes, keeps its chart tile (zero irradiance) so layout
+and bake coordinates are unchanged, and an emitter whose triangles all collapsed
+emits nothing. `GetDiagnostics` and `GetSkippedTriangleCount` report the skipped
+triangles as soon as preparation completes, while ranges still run, so a caller
+can warn its user and offer `Cancel`; each Ready chart also carries its object's
+count. Real triangles keep their indices and random streams, so their charts are
+bit-identical to a scene without the collapsed triangles. Non-finite geometry,
+including an area that overflows binary32, still fails preparation.
+
 The virtual diffuse receiver uses cosine-hemisphere sampling plus the reference
 integrator's same-measure next-event MIS, visibility, metallic/roughness transport
 and compensated roulette. It includes **all admitted emissive triangles** and

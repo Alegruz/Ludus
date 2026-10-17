@@ -549,3 +549,190 @@ TEST_CASE("Static bake survives system shutdown and destruction while in flight"
         REQUIRE(system.Shutdown() == threading::JobStatus::Ok);
     }
 }
+namespace
+{
+/// Collapsed triangles appended to the final object: one repeats a vertex, one is collinear.
+constexpr uint32 COLLAPSED_TRIANGLE_COUNT = 2;
+constexpr uint64 FINAL_OBJECT_SOURCE_ID = 500;
+/// Path samples per Step call; any positive budget yields the same charts.
+constexpr uint32 SERIAL_STEP_SAMPLES = 97;
+namespace format = ludus::content::scene_format;
+/// MakeGridBakeScene plus a final object with its own mesh: one real triangle, then
+/// optionally the collapsed ones. They sit at the end of the global triangle order, so
+/// every real triangle keeps its index (and random stream) with or without them.
+resources::SceneDefinition MakeSceneWithFinalObject(uint32 cells, bool hasCollapsedTriangles)
+{
+    resources::SceneDefinition scene = MakeGridBakeScene(cells);
+    const uint32 meshIndex = static_cast<uint32>(scene.Meshes.GetSize());
+    REQUIRE(scene.Meshes.TryResize(scene.Meshes.GetSize() + 1) == true);
+    resources::SceneMesh& mesh = scene.Meshes[meshIndex];
+    const math::Vector3 positions[] = {{-.5F, -.5F, .4F}, {.5F, -.5F, .4F}, {0, .5F, .4F}, {0, -.5F, .4F}};
+    REQUIRE(mesh.Positions.TryAddRange(positions) == true);
+    REQUIRE(mesh.Normals.TryResize(mesh.Positions.GetSize()) == true);
+    REQUIRE(mesh.Texcoords.TryResize(mesh.Positions.GetSize()) == true);
+    for (math::Vector3& normal : mesh.Normals)
+    {
+        normal = {0, 0, 1};
+    }
+    const uint32 real[] = {0, 1, 2};
+    REQUIRE(mesh.Indices.TryAddRange(real) == true);
+    if (hasCollapsedTriangles == true)
+    {
+        // A repeated vertex, then three collinear points along the bottom edge.
+        const uint32 collapsed[] = {0, 0, 1, 0, 3, 1};
+        REQUIRE(mesh.Indices.TryAddRange(collapsed) == true);
+    }
+    const usize objectIndex = scene.Objects.GetSize();
+    REQUIRE(scene.Objects.TryResize(objectIndex + 1) == true);
+    scene.Objects[objectIndex].SourceId = FINAL_OBJECT_SOURCE_ID;
+    scene.Objects[objectIndex].Mesh = meshIndex;
+    scene.Objects[objectIndex].Material = 0;
+    return scene;
+}
+/// Reads the RGB of one triangle's chart tile.
+StaticArray<uint8, 3> ReadTile(const rr::StaticLightingChart& chart, usize triangle)
+{
+    const usize columns = chart.Width / format::BAKE_CHART_TILE_PIXELS;
+    const usize x = (triangle % columns) * format::BAKE_CHART_TILE_PIXELS;
+    const usize y = (triangle / columns) * format::BAKE_CHART_TILE_PIXELS;
+    const usize offset = (y * chart.Width + x) * format::TEXEL_BYTES;
+    return {chart.Pixels[offset], chart.Pixels[offset + 1], chart.Pixels[offset + 2]};
+}
+void CompleteSerialBake(rr::StaticLightingBake& inoutBake)
+{
+    rhi::RasterStatus status = rhi::RasterStatus::Pending;
+    while (status == rhi::RasterStatus::Pending)
+    {
+        status = inoutBake.Step(SERIAL_STEP_SAMPLES);
+    }
+    REQUIRE(status == rhi::RasterStatus::Ready);
+}
+} // namespace
+TEST_CASE("Static bake skips zero-area triangles without perturbing the rest", "[renderer][static-lighting]")
+{
+    const resources::SceneDefinition clean = MakeSceneWithFinalObject(ORACLE_GRID_CELLS, false);
+    const resources::SceneDefinition flawed = MakeSceneWithFinalObject(ORACLE_GRID_CELLS, true);
+    const rr::StaticLightingBakeDescription description = MakeBakeDescription(16);
+    const usize objectCount = flawed.Objects.GetSize();
+    const usize finalObject = objectCount - 1;
+    rr::StaticLightingBake cleanBake;
+    rr::StaticLightingBake flawedBake;
+    REQUIRE(cleanBake.Initialize(clean, description) == rhi::RasterStatus::Pending);
+    REQUIRE(flawedBake.Initialize(flawed, description) == rhi::RasterStatus::Pending);
+    // Serial preparation completes inside Initialize, so the report is available before any Step.
+    rr::StaticLightingBakeDiagnostics diagnostics;
+    REQUIRE(flawedBake.GetDiagnostics(diagnostics) == rhi::RasterStatus::Ready);
+    CHECK(diagnostics.SkippedTriangleCount == COLLAPSED_TRIANGLE_COUNT);
+    CHECK(diagnostics.AffectedObjectCount == 1);
+    uint32 skipped = 99;
+    REQUIRE(flawedBake.GetSkippedTriangleCount(finalObject, skipped) == rhi::RasterStatus::Ready);
+    CHECK(skipped == COLLAPSED_TRIANGLE_COUNT);
+    REQUIRE(flawedBake.GetSkippedTriangleCount(0, skipped) == rhi::RasterStatus::Ready);
+    CHECK(skipped == 0);
+    skipped = 99;
+    CHECK(flawedBake.GetSkippedTriangleCount(objectCount, skipped) == rhi::RasterStatus::InvalidDescription);
+    CHECK(skipped == 99);
+    REQUIRE(cleanBake.GetDiagnostics(diagnostics) == rhi::RasterStatus::Ready);
+    CHECK(diagnostics.SkippedTriangleCount == 0);
+    CHECK(diagnostics.AffectedObjectCount == 0);
+    CompleteSerialBake(cleanBake);
+    CompleteSerialBake(flawedBake);
+    // Collapsed triangles are never hit, sampled as emitters or probed, so every other
+    // object's chart is bit-identical to the clean scene's.
+    RequireIdenticalCharts(cleanBake, flawedBake, finalObject);
+    rr::StaticLightingChart cleanChart;
+    rr::StaticLightingChart flawedChart;
+    REQUIRE(cleanBake.GetChart(finalObject, cleanChart) == rhi::RasterStatus::Ready);
+    REQUIRE(flawedBake.GetChart(finalObject, flawedChart) == rhi::RasterStatus::Ready);
+    CHECK(cleanChart.SkippedTriangleCount == 0);
+    CHECK(flawedChart.SkippedTriangleCount == COLLAPSED_TRIANGLE_COUNT);
+    // The layout keeps one tile per triangle; the real tile matches and collapsed tiles are zero.
+    CHECK(flawedChart.Scale == cleanChart.Scale);
+    CHECK(ReadTile(flawedChart, 0) == ReadTile(cleanChart, 0));
+    const StaticArray<uint8, 3> zero{0, 0, 0};
+    for (usize triangle = 1; triangle <= COLLAPSED_TRIANGLE_COUNT; ++triangle)
+    {
+        CHECK(ReadTile(flawedChart, triangle) == zero);
+    }
+    // Scheduled evaluation skips the same triangles and stays bit-identical to Step.
+    threading::JobSystem system;
+    REQUIRE(system.Initialize({ .WorkerCount = 2 }) == threading::JobStatus::Ok);
+    rr::StaticLightingBake scheduled;
+    REQUIRE(scheduled.Submit(system, flawed, description, { .RangeCount = 7 }) == rhi::RasterStatus::Pending);
+    REQUIRE(scheduled.Finish() == rhi::RasterStatus::Ready);
+    RequireIdenticalCharts(flawedBake, scheduled, objectCount);
+    rr::StaticLightingBakeProgress progress;
+    scheduled.GetProgress(progress);
+    CHECK(progress.CompletedSamples == progress.TotalSamples);
+}
+TEST_CASE("Scheduled static bake reports skipped triangles while ranges run and after cancellation",
+          "[renderer][static-lighting][threading]")
+{
+    rr::StaticLightingBake unbound;
+    rr::StaticLightingBakeDiagnostics diagnostics;
+    diagnostics.SkippedTriangleCount = 77;
+    REQUIRE(unbound.GetDiagnostics(diagnostics) == rhi::RasterStatus::InvalidState);
+    REQUIRE(diagnostics.SkippedTriangleCount == 77);
+    const resources::SceneDefinition scene = MakeSceneWithFinalObject(CANCEL_GRID_CELLS, true);
+    threading::JobSystem system;
+    REQUIRE(system.Initialize({ .WorkerCount = 2 }) == threading::JobStatus::Ok);
+    rr::StaticLightingBake bake;
+    REQUIRE(bake.Submit(system, scene, MakeBakeDescription(CANCEL_SAMPLES)) == rhi::RasterStatus::Pending);
+    rhi::RasterStatus prepared = rhi::RasterStatus::Pending;
+    while (prepared == rhi::RasterStatus::Pending)
+    {
+        prepared = bake.GetDiagnostics(diagnostics);
+    }
+    REQUIRE(prepared == rhi::RasterStatus::Ready);
+    // The report arrives with preparation, long before this multi-second bake finishes,
+    // so a caller can warn and offer Cancel.
+    REQUIRE(bake.Poll() == rhi::RasterStatus::Pending);
+    CHECK(diagnostics.SkippedTriangleCount == COLLAPSED_TRIANGLE_COUNT);
+    CHECK(diagnostics.AffectedObjectCount == 1);
+    bake.Cancel();
+    REQUIRE(bake.Finish() == rhi::RasterStatus::NotReady);
+    rr::StaticLightingBakeDiagnostics afterCancel;
+    REQUIRE(bake.GetDiagnostics(afterCancel) == rhi::RasterStatus::Ready);
+    CHECK(afterCancel.SkippedTriangleCount == COLLAPSED_TRIANGLE_COUNT);
+    // A failed preparation never reports.
+    rr::StaticLightingBakeDescription invalid = MakeBakeDescription(4);
+    invalid.SceneRevision = 0;
+    rr::StaticLightingBake failed;
+    REQUIRE(failed.Submit(system, scene, invalid) == rhi::RasterStatus::Pending);
+    REQUIRE(failed.Finish() == rhi::RasterStatus::InvalidDescription);
+    diagnostics.SkippedTriangleCount = 77;
+    CHECK(failed.GetDiagnostics(diagnostics) == rhi::RasterStatus::NotReady);
+    CHECK(diagnostics.SkippedTriangleCount == 77);
+}
+TEST_CASE("Static bake treats a fully collapsed emitter as emitting nothing", "[renderer][static-lighting]")
+{
+    resources::SceneDefinition scene = MakeBakeScene(true, false, false);
+    // Every emitter instance shares mesh 1; collapse it onto one point.
+    scene.Materials[1].HasEmissionPower = true;
+    scene.Materials[1].EmissionPower = 100;
+    for (math::Vector3& position : scene.Meshes[1].Positions)
+    {
+        position = {0, 0, 0};
+    }
+    rr::StaticLightingBake bake;
+    REQUIRE(bake.Initialize(scene, MakeBakeDescription(8)) == rhi::RasterStatus::Pending);
+    rr::StaticLightingBakeDiagnostics diagnostics;
+    REQUIRE(bake.GetDiagnostics(diagnostics) == rhi::RasterStatus::Ready);
+    CHECK(diagnostics.SkippedTriangleCount == SYNTHETIC_EMITTER_COUNT);
+    CHECK(diagnostics.AffectedObjectCount == SYNTHETIC_EMITTER_COUNT);
+    // Normalizing the authored power over zero area must not poison the bake.
+    const rr::StaticLightingChart receiver = CompleteBake(bake, 64);
+    CHECK(ReadChart(receiver) == math::Vector3{});
+}
+TEST_CASE("Static bake still rejects triangles whose area is not representable", "[renderer][static-lighting]")
+{
+    resources::SceneDefinition scene = MakeBakeScene(false, false, false);
+    // Finite coordinates whose edge cross product overflows binary32.
+    scene.Meshes[0].Positions[0] = {3.0e38F, 0, 0};
+    scene.Meshes[0].Positions[1] = {0, 3.0e38F, 0};
+    scene.Meshes[0].Positions[2] = {0, 0, 0};
+    rr::StaticLightingBake bake;
+    CHECK(bake.Initialize(scene, MakeBakeDescription(4)) == rhi::RasterStatus::InvalidDescription);
+    rr::StaticLightingBakeDiagnostics diagnostics;
+    CHECK(bake.GetDiagnostics(diagnostics) == rhi::RasterStatus::InvalidState);
+}

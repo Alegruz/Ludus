@@ -338,8 +338,8 @@ write_basic_package_version_file(
 # --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
-    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationGeometry FoundationTime FoundationLogging
-    FoundationProfiling FoundationThreadingProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat StringDictionaryFormat StringDictionary StringDictionaryWriter SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
+    FoundationBase FoundationMemory FoundationHash FoundationIdentity FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationGeometry FoundationTime FoundationLogging
+    FoundationProfiling FoundationThreadingProfiling FoundationReflection FoundationSerialization FoundationConfig FoundationConfigJson RuntimeConfiguration GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat StringDictionaryFormat StringDictionary StringDictionaryWriter SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
@@ -349,12 +349,12 @@ if(LUDUS_BUILD_BEHAVIOR)
     ludus_sdk_register_dependency(Luau "1eca9fda3e4753a1592000f6cfdf659aaa778b7d-reviewed-loader-v1" "MIT" bundled)
 endif()
 if(NOT EMSCRIPTEN)
-    foreach(_component Platform PlatformEntropy GraphicsRhi GraphicsRenderer Text GameHost)
+    foreach(_component Platform PlatformEntropy PlatformPacing GraphicsRhi GraphicsRenderer GraphicsText Text GameHost)
         ludus_sdk_register_component(${_component})
         ludus_sdk_register_feature(${_component})
     endforeach()
 else()
-    foreach(_component Platform PlatformEntropy GraphicsRhi GraphicsRenderer)
+    foreach(_component Platform PlatformEntropy PlatformPacing GraphicsRhi GraphicsRenderer GraphicsText)
         ludus_sdk_register_component(${_component})
         ludus_sdk_register_feature(${_component})
     endforeach()

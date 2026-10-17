@@ -7,9 +7,12 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPointer>
+#include <QPushButton>
 #include <QSignalBlocker>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
@@ -594,9 +597,10 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     mNavigationTimer.setInterval(16);
     connect(&mNavigationTimer, &QTimer::timeout, this, [this]() { advanceNavigation(); });
     connect(preview, &RenderPreview::Stopped, this, [this]() { stopNavigation(); });
-    setToolTip(QStringLiteral(
-        "Right-drag to look · hold right mouse + WASD/QE to fly · Alt/Option-left-drag to orbit · middle-drag to pan · "
-        "wheel to dolly (right mouse: speed) · F frames selection · Home frames all"));
+    setToolTip(
+        QStringLiteral("Right-drag to look · hold right mouse + WASD/QE to fly · Alt/Option-left-drag to orbit · "
+                       "Shift-Alt/Option-left-drag or middle-drag to pan · "
+                       "wheel to dolly (right mouse: speed) · F frames selection · Home frames all"));
     mState->Preview = preview;
     mState->IsAutomatic = isAutomatic;
     mState->CanShowFrames = isAutomatic;
@@ -606,16 +610,90 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     QComboBox* shading = new QComboBox(this);
     shading->setObjectName(QStringLiteral("viewportShading"));
     shading->setAccessibleName(QStringLiteral("Viewport shading"));
+    shading->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    shading->setMinimumContentsLength(4);
+    shading->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     shading->addItem(QStringLiteral("Solid — neutral preview shading"));
     shading->addItem(QStringLiteral("Albedo — unlit surface colors"));
     shading->addItem(QStringLiteral("Lit — scene lighting"));
     shading->setToolTip(QStringLiteral("Solid uses an editor-only neutral material and preview light; Albedo shows "
-                                       "base colors without illumination. Lit shows emission; "
-                                       "imported emitting surfaces do not yet illuminate the room."));
+                                       "base colors without illumination. Lit shows authored lights, emitting surfaces "
+                                       "as shadowed area lights and, once baked, static diffuse lighting."));
     shading->setCurrentIndex(static_cast<foundation::int32>(preview->GetShading()));
-    mState->Layout->addWidget(shading);
-    connect(shading, &QComboBox::currentIndexChanged, this, [preview](foundation::int32 index) {
+    QHBoxLayout* controls = new QHBoxLayout;
+    controls->addWidget(shading, 1);
+    QToolButton* frameAll = new QToolButton(this);
+    frameAll->setObjectName(QStringLiteral("viewportFrameAll"));
+    frameAll->setText(QStringLiteral("Frame all"));
+    frameAll->setAccessibleName(QStringLiteral("Frame all visible objects"));
+    frameAll->setToolTip(QStringLiteral("Fit all visible geometry in the viewport (Home)."));
+    controls->addWidget(frameAll);
+    connect(frameAll, &QToolButton::clicked, preview, &RenderPreview::FrameAll);
+    mState->Layout->addLayout(controls);
+    QLabel* navigationHint = new QLabel(this);
+    navigationHint->setObjectName(QStringLiteral("viewportNavigationHint"));
+    navigationHint->setTextFormat(Qt::PlainText);
+#if defined(Q_OS_MACOS)
+    navigationHint->setText(QStringLiteral("Option-drag: orbit · Shift-Option-drag: pan · Scroll: zoom"));
+#else
+    navigationHint->setText(QStringLiteral("Alt-drag: orbit · Shift-Alt-drag: pan · Scroll: zoom"));
+#endif
+    navigationHint->setWordWrap(true);
+    navigationHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    navigationHint->setToolTip(toolTip());
+    mState->Layout->addWidget(navigationHint);
+    // Keep bake diagnostics from squeezing the shading and framing controls.
+    QHBoxLayout* bakeControls = new QHBoxLayout;
+    bakeControls->setContentsMargins(0, 0, 0, 0);
+    QLabel* bakeNotice = new QLabel(this);
+    bakeNotice->setObjectName(QStringLiteral("viewportBakeNotice"));
+    bakeNotice->setWordWrap(true);
+    bakeNotice->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    bakeNotice->hide();
+    bakeControls->addWidget(bakeNotice, 1);
+    QPushButton* bakeAction = new QPushButton(this);
+    bakeAction->setObjectName(QStringLiteral("viewportBakeAction"));
+    bakeAction->hide();
+    bakeControls->addWidget(bakeAction);
+    mState->Layout->addLayout(bakeControls);
+    const auto updateBake = [preview, bakeNotice, bakeAction]() {
+        const PreviewBakeState state = preview->GetBakeState();
+        PreviewBakeNotice notice;
+        const bool hasNotice = preview->GetBakeNotice(notice) == true && state != PreviewBakeState::Idle;
+        bakeNotice->setVisible(hasNotice);
+        if (hasNotice == true)
+        {
+            bakeNotice->setText(QStringLiteral("⚠ %1 collapsed triangles skipped").arg(notice.SkippedTriangleCount));
+            bakeNotice->setToolTip(
+                QStringLiteral("The static bake skipped %1 zero-area triangles in %2: %3. They cover no surface, so "
+                               "the baked lighting is unaffected; fix the meshes to remove this warning. Cancel the "
+                               "bake to keep direct lighting only.")
+                    .arg(notice.SkippedTriangleCount)
+                    .arg(notice.AffectedObjectCount == 1 ? QStringLiteral("1 object")
+                                                         : QStringLiteral("%1 objects").arg(notice.AffectedObjectCount))
+                    .arg(notice.AffectedObjects));
+        }
+        bakeAction->setVisible(state == PreviewBakeState::Running || state == PreviewBakeState::Cancelled);
+        bakeAction->setText(state == PreviewBakeState::Cancelled ? QStringLiteral("Bake again")
+                                                                 : QStringLiteral("Cancel bake"));
+        bakeAction->setToolTip(state == PreviewBakeState::Cancelled
+                                   ? QStringLiteral("Restart the static lighting bake for this scene.")
+                                   : QStringLiteral("Stop the static lighting bake; direct lighting stays visible."));
+    };
+    connect(preview, &RenderPreview::BakeChanged, this, updateBake);
+    connect(bakeAction, &QPushButton::clicked, this, [preview]() {
+        if (preview->GetBakeState() == PreviewBakeState::Cancelled)
+        {
+            static_cast<void>(preview->RestartBake());
+        }
+        else
+        {
+            preview->CancelBake();
+        }
+    });
+    connect(shading, &QComboBox::currentIndexChanged, this, [preview, updateBake](foundation::int32 index) {
         preview->SetShading(static_cast<PreviewShading>(index));
+        updateBake();
     });
     connect(preview, &RenderPreview::NavigationChanged, shading, [preview, shading]() {
         const QSignalBlocker blocker(shading);

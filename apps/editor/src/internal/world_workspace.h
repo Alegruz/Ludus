@@ -21,6 +21,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QVBoxLayout;
 class QSplitter;
+class QToolButton;
 QT_END_NAMESPACE
 namespace ludus::editor
 {
@@ -141,6 +142,7 @@ private:
     QString PreviewedSource_;
     /// Stored import reports of the World's scene.
     QPlainTextEdit* ImportReport_ = nullptr;
+    QToolButton* mImportReportToggleOrNull = nullptr;
     void ShowImportPreview(bool isAccepted);
     void ShowImportReports();
     /// Import source into the World; isPreviewed requires it to match the approved preview.

@@ -1,6 +1,7 @@
 #include "internal/application.h"
 #include "internal/camera_view.h"
 #include "world_scene.h"
+#include <ludus/foundation/base/config.h>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/time/time.hpp>
@@ -72,6 +73,9 @@ bool Application::Start(rhi::BackendSelection selection, const char* levelBytes,
     mFrame = {};
     mInputFrame = 0;
     mPresentedFrames = 0;
+    mPacedPresentedFrames = 0;
+    mPresentReturn = {};
+    mPacing.Reset();
     mHadFocus = false;
     if (!mInput.IsValid())
     {
@@ -308,9 +312,27 @@ bool Application::Render(const platform::browser::WindowState& window) noexcept
     const auto end = rhi::EndFrameStatus();
     if (end == rhi::FrameStatus::Ready)
     {
+        // A diagnostic reading for --pacing-report, independent of the frame's one simulation timestamp.
+        mPresentReturn = foundation::time::Now();
         ++mPresentedFrames;
     }
     return end == rhi::FrameStatus::Ready || end == rhi::FrameStatus::Skipped;
+}
+platform::PaceResult Application::Pace(const platform::PacingClock& clock) noexcept
+{
+    const bool hasPresented = mPresentedFrames != mPacedPresentedFrames;
+    mPacedPresentedFrames = mPresentedFrames;
+#if LUDUS_TARGET_OS == LUDUS_OS_WEB
+    (void)hasPresented;
+    (void)clock;
+    return {};
+#else
+    if (mState == AppState::Stopped || mState == AppState::Failed)
+    {
+        return {};
+    }
+    return mPacing.EndFrame(hasPresented, clock);
+#endif
 }
 AppState Application::Frame() noexcept
 {
@@ -331,7 +353,11 @@ AppState Application::Frame() noexcept
         LUDUS_LOG_ERROR(logging::LOG_CORE, "Level candidate failed; active world preserved");
     }
     // Session replacement resets the driver, so the replacement starts from a zero-elapsed baseline.
-    (void)mSession.Activate();
+    // Pacing restarts too: a slow activation frame is not judged against the loading schedule.
+    if (mSession.Activate() == true)
+    {
+        mPacing.Reset();
+    }
     const auto startup = rhi::GetStartup();
     if (startup.State == rhi::StartupState::Failed || startup.State == rhi::StartupState::DeviceLost)
     {
