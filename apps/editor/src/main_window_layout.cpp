@@ -255,9 +255,7 @@ void MainWindow::BuildUi()
 
     // Runtime timing telemetry shares the inspector's area: both describe the
     // running session, and the inspector stays the default tab.
-    TimingDock_ = new QDockWidget(QStringLiteral("Timing"), this);
     TimingDock_->setObjectName(QStringLiteral("timingDock"));
-    Timing_ = new TimingPanel(Controller_, TimingDock_);
     TimingDock_->setWidget(Timing_);
     addDockWidget(Qt::RightDockWidgetArea, TimingDock_);
     tabifyDockWidget(InspectorDock_, TimingDock_);

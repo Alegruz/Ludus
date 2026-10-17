@@ -128,7 +128,8 @@ private:
     QTabWidget* WorkTabs_ = nullptr;
     QDockWidget* InspectorDock_ = nullptr;
     QDockWidget* OutputDock_ = nullptr;
-    // Created with the other docks in BuildUi; never null afterwards.
+    // Constructed in the MainWindow member-initializer list, so neither is ever
+    // null (no nullable OrNull state); BuildUi only configures and places them.
     QDockWidget* TimingDock_;
     TimingPanel* Timing_;
     QToolBar* GameToolbar_ = nullptr;

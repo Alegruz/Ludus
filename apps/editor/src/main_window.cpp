@@ -55,7 +55,8 @@ namespace ludus::editor
 {
 
 MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QString& workspaceSettingsFile)
-    : QMainWindow(parent), Controller_(controller), WorkspaceSettingsFile_(workspaceSettingsFile)
+    : QMainWindow(parent), Controller_(controller), WorkspaceSettingsFile_(workspaceSettingsFile),
+      TimingDock_(new QDockWidget(QStringLiteral("Timing"), this)), Timing_(new TimingPanel(controller, TimingDock_))
 {
     setWindowTitle(QStringLiteral("Ludus Editor"));
     setWindowIcon(QIcon(QStringLiteral(":/ludus/ludus-icon.png")));
