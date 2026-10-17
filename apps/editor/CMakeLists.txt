@@ -197,14 +197,11 @@ qt_add_resources(ludus_editor ludus_brand
     BASE "${PROJECT_SOURCE_DIR}/docs/wiki/assets"
     FILES ${editor_brand_assets})
 # Ship editable, self-contained examples with both presentations. Generated
-# build outputs and local machine settings are never part of the sample library.
-set(editor_sample_files)
-foreach(sample cornell-box live-edit-game scripted-game editor-sdk-project)
-    file(GLOB_RECURSE sample_files CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/examples/${sample}/*")
-    list(FILTER sample_files EXCLUDE REGEX "/(out|build|\\.ludus)/|CMakeUserPresets\\.json$")
-    list(APPEND editor_sample_files ${sample_files})
-endforeach()
+# build outputs and local machine settings are never part of the sample library;
+# they are excluded relative to each sample root, not the checkout path.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/EditorSampleResources.cmake")
+ludus_collect_editor_sample_files(editor_sample_files "${PROJECT_SOURCE_DIR}/examples"
+    cornell-box live-edit-game scripted-game editor-sdk-project)
 set(world_demo_schema "${PROJECT_SOURCE_DIR}/apps/world_demo/authoring/world.schema.json")
 qt_add_resources(ludus_editor world_demo_schema PREFIX "/world-demo" BASE "${PROJECT_SOURCE_DIR}/apps/world_demo/authoring" FILES ${world_demo_schema})
 qt_add_resources(ludus_editor ludus_samples
