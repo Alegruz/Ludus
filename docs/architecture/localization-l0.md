@@ -150,7 +150,10 @@ player preferences, is a separate L3 policy.
 `scripts/localization-corpus validate` checks all of the above. It does not
 parse patterns: the probe validates them with ICU's own `MessagePattern`, so
 Ludus maintains no second MessageFormat grammar. A shipping cooker (L1) must run
-the same native profile check before it writes a catalog.
+the same native profile check before it writes a catalog; the L1 release cooker
+does so through `ludus_localization_profile`, which shares the probe's walk in
+[`tools/icu-probe/profile.hpp`](../../tools/icu-probe/profile.hpp) (see
+[release cooking](../modules/localization.md#release-cooking-ludus-icu-mf1-v1)).
 
 ## Message profile `ludus-icu-mf1-v1`
 

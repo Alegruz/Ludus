@@ -95,7 +95,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [FoundationThreading](modules/foundation/threading.md)
 - [Gameplay world storage](modules/gameplay/world.md)
 - [Graphics RHI](modules/graphics/rhi.md)
-- [Localization: static UTF-8 catalogs](modules/localization.md)
+- [Localization: catalogs and release cooking](modules/localization.md)
 - [Ludus::FoundationGeometry](modules/foundation/geometry.md)
 - [Ludus::FoundationMath](modules/foundation/math.md)
 
