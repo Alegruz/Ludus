@@ -138,6 +138,14 @@ include(EngineDependencyPreflight)
 include(EngineTestDiagnostics)
 
 add_subdirectory(modules/foundation/base)
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    # Windows validates only the FoundationThreading closure (threading.md, T3).
+    # Other modules have no Windows backend; the SDK is not installed there yet.
+    foreach(module IN ITEMS memory containers time profiling threading)
+        add_subdirectory(modules/foundation/${module})
+    endforeach()
+    return()
+endif()
 # Portable bounded networking primitives are shared by native and web targets.
 add_subdirectory(modules/network/core)
 add_subdirectory(modules/foundation/memory)

@@ -1,14 +1,29 @@
 #include "internal/native.hpp"
 
+#if defined(LUDUS_THREADING_NATIVE_FAULT_TESTING)
+#    include "internal/native_test_hooks.hpp"
+#endif
+
 namespace ludus::foundation::threading::detail
 {
 bool NativeGate::Initialize() noexcept
 {
+#if defined(LUDUS_THREADING_NATIVE_FAULT_TESTING)
+    if (test::ShouldFailMutexInitialization() == true)
+    {
+        return false;
+    }
+#endif
     if (pthread_mutex_init(&Mutex, nullptr) != 0)
     {
         return false;
     }
-    if (pthread_cond_init(&Condition, nullptr) != 0)
+#if defined(LUDUS_THREADING_NATIVE_FAULT_TESTING)
+    const bool shouldFailCondition = test::ShouldFailConditionInitialization();
+#else
+    constexpr bool shouldFailCondition = false;
+#endif
+    if (shouldFailCondition == true || pthread_cond_init(&Condition, nullptr) != 0)
     {
         (void)pthread_mutex_destroy(&Mutex);
         return false;
@@ -51,10 +66,19 @@ bool NativeThread::Start(ThreadFunction function, void* contextOrNull) noexcept
 {
     Function = function;
     ContextOrNull = contextOrNull;
+#if defined(LUDUS_THREADING_NATIVE_FAULT_TESTING)
+    if (test::ShouldFailThreadStart() == true)
+    {
+        return false;
+    }
+#endif
     return pthread_create(&Handle, nullptr, ThreadEntry, this) == 0;
 }
 void NativeThread::Join() noexcept
 {
+#if defined(LUDUS_THREADING_NATIVE_FAULT_TESTING)
+    test::RecordThreadJoin();
+#endif
     LUDUS_REQUIRE(pthread_join(Handle, nullptr) == 0);
 }
 } // namespace ludus::foundation::threading::detail
