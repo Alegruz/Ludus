@@ -17,7 +17,7 @@ import zipfile
 import urllib.request
 import xml.etree.ElementTree as ET
 
-from api_markdown import render_reference
+from api_markdown import is_hidden_member, is_hidden_scope, render_reference
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = {
@@ -77,7 +77,11 @@ def documented(node):
 
 
 def coverage(xml):
-    """Use semantic keys, not Doxygen's generated IDs, to track the backlog."""
+    """Use semantic keys, not Doxygen's generated IDs, to track the backlog.
+
+    Implementation `detail`/`internal` namespaces are not public API, matching
+    the header-path exclusion in public_inputs() and docs/Doxyfile.
+    """
     missing = set()
     symbols = set()
     for entry in ET.parse(xml / "index.xml").getroot().findall("compound"):
@@ -85,13 +89,15 @@ def coverage(xml):
             continue
         compound = ET.parse(xml / (entry.get("refid") + ".xml")).getroot().find("compounddef")
         name = compound.findtext("compoundname", "")
+        if is_hidden_scope(name):
+            continue
         if compound.get("kind") in {"class", "struct", "union", "concept"}:
             key = f"{compound.get('kind')} {name}"
             symbols.add(key)
             if not documented(compound):
                 missing.add(key)
         for member in compound.findall("sectiondef/memberdef"):
-            if member.get("prot") not in {None, "public"}:
+            if member.get("prot") not in {None, "public"} or is_hidden_member(member):
                 continue
             qualified = member.findtext("qualifiedname") or name + "::" + member.findtext("name", "")
             args = " ".join(member.findtext("argsstring", "").split())
