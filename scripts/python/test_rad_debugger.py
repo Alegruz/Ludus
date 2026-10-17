@@ -251,9 +251,9 @@ class RadTests(unittest.TestCase):
         source = self.setup_fixture()
         self.make_executable(source / "build/raddbg")
         (source.parent / "build.json").write_text(json.dumps(
-            {"pin": self.data, "compiler": "/clang-18", "archiver": "/llvm-ar-18"}
+            {"pin": self.data, "compiler": "/pinned/clang", "archiver": "/pinned/llvm-ar"}
         ))
-        with patch.object(rad, "build_tools", return_value=("/clang-18", "/llvm-ar-18", True)), \
+        with patch.object(rad, "build_tools", return_value=("/pinned/clang", "/pinned/llvm-ar", True)), \
                 patch.object(engine, "capture_command_quiet", side_effect=self.git_reply), \
                 patch.object(engine, "run") as run, contextlib.redirect_stdout(io.StringIO()):
             rad.setup_locked(self.root, source.parent, self.data, argparse.Namespace(no_system_install=True), engine)
@@ -262,13 +262,13 @@ class RadTests(unittest.TestCase):
     def test_failed_build_leaves_no_success_stamp_and_can_be_retried(self) -> None:
         source = self.setup_fixture()
         stamp = source.parent / "build.json"
-        with patch.object(rad, "build_tools", return_value=("/clang-18", "/llvm-ar-18", True)), \
+        with patch.object(rad, "build_tools", return_value=("/pinned/clang", "/pinned/llvm-ar", True)), \
                 patch.object(engine, "capture_command_quiet", side_effect=self.git_reply), \
                 patch.object(engine, "run", side_effect=engine.EngineError("failed build")), \
                 self.assertRaisesRegex(engine.EngineError, "failed build"):
             rad.setup_locked(self.root, source.parent, self.data, argparse.Namespace(no_system_install=True), engine)
         self.assertFalse(stamp.exists())
-        with patch.object(rad, "build_tools", return_value=("/clang-18", "/llvm-ar-18", True)), \
+        with patch.object(rad, "build_tools", return_value=("/pinned/clang", "/pinned/llvm-ar", True)), \
                 patch.object(engine, "capture_command_quiet", side_effect=self.git_reply), \
                 patch.object(engine, "run", side_effect=lambda *a, **kw: self.make_executable(source / "build/raddbg")), \
                 contextlib.redirect_stdout(io.StringIO()):
@@ -281,7 +281,7 @@ class RadTests(unittest.TestCase):
         def dirty_reply(argv: list[str], **kwargs: object) -> tuple[int, str]:
             return (0, " M build.sh") if argv[1] == "status" else self.git_reply(argv)
 
-        with patch.object(rad, "build_tools", return_value=("/clang-18", "/llvm-ar-18", True)), \
+        with patch.object(rad, "build_tools", return_value=("/pinned/clang", "/pinned/llvm-ar", True)), \
                 patch.object(engine, "capture_command_quiet", side_effect=dirty_reply), \
                 patch.object(engine, "run") as run, self.assertRaisesRegex(engine.EngineError, "clean pinned checkout"):
             rad.setup_locked(self.root, source.parent, self.data, argparse.Namespace(no_system_install=True), engine)
@@ -295,7 +295,7 @@ class RadTests(unittest.TestCase):
         self.data = dict(old_pin, version="upgrade-test", revision="a" * 40)
         (self.root / "config/rad_debugger.json").write_text(json.dumps(self.data))
         source = self.setup_fixture()
-        with patch.object(rad, "build_tools", return_value=("/clang-18", "/llvm-ar-18", True)), \
+        with patch.object(rad, "build_tools", return_value=("/pinned/clang", "/pinned/llvm-ar", True)), \
                 patch.object(engine, "capture_command_quiet", side_effect=self.git_reply), \
                 patch.object(engine, "run", side_effect=engine.EngineError("failed upgrade")), \
                 self.assertRaisesRegex(engine.EngineError, "failed upgrade"):

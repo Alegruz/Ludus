@@ -215,9 +215,10 @@ def verify() -> None:
 def check(preset: str, fix: bool) -> None:
     sys.path.insert(0, str(ROOT / "scripts/python"))
     from formatting import format_source
+    from engine import pinned_llvm_tool
     source = ROOT / "tools/luau-probe/main.cpp"
     code = source.read_text()
-    formatted = format_source(code, source, "clang-format-18")
+    formatted = format_source(code, source, pinned_llvm_tool(ROOT, "clang-format"))
     if fix:
         source.write_text(formatted)
         return
@@ -228,7 +229,7 @@ def check(preset: str, fix: bool) -> None:
     if preset.startswith("web-"):
         from web_build import analysis_commands
         sysroot = ROOT / "out/host-tools/emsdk/upstream/emscripten/cache/sysroot"
-        command = analysis_commands(ROOT, [entry], "clang-tidy-18", sysroot)[0]
+        command = analysis_commands(ROOT, [entry], pinned_llvm_tool(ROOT, "clang-tidy"), sysroot)[0]
         run([flag for flag in command if flag != "-sSUPPORT_LONGJMP=wasm"])
         return
     flags = shlex.split(entry["command"])[1:]
@@ -242,7 +243,7 @@ def check(preset: str, fix: bool) -> None:
         if flag not in ("-c", str(source), "-sSUPPORT_LONGJMP=wasm") and not flag.startswith("@"):
             clean.append(flag)
         index += 1
-    run(["clang-tidy-18", str(source), "--quiet", "--warnings-as-errors=*", "--", *clean])
+    run([pinned_llvm_tool(ROOT, "clang-tidy"), str(source), "--quiet", "--warnings-as-errors=*", "--", *clean])
 
 
 def main() -> None:

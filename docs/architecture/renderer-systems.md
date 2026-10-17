@@ -2168,12 +2168,25 @@ number of complete paths on one thread. Scheduled, `Submit` runs preparation and
 coarse disjoint triangle ranges on a caller-owned `JobSystem`; the owner's `Poll`
 or `Finish` merges ranges in stable order and encodes the charts after the Wait
 fence. Both modes produce bit-identical charts. `Cancel` stops scheduled ranges at
-the next path sample; destroying an in-flight bake cancels and drains it. See the
+the next path sample; destroying an in-flight bake cancels and drains it. The jobs
+carry the labels `StaticLightingPrepare` and `StaticLightingRange`, so a system
+initialized with the profiler hooks shows them in captured traces. See the
 [threading consumer contract](threading.md#first-engine-consumer-static-lighting-bake).
 No renderer registry, native ray-query API, GPU upload, readback or Qt state is
 touched there. Keep the input scene's texture storage immutable and alive until
 the bake is destroyed. Composition must discard results with obsolete exact
 revisions before publication.
+
+Input flaws that cannot change the result are tolerated and reported, not fatal.
+A zero-area (collapsed) triangle covers no surface: it is left out of the BVH,
+emitter selection and probes, keeps its chart tile (zero irradiance) so layout
+and bake coordinates are unchanged, and an emitter whose triangles all collapsed
+emits nothing. `GetDiagnostics` and `GetSkippedTriangleCount` report the skipped
+triangles as soon as preparation completes, while ranges still run, so a caller
+can warn its user and offer `Cancel`; each Ready chart also carries its object's
+count. Real triangles keep their indices and random streams, so their charts are
+bit-identical to a scene without the collapsed triangles. Non-finite geometry,
+including an area that overflows binary32, still fails preparation.
 
 The virtual diffuse receiver uses cosine-hemisphere sampling plus the reference
 integrator's same-measure next-event MIS, visibility, metallic/roughness transport

@@ -141,7 +141,9 @@ preview** drops it.
 A best-effort import stores its full report in the scene manifest, beside the
 input digests that guard against a source changing mid-import. Opening or
 reassembling a World returns these reports as `import_reports`, and the
-**Import report** panel shows them for the World's imported scenes.
+**Import report** toggle beside the World path opens them in the scrollable
+inspector. Reports start collapsed so their length does not squeeze the viewport
+or hierarchy controls.
 Reference imports have no such report; their approximations still appear as
 warnings.
 

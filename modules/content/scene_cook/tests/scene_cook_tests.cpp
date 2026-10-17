@@ -1,6 +1,7 @@
 // Byte-identity tests for the native scene cooker against the Phase 0 goldens
 // captured from the retired Python 3.12 pipeline (tests/goldens/scene_pipeline).
 
+#include <ludus/content/scene_cook/limits.h>
 #include <ludus/content/scene_cook/scene_cook.h>
 #include <ludus/foundation/math/summation.hpp>
 
@@ -48,7 +49,7 @@ std::string Hex(const content::Digest& digest)
 std::string ReadGolden(std::string_view relative)
 {
     content::Bytes bytes;
-    REQUIRE(content::ReadFile(GOLDENS, relative, usize{64} * 1024 * 1024, bytes) == content::Status::Ok);
+    REQUIRE(content::ReadFile(GOLDENS, relative, MAX_SOURCE_BYTES, bytes) == content::Status::Ok);
     return std::string(bytes.String());
 }
 

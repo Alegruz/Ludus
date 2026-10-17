@@ -10,6 +10,9 @@ modules/foundation/identity
 modules/platform/include/ludus/platform/entropy.h
 modules/platform/src/entropy.cpp
 modules/platform/tests/entropy_tests.cpp
+modules/platform/include/ludus/platform/frame_pacing.h
+modules/platform/src/frame_pacing.cpp
+modules/platform/tests/frame_pacing_tests.cpp
 modules/foundation/math/include/ludus/foundation/math/summation.hpp
 modules/foundation/math/src/summation.cpp
 modules/foundation/math/tests/summation_tests.cpp

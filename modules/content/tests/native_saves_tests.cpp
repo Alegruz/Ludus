@@ -1,4 +1,5 @@
 #include <ludus/content/content.h>
+#include <ludus/content/limits.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
@@ -142,9 +143,9 @@ TEST_CASE("Native save byte admission preserves the destination above 32 MiB", "
 {
     Fixture fixture;
     REQUIRE(SaveFile(fixture.Root, "data", INITIAL, nullptr) == Status::Ok);
-    const auto digest = Hash(INITIAL);
+    const Digest digest = Hash(INITIAL);
     Bytes large;
-    REQUIRE(large.Resize(usize{32} * 1024 * 1024 + 1));
+    REQUIRE(large.Resize(MAX_SAVE_BYTES + 1) == true);
     REQUIRE(SaveFile(fixture.Root, "data", large.Data(), &digest) == Status::Limit);
     REQUIRE(SaveFile(fixture.Root, "absent", large.Data(), nullptr) == Status::Limit);
     REQUIRE_FALSE(std::filesystem::exists(fixture.Path("absent")));
@@ -152,4 +153,23 @@ TEST_CASE("Native save byte admission preserves the destination above 32 MiB", "
     Bytes output;
     REQUIRE(ReadFile(fixture.Root, "data", 3, output) == Status::Ok);
     REQUIRE(output.String() == "abc");
+}
+
+TEST_CASE("Native saves admit the exact byte ceiling for both writes and replacements", "[content][save]")
+{
+    Fixture fixture;
+    Bytes input;
+    REQUIRE(input.Resize(MAX_SAVE_BYTES) == true);
+    for (uint8& byte : input.Data())
+    {
+        byte = 0;
+    }
+    REQUIRE(SaveFile(fixture.Root, "data", input.Data(), nullptr) == Status::Ok);
+    Bytes output;
+    REQUIRE(ReadFile(fixture.Root, "data", MAX_SAVE_BYTES, output) == Status::Ok);
+    REQUIRE(output.Data().size() == MAX_SAVE_BYTES);
+    const Digest digest = Hash(output.Data());
+    REQUIRE(SaveFile(fixture.Root, "data", NEXT, &digest) == Status::Ok);
+    REQUIRE(ReadFile(fixture.Root, "data", MAX_SAVE_BYTES, output) == Status::Ok);
+    CHECK(output.String() == "xy");
 }

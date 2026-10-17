@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from .package_limits import MAX_MACHO_LOAD_COMMAND_BYTES, MAX_NATIVE_INSPECTION_OUTPUT_BYTES
 from .release_model import fail
 
 # Thanks to Apple, XNU mach-o/loader.h (mach_header_64, segment_command_64,
@@ -41,7 +42,7 @@ def inspect(path: Path) -> dict:
         if len(header) != 32 or header[:4] != MAGIC:
             _invalid("macOS payload requires a thin little-endian Mach-O64 image")
         _, cpu, subtype, kind, count, length, flags, _ = struct.unpack("<8I", header)
-        if cpu not in CPUS.values() or kind not in (2, 6, 8) or not 1 <= count <= 4096 or length > 8 * 1024 * 1024 or 32 + length > size:
+        if cpu not in CPUS.values() or kind not in (2, 6, 8) or not 1 <= count <= 4096 or length > MAX_MACHO_LOAD_COMMAND_BYTES or 32 + length > size:
             _invalid("unsupported or malformed Mach-O header")
         commands = handle.read(length)
         offset, sections, dependencies, rpaths, minimum, entry = 0, {}, [], [], None, None
@@ -218,7 +219,7 @@ def _codesign(argv, *, runner=None, env=None, cancel_check=None):
                                     stderr=output, timeout=30, check=False)
         except (OSError, subprocess.TimeoutExpired):
             _invalid("macOS signature verification failed or timed out")
-        if result.returncode or output.tell() > 8 * 1024 * 1024:
+        if result.returncode or output.tell() > MAX_NATIVE_INSPECTION_OUTPUT_BYTES:
             _invalid("invalid macOS code signature")
 
 

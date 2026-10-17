@@ -60,6 +60,24 @@ struct JobHandle
     uint32 Index = 0;      ///< Job index in that generation.
 };
 
+/// @brief Optional identity of a job, given to JobGraph::Add and reported to trace hooks.
+///
+/// Neither field is interpreted by the scheduler. Add stores the label by value,
+/// without allocating or copying the name. A default label is anonymous.
+struct JobLabel
+{
+    /// @brief Borrowed NUL-terminated name, normally a string literal; never copied.
+    ///
+    /// It must stay valid until the Wait that releases every submission of the job
+    /// returns. Trace hooks receive this pointer, not a copy.
+    const char* NameOrNull = nullptr;
+    /// @brief Caller-chosen call-site identifier; zero means none.
+    ///
+    /// The profiler adapter (`job_profiling.hpp`) uses it as a profiler site ID, so
+    /// a label from `LUDUS_JOB_LABEL` resolves to its name in exported traces.
+    uint32 SiteId = 0;
+};
+
 /// @brief Fixed graph capacity. Initialize reserves all storage; a graph never grows.
 struct JobGraphConfig
 {
@@ -67,7 +85,109 @@ struct JobGraphConfig
     uint32 MaxDependencies = 1024; ///< Maximum dependency edges per generation; range 0..1048576.
 };
 
-/// @brief Worker budget for a JobSystem.
+/// @brief WorkerIndex of a trace event reported on the thread that called Submit or Wait.
+inline constexpr uint32 CALLING_THREAD_WORKER_INDEX = static_cast<uint32>(-1);
+/// @brief EdgeIndex of a Started trace event for a job without prerequisites.
+inline constexpr uint32 NO_JOB_EDGE = static_cast<uint32>(-1);
+
+/// @brief Scheduler transition reported to JobSystemHooks::TraceOrNull.
+///
+/// For one traced submission, the owner reports Submitted before any job can start
+/// and WaitEntered/WaitReturned from Wait. The thread executing a job reports Started,
+/// then, after the callback returns Succeeded, one Signalled per outgoing dependency
+/// edge, then Finished. Jobs skipped as Blocked or Cancelled are not reported.
+enum class JobTraceKind : uint8
+{
+    Submitted,    ///< Submit admitted the graph; its ReadyDepth roots become ready after this report returns.
+    Started,      ///< The job's callback is about to run on the reporting thread.
+    Signalled,    ///< The succeeded job is about to satisfy EdgeIndex of DependentIndex.
+    Finished,     ///< The callback returned Outcome; the outcome is published after this report returns.
+    WaitEntered,  ///< The owner entered Wait for this submission.
+    WaitReturned, ///< Wait released the submission with Outcome and is about to return.
+};
+
+/// @brief One scheduler transition of a traced submission. Fields not listed for a kind are zero or default.
+///
+/// Every value is copied out of scheduler state under the system gate; the report
+/// itself runs outside the gate. Sequence numbers, edge indices and job indices
+/// identify work within one SubmissionId only.
+struct JobTraceEvent
+{
+    /// @brief Nonzero identity of the submission, unique within this FoundationThreading runtime.
+    uint64 SubmissionId = 0;
+    /// @brief JobHandle::GraphId of the submitted graph.
+    uint64 GraphId = 0;
+    /// @brief Started, Signalled and Finished: the label given to Add for the job.
+    JobLabel Label{};
+    /// @brief Started, Signalled and Finished: index of the job (JobHandle::Index).
+    uint32 JobIndex = 0;
+    /// @brief Started, Signalled and Finished: zero-based order in which the job became ready.
+    ///
+    /// Jobs without prerequisites are ready first, in Add order, so their sequence
+    /// numbers are [0, ReadyDepth of Submitted).
+    uint32 Sequence = 0;
+    /// @brief Started: the dependency edge whose satisfaction made the job ready, or NO_JOB_EDGE
+    ///        for a job without prerequisites. Signalled: the edge being satisfied.
+    ///
+    /// Edges are numbered in DependsOn order from zero within the graph generation.
+    uint32 EdgeIndex = NO_JOB_EDGE;
+    /// @brief Signalled: index of the dependent job.
+    uint32 DependentIndex = 0;
+    /// @brief Submitted: number of jobs without prerequisites. Started: jobs still waiting
+    ///        in the ready queue after this one was taken.
+    uint32 ReadyDepth = 0;
+    /// @brief Submitted: number of jobs in the graph.
+    uint32 JobCount = 0;
+    /// @brief Zero-based worker index of the reporting thread, or CALLING_THREAD_WORKER_INDEX
+    ///        for the thread that called Submit or Wait (including a helping Wait).
+    uint32 WorkerIndex = CALLING_THREAD_WORKER_INDEX;
+    /// @brief The reported transition.
+    JobTraceKind Kind = JobTraceKind::Submitted;
+    /// @brief Finished: the callback's outcome (an invalid value is reported as Failed).
+    ///        WaitReturned: the graph outcome returned by Wait.
+    JobOutcome Outcome = JobOutcome::Pending;
+};
+
+/// @brief Worker setup or teardown hook. Runs once on the worker thread it names.
+/// @param contextOrNull JobSystemHooks::ContextOrNull.
+/// @param workerIndex Zero-based worker index, below JobSystemConfig::WorkerCount.
+using JobWorkerFunction = void (*)(void* contextOrNull, uint32 workerIndex) noexcept;
+/// @brief Receives one trace event. Called concurrently from workers and the owner.
+using JobTraceFunction = void (*)(void* contextOrNull, const JobTraceEvent& event) noexcept;
+/// @brief Asked once per Submit, on the calling thread, whether to trace that submission.
+using JobTraceFilterFunction = bool (*)(void* contextOrNull) noexcept;
+
+/// @brief Optional observers of a JobSystem, fixed at Initialize.
+///
+/// Every hook runs outside the scheduler gate and must not block on jobs. A hook
+/// that calls JobSystem Initialize, Submit, Wait or Shutdown receives InsideJob;
+/// destroying a system or a submitted graph from a hook is a fatal contract
+/// violation. Hooks must not fail the scheduler: report or drop their own errors.
+/// The hook code and the data ContextOrNull references must outlive the system.
+/// With no hooks the scheduler performs no extra work; with TraceOrNull set and the
+/// filter declining a submission, each job costs one extra predictable branch.
+struct JobSystemHooks
+{
+    /// @brief Runs once on each worker before it takes work; Initialize returns after every call returned.
+    ///
+    /// Use it to register threads with a profiler or to initialize thread-local state.
+    JobWorkerFunction WorkerStartOrNull = nullptr;
+    /// @brief Runs once on each worker after it stops taking work, before Shutdown joins it.
+    JobWorkerFunction WorkerStopOrNull = nullptr;
+    /// @brief Receives the transitions of each traced submission; null disables tracing.
+    ///
+    /// For a submission, every call returns before Wait releases it, except
+    /// WaitReturned, which Wait reports after the release and before it returns.
+    /// Started, Signalled and Finished are reported by the thread that runs the job,
+    /// around its callback, so an event's Label is valid during the call.
+    JobTraceFunction TraceOrNull = nullptr;
+    /// @brief Decides per Submit whether TraceOrNull observes it; null traces every submission.
+    JobTraceFilterFunction ShouldTraceOrNull = nullptr;
+    /// @brief Passed to every hook. Not owned.
+    void* ContextOrNull = nullptr;
+};
+
+/// @brief Worker budget and optional observers for a JobSystem.
 struct JobSystemConfig
 {
     /// @brief Explicit budget, excluding the calling thread, which may help in Wait. Range 0..64.
@@ -77,6 +197,8 @@ struct JobSystemConfig
     /// time for simulation, driver, audio and I/O threads; logical CPU count is not
     /// a recommended value.
     uint32 WorkerCount = 0;
+    /// @brief Worker setup/teardown and trace hooks; none by default.
+    JobSystemHooks Hooks{};
 };
 
 /// @brief Per-outcome job counts of the in-flight graph, observed atomically under the system gate.
@@ -141,8 +263,11 @@ public:
     /// @param function Callback; must not be null.
     /// @param contextOrNull Value passed to every invocation of the callback. Not owned.
     /// @param outHandle Receives the new job's handle, or a default (invalid) handle on failure.
+    /// @param label Optional identity reported to trace hooks; stored by value without
+    ///        allocation. The name is borrowed (see JobLabel::NameOrNull).
     /// @return Ok; NotInitialized; Busy when sealed or submitted; InvalidArgument; or CapacityExceeded.
-    [[nodiscard]] JobStatus Add(JobFunction function, void* contextOrNull, JobHandle& outHandle) noexcept;
+    [[nodiscard]] JobStatus
+    Add(JobFunction function, void* contextOrNull, JobHandle& outHandle, JobLabel label = {}) noexcept;
 
     /// @brief Declares that @p dependent runs only after @p prerequisite succeeds.
     ///
@@ -202,7 +327,10 @@ public:
     JobSystem& operator=(JobSystem&&) = delete;
 
     /// @brief Allocates scheduler state and starts every worker once.
-    /// @param config Worker budget; see JobSystemConfig::WorkerCount.
+    ///
+    /// When JobSystemHooks::WorkerStartOrNull is set, returns Ok only after it has
+    /// run on every worker.
+    /// @param config Worker budget and hooks; see JobSystemConfig.
     /// @return Ok; InsideJob; AlreadyInitialized; InvalidArgument when WorkerCount exceeds 64;
     ///         Unsupported for nonzero workers on browser builds; OutOfMemory; or
     ///         ThreadCreationFailed, after joining any worker already started.

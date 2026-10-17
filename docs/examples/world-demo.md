@@ -43,6 +43,15 @@ profiling-disabled Release build and is not available for the browser window.
 [Runtime profiling](../development/runtime-profiling.md) runs these modes on a
 schedule.
 
+The native loop is [paced](../architecture/high-resolution-time.md#native-frame-pacing).
+The FIFO swapchain paces presented frames. Frames that present nothing (startup,
+loading, a minimized window) wait at 60 Hz instead of polling. `--frame-rate N`
+caps every native frame at `N` per second (1 to 1000); with `--headless` it paces
+each tick iteration without changing the ticks run or the replay hash.
+`--pacing-report` logs wake lateness, frame-start intervals and EndFrame-return
+intervals at exit; it requires `--frames`. The browser build rejects both
+options, because its presentation callbacks already pace the page.
+
 For the browser, prepare `./init.sh --cli web-emscripten-development --preset-only`,
 enable `LUDUS_BUILD_WORLD_DEMO=ON` in that preset's local CMake cache, and run
 `./scripts/build web-emscripten-development`. Serve

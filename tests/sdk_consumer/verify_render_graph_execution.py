@@ -1,10 +1,26 @@
 #!/usr/bin/env python3
-"""Qualify RG2 installed CLI and relocated CMake helper without engine sources."""
+"""Qualify RG2/RG3 installed CLI and relocated CMake helper without engine sources.
+
+The installed CLI and relocated helper must emit identical headers and identical
+`.lurgrt` runtime generations, and both must match the source-tree tool that cooks
+the generation decoded by the native GPU activation test.
+"""
 import argparse
 import json
+import os
 from pathlib import Path
+import re
 import shutil
+import struct
 import subprocess
+import sys
+
+SOURCE_TOOLS = Path(__file__).resolve().parents[2] / 'scripts/python'
+# Mirrors render_graph_format/runtime_package.h: six uint32 header fields, then the identities.
+PACKAGE_MAGIC = 0x4752554C
+PACKAGE_VERSION = 1
+HEADER_FIELDS = 6
+IDENTITY_BYTES = 32
 
 
 def main():
@@ -47,6 +63,10 @@ def main():
         flags += ['--spirv-cross', Path(args.spirv_cross).resolve()]
     package = run_cli('build', manifest, output / 'package', *flags)['build']
     run_cli('emit-runtime', package['package'], output / 'cli.h', '--name', 'InstalledGraph')
+    runtime = run_cli('cook-runtime', package['package'], output / 'cli.lurgrt')['runtime']
+    # The installed CLI ships the RG3 authoring services, not only build/execution.
+    difference = run_cli('schema-diff', package['package'], package['package'])['schema_diff']
+    assert difference['cpu_interface'] == 'Compatible', difference
     # Force a nonvoid DepthOnly function through the real compiler: never silently discard its result.
     depth = source / 'graphs/main_shaders/depth.slang'
     original = depth.read_text()
@@ -70,7 +90,7 @@ def main():
              f'include("{relocated.as_posix()}/cmake/LudusRenderGraph.cmake")', 'add_executable(consumer main.cpp)',
              f'target_include_directories(consumer PRIVATE "{relocated.as_posix()}/include")',
              'target_compile_options(consumer PRIVATE -fno-exceptions -Wall -Wextra -Werror)',
-             f'ludus_compile_render_graph(TARGET consumer NAME InstalledGraph MANIFEST "{Path(manifest).as_posix()}" ROOT "{source.as_posix()}")']
+             f'ludus_compile_render_graph(TARGET consumer NAME InstalledGraph MANIFEST "{Path(manifest).as_posix()}" ROOT "{source.as_posix()}" RUNTIME_PACKAGE)']
     (consumer / 'CMakeLists.txt').write_text('\n'.join(cmake) + '\n')
     command = [args.cmake, '-S', str(consumer), '-B', str(output / 'build'),
                '-DCMAKE_CXX_COMPILER=' + str(Path(args.cxx).resolve()),
@@ -84,7 +104,32 @@ def main():
     subprocess.run([str(output / 'build/consumer')], check=True, timeout=30)
     header = next((output / 'build').rglob('InstalledGraph.h'))
     assert header.read_bytes() == (output / 'cli.h').read_bytes(), 'installed CLI/CMake plans differ'
+    verify_runtime_package(output, header, runtime, package['package'])
     print('RG2 installed CLI/CMake, relocation, numeric header and nonvoid depth rejection passed.')
+    print('RG3 installed CLI, relocated CMake RUNTIME_PACKAGE and source tool cook identical .lurgrt bytes.')
+
+
+def verify_runtime_package(output, header, runtime, package):
+    """Require one `.lurgrt` image from every tool path, consistent with the emitted header."""
+    cli = (output / 'cli.lurgrt').read_bytes()
+    generated = sorted((output / 'build').rglob('InstalledGraph.lurgrt'))
+    assert len(generated) == 1, generated
+    assert generated[0].read_bytes() == cli, 'installed CLI and relocated CMake runtime generations differ'
+    source = output / 'source.lurgrt'
+    environment = dict(os.environ, PYTHONPATH=str(SOURCE_TOOLS), PYTHONDONTWRITEBYTECODE='1')
+    subprocess.run([sys.executable, '-m', 'ludus_tools', '--json', 'render-graph', 'cook-runtime', str(package), str(source)],
+                   check=True, cwd=output, env=environment, stdout=subprocess.DEVNULL)
+    assert source.read_bytes() == cli, 'installed and source-tree runtime generations differ'
+    magic, version, _, _, _, stages = struct.unpack_from('<' + 'I' * HEADER_FIELDS, cli)
+    assert (magic, version) == (PACKAGE_MAGIC, PACKAGE_VERSION) and stages == runtime['stages'], runtime
+    identity = cli[HEADER_FIELDS * 4:HEADER_FIELDS * 4 + IDENTITY_BYTES]
+    generation = cli[HEADER_FIELDS * 4 + IDENTITY_BYTES:HEADER_FIELDS * 4 + 2 * IDENTITY_BYTES]
+    assert identity.hex() == runtime['interface_identity'] and generation.hex() == runtime['generation'], runtime
+    # The host header compiled against this generation names the same CPU interface identity.
+    text = header.read_text()
+    block = text[text.index('INTERFACE_IDENTITY'):]
+    block = block[:block.index('};')]
+    assert bytes(int(value, 16) for value in re.findall(r'0x[0-9a-f]+', block)) == identity, 'header/package identity differ'
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ import os
 import platform
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import urllib.request
 
@@ -33,11 +34,14 @@ def main() -> None:
         raise SystemExit('Pinned bootstrap supports Linux x86_64 and native macOS')
     tools = ROOT / 'out/shader-tools'
     destination = tools / 'spirv-cross'
-    cxx = str(ROOT / 'out/host-tools/bin/clang++') if platform.system() == 'Darwin' else 'clang++-18'
-    cc = str(ROOT / 'out/host-tools/bin/clang') if platform.system() == 'Darwin' else 'clang-18'
+    sys.path.insert(0, str(ROOT / 'scripts/python'))
+    from engine import pinned_llvm_major
+    llvm_major = pinned_llvm_major(ROOT)
+    cxx = str(ROOT / 'out/host-tools/bin/clang++') if platform.system() == 'Darwin' else f'clang++-{llvm_major}'
+    cc = str(ROOT / 'out/host-tools/bin/clang') if platform.system() == 'Darwin' else f'clang-{llvm_major}'
     compiler = subprocess.check_output([cxx, '--version'], text=True).splitlines()[0]
-    if 'clang version 18.' not in compiler:
-        raise SystemExit('SPIRV-Cross bootstrap requires pinned Clang 18')
+    if f'clang version {llvm_major}.' not in compiler:
+        raise SystemExit(f'SPIRV-Cross bootstrap requires pinned Clang {llvm_major}')
     archive = tools / 'spirv-cross-src/spirv-cross.tar.gz'
     archive.parent.mkdir(parents=True, exist_ok=True)
     if not archive.exists() or digest(archive) != pin['source_sha256']:

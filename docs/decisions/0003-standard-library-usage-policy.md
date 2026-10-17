@@ -102,6 +102,13 @@ closed argument set and an implementation-only parser.
 - `<source_location>` — used by logging to capture call sites.
 - `<chrono>`, `<ctime>` — only within existing logging/time implementations;
   new engine callers use the owning Ludus API.
+- POSIX `<time.h>` `nanosleep(2)` and `<errno.h>` `errno`/`EINTR` — only in
+  Platform's native pacing wait (`modules/platform/src/frame_pacing.cpp`) on
+  macOS and Linux. This is the operating-system wait primitive behind
+  `GetSystemPacingClock()`; clock reads remain FoundationTime `Now()`, and no
+  other `<time.h>` operation (calendar, `clock_gettime`, `time`) is approved.
+  Browser builds have no wait. See the
+  [native frame pacing contract](../architecture/high-resolution-time.md#native-frame-pacing).
 - `<type_traits>`, `<utility>`, `<concepts>` — compile-time utilities, zero
   runtime cost.
 - `<cstdint>`, `<cstddef>` — allowed **only** inside `types.h`, which aliases

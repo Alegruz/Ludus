@@ -1,4 +1,5 @@
 #include <ludus/content/content.h>
+#include <ludus/content/limits.h>
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/filesystem/filesystem.hpp>
@@ -267,7 +268,7 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
         return Status::Invalid;
     }
 #if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
-    if (data.size() > usize{32} * 1024 * 1024)
+    if (data.size() > MAX_SAVE_BYTES)
     {
         return Status::Limit;
     }
@@ -292,7 +293,7 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
     }
     auto matches = [&]() noexcept {
         Bytes current;
-        const auto readStatus = ReadAt(directory.Value, leaf.Data, usize{32} * 1024 * 1024, current);
+        const Status readStatus = ReadAt(directory.Value, leaf.Data, MAX_SAVE_BYTES, current);
         if (expected == nullptr)
         {
             return readStatus == Status::NotFound ? Status::Ok

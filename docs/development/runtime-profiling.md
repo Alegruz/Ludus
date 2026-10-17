@@ -8,8 +8,8 @@ scenario. Build-time measurement is separate; see [Build Profiling](build-profil
 Timings are **reported, never gated**, on both shared GitHub-hosted runners and
 self-hosted [device lanes](#controlled-device-lane). A run fails only when a
 scenario is incorrect: a non-zero exit, a timeout, a missing or malformed trace,
-an incomplete sample set, output the runner cannot parse, or a software adapter
-where a physical GPU was declared. This follows the hardware/performance lane in
+an incomplete sample set, output the runner cannot parse, or a software
+rasterizer where a GPU was declared. This follows the hardware/performance lane in
 the [engineering quality architecture](../architecture/engineering-quality.md#4-validation-lanes-and-scheduling):
 timing gates need controlled hardware and a calibrated variability bound. The
 device lane provides the hardware; [Toward a timing gate](#toward-a-timing-gate)
@@ -65,7 +65,10 @@ To include the GPU scenarios, declare the machine's GPU class and identity:
 A GPU class is `gpu-` followed by a short lowercase name for the adapter family
 (`gpu-apple-m5`, `gpu-nvidia-rtx4090`). Declaring one also provides the `gpu`
 capability that GPU scenarios require; `gpu` cannot be declared on its own, so
-every GPU report names its device.
+every GPU report names its device. `gpu` means a hardware-backed adapter,
+physical or virtual; CPU software rasterizers such as llvmpipe are rejected. A
+virtual GPU names itself in its class and identity, as the hosted macOS lane's
+`gpu-apple-paravirtual` does, because its timings are not hardware evidence.
 
 ## Output
 
@@ -116,14 +119,20 @@ runs nightly at 03:17 UTC on `main` and can be started manually from the
 **Actions → performance → Run workflow** button, selecting the lanes (`all`,
 `hosted` or `device`), optional scenario ids and a repetition override. Named
 scenarios must be runnable on every selected lane; for example, `world-presented`
-fails the Ubuntu lane because it needs `presentation`, and the GPU scenarios
-need `lanes: device`. GitHub runs schedules from the default branch only, so a
+and the GPU scenarios fail the Ubuntu lane, which has neither `presentation` nor
+a GPU. GitHub runs schedules from the default branch only, so a
 change to the workflow takes effect after it lands.
 
 | Lane | Runner | Preset | Declared capabilities |
 | --- | --- | --- | --- |
-| `ubuntu` | `ubuntu-24.04` | `linux-clang-profile` | none (headless) |
-| `macos` | `macos-15` | `macos-clang-profile` | `presentation` (hosted macOS already presents Metal frames in CI) |
+| `ubuntu` | `ubuntu-24.04` | `linux-clang-profile` | none (headless, no GPU) |
+| `macos` | `macos-15` | `macos-clang-profile` | `presentation` (hosted macOS already presents Metal frames in CI) and `gpu-apple-paravirtual`, with a `--device` identity naming the virtual GPU |
+
+The hosted macOS lane runs the GPU scenarios every night on GitHub's paravirtual
+Metal GPU. That catches benchmark breakage (an image mismatch, a crash, an
+incomplete sample set or missing GPU timings) within a day, at no cost. Its
+timings show only large trends: the GPU is virtual, shared and changes with the
+runner image, so they are not evidence about any real adapter.
 
 Each lane:
 
@@ -138,7 +147,22 @@ Each lane:
 
 The workflow never runs on pull requests and is not a required check. To compare
 a branch, run the command locally on the same machine for the base and head
-commits, then pass the base `report.json` as `--baseline`.
+commits, then pass the base `report.json` as `--baseline`. For a change to GPU
+performance, use a real GPU and run both sides in one sitting, on mains power
+with other applications closed. On the base commit:
+
+```bash
+./scripts/profile-engine --capability gpu-apple-m5 --device "Apple M5, Metal, macOS 26.6" --scenario rhi-ordered-graph-gpu-timing --scenario renderer-clustered-lighting --output out/runtime-profile/base
+```
+
+Then on the head commit:
+
+```bash
+./scripts/profile-engine --capability gpu-apple-m5 --device "Apple M5, Metal, macOS 26.6" --scenario rhi-ordered-graph-gpu-timing --scenario renderer-clustered-lighting --output out/runtime-profile/head --baseline out/runtime-profile/base/report.json
+```
+
+A notable change there is a prompt to repeat the pair, not a verdict; fanless
+laptops throttle under sustained load.
 
 ## Controlled device lane
 
@@ -381,12 +405,11 @@ after these steps:
 ## Limits
 
 - Hosted runners are shared virtual machines. Their timings vary between runs and
-  between image updates, and they carry no GPU timing evidence. The macOS lane
-  presents through a virtual display; its frame intervals follow display pacing,
-  not GPU cost.
-- Linux hosted runners have no display, so `world-presented` is skipped there.
-  GPU scenarios need a declared GPU class, so they run only on device lanes or
-  locally.
+  between image updates, and their GPU timings describe a paravirtual GPU, not
+  hardware. The macOS lane presents through a virtual display; its frame
+  intervals follow display pacing, not GPU cost.
+- Linux hosted runners have no display or GPU, so `world-presented` and the GPU
+  scenarios are skipped there.
 - Device lanes reduce noise but do not remove it: thermal state, background
   work and driver updates still move timings. GPU durations come from timestamp
   queries on the device clock and cover each workload, not a whole frame.

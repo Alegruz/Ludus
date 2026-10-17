@@ -20,7 +20,10 @@ from ludus_tools.package_verify import extract_archive, file_digest, inventory, 
 from ludus_tools.release_template import release_files
 from ludus_tools.sdkstore import SdkStore
 from ludus_tools.identity import SdkIdentity
+from ludus_tools.toolchain import PINNED_LLVM_MAJOR, pinned_llvm_tool
 from test_ludus_tools import _manifest_json, _write_sdk_prefix
+
+CLANG_CXX = pinned_llvm_tool("clang++")
 
 
 def config(target="game"):
@@ -89,7 +92,7 @@ class ReleaseModelTests(unittest.TestCase):
             self.assertFalse((root / "bad").exists())
 
 
-@unittest.skipUnless(shutil.which("clang++-18") and shutil.which("readelf"), "requires Clang 18 and readelf")
+@unittest.skipUnless(shutil.which(CLANG_CXX) and shutil.which("readelf"), f"requires Clang {PINNED_LLVM_MAJOR} and readelf")
 class ArchiveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -97,7 +100,7 @@ class ArchiveTests(unittest.TestCase):
         cls.binary = Path(cls.temp.name) / "game"
         cpp = Path(cls.temp.name) / "main.cpp"
         cpp.write_text("int main() { return 0; }\n")
-        subprocess.run(["clang++-18", "-std=c++23", "-fno-exceptions", "-g0", str(cpp), "-o", str(cls.binary)], check=True)
+        subprocess.run([CLANG_CXX, "-std=c++23", "-fno-exceptions", "-g0", str(cpp), "-o", str(cls.binary)], check=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -238,7 +241,7 @@ class ArchiveTests(unittest.TestCase):
             _, _, payload = self.make_package(root)
             source = root / "loader.cpp"
             source.write_text("int main(){return 0;}\n")
-            subprocess.run(["clang++-18", str(source), "-Wl,--no-as-needed", "-Wl,-l:ld-linux-x86-64.so.2",
+            subprocess.run([CLANG_CXX, str(source), "-Wl,--no-as-needed", "-Wl,-l:ld-linux-x86-64.so.2",
                             "-o", str(payload / "bin/game")], check=True, capture_output=True)
             external = validate_native(payload, "bin/game")
             self.assertIn("ld-linux-x86-64.so.2", external)
@@ -249,10 +252,10 @@ class ArchiveTests(unittest.TestCase):
             _, _, payload = self.make_package(root)
             cpp = root / "dependency.cpp"
             cpp.write_text('extern "C" int value() { return 0; }')
-            subprocess.run(["clang++-18", "-shared", "-fPIC", str(cpp), "-o", str(root / "libfixture.so")], check=True)
+            subprocess.run([CLANG_CXX, "-shared", "-fPIC", str(cpp), "-o", str(root / "libfixture.so")], check=True)
             cpp.write_text('extern "C" int value(); int main() { return value(); }')
             for loader in ([], [f"-Wl,-rpath,{root}"]):
-                subprocess.run(["clang++-18", str(cpp), "-L", str(root), "-lfixture", *loader,
+                subprocess.run([CLANG_CXX, str(cpp), "-L", str(root), "-lfixture", *loader,
                                 "-o", str(payload / "bin/game")], check=True)
                 with self.assertRaises(ToolingError):
                     validate_native(payload, "bin/game")
@@ -265,10 +268,10 @@ class ArchiveTests(unittest.TestCase):
             library.mkdir()
             cpp = root / "fixture.cpp"
             cpp.write_text('extern "C" int value() { return 0; }')
-            subprocess.run(["clang++-18", "-fno-exceptions", "-shared", "-fPIC", str(cpp),
+            subprocess.run([CLANG_CXX, "-fno-exceptions", "-shared", "-fPIC", str(cpp),
                             "-Wl,-soname,libfixture.so", "-o", str(library / "libfixture.so")], check=True)
             cpp.write_text('extern "C" int value(); int main() { return value(); }')
-            subprocess.run(["clang++-18", "-fno-exceptions", str(cpp), "-L", str(library), "-lfixture",
+            subprocess.run([CLANG_CXX, "-fno-exceptions", str(cpp), "-L", str(library), "-lfixture",
                             "-Wl,-rpath,$ORIGIN/../lib", "-o", str(payload / "bin/game")], check=True)
             validate_native(payload, "bin/game")
             self.assertEqual(subprocess.run([str(payload / "bin/game")], check=False).returncode, 0)
@@ -288,11 +291,11 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(list(destination.iterdir()), [])
 
 
-@unittest.skipUnless(shutil.which("clang++-18") and shutil.which("readelf") and shutil.which("cmake"),
-                     "requires Clang 18, readelf, CMake")
+@unittest.skipUnless(shutil.which(CLANG_CXX) and shutil.which("readelf") and shutil.which("cmake"),
+                     f"requires Clang {PINNED_LLVM_MAJOR}, readelf, CMake")
 class ProjectRoundtripTests(unittest.TestCase):
     def setup_project(self, root):
-        compiler = subprocess.run(["clang++-18", "--version"], capture_output=True, text=True, check=True).stdout
+        compiler = subprocess.run([CLANG_CXX, "--version"], capture_output=True, text=True, check=True).stdout
         import re
         manifest = _manifest_json(build_flavor="Release", compiler_version=re.search(r"\d+\.\d+\.\d+", compiler)[0],
                                   target_triple="x86_64-linux-gnu")
@@ -320,7 +323,7 @@ class ProjectRoundtripTests(unittest.TestCase):
         return project, sdk
 
     def test_build_extract_plan_and_failed_build_preserves_package(self):
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18", "BUTLER_API_KEY": "fixture-secret"}):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": CLANG_CXX, "BUTLER_API_KEY": "fixture-secret"}):
             root = Path(temp)
             project, sdk = self.setup_project(root)
             package = release.package_project(project, profile="linux-release", version="0.1.0", store=SdkStore(root / "store"))
@@ -346,7 +349,7 @@ class ProjectRoundtripTests(unittest.TestCase):
             self.assertEqual(json.loads(output.getvalue())["verified"]["archiveSha256"], package.name)
 
     def test_cmake_install_loader_rewrite_preserves_program_identity(self):
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18"}):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": CLANG_CXX}):
             root = Path(temp)
             project, _ = self.setup_project(root)
             cmake = project / "CMakeLists.txt"
@@ -362,11 +365,11 @@ class ProjectRoundtripTests(unittest.TestCase):
             self.assertEqual(subprocess.run([str(extracted / "bin/MyGame")], check=False).returncode, 0)
             cpp = root / "different.cpp"
             cpp.write_text("int main() { return 7; }")
-            subprocess.run(["clang++-18", "-fno-exceptions", str(cpp), "-o", str(root / "different")], check=True)
+            subprocess.run([CLANG_CXX, "-fno-exceptions", str(cpp), "-o", str(root / "different")], check=True)
             self.assertNotEqual(executable_identity(artifact), executable_identity(root / "different"))
 
     def test_failed_build_cannot_package_old_executable(self):
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18"}):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": CLANG_CXX}):
             root = Path(temp)
             project, _ = self.setup_project(root)
             store = SdkStore(root / "store")
@@ -380,7 +383,7 @@ class ProjectRoundtripTests(unittest.TestCase):
 
     def test_cancel_and_lock_contention_never_publish_partial_package(self):
         from ludus_tools.buildlock import BuildTreeLock
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18"}):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": CLANG_CXX}):
             root = Path(temp)
             project, _ = self.setup_project(root)
             store = SdkStore(root / "store")
@@ -393,7 +396,7 @@ class ProjectRoundtripTests(unittest.TestCase):
             self.assertEqual(list((project / "out/packages/linux-release").iterdir()), [])
 
     def test_sdk_changes_mid_build_fail_without_package(self):
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18"}):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": CLANG_CXX}):
             root = Path(temp)
             project, sdk = self.setup_project(root)
             def run(argv, **kwargs):
@@ -405,7 +408,7 @@ class ProjectRoundtripTests(unittest.TestCase):
             self.assertEqual(list((project / "out/packages/linux-release").iterdir()), [])
 
     def test_metadata_changes_conflict_and_build_environment_has_no_secret(self):
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18", "BUTLER_API_KEY": "secret"}):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": CLANG_CXX, "BUTLER_API_KEY": "secret"}):
             root = Path(temp)
             project, sdk = self.setup_project(root)
             original_run = release.operations._run

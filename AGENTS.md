@@ -220,6 +220,13 @@ rejects the explicit `== true`/`== false` style.
   shader `PI`. Changed Slang rejects recognizable duplicated pi literals outside
   that owner. Other constants still need semantic review; give tolerances units
   and purpose rather than mechanically naming every zero or one.
+- Admission limits have one owner per policy. Reuse the owner's named constant
+  at reads, parsing, validation and publication; equal numbers do not establish
+  shared policy. Keep encoded inputs, decoded payloads and peak-memory budgets
+  distinct. See `docs/architecture/content-resources.md#limit-ownership`.
+  The changed-source gate catches recognizable duplicated capacity literals in
+  the consolidated content/scene paths; arbitrary expressions and the choice of
+  semantic owner remain review responsibilities.
 - Name representation tags, versions, strides and serialized record widths in
   their owner. Share host/shader layout constants rather than repeating literals;
   derive serialized widths from their explicit field schema, never host padding.
@@ -541,6 +548,38 @@ headers. Separate the groups with a blank line.
   depend on any higher-level module.
 - Internal implementation details (private headers, sink interfaces, etc.) must
   not leak into the installed SDK.
+
+### Responsibility boundaries and incremental refactoring
+
+- Before adding behavior to a large source file, identify the owning operation,
+  its inputs, mutable state, errors and resource lifetime. Extract an independent
+  responsibility when the addition would combine unrelated workflows. File and
+  function size are review signals, not arbitrary line-count gates.
+- Extract private components with narrow contracts and their own state. Moving
+  member definitions into several files while retaining an all-purpose shared
+  state object, or including implementation bodies from a header, does not
+  establish an ownership or compilation boundary. Preserve module dependency
+  direction and installed SDK boundaries; do not add a framework to split files.
+- Refactor one boundary per reviewable change. Keep structural moves separate
+  from intentional behavior fixes, identify any necessary differences explicitly,
+  and preserve source attribution. Establish relevant regression coverage before
+  changing transactional, asynchronous or GPU lifetime code.
+- Retain one authoritative document history, publication transaction and native
+  resource lifetime ledger in their existing owners. Model asynchronous stages
+  with named states and explicit Pending/Ready/failure outcomes. Candidates must
+  not mutate the live resource generation or replace drawable output before
+  readiness; stale callbacks must carry and validate the relevant identity.
+- Preserve failure/output behavior, cancellation, rollback, bounded capacities,
+  deterministic cooked bytes and native/browser support during extraction.
+  Exercise the production paths with focused tests, then run the applicable
+  build, sanitizer, formatting, tidy and changed-source checks. A shorter file or
+  passing lexical check alone is not evidence of reduced coupling.
+- Prioritize the preview resource/publication boundary, World inspector/import
+  workflows, asset preparation/publication, then renderer and reference cooker
+  decomposition. See the existing
+  [editor GUI systems context](docs/architecture/editor-gui-systems.md#implementation-boundaries-and-refactoring)
+  for the staged scope and remaining work. These are incremental extractions,
+  not permission to rewrite all five subsystems together.
 
 ### Memory and error handling
 

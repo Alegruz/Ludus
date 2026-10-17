@@ -1,5 +1,6 @@
 // Perfetto/Chrome JSON export shape (final design §16) and incomplete-scope
 // honesty (§6, gate G13).
+#include <ludus/foundation/profiling/integration.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
 
@@ -192,6 +193,45 @@ TEST_CASE("an open scope at capture end is exported as incomplete, not fabricate
     std::remove(path.c_str());
     // Let the leaked zone destruct without an active capture (no-op emit).
     delete leaked;
+}
+
+TEST_CASE("integration emission exports site slices, caller flows, counters and thread names",
+          "[profiling][export][integration]")
+{
+    static constexpr ZoneDescriptor SLICE_ZONE{std::string_view{"IntegrationSlice"}};
+    static constexpr ZoneDescriptor FLOW_ZONE{std::string_view{"IntegrationFlow"}};
+    static constexpr ZoneDescriptor COUNTER_ZONE{std::string_view{"IntegrationCounter"}};
+    constexpr uint64 FLOW_ID = CALLER_FLOW_ID_BIT | 42u;
+    RegisterThreadForTrace("Main");
+    CHECK(IsCaptureActive() == false);
+    // Inactive: nothing is recorded.
+    BeginSite(SLICE_ZONE.SiteId);
+    EndSite(SLICE_ZONE.SiteId);
+    REQUIRE(BeginCapture(8));
+    CHECK(IsCaptureActive() == true);
+    RegisterSite(SLICE_ZONE);
+    RegisterSite(FLOW_ZONE);
+    RegisterSite(COUNTER_ZONE);
+    BeginSite(SLICE_ZONE.SiteId);
+    StartFlow(FLOW_ZONE, FLOW_ID);
+    SampleCounter(COUNTER_ZONE, 7);
+    FinishFlow(FLOW_ZONE, FLOW_ID);
+    EndSite(SLICE_ZONE.SiteId);
+    EndCapture();
+    CHECK(GetTraceHealth().EventsRecorded == 5);
+
+    const std::string path = tempPath("integration");
+    REQUIRE(ExportPerfettoTrace(path));
+    const std::string json = readFile(path);
+    std::remove(path.c_str());
+    CHECK(json.find("\"ph\":\"M\",\"name\":\"thread_name\",\"args\":{\"name\":\"Main\"}") != std::string::npos);
+    CHECK(json.find("\"ph\":\"B\",\"name\":\"IntegrationSlice\"") != std::string::npos);
+    CHECK(json.find("\"ph\":\"E\",\"name\":\"IntegrationSlice\"") != std::string::npos);
+    const std::string flowId = "\"id\":" + std::to_string(FLOW_ID);
+    // Start and finish carry the same name and ID so viewers can pair them.
+    CHECK(json.find("\"ph\":\"s\",\"name\":\"IntegrationFlow\",\"cat\":\"flow\"," + flowId) != std::string::npos);
+    CHECK(json.find("\"ph\":\"f\",\"name\":\"IntegrationFlow\",\"cat\":\"flow\"," + flowId) != std::string::npos);
+    CHECK(json.find("\"ph\":\"C\",\"name\":\"IntegrationCounter\",\"args\":{\"value\":7}") != std::string::npos);
 }
 
 #endif // LUDUS_PROFILING_ENABLED

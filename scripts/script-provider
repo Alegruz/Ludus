@@ -63,10 +63,11 @@ def main():
     else:
         S1['check'](args.preset,args.fix)
         from formatting import format_source
+        from engine import pinned_llvm_tool
         paths=list((ROOT/'modules/runtime/behavior').rglob('*.cpp'))+list((ROOT/'modules/runtime/behavior').rglob('*.h'))+list((ROOT/'tools/script-provider').rglob('*.cpp'))+list((ROOT/'tools/script-provider').rglob('*.h'))
         for source in paths:
             code=source.read_text()
-            formatted=format_source(code,source,'clang-format-18')
+            formatted=format_source(code,source,pinned_llvm_tool(ROOT, 'clang-format'))
             if args.fix: source.write_text(formatted)
             else: S1['require'](code==formatted,f'Format {source} with script-provider check --fix')
         if args.fix: return
@@ -75,7 +76,7 @@ def main():
             if not any(part in entry['file'] for part in ('/modules/runtime/behavior/','/tools/script-provider/')): continue
             if args.preset.startswith('web-'):
                 from web_build import analysis_commands
-                commands=analysis_commands(ROOT,[entry],'clang-tidy-18',ROOT/'out/host-tools/emsdk/upstream/emscripten/cache/sysroot')
+                commands=analysis_commands(ROOT,[entry],pinned_llvm_tool(ROOT, 'clang-tidy'),ROOT/'out/host-tools/emsdk/upstream/emscripten/cache/sysroot')
                 S1['run']([flag for flag in commands[0] if flag!='-sSUPPORT_LONGJMP=wasm'])
             else:
                 flags=shlex.split(entry['command'])[1:]; clean=[]; index=0
@@ -84,7 +85,7 @@ def main():
                     if flag=='-o': index+=2; continue
                     if flag not in ('-c',entry['file']) and not flag.startswith('@'): clean.append(flag)
                     index+=1
-                S1['run'](['clang-tidy-18',entry['file'],'--quiet','--warnings-as-errors=*','--',*clean])
+                S1['run']([pinned_llvm_tool(ROOT, 'clang-tidy'),entry['file'],'--quiet','--warnings-as-errors=*','--',*clean])
 if __name__=='__main__':
     try:main()
     except (OSError,ValueError,KeyError,TypeError,RecursionError,RuntimeError,subprocess.SubprocessError) as error:

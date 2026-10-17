@@ -3,11 +3,11 @@
 #include <ludus/foundation/base/core.h>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/foundation/memory/allocation_domain.hpp>
+#include <ludus/foundation/memory/owned_object.hpp>
 
 #include "internal/log_categories.h"
 #include "internal/reducer.hpp"
-
-#include <new> // std::nothrow
 
 namespace ludus::input
 {
@@ -21,14 +21,14 @@ struct InputSystem::Impl final
 InputSystem::InputSystem() noexcept
 {
     // The single allocation in the system (K12: no hot-path allocation). Report
-    // failure explicitly via IsValid(); never throw.
-    Impl* impl = new (std::nothrow) Impl();
-    if (impl == nullptr)
+    // failure explicitly via IsValid(); never throw. The owner frees through the
+    // same domain when the system is destroyed.
+    const ludus::foundation::OwnershipStatus status =
+        ludus::foundation::TryCreateOwned<Impl>(ludus::foundation::GetSystemAllocationDomain(), mImpl);
+    if (status != ludus::foundation::OwnershipStatus::Ok)
     {
         LUDUS_LOG_ERROR(LOG_INPUT, "Failed to allocate input reducer storage");
-        return;
     }
-    mImpl = ludus::foundation::core::UniquePtr<Impl>(impl);
 }
 
 InputSystem::~InputSystem() noexcept = default;

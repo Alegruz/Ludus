@@ -1,3 +1,4 @@
+#include "internal/preview_shading.h"
 #include "internal/render_scene.h"
 #include "internal/scene_archive.h"
 #include "internal/software_viewport.h"

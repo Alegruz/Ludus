@@ -12,6 +12,10 @@ SPEC = importlib.util.spec_from_file_location('reflection_generate', Path(__file
 generate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(generate)
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts/python'))
+from engine import pinned_llvm_tool  # noqa: E402
+
+CLANG_CXX = pinned_llvm_tool(ROOT, 'clang++')
 
 
 class GeneratorTests(unittest.TestCase):
@@ -111,7 +115,7 @@ class GeneratorTests(unittest.TestCase):
                 positive['fields'][0][key] = 0.0
             generate.check_baseline(self.load(positive), baseline)
 
-    @unittest.skipUnless(shutil.which('clang++-18'), 'pinned Clang 18 not available')
+    @unittest.skipUnless(shutil.which(CLANG_CXX), f'pinned {CLANG_CXX} not available')
     def test_target_compiler_rejects_a_native_type_mismatch(self):
         data = self.load(self.data)
         header, source, _ = generate.generate(data, 'body_schema.hpp', 'body.schema.json')
@@ -119,7 +123,7 @@ class GeneratorTests(unittest.TestCase):
         (self.root / 'body.cpp').write_text(source)
         (self.root / 'body.h').write_text('#include <ludus/foundation/base/types.h>\n'
             'namespace ludus::sample { struct Body { ludus::foundation::float64 Speed; ludus::foundation::int32 Bounces; }; }\n')
-        command = ['clang++-18', '-std=c++23', '-fno-exceptions', '-fsyntax-only', str(self.root / 'body.cpp')]
+        command = [CLANG_CXX, '-std=c++23', '-fno-exceptions', '-fsyntax-only', str(self.root / 'body.cpp')]
         for module in ('base', 'memory', 'reflection', 'serialization'):
             command += ['-I', str(ROOT / 'modules/foundation' / module / 'include')]
         result = subprocess.run(command, capture_output=True, text=True)

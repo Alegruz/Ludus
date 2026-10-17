@@ -1,6 +1,8 @@
 #include "internal/render_scene.h"
 #include "internal/qt_numeric_stream.h"
+#include "internal/render_scene_limits.h"
 
+#include <ludus/content/scene_format/limits.h>
 #include <ludus/content/scene_format/luscn.h>
 #include <ludus/foundation/containers/borrowed_view.hpp>
 #include <ludus/foundation/math/precision.hpp>
@@ -78,12 +80,22 @@ bool WriteChartedMesh(QDataStream& inoutStream,
             }
         }
         math::Vector3 faceNormal;
-        if (normals.IsEmpty() == true &&
-            math::TryNormalize(math::Cross(positions[indices[triangle * 3 + 1]] - positions[indices[triangle * 3]],
-                                           positions[indices[triangle * 3 + 2]] - positions[indices[triangle * 3]]),
-                               faceNormal) != math::MathStatus::Success)
+        if (normals.IsEmpty() == true)
         {
-            return Fail(outError, QStringLiteral("Schema mesh has a degenerate shading normal."));
+            const math::Vector3 cross =
+                math::Cross(positions[indices[triangle * 3 + 1]] - positions[indices[triangle * 3]],
+                            positions[indices[triangle * 3 + 2]] - positions[indices[triangle * 3]]);
+            if (math::IsFinite(cross) == false)
+            {
+                return Fail(outError, QStringLiteral("Schema mesh triangle area is not representable."));
+            }
+            if (math::TryNormalize(cross, faceNormal) != math::MathStatus::Success)
+            {
+                // A collapsed (zero-area) triangle covers no pixels and has no face
+                // normal; any unit normal is inert. The static bake skips and reports it
+                // instead of rejecting the World.
+                faceNormal = {0, 0, 1};
+            }
         }
         for (uint32 corner = 0; corner < 3; ++corner)
         {
@@ -107,33 +119,39 @@ bool WriteChartedMesh(QDataStream& inoutStream,
     }
     return true;
 }
-bool Read(const QString& root, const QString& relative, QByteArray& bytes, QString& error, int64 limit = 1048576)
+bool Read(const QString& root,
+          const QString& relative,
+          QByteArray& outBytes,
+          QString& outError,
+          int64 maximumBytes = static_cast<int64>(MAX_PREVIEW_DOCUMENT_BYTES))
 {
-    const auto path = QDir(root).absoluteFilePath(relative);
+    const QString path = QDir(root).absoluteFilePath(relative);
     const QFileInfo info(path);
-    if (relative.isEmpty() || QDir::isAbsolutePath(relative) ||
-        relative.split(QLatin1Char('/')).contains(QStringLiteral("..")) || relative.contains(QChar(0)) ||
-        !info.isFile() || info.isSymLink() || info.canonicalFilePath() != info.absoluteFilePath() ||
-        !path.startsWith(root + QLatin1Char('/')))
+    if (relative.isEmpty() == true || QDir::isAbsolutePath(relative) == true ||
+        relative.split(QLatin1Char('/')).contains(QStringLiteral("..")) == true ||
+        relative.contains(QChar(0)) == true || info.isFile() == false || info.isSymLink() == true ||
+        info.canonicalFilePath() != info.absoluteFilePath() || path.startsWith(root + QLatin1Char('/')) == false)
     {
-        return Fail(error, QStringLiteral("Asset must be a regular file inside the project: %1").arg(relative));
+        return Fail(outError, QStringLiteral("Asset must be a regular file inside the project: %1").arg(relative));
     }
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > limit)
+    if (file.open(QIODevice::ReadOnly) == false || file.size() <= 0 || file.size() > maximumBytes)
     {
-        return Fail(
-            error,
-            QStringLiteral("Missing, empty or oversized preview file (%1 bytes maximum): %2").arg(limit).arg(relative));
+        return Fail(outError,
+                    QStringLiteral("Missing, empty or oversized preview file (%1 bytes maximum): %2")
+                        .arg(maximumBytes)
+                        .arg(relative));
     }
-    bytes = file.read(limit + 1);
-    return (file.error() == QFileDevice::NoError && bytes.size() == file.size() && bytes.size() <= limit) ||
-           Fail(error, QStringLiteral("Preview file changed or could not be read: %1").arg(relative));
+    outBytes = file.read(maximumBytes + 1);
+    return (file.error() == QFileDevice::NoError && outBytes.size() == file.size() &&
+            outBytes.size() <= maximumBytes) ||
+           Fail(outError, QStringLiteral("Preview file changed or could not be read: %1").arg(relative));
 }
 bool Decode(const QByteArray& bytes, parsing::JsonDocument& document, QString& error)
 {
     parsing::ParseError diagnostic;
     parsing::JsonLimits limits;
-    limits.MaxInputBytes = 1048576;
+    limits.MaxInputBytes = MAX_PREVIEW_DOCUMENT_BYTES;
     limits.MaxArrayElements = 12288;
     limits.MaxObjectMembers = 64;
     limits.MaxValues = 65536;
@@ -511,12 +529,14 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
                                         a.value(QStringLiteral("kind")) ==
                                             QJsonValue(texture ? QStringLiteral("texture") : QStringLiteral("mesh")));
             }
-            if (!Fields(entry, {QStringLiteral("id"), QStringLiteral("path")}) || !declared || seen.contains(id) ||
-                !Read(canonical,
-                      entry.value(QStringLiteral("path")).toString(),
-                      bytes,
-                      error,
-                      texture ? 4194304 : 1048576))
+            if (Fields(entry, {QStringLiteral("id"), QStringLiteral("path")}) == false || declared == false ||
+                seen.contains(id) == true ||
+                Read(canonical,
+                     entry.value(QStringLiteral("path")).toString(),
+                     bytes,
+                     error,
+                     static_cast<int64>(texture == true ? MAX_PREVIEW_TEXTURE_FILE_BYTES
+                                                        : MAX_PREVIEW_DOCUMENT_BYTES)) == false)
             {
                 return Fail(
                     error,
@@ -1099,7 +1119,7 @@ bool RenderScene::Merge(const RenderScene& authored,
         stream << pixel.X << pixel.Y << pixel.Z;
     }
     mergedLevel.insert(QStringLiteral("objects"), objects);
-    if (stream.status() != QDataStream::Ok || bytes.size() > 67108864)
+    if (stream.status() != QDataStream::Ok || bytes.size() > static_cast<qsizetype>(format::MAX_BUNDLE_BYTES))
     {
         return Fail(error, QStringLiteral("Combined World exceeds its cooked byte budget."));
     }

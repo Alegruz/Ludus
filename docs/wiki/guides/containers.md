@@ -34,6 +34,7 @@ These types ship today. Each has its reference page in the
 | Borrowed read or write of caller storage | `BorrowedView<T>` or `std::span<T>` | `borrowed_view.hpp` | Pointer and count only; never owns or extends the storage's lifetime |
 | In-place ordering, no stability | `Sort` | `sort.hpp` | Heap sort; O(1) extra storage; equal elements may reorder |
 | Stable ordering | `StableSort` | `stable_sort.hpp` | Merge sort into caller-supplied scratch; no allocation |
+| Bounded first-in, first-out queue | `RingBuffer<T, N>` | `ring_buffer.hpp` | Inline storage; full is a status; wrapped contents as two spans; single owner; never allocates |
 
 `Array` is the default. Use linear search over a small `Array` for short-lived
 tables. Use `SortedMap` when ordered iteration or binary lookup helps. There is
@@ -47,7 +48,6 @@ tracks their status and gating consumers.
 
 | Planned type | Intended use |
 | --- | --- |
-| `RingBuffer<T>` | Single-owner FIFO with a hard capacity |
 | `BitSet`, `StaticBitSet<N>` | Packed flags and dense index membership |
 | `HashMap`, `HashSet` | Larger mutable dictionaries, after a measured algorithm selection |
 | `SortedSet<K>` | Ordered uniqueness without mapped values |
@@ -137,6 +137,60 @@ borrows stay valid until that element is removed or shifted by an ordered
 insert or `RemoveAt`. Copying or moving the array copies or moves its elements;
 borrows do not follow, and a moved-from `FixedArray` is empty. Use
 `StaticArray` instead when every element is always live.
+
+## Queue work in arrival order
+
+`RingBuffer<T, N>` is a bounded FIFO: `TryAdd` appends at the back and
+`RemoveFirst` removes the oldest element. Like `FixedArray`, it never allocates,
+only occupied slots hold objects, and a full ring rejects `TryAdd` without
+changing anything. Decide the overflow policy at the call site, such as
+dropping, coalescing, or recovering, as Input does.
+
+```cpp
+#include <ludus/foundation/containers/ring_buffer.hpp>
+
+#include <initializer_list>
+#include <span>
+
+constexpr ludus::foundation::usize MAX_PENDING_COMMANDS = 32;
+
+struct Command
+{
+    ludus::foundation::uint32 Kind;
+    ludus::foundation::uint32 Argument;
+};
+
+using CommandQueue = ludus::foundation::RingBuffer<Command, MAX_PENDING_COMMANDS>;
+
+// Applies every queued command in arrival order, oldest first.
+template <typename ApplyFunction>
+void DrainCommands(CommandQueue& inoutQueue, const ApplyFunction& apply) noexcept
+{
+    while (inoutQueue.IsEmpty() == false)
+    {
+        apply(inoutQueue.GetFirst());
+        inoutQueue.RemoveFirst();
+    }
+}
+
+// Reads without removing: the oldest elements, then any that wrapped around.
+[[nodiscard]] ludus::foundation::uint64 SumArguments(const CommandQueue& queue) noexcept
+{
+    ludus::foundation::uint64 sum = 0;
+    for (const std::span<const Command> part : {queue.GetLeadingSpan(), queue.GetTrailingSpan()})
+    {
+        for (const Command& command : part)
+        {
+            sum += command.Argument;
+        }
+    }
+    return sum;
+}
+```
+
+The ring is not contiguous once it wraps, so it has no `begin`/`end`. Index it
+with `operator[]` (0 is the oldest) or walk the two spans. It is single-owner,
+not a thread-safe queue.
 
 ## Register and look up by key
 

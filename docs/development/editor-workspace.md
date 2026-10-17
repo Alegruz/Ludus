@@ -583,6 +583,11 @@ the open World; it does not introduce another authoring workspace.
 
 ### World viewport navigation
 
+The World hierarchy scrolls when the available dock height cannot fit its entity
+list and commands. **Import report**, beside the World path, opens the full stored
+report in the scrollable inspector; opening it does not reduce viewport height.
+The import confirmation preview remains visible before an import is accepted.
+
 The editor owns a separate camera controller and publishes a validated C0
 pose/lens sample to the renderer. Navigation never changes an authored camera,
 World Save/Undo history, or simulation state. Starting navigation from an
@@ -598,7 +603,7 @@ that preview. Zero-motion input leaves the selected camera unchanged.
 | Shift while flying | Four-times movement speed |
 | Wheel while holding right mouse | Adjust fly speed without dollying |
 | Alt/Option + left-drag | Orbit around the current focus pivot |
-| Middle-drag | Pan in the camera plane |
+| Middle-drag or Shift + Alt/Option + left-drag | Pan in the camera plane |
 | Wheel / high-resolution trackpad scroll | Proportional dolly; orthographic views change visible span |
 | F | Frame the selected rendered World entity |
 | Home / **Frame all visible objects** | Fit all extracted visible geometry |
@@ -610,6 +615,11 @@ no-op. Framing uses transformed mesh bounds, fits both viewport axes, and
 preserves orientation. Pan uses the current lens, focus distance and drawable
 height, so resizing and display scaling do not change the intended displacement.
 Fractional pointer/scroll input is retained rather than rounded to mouse notches.
+The controls hint stays visible above the image. On a Mac trackpad, hold Option
+while clicking and dragging to orbit, add Shift to pan, and use two-finger scroll
+to dolly. These gestures do not require a secondary or middle button. **Frame all**
+beside the shading selector fits the scene without a Home key. Fly/look still
+uses a held secondary click (including macOS Control-click) and WASD/QE.
 On Cocoa and X11, fly look recenters the captured pointer and restores its starting
 position on release. Wayland forbids pointer warping through this Qt API, so it
 uses the delivered drag motion; continuous look at the screen edge still needs a
@@ -821,7 +831,13 @@ contribution. HDR/constant authored environments supply the initial irradiance
 and retain specular reflection after the bake. No editor fill is added to Lit.
 
 The status shows planar proxy/shadow counts, bake progress, completion or failure.
-A failed bake retains the direct-lit viewport and camera controls. Camera, orbit,
+A failed bake retains the direct-lit viewport and camera controls. While the bake
+runs, **Cancel bake** below the shading selector stops it and keeps direct
+lighting; **Bake again** restarts it. When the bake tolerates input flaws, such as
+zero-area triangles in imported meshes, the bake controls show a warning with the
+skipped count, and its tooltip names each affected object, as soon as preparation
+completes. The status line repeats the count, so you can fix the meshes or cancel
+the bake instead of waiting for a rejection. Camera, orbit,
 exposure and layout changes do not restart this view-independent bake; geometry,
 material, light and environment changes create a new exact revision. Saved World
 assets preserve authored lighting through reopen and relocation. Legacy v1/v2
@@ -832,10 +848,10 @@ planar emitter patch and hard cube-map shadows. It supports up to 128 admitted
 lights and 80 shadow regions: point/area lights consume six faces, while
 spot/directional lights consume one. The 2048-pixel atlas packs guttered cells;
 capacity, malformed or unsupported source topology rejects rather than dropping
-illumination. Zero-area emitter triangles, common in imported meshes, carry no
-power and form no proxy. The static bake still rejects any instance with a
-zero-area triangle (for example the staircase2 reference scene); Lit then keeps
-its shadowed direct lighting and reports the bake failure. Curved or concave sources can exceed this proxy profile. The
+illumination. Zero-area triangles, common in imported meshes, never reject a scene:
+they carry no power and form no area proxy, an authored World mesh gives them an
+inert placeholder normal, and the static bake skips and reports them (for example
+the staircase2 reference scene). Curved or concave sources can exceed this proxy profile. The
 static bake uses 64 cosine samples per triangle, depth four, and separate
 4×4 guttered triangle tiles; it can show spatial discontinuities and sampling
 noise. It includes diffuse bounces, with finite-depth bias, rather than glossy
@@ -846,7 +862,13 @@ Optional GPU path tracing remains a separate renderer API.
 Qt Quick's native surface is embedded in the World splitter and uses the basic
 owner-thread render loop. The adapter admits the device and queue Qt Quick renders with, imports
 its RGBA8 texture, and retires replaced reads only after Qt submits the consumer
-frame. Resize, scene replacement, Stop and source invalidation release texture
+frame. The scene graph samples only the active image, whose read stays open until
+a synchronized replacement takes its place; the replaced read is released at
+`afterFrameEnd` or on the next service tick, after Qt's submission either way.
+`QQuickWindow::grabWindow` synchronizes and renders without the frame signals and
+may itself promote the pending image; the same rule covers it. RHI and Qt submit
+on one serialized queue, so a lease error would show a newer frame, never torn
+pixels. Resize, scene replacement, Stop and source invalidation release texture
 leases before renderer/device cleanup. Camera and splitter restoration keep the
 existing project-local preferences. The native child surface follows Qt window
 container stacking rules; widgets cannot overlay it arbitrarily.
@@ -861,6 +883,11 @@ a device it created itself; with this ownership it never has to, so Ubuntu 24.04
 Qt 6.4 shares GPU textures without CPU readback. Hardware adapters are preferred
 over software rasterizers. The editor destroys the device only after Qt Quick and
 the RHI have released it.
+
+Qt 6.4's `grabWindow` interprets every non-BGRA8 swapchain readback as 8-bit RGBA.
+On GNOME Wayland, Mesa offers Intel GPUs an RGBA16F swapchain first, so grabs there
+look striped although the screen is correct. On X11, grabs match `xwd` captures of
+the window exactly; use X11 for pixel evidence.
 
 If no adapter can present to the window with a shareable device, the viewport
 falls back to an offscreen path. The engine creates its own headless Vulkan device,
@@ -1078,7 +1105,9 @@ Native support follows the [host prerequisites](#prerequisites-optional-editor-s
 Browser import and persistence still need acceptance.
 
 The table uses a Qt model/view projection with no widget per asset row. Actual
-catalog admission remains **4096 resources / 1 MiB JSON**, as required by Content.
+audio catalog admission remains **4096 resources / 1 MiB JSON**. The separate
+scene asset catalog admits **4096 resources / 64 MiB JSON**; see
+[limit ownership](../architecture/content-resources.md#limit-ownership).
 The `[content][scale]` fixture separately measures a synthetic **100,000-row**
 view: population, 20 searches (p50/p95), and stable-ID lookup. The optional-editor
 CI records host/OS/architecture, Qt version and the Development profile in its

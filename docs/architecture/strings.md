@@ -274,8 +274,8 @@ publication or synchronization of unrelated mutable state.
 Failures distinguish at least `OutOfMemory`, `TooLarge`, `CapacityExceeded`,
 `InvalidArgument`, `InvalidUtf8`, `EmbeddedZero`, `InvalidHandle`, `WrongTable`,
 `Frozen`,
-`NotFound`, and `TokenExhausted`. Status storage is small and independent of
-the normal logger. A separate optional diagnostic contains the byte offset or
+`NotFound`, `TokenExhausted`, and `ProbeExhausted`. Status storage is small and
+independent of the normal logger. A separate optional diagnostic contains the byte offset or
 limit; it owns no string. Empty success is distinct from not found and failure.
 
 In signatures below, `Status` means a Strings-local status enum. It is not an
@@ -483,7 +483,9 @@ error and not a reason to rename a user's string.
 
 Use linear probing initially, with a load-factor candidate of 0.75 to measure.
 It needs no tombstones because there is no individual removal. A probe is bounded
-by capacity; corrupted metadata must not produce an infinite loop. Control-byte
+by capacity; corrupted metadata must not produce an infinite loop. A probe that
+visits every slot without a match or an empty slot reports `ProbeExhausted` from
+lookup and insertion, and never publishes into an occupied slot. Control-byte
 group probing is the first performance upgrade to evaluate. The
 [Abseil Swiss-table design](https://abseil.io/about/design/swisstables)
 describes filtering candidate entries with compact hash metadata before full
@@ -987,6 +989,9 @@ exact append-only `StringTable`, bounded allocation/entry/spelling budgets, and
 ownership transfer to `FrozenStringTable` with no allocation or index changes.
 Spellings occupy linked 32 KiB pages (a smaller final page may fit a tight budget);
 metadata uses geometric growth and linear probing at at most 75% occupancy.
+Each lookup visits at most the lookup capacity. Exhaustion is unreachable for
+intact metadata; `TryFind`, `TryIntern` and frozen `TryFind` report it as
+`ProbeExhausted`, preserve their output and leave the logical table unchanged.
 The initial LP64 `String` is 48 bytes; its layout is a baseline, not a stable ABI
 or a claim that 23 inline bytes wins every workload. The system allocator remains
 unchanged for existing containers. Domains are immutable and must outlive owners.
@@ -997,7 +1002,8 @@ Its formatting scratch and filesystem adapter still use their existing APIs.
 The relocated SDK consumer and wasm/Node foundation probe execute the new public
 APIs. Unit tests include allocation/failure/provenance checks, overlap handling,
 all Unicode scalar encodings, malformed sequences, the 64 official SipHash
-vectors, XXH3 golden vectors, forced collisions, table growth, duplicate admission
+vectors, XXH3 golden vectors, forced collisions (including wrap-around at the
+load limit and a corrupted full lookup array), table growth, duplicate admission
 at capacity, and concurrent mutation / immutable reads. Reduced-width reference
 count tests exercise saturation without attempting 2^64 copies.
 
@@ -1119,7 +1125,7 @@ not a new build, sanitizer run, or performance result.
 | Content and symbol consumers | Pair the dictionary with a real indexed-content reader/cooker and retained snapshot; define safe reload retirement and compatibility. The [2026-10-16 survey](#dictionary-adoption-survey) found no qualifying format; start when one of its triggers exists. Bind literals during setup, cache IDs in an actual repeated-name consumer, and validate any generated closed symbol schema for collisions | [Migration phases](#migration-phases) and [literal descriptors](#literal-descriptors) |
 | Mutable and bounded storage | Add explicit shrinking, checked byte-range erase, and named display truncation where required by the initial consumers; enforce their byte limits. Insert/replace and mutable write reservations still require a concrete consumer | [Mutable string storage](#mutable-string-storage) |
 | Text and formatting boundaries | Checked UTF-8 slicing, explicit display repair, counted `char8_t` adapters, strict native UTF-16 conversion at OS boundaries, and exception-free builder/bounded formatting adapters | [Bytes and Unicode](#bytes-and-unicode) and [bounded strings and construction](#bounded-strings-and-construction) |
-| Table completion | Checked resolution from table-local `StringIndex`, reservation for known content counts, explicit symbol-grammar adapters, and bounded lookup probing. Current public resolution accepts `NameId`; `FindSlot` has no explicit probe-count bound | [Interned names and indexed strings](#interned-names-and-indexed-strings) |
+| Table completion | Checked resolution from table-local `StringIndex`, reservation for known content counts, and explicit symbol-grammar adapters. Current public resolution accepts `NameId`. Bounded lookup probing is implemented; see [implementation status](#implementation-status) | [Interned names and indexed strings](#interned-names-and-indexed-strings) |
 | Diagnostics and validation | Counted debugger previews, opt-in footprint/probe/retention snapshots, appropriate public Doxygen contracts, reduced-width table-token exhaustion tests, and differential operation sequences; add reader/cooker and boundary tests with their implementation | [Debugging and observation](#debugging-and-observation) and [required correctness evidence](#required-correctness-evidence) |
 
 [Static localization catalogs](../../modules/localization/README.md) already

@@ -1,3 +1,4 @@
+#include <ludus/foundation/profiling/integration.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
 
@@ -20,6 +21,16 @@ uint64 EmitFlowOut(const ZoneDescriptor&) noexcept
 void EmitFlowIn(uint64) noexcept {}
 void RegisterSite(const ZoneDescriptor&) noexcept {}
 } // namespace detail
+bool IsCaptureActive() noexcept
+{
+    return false;
+}
+void RegisterSite(const ZoneDescriptor&) noexcept {}
+void BeginSite(uint32) noexcept {}
+void EndSite(uint32) noexcept {}
+void StartFlow(const ZoneDescriptor&, uint64) noexcept {}
+void FinishFlow(const ZoneDescriptor&, uint64) noexcept {}
+void SampleCounter(const ZoneDescriptor&, uint64) noexcept {}
 void RegisterThreadForTrace(std::string_view) noexcept {}
 void UnregisterThreadForTrace() noexcept {}
 bool BeginCapture(usize) noexcept

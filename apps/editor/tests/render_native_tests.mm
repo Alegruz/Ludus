@@ -1,5 +1,6 @@
 #include "internal/level_workspace.h"
 #include "internal/preview_lighting.h"
+#include "internal/preview_shading.h"
 #include "internal/preview_viewport.h"
 #include "internal/readback.h"
 #include "internal/render_preview.h"

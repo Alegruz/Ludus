@@ -342,17 +342,20 @@ inner loop.
 
 | Measurement | Scanning on | Scanning off |
 | --- | ---: | ---: |
-| Clean-build Ninja edges | 1559 | 543 |
+| Clean-build `.ninja_log` entries | 1559 | 543 |
 | Compiler invocations (`.o`) | 382 | 382 |
-| Scan and collation CPU, clean build | 103–129 s | 0 |
-| Ninja edges after touching `core.h` | 1046 | 349 |
-| Scan and collation CPU after touching `core.h` | 75–104 s | 0 |
+| Scan and collation CPU, clean build | 72–91 s | 0 |
+| `.ninja_log` entries after touching `core.h` | 1046 | 349 |
+| Scan and collation CPU after touching `core.h` | 51–76 s | 0 |
 | Configure, median of five interleaved runs | 5.40 s | 5.15 s |
 
-The removed edges are 375 `.ddi` scans, 375 `.modmap` files, and 133 each of
-the per-target `CXX.dd` and `CXXModules.json` collation outputs. Their CPU time
-comes from the scanning-on runs' own `.ninja_log` and adds 11–15% to compile CPU
-for a clean build and 9–16% after touching `core.h`.
+The removed entries are 375 `.ddi` scans, 375 `.modmap` files, and 133 each of
+the per-target `CXX.dd` and `CXXModules.json` collation outputs, written by 375
+scan and 133 collation commands. Their CPU time comes from the scanning-on runs'
+own `.ninja_log`, counting each command once: one collation writes its target's
+`CXX.dd`, `CXXModules.json` and all of its `.modmap` files. Scanning and
+collation add 8–10% to compile CPU for a clean build and 6–10% after touching
+`core.h`.
 
 No wall-time improvement is claimed. The host was shared with other builds
 (load average 9–28), and the same 382 compilations summed between 757 s and
@@ -369,6 +372,49 @@ and 249.0 s), which scanning does not touch, so the difference is host load.
 No budget changes.
 
 `compile_commands.json` entries no longer reference generated `.modmap`
-response files. Game projects configured through the installed SDK keep CMake's
-default and still scan. Re-enable scanning for any target that adopts named
-modules.
+response files. The installed SDK helpers turn scanning off for the game-project
+targets they configure; see
+[SDK game project module scanning](#sdk-game-project-module-scanning).
+Re-enable scanning for any target that adopts named modules.
+
+## SDK game project module scanning
+
+The installed SDK helpers apply the same setting to the game-project targets
+they configure. `CXX_SCAN_FOR_MODULES` is `OFF` on `ludus_add_game`'s module,
+host and shipping targets, and on every target passed to
+`ludus_apply_app_policy`, including `ludus_generate_reflection` libraries. The
+helpers do not set `CMAKE_CXX_SCAN_FOR_MODULES`, so a project's other targets
+keep CMake's default. A target that adopts named modules can set the property
+back `ON` after the helper call.
+
+Measured on a 10-core Apple M5 host with CMake 3.29.6 and the pinned Clang 18.
+`./scripts/install-sdk macos-clang-development` supplied a RelWithDebInfo SDK.
+A copy of that prefix, differing only in `LudusConfig.cmake` and
+`LudusGame.cmake`, provided the scanning-on side. Each consumer was configured
+and built clean against each prefix, alternating order: 18 interleaved pairs
+at Ninja's default parallelism (load average 7–15).
+
+| Consumer | Targets the helpers configure | Ninja steps (on → off) | `.ninja_log` entries (on → off) | Scan and collation CPU removed | Compile CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `examples/cornell-box` | 2 of 2 | 13 → 7 | 30 → 18 | 0.46 s (0.40–1.43 s) | 0.9 s |
+| `examples/live-edit-game` | 4 of 4 | 21 → 11 | 40 → 20 | 1.0 s (0.8–7.5 s) | 2.5 s |
+| `tests/sdk_consumer` | 2 of 3 | 57 → 52 | 94 → 84 | 0.89 s (0.58–1.09 s) | 17–19 s |
+
+CPU values are medians with their ranges; the `tests/sdk_consumer` split by
+target comes from the last 12 pairs. Removed CPU sums the `.ddi`, `.modmap`,
+`CXX.dd` and `CXXModules.json` entries of the scanning-on runs, counting each
+command once: one collation writes `CXX.dd`, `CXXModules.json` and all of its
+target's `.modmap` files. For the two examples, scanning added a median 49% and
+38% to compile CPU. The same compilations ran either way, and configure time
+was unchanged. `tests/sdk_consumer` keeps scanning its own `ludus_sdk_consumer`
+target (22 sources, 5.8 s median), as intended. Its compile commands still
+reference `.modmap` files; those of the helper-configured targets no longer do.
+
+At default parallelism, Ninja's build span (first start to last end in
+`.ninja_log`) was shorter without scanning in 16 of 18 `cornell-box` pairs
+(median 1.24 → 1.02 s, median paired difference 0.15 s) and 17 of 18
+`live-edit-game` pairs (1.10 → 0.85 s, 0.29 s). In these small builds, each
+target's scan and collation sit on the critical path before its first
+compilation. `tests/sdk_consumer` showed no consistent difference (10 of 18
+pairs, differences from −1.7 to +0.9 s). Six pairs at `--parallel 2` pointed
+the same way for the two examples but are too few to quantify.

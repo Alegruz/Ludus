@@ -460,7 +460,7 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
         return
 
     minimum = versions["minimum"]
-    clang_major = version_tuple(minimum["clang"])[0] if version_tuple(minimum["clang"]) else 18
+    clang_major = llvm_major_version(versions)
     if platform.system() == "Darwin":
         brew = shutil.which("brew")
         if brew:
@@ -482,7 +482,7 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
             link_or_replace_symlink(host_tools_bin_dir(root) / shim_name, Path(target))
 
     if platform.system() == "Darwin" and clang_cxx(root).is_file():
-        configure_macos_sdk(root)
+        configure_macos_sdk(root, clang_major)
 
 
 def macos_toolchain_identity(root: Path) -> dict[str, str]:
@@ -520,12 +520,18 @@ def probe_macos_sdk(root: Path, sdk: Path, libcxx: Path) -> tuple[int, str]:
     # Compile and link rather than checking a version label: Apple SDK math
     # headers can require compiler-resource macros absent from older Clang.
     # This exercises the NAN/INFINITY contract that HarfBuzz's source uses.
+    # <cfloat> after <cmath> catches libc++ 22 with the macOS 27 SDK (C++23): math.h's
+    # partial float.h include sets libc++'s guard, leaving <cfloat> empty
+    # (Catch2 needs DBL_MAX_10_EXP). Thanks to Ian Anderson (LLVM), "[libc++]
+    # Remove libc++'s <float.h>", llvm/llvm-project#175849 (LLVM 23):
+    # https://github.com/llvm/llvm-project/pull/175849
     for metadata in (sdk / "SDKSettings.json", libcxx / "__config"):
         if not metadata.is_file():
             return 1, f"Incomplete SDK/header installation: missing {metadata}"
-    source = ("#include <cmath>\n#include <string_view>\n"
+    source = ("#include <cmath>\n#include <cfloat>\n#include <string_view>\n"
               "#ifndef NAN\n#error LudusSDK_missing_NAN\n#endif\n"
               "#ifndef INFINITY\n#error LudusSDK_missing_INFINITY\n#endif\n"
+              "#ifndef DBL_MAX_10_EXP\n#error LudusSDK_missing_DBL_MAX_10_EXP\n#endif\n"
               "int main() { volatile double n = NAN; volatile double i = INFINITY; "
               "return std::isnan(n) && std::isinf(i) && std::string_view(\"sdk\").size() == 3 ? 0 : 1; }\n")
     import tempfile
@@ -537,7 +543,8 @@ def probe_macos_sdk(root: Path, sdk: Path, libcxx: Path) -> tuple[int, str]:
             cwd=root, input_text=source, timeout=30)
 
 
-def configure_macos_sdk(root: Path) -> None:
+def configure_macos_sdk(root: Path, llvm_major: int) -> None:
+    """Select and link a macOS SDK that the pinned Clang ``llvm_major`` can compile and link with."""
     explicit = os.environ.get("SDKROOT", "")
     sdk = explicit
     if not sdk:
@@ -552,7 +559,8 @@ def configure_macos_sdk(root: Path) -> None:
         raise EngineError(f"macOS SDK is missing: {sdk}. Set SDKROOT to an installed SDK and rerun ./init.sh.")
     libcxx = clang_cxx(root).resolve().parent.parent / "include/c++/v1"
     if not libcxx.is_dir():
-        raise EngineError(f"Clang libc++ headers are missing: {libcxx}. Restore llvm@18 and rerun ./init.sh.")
+        raise EngineError(f"Clang libc++ headers are missing: {libcxx}. "
+                          f"Restore llvm@{llvm_major} and rerun ./init.sh.")
     candidates = [Path(sdk).resolve()] if explicit else macos_sdk_candidates(Path(sdk))
     failures = []
     for candidate in candidates:
@@ -560,7 +568,7 @@ def configure_macos_sdk(root: Path) -> None:
         if code == 0:
             link_or_replace_symlink(root / "out/host-tools/macos-sdk", candidate)
             link_or_replace_symlink(root / "out/host-tools/libcxx-include", libcxx)
-            print(f"Validated macOS SDK: {candidate} (Clang compile/link and NAN/INFINITY checks passed)")
+            print(f"Validated macOS SDK: {candidate} (Clang compile/link, NAN/INFINITY and <cfloat> checks passed)")
             if failures:
                 print(f"Skipped incompatible SDK: {Path(sdk).resolve()}")
             return
@@ -570,7 +578,8 @@ def configure_macos_sdk(root: Path) -> None:
         f"{selection} with {clang_cxx(root).resolve()}.\n"
         "Compiler/SDK compile-link validation failed before dependency downloads or HarfBuzz builds.\n"
         + "\n".join(failures) + "\nHow to fix:\n"
-        "  Install a macOS SDK compatible with Clang 18 (macOS 26.5 passes the current math-header probe).\n"
+        f"  Install a macOS SDK compatible with Clang {llvm_major} "
+        "(macOS 26.5 passes the current math-header probe).\n"
         "  SDKROOT=/absolute/path/to/MacOSX26.5.sdk ./init.sh\n"
         "  If SDKROOT was set accidentally, unset SDKROOT and rerun ./init.sh to test installed sibling SDKs.\n"
         "Changing only the deployment target does not change the SDK headers.")
@@ -598,7 +607,7 @@ def executable_version(path: str, args: Sequence[str], root: Path) -> str:
 
 def system_tool_statuses(root: Path, versions: dict[str, dict[str, str]]) -> list[ToolStatus]:
     minimum = versions["minimum"]
-    clang_major = version_tuple(minimum["clang"])[0] if version_tuple(minimum["clang"]) else 14
+    clang_major = llvm_major_version(versions)
     shim_dir = host_tools_bin_dir(root)
     tool_specs: list[tuple[str, bool, Sequence[str], Sequence[str], str]] = [
         ("Git", True, ("git",), ("--version",), ""),
@@ -737,7 +746,8 @@ def print_status_table(statuses: Sequence[ToolStatus]) -> None:
         print(" | ".join(value.ljust(widths[index]) for index, value in enumerate(row)))
 
 
-def print_missing_tool_help(name: str, version: str, path: str, minimum: str) -> None:
+def print_missing_tool_help(name: str, version: str, path: str, minimum: str,
+                            llvm_major: int | None = None) -> None:
     print("")
     print(f"Missing or invalid required tool: {name}")
     print(f"Detected host: {platform.platform()}")
@@ -746,21 +756,33 @@ def print_missing_tool_help(name: str, version: str, path: str, minimum: str) ->
     print(f"Minimum required version: {minimum}")
     print("One-command onboarding command:")
     print("  ./init.sh")
-    if name != "Python":
-        major = version_tuple(minimum)[0] if version_tuple(minimum) else 18
+    if name != "Python" and llvm_major is not None:
         print("Manual Ubuntu fallback, if automatic sudo installation is unavailable:")
         print(
             "  sudo apt-get update && sudo apt-get install -y "
-            f"git python3 python3-venv ca-certificates clang-{major} lld-{major} "
-            f"clang-format-{major} clang-tidy-{major}"
+            f"git python3 python3-venv ca-certificates clang-{llvm_major} lld-{llvm_major} "
+            f"clang-format-{llvm_major} clang-tidy-{llvm_major}"
         )
         print("  If apt cannot find those packages, enable Ubuntu universe first:")
         print("  sudo add-apt-repository -y universe && sudo apt-get update")
 
 
 def llvm_major_version(versions: dict[str, dict[str, str]]) -> int:
-    parts = version_tuple(versions["minimum"]["clang"])
-    return parts[0] if parts else 18
+    """Return the pinned LLVM major from ``minimum.clang`` in config/tool_versions.json."""
+    parts = version_tuple(versions["minimum"].get("clang", ""))
+    if not parts:
+        raise EngineError("config/tool_versions.json must pin minimum.clang as a version")
+    return parts[0]
+
+
+def pinned_llvm_major(root: Path) -> int:
+    """Read the pinned LLVM major for the checkout at ``root``."""
+    return llvm_major_version(load_tool_versions(root))
+
+
+def pinned_llvm_tool(root: Path, tool: str) -> str:
+    """Return the versioned executable name of a pinned LLVM tool, such as ``clang-format-<major>``."""
+    return f"{tool}-{pinned_llvm_major(root)}"
 
 
 def host_is_ubuntu() -> bool:
@@ -1033,7 +1055,8 @@ def validate_required_system_tools(root: Path, versions: dict[str, dict[str, str
     print_status_table(statuses)
     for failure in failures:
         minimum = versions["minimum"].get(failure.name.lower(), failure.requirement.removeprefix(">= "))
-        print_missing_tool_help(failure.name, failure.version, failure.path, minimum)
+        print_missing_tool_help(failure.name, failure.version, failure.path, minimum,
+                                llvm_major_version(versions))
     raise EngineError("required system-level tools are missing or below the supported version")
 
 
@@ -1370,8 +1393,9 @@ def command_init(args: argparse.Namespace) -> int:
             if system_prerequisites_need_install(root, versions):
                 brew = shutil.which("brew")
                 if not brew:
-                    raise EngineError("macOS setup requires Homebrew and Xcode Command Line Tools; install llvm@18 first")
-                run([brew, "install", "llvm@18"], cwd=root)
+                    raise EngineError("macOS setup requires Homebrew and Xcode Command Line Tools; "
+                                      f"install llvm@{llvm_major_version(versions)} first")
+                run([brew, "install", f"llvm@{llvm_major_version(versions)}"], cwd=root)
                 configure_system_tool_shims(root, versions)
         else:
             install_ubuntu_system_prerequisites(root, versions)
@@ -1517,7 +1541,7 @@ def find_system_tool(root: Path, name: str, versions: dict[str, dict[str, str]])
             if status.ok:
                 return status.path
             minimum = versions["minimum"].get(name.lower(), "")
-            print_missing_tool_help(name, status.version, status.path, minimum)
+            print_missing_tool_help(name, status.version, status.path, minimum, llvm_major_version(versions))
             raise EngineError(f"{name} is required")
     raise EngineError(f"unknown tool status requested: {name}")
 
@@ -1585,7 +1609,7 @@ def run_tidy(root: Path, preset: str, *, analyzer: bool = False) -> None:
     clang_tidy = find_system_tool(root, "clang-tidy", versions)
     actual_version = executable_version(clang_tidy, ("--version",), root)
     if not version_tuple(actual_version) or version_tuple(actual_version)[0] != llvm_major_version(versions):
-        raise EngineError("Static analysis requires reference clang-tidy 18")
+        raise EngineError(f"Static analysis requires reference clang-tidy {llvm_major_version(versions)}")
     build_dir = build_dir_for_preset(root, preset)
     if not (build_dir / "compile_commands.json").is_file() or not list(
             (build_dir / ".cmake/api/v1/reply").glob("index-*.json")):

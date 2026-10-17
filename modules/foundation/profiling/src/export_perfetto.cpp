@@ -38,6 +38,8 @@
 //   Instant-> phase "i"   (scope "t")
 //   FrameMark -> phase "i" on a synthetic "Frames" name (a frame boundary; D7)
 //   FlowOut/FlowIn -> phases "s"/"f" with a shared id (cross-context links; C5)
+//   Counter -> phase "C" with args {"value": N} (timeline counter sample)
+//   registered thread names -> metadata "M" thread_name records
 //
 // Incomplete scopes (a Begin with no End when the capture ends, or a dropped
 // chunk) are closed with a synthesized "E" carrying an "incomplete" arg so the
@@ -138,8 +140,23 @@ struct ChromeEvent
     uint32 ThreadId = 0;
     uint64 TicksNs = 0;
     uint64 FlowId = 0;
+    uint64 CounterValue = 0;
     bool Incomplete = false;
 };
+
+void AppendThreadName(std::string& inoutJson, bool& inoutIsFirst, uint32 threadId, std::string_view name) noexcept
+{
+    if (inoutIsFirst == false)
+    {
+        inoutJson += ",\n";
+    }
+    inoutIsFirst = false;
+    inoutJson += "  {\"pid\":1,\"tid\":";
+    AppendUint(inoutJson, threadId);
+    inoutJson += ",\"ph\":\"M\",\"name\":\"thread_name\",\"args\":{\"name\":\"";
+    AppendJsonEscaped(inoutJson, name);
+    inoutJson += "\"}}";
+}
 
 void AppendEventObject(std::string& out, bool& first, const ChromeEvent& event) noexcept
 {
@@ -169,6 +186,12 @@ void AppendEventObject(std::string& out, bool& first, const ChromeEvent& event) 
         {
             out += ",\"bp\":\"e\"";
         }
+    }
+    if (event.Phase == 'C')
+    {
+        out += ",\"args\":{\"value\":";
+        AppendUint(out, event.CounterValue);
+        out += "}";
     }
     if (event.Incomplete)
     {
@@ -243,6 +266,15 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
     out.reserve(events.size() * 96 + 256);
     out += "{\"traceEvents\":[\n";
     bool first = true;
+    for (usize threadIndex = 0; threadIndex < recorder.ThreadCount(); ++threadIndex)
+    {
+        const uint32 threadId = recorder.ThreadIdAt(threadIndex);
+        const std::string_view threadName = recorder.ThreadName(threadId);
+        if (threadName.empty() == false)
+        {
+            AppendThreadName(out, first, threadId, threadName);
+        }
+    }
 
     // Per-thread open-scope DEPTH used to synthesize End events for scopes still
     // open at capture end (incomplete; §6/G13). The viewer pairs B/E by order, so
@@ -319,6 +351,11 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
             case TraceEventKind::FlowIn:
                 ce.Phase = 'f';
                 ce.FlowId = e.Aux;
+                AppendEventObject(out, first, ce);
+                break;
+            case TraceEventKind::Counter:
+                ce.Phase = 'C';
+                ce.CounterValue = e.Aux;
                 AppendEventObject(out, first, ce);
                 break;
         }

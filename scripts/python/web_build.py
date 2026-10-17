@@ -168,7 +168,7 @@ def command(args, engine) -> int:
             for probe in ("web-foundation-probe", "web-observability-probe", "web-platform-probe", "web-rhi-probe", "web-frame-probe"):
                 path = root / "tools" / probe / "main.cpp"
                 original = path.read_text()
-                formatted = format_source(original, path, "clang-format-18")
+                formatted = format_source(original, path, engine.pinned_llvm_tool(root, "clang-format"))
                 if args.fix:
                     path.write_text(formatted)
                 elif formatted != original:
@@ -179,12 +179,13 @@ def command(args, engine) -> int:
             (directory / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
             if inventory_only and not (args.tidy or all_checks or analyzer):
                 return 0
-            tidy = shutil.which("clang-tidy-18")
+            llvm_major = engine.pinned_llvm_major(root)
+            tidy = shutil.which(f"clang-tidy-{llvm_major}")
             if not tidy:
-                raise EngineError("clang-tidy 18 is required")
+                raise EngineError(f"clang-tidy {llvm_major} is required")
             actual = engine.executable_version(tidy, ("--version",), root)
-            if not engine.version_tuple(actual) or engine.version_tuple(actual)[0] != 18:
-                raise EngineError("Browser analysis requires reference clang-tidy 18")
+            if not engine.version_tuple(actual) or engine.version_tuple(actual)[0] != llvm_major:
+                raise EngineError(f"Browser analysis requires reference clang-tidy {llvm_major}")
             policy = root / ("config/clang-analyzer.yml" if analyzer and not (args.tidy or all_checks) else ".clang-tidy")
             report["analysis"] = {"tool_version": actual, "tool_sha256": engine.file_sha256(Path(tidy)),
                                   "policy": str(policy.relative_to(root)), "policy_sha256": engine.file_sha256(policy)}

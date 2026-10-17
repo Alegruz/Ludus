@@ -36,6 +36,7 @@ enum class TraceEventKind : uint8
     FrameMark = 3,
     FlowOut = 4,
     FlowIn = 5,
+    Counter = 6, // timeline counter sample (integration.hpp SampleCounter); Aux = value
     // GpuBegin/GpuEnd reserved for Phase 5 (needs an RHI); not emitted yet.
 };
 

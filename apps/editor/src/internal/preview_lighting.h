@@ -223,10 +223,16 @@ inline rhi::RasterStatus BuildInputs(const RenderScene& scene, const QByteArray&
             const math::Vector3 c = math::TransformPoint(object.Transform, mesh.Positions[mesh.Indices[i * 3 + 2]]);
             area += static_cast<float64>(math::Length(math::Cross(b - a, c - a))) * .5;
         }
+        if (area <= 0)
+        {
+            // Every triangle collapsed: no surface emits, so there is no proxy to add.
+            overrideSurface.Emission = {};
+            continue;
+        }
         if (material.HasEmissionPower == true)
         {
             const float32 luminance = math::Dot(surface.Emission, math::Vector3{.2126F, .7152F, .0722F});
-            if (area <= 0 || luminance <= 0)
+            if (luminance <= 0)
             {
                 return rhi::RasterStatus::InvalidDescription;
             }

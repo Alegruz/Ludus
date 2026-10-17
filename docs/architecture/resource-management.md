@@ -829,7 +829,8 @@ retain separate logical ownership even when immutable byte files can be shared.
 Artifact keys include source input digests, importer and publisher code digests,
 canonical settings, schema/target profile, output digest and exact required child
 artifact keys. Required dependency UUIDs and their artifact keys are recorded
-before loading. The catalog is limited to 1 MiB/4096 records; an admitted scene
+before loading. The scene catalog is limited to 64 MiB/4096 records (see
+[limit ownership](content-resources.md#limit-ownership)); an admitted scene
 closure has at most 64 records, depth eight, and 64 MiB of payloads. Missing,
 corrupt or mismatched dependency revisions reject the complete candidate.
 

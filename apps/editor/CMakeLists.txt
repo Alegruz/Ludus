@@ -137,6 +137,10 @@ qt_add_executable(ludus_editor
     ${editor_viewport_sources}
     src/render_scene.cpp
     src/render_preview.cpp
+    src/preview_gpu_generation.cpp
+    src/internal/preview_gpu_generation.h
+    src/internal/preview_bake.h
+    src/internal/preview_shading.h
     src/editor_camera_controller.cpp
     src/static_lighting_job.cpp
     src/internal/static_lighting_job.h
@@ -197,14 +201,11 @@ qt_add_resources(ludus_editor ludus_brand
     BASE "${PROJECT_SOURCE_DIR}/docs/wiki/assets"
     FILES ${editor_brand_assets})
 # Ship editable, self-contained examples with both presentations. Generated
-# build outputs and local machine settings are never part of the sample library.
-set(editor_sample_files)
-foreach(sample cornell-box live-edit-game scripted-game editor-sdk-project)
-    file(GLOB_RECURSE sample_files CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/examples/${sample}/*")
-    list(FILTER sample_files EXCLUDE REGEX "/(out|build|\\.ludus)/|CMakeUserPresets\\.json$")
-    list(APPEND editor_sample_files ${sample_files})
-endforeach()
+# build outputs and local machine settings are never part of the sample library;
+# they are excluded relative to each sample root, not the checkout path.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/EditorSampleResources.cmake")
+ludus_collect_editor_sample_files(editor_sample_files "${PROJECT_SOURCE_DIR}/examples"
+    cornell-box live-edit-game scripted-game editor-sdk-project)
 set(world_demo_schema "${PROJECT_SOURCE_DIR}/apps/world_demo/authoring/world.schema.json")
 qt_add_resources(ludus_editor world_demo_schema PREFIX "/world-demo" BASE "${PROJECT_SOURCE_DIR}/apps/world_demo/authoring" FILES ${world_demo_schema})
 qt_add_resources(ludus_editor ludus_samples
@@ -277,6 +278,10 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         ${editor_viewport_sources}
         src/render_scene.cpp
         src/render_preview.cpp
+        src/preview_gpu_generation.cpp
+        src/internal/preview_gpu_generation.h
+        src/internal/preview_bake.h
+        src/internal/preview_shading.h
         src/editor_camera_controller.cpp
         src/static_lighting_job.cpp
         src/internal/static_lighting_job.h
@@ -296,6 +301,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/world_workspace_tests.cpp
         tests/level_workspace_tests.cpp
         tests/render_authoring_tests.cpp
+        tests/preview_generation_tests.cpp
         tests/viewport_navigation_tests.cpp
         tests/world_demo_workspace_tests.cpp
         src/internal/controller.h
@@ -415,7 +421,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         target_sources(ludus_editor_tests PRIVATE tests/offscreen_viewport_tests.cpp tests/vulkan_viewport_tests.cpp)
     endif()
     if(APPLE AND LUDUS_EDITOR_RENDER_PREVIEW)
-        target_sources(ludus_editor_tests PRIVATE tests/scene_native_tests.mm tests/render_native_tests.mm)
+        target_sources(ludus_editor_tests PRIVATE tests/scene_native_tests.mm tests/render_native_tests.mm
+            tests/viewport_native_navigation.mm)
         # Test-only GPU pixel oracle; no RHI private header enters editor production or the SDK.
         target_include_directories(ludus_editor_tests PRIVATE "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/src")
         target_link_libraries(ludus_editor_tests PRIVATE "-framework Cocoa")

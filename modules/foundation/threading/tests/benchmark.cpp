@@ -1,8 +1,15 @@
+// Submit-to-Wait timing of 256 independent jobs over worker counts and grain
+// sizes, with every output compared with the serial oracle. `--tracing` adds the
+// T2 tracing-overhead comparison; see docs/development/threading-evidence.md.
+#include <ludus/foundation/containers/sort.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/profiling/clock.hpp>
+#include <ludus/foundation/profiling/trace_system.hpp>
+#include <ludus/foundation/threading/job_profiling.hpp>
 #include <ludus/foundation/threading/jobs.hpp>
 
-#include <algorithm>
-#include <chrono>
 #include <cstdio>
+#include <cstring>
 
 using namespace ludus::foundation;
 using namespace ludus::foundation::threading;
@@ -11,6 +18,16 @@ namespace
 {
 constexpr uint32 JOB_COUNT = 256;
 constexpr uint32 SAMPLES = 11;
+// Paired off/traced submissions per configuration in the --tracing comparison.
+constexpr uint32 PAIRED_SAMPLES = 31;
+constexpr uint32 PERCENTILE_25 = 25;
+constexpr uint32 PERCENTILE_50 = 50;
+constexpr uint32 PERCENTILE_75 = 75;
+constexpr uint32 PERCENT = 100;
+// 256 jobs x 5 events x 32 submissions x 15 configurations, plus partial chunks.
+constexpr usize CAPTURE_CHUNKS = 512;
+constexpr uint32 MODE_COUNT = 2;
+
 struct Work
 {
     uint64 Output = 0;
@@ -30,75 +47,213 @@ JobOutcome Compute(void* context) noexcept
     work.Output = value;
     return JobOutcome::Succeeded;
 }
-} // namespace
 
-int main()
+// One system and graph over its own job data, so two modes can be interleaved.
+struct Bench
+{
+    StaticArray<Work, JOB_COUNT> Data{};
+    StaticArray<uint64, PAIRED_SAMPLES> Times{};
+    JobGraph Graph;
+    JobSystem System;
+};
+
+[[nodiscard]] bool Initialize(Bench& outBench, uint32 workers, const JobSystemHooks& hooks, uint32 iterations)
+{
+    if (outBench.Graph.Initialize({JOB_COUNT, 0}) != JobStatus::Ok ||
+        outBench.System.Initialize({ .WorkerCount = workers, .Hooks = hooks }) != JobStatus::Ok)
+    {
+        return false;
+    }
+    const JobLabel label = LUDUS_JOB_LABEL(BenchmarkCompute);
+    for (uint32 index = 0; index < JOB_COUNT; ++index)
+    {
+        outBench.Data[index].Seed = index;
+        outBench.Data[index].Iterations = iterations;
+        JobHandle handle{};
+        if (outBench.Graph.Add(Compute, &outBench.Data[index], handle, label) != JobStatus::Ok)
+        {
+            return false;
+        }
+    }
+    return outBench.Graph.Seal() == JobStatus::Ok;
+}
+
+// Runs one complete submission; sample zero is the warm-up and is not recorded.
+[[nodiscard]] bool RunSample(Bench& inoutBench, uint32 sample)
+{
+    const uint64 begin = profiling::NowTicks();
+    JobOutcome outcome{};
+    if (inoutBench.System.Submit(inoutBench.Graph) != JobStatus::Ok ||
+        inoutBench.System.Wait(outcome) != JobStatus::Ok || outcome != JobOutcome::Succeeded)
+    {
+        return false;
+    }
+    if (sample > 0)
+    {
+        inoutBench.Times[sample - 1] = profiling::NowTicks() - begin;
+    }
+    return true;
+}
+
+[[nodiscard]] uint64 GetMedian(Bench& inoutBench, uint32 sampleCount)
+{
+    Sort(inoutBench.Times.GetData(), sampleCount, [](uint64 left, uint64 right) noexcept { return left < right; });
+    return inoutBench.Times[sampleCount / 2];
+}
+
+// Nearest-rank percentile of an ascending sequence.
+[[nodiscard]] float64 GetPercentile(const StaticArray<float64, PAIRED_SAMPLES>& sorted, uint32 percentile)
+{
+    const uint32 rank = (PAIRED_SAMPLES * percentile + PERCENT - 1) / PERCENT;
+    return sorted[rank == 0 ? 0 : rank - 1];
+}
+
+// Compares every output with the oracle; the zero-worker run defines it.
+[[nodiscard]] bool
+CheckOutputs(const Bench& bench, StaticArray<uint64, JOB_COUNT>& inoutOracle, bool isOracle, uint64& outChecksum)
+{
+    outChecksum = 0;
+    for (uint32 index = 0; index < JOB_COUNT; ++index)
+    {
+        outChecksum ^= bench.Data[index].Output;
+        if (isOracle == true)
+        {
+            inoutOracle[index] = bench.Data[index].Output;
+        }
+        if (bench.Data[index].Output != inoutOracle[index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+int RunBaseline()
 {
     for (const uint32 iterations : {0u, 10000u, 100000u})
     {
-        uint64 oracle[JOB_COUNT]{};
+        StaticArray<uint64, JOB_COUNT> oracle{};
         for (const uint32 workers : {0u, 1u, 2u, 4u, 8u})
         {
-            Work data[JOB_COUNT]{};
-            JobGraph graph;
-            JobSystem system;
-            if (graph.Initialize({JOB_COUNT, 0}) != JobStatus::Ok || system.Initialize({workers}) != JobStatus::Ok)
+            Bench bench;
+            if (Initialize(bench, workers, {}, iterations) == false)
             {
                 return 1;
             }
-            for (uint32 index = 0; index < JOB_COUNT; ++index)
-            {
-                data[index].Seed = index;
-                data[index].Iterations = iterations;
-                JobHandle handle{};
-                if (graph.Add(Compute, &data[index], handle) != JobStatus::Ok)
-                {
-                    return 1;
-                }
-            }
-            if (graph.Seal() != JobStatus::Ok)
-            {
-                return 1;
-            }
-            int64 times[SAMPLES]{};
             // One warm-up sample, then measure whole submit-to-completion runs.
             for (uint32 sample = 0; sample <= SAMPLES; ++sample)
             {
-                const std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-                JobOutcome outcome{};
-                if (system.Submit(graph) != JobStatus::Ok || system.Wait(outcome) != JobStatus::Ok ||
-                    outcome != JobOutcome::Succeeded)
+                if (RunSample(bench, sample) == false)
                 {
                     return 1;
                 }
-                if (sample > 0)
-                {
-                    times[sample - 1] =
-                        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - begin)
-                            .count();
-                }
             }
-            std::sort(times, times + SAMPLES);
             uint64 checksum = 0;
-            for (uint32 index = 0; index < JOB_COUNT; ++index)
+            if (CheckOutputs(bench, oracle, workers == 0, checksum) == false)
             {
-                checksum ^= data[index].Output;
-                if (workers == 0)
-                {
-                    oracle[index] = data[index].Output;
-                }
-                if (data[index].Output != oracle[index])
-                {
-                    return 2;
-                }
+                return 2;
             }
             // Standalone test/benchmark diagnostics; never used by engine code.
-            std::printf("jobs=%u iterations=%u workers=%u median_ns=%lld checksum=%llu\n",
+            std::printf("jobs=%u iterations=%u workers=%u median_ns=%llu checksum=%llu\n",
                         JOB_COUNT,
                         iterations,
                         workers,
-                        static_cast<long long>(times[SAMPLES / 2]),
+                        static_cast<unsigned long long>(GetMedian(bench, SAMPLES)),
                         static_cast<unsigned long long>(checksum));
         }
     }
+    return 0;
+}
+
+// Interleaves a hookless system with a profiler-hooked one, alternating which runs
+// first, so machine drift affects both modes alike. The capture state is the
+// caller's: inactive measures idle hooks, active measures recording.
+int RunTracingComparison(bool isCapturing)
+{
+    const JobSystemHooks profilerHooks = MakeProfilerJobHooks("Benchmark worker");
+    for (const uint32 iterations : {0u, 10000u, 100000u})
+    {
+        StaticArray<uint64, JOB_COUNT> oracle{};
+        for (const uint32 workers : {0u, 1u, 2u, 4u, 8u})
+        {
+            StaticArray<Bench, MODE_COUNT> benches{};
+            if (Initialize(benches[0], workers, {}, iterations) == false ||
+                Initialize(benches[1], workers, profilerHooks, iterations) == false)
+            {
+                return 1;
+            }
+            for (uint32 sample = 0; sample <= PAIRED_SAMPLES; ++sample)
+            {
+                const uint32 first = sample % MODE_COUNT;
+                if (RunSample(benches[first], sample) == false || RunSample(benches[1 - first], sample) == false)
+                {
+                    return 1;
+                }
+            }
+            uint64 checksum = 0;
+            uint64 tracedChecksum = 0;
+            if (CheckOutputs(benches[0], oracle, workers == 0, checksum) == false ||
+                CheckOutputs(benches[1], oracle, false, tracedChecksum) == false)
+            {
+                return 2;
+            }
+            // Pair the two submissions of each round before sorting breaks the pairing.
+            StaticArray<float64, PAIRED_SAMPLES> overheadPercent{};
+            for (uint32 pair = 0; pair < PAIRED_SAMPLES; ++pair)
+            {
+                overheadPercent[pair] =
+                    (static_cast<float64>(benches[1].Times[pair]) / static_cast<float64>(benches[0].Times[pair]) - 1) *
+                    PERCENT;
+            }
+            Sort(overheadPercent.GetData(), PAIRED_SAMPLES, [](float64 left, float64 right) noexcept {
+                return left < right;
+            });
+            const uint64 offMedian = GetMedian(benches[0], PAIRED_SAMPLES);
+            // Standalone test/benchmark diagnostics; never used by engine code.
+            std::printf("jobs=%u iterations=%u workers=%u capture=%s pairs=%u overhead_pct p25=%.2f p50=%.2f p75=%.2f "
+                        "off_median_ns=%llu checksum=%llu\n",
+                        JOB_COUNT,
+                        iterations,
+                        workers,
+                        isCapturing == true ? "active" : "inactive",
+                        PAIRED_SAMPLES,
+                        GetPercentile(overheadPercent, PERCENTILE_25),
+                        GetPercentile(overheadPercent, PERCENTILE_50),
+                        GetPercentile(overheadPercent, PERCENTILE_75),
+                        static_cast<unsigned long long>(offMedian),
+                        static_cast<unsigned long long>(checksum));
+        }
+    }
+    return 0;
+}
+} // namespace
+
+// Usage: ludus_threading_benchmark [--tracing [trace.json]]
+int main(int argumentCount, char** arguments)
+{
+    if (argumentCount < 2 || std::strcmp(arguments[1], "--tracing") != 0)
+    {
+        return RunBaseline();
+    }
+    profiling::RegisterThreadForTrace("Benchmark owner");
+    const int idleResult = RunTracingComparison(false);
+    if (idleResult != 0)
+    {
+        return idleResult;
+    }
+    if (profiling::BeginCapture(CAPTURE_CHUNKS) == false)
+    {
+        return 1;
+    }
+    const int captureResult = RunTracingComparison(true);
+    profiling::EndCapture();
+    const profiling::TraceHealth health = profiling::GetTraceHealth();
+    std::printf("trace events_recorded=%llu events_dropped=%llu\n",
+                static_cast<unsigned long long>(health.EventsRecorded),
+                static_cast<unsigned long long>(health.EventsDropped));
+    if (captureResult == 0 && argumentCount > 2 && profiling::ExportPerfettoTrace(arguments[2]) == false)
+    {
+        return 1;
+    }
+    return captureResult;
 }

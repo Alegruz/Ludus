@@ -1,3 +1,4 @@
+#include "internal/preview_shading.h"
 #include "internal/preview_viewport.h"
 #include "internal/render_preview.h"
 #include "internal/render_scene.h"
@@ -8,6 +9,8 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QImage>
+#include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QWidget>
@@ -30,6 +33,48 @@ constexpr int32 POLL_MILLISECONDS = 20;
 /// Embedded viewport size in device-independent pixels.
 constexpr int32 VIEWPORT_WIDTH = 640;
 constexpr int32 VIEWPORT_HEIGHT = 420;
+/// Grabs compared with the reference while the engine keeps replacing leased images.
+constexpr int32 TURNOVER_GRABS = 24;
+/// Pause steps between turnover grabs, cycled so grabs land at varied frame phases.
+constexpr int32 TURNOVER_PAUSE_STEPS = 4;
+/// Pause added per step between turnover grabs, in milliseconds.
+constexpr int32 TURNOVER_PAUSE_MILLISECONDS = 8;
+/// Alpha of every pixel in a correctly read back opaque 8-bit grab.
+constexpr int32 OPAQUE_ALPHA = 255;
+/// Whether every pixel of the grab is opaque. Qt 6.4 wraps every non-BGRA8 swapchain
+/// readback as RGBA8888, so a grab of an RGBA16F or RGB10A2 swapchain (Mesa lists
+/// RGBA16F first for Intel on GNOME Wayland) has non-opaque bytes. Only an opaque
+/// grab of this opaque window reports the pixels Qt actually presents.
+bool IsOpaque(const QImage& image)
+{
+    for (int32 y = 0; y < image.height(); ++y)
+    {
+        for (int32 x = 0; x < image.width(); ++x)
+        {
+            if (qAlpha(image.pixel(x, y)) != OPAQUE_ALPHA)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+/// Whether the grab holds a single color, such as only the clear color.
+bool IsUniform(const QImage& image)
+{
+    const QRgb first = image.pixel(0, 0);
+    for (int32 y = 0; y < image.height(); ++y)
+    {
+        for (int32 x = 0; x < image.width(); ++x)
+        {
+            if (image.pixel(x, y) != first)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
 QWindow* FindWindow(const QString& name)
 {
     for (QWindow* window : QGuiApplication::allWindows())
@@ -90,9 +135,6 @@ TEST_CASE("Linux viewport shares an editor-created Vulkan device with Qt Quick",
     REQUIRE(preview.Running() == true);
     REQUIRE(viewport.PresentedFrames() >= PRESENTED_FRAMES);
     CHECK(preview.Status().contains(QStringLiteral("Lit: %1 lights").arg(tests::LAMP_COUNT)) == true);
-    // Pixels are not asserted here: QQuickWindow::grabWindow re-renders outside
-    // beforeFrameBegin/afterFrameEnd and may sample a lease the engine has already
-    // reclaimed. Presentation through the shared device is the contract under test.
     const auto awaitFrames = [&viewport, &preview](uint64 target) {
         QElapsedTimer wait;
         wait.start();
@@ -106,6 +148,38 @@ TEST_CASE("Linux viewport shares an editor-created Vulkan device with Qt Quick",
     // Mode changes and resizes keep presenting through the same adopted device.
     preview.SetShading(PreviewShading::Solid);
     CHECK(awaitFrames(viewport.PresentedFrames() + PRESENTED_FRAMES) == true);
+    // The renderer redraws the same Solid view every tick into alternating leased
+    // images, and Vulkan's invariance rules make each replacement identical. Qt 6.4's
+    // grabWindow syncs and renders without beforeFrameBegin/afterFrameEnd and often
+    // promotes the pending frame itself, the only Qt Quick path outside that bracket;
+    // its pixels must still equal the presented view. This checks presentation, not
+    // lease timing: the scene graph samples only the active, still-leased image, and
+    // RHI and Qt submit on one serialized queue, so even a premature release could
+    // show only a newer frame, never torn pixels. Lit is not compared because its
+    // static bake keeps changing the image.
+    QQuickWindow* quickWindow = static_cast<QQuickWindow*>(window);
+    const QImage reference = quickWindow->grabWindow();
+    REQUIRE(reference.isNull() == false);
+    if (IsOpaque(reference) == false)
+    {
+        WARN("Pixels not compared: Qt misreads this swapchain format in grabWindow");
+    }
+    else
+    {
+        CHECK(IsUniform(reference) == false);
+        const uint64 turnoverStart = viewport.PresentedFrames();
+        int32 mismatches = 0;
+        for (int32 i = 0; i < TURNOVER_GRABS; ++i)
+        {
+            QTest::qWait(i % TURNOVER_PAUSE_STEPS * TURNOVER_PAUSE_MILLISECONDS);
+            if (quickWindow->grabWindow() != reference)
+            {
+                ++mismatches;
+            }
+        }
+        CHECK(mismatches == 0);
+        CHECK(viewport.PresentedFrames() > turnoverStart);
+    }
     viewport.resize(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2);
     CHECK(awaitFrames(viewport.PresentedFrames() + PRESENTED_FRAMES) == true);
     // Stop retires the RHI and Qt Quick before the editor destroys its device;
