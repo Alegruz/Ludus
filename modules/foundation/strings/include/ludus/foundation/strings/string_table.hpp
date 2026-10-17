@@ -69,7 +69,25 @@ public:
     {
         return mState != nullptr;
     }
+    /// @brief Returns the ID of an exact spelling, inserting a copy when it is absent.
+    ///
+    /// A duplicate succeeds without allocating, even at the entry or byte budget. A new
+    /// spelling consumes the next index only on success. Serialized by the table mutex.
+    /// @param value Counted bytes, checked against the configured length, UTF-8 and zero-byte rules.
+    /// @param output Receives the table-qualified ID on success; unchanged on failure.
+    /// @return Ok; InvalidHandle for an empty table; TooLarge, InvalidUtf8 or EmbeddedZero for a
+    /// rejected spelling; CapacityExceeded, TooLarge or OutOfMemory when growth fails; or
+    /// ProbeExhausted when corrupted lookup metadata has neither the spelling nor a free slot.
+    /// Failure leaves the logical table unchanged; earlier successful reservations may remain.
     [[nodiscard]] StringStatus TryIntern(std::string_view value, NameId& output) noexcept;
+    /// @brief Looks up an exact spelling without inserting or allocating.
+    ///
+    /// Serialized by the table mutex.
+    /// @param value Counted bytes, checked against the configured spelling rules.
+    /// @param output Receives the table-qualified ID on success; unchanged on failure.
+    /// @return Ok; NotFound when the spelling is absent; InvalidHandle for an empty table;
+    /// TooLarge, InvalidUtf8 or EmbeddedZero for a rejected spelling; or ProbeExhausted when
+    /// corrupted lookup metadata has neither the spelling nor a free slot.
     [[nodiscard]] StringStatus TryFind(std::string_view value, NameId& output) const noexcept;
     [[nodiscard]] StringStatus TryResolve(NameId id, std::string_view& output) const& noexcept;
     StringStatus TryResolve(NameId, std::string_view&) const&& = delete;
@@ -98,6 +116,14 @@ public:
     {
         return mState != nullptr;
     }
+    /// @brief Looks up an exact spelling in the immutable table without locking or allocating.
+    ///
+    /// Concurrent calls are safe while the owner lives and is not moved or destroyed.
+    /// @param value Counted bytes, checked against the configured spelling rules.
+    /// @param output Receives the table-qualified ID on success; unchanged on failure.
+    /// @return Ok; NotFound when the spelling is absent; InvalidHandle for an empty owner;
+    /// TooLarge, InvalidUtf8 or EmbeddedZero for a rejected spelling; or ProbeExhausted when
+    /// corrupted lookup metadata has neither the spelling nor a free slot.
     [[nodiscard]] StringStatus TryFind(std::string_view value, NameId& output) const noexcept;
     [[nodiscard]] StringStatus TryResolve(NameId id, std::string_view& output) const& noexcept;
     StringStatus TryResolve(NameId, std::string_view&) const&& = delete;

@@ -89,6 +89,8 @@ StringDictionaryStatus ConvertStatus(foundation::StringStatus status) noexcept
         case foundation::StringStatus::InvalidHandle:
         case foundation::StringStatus::WrongTable:
             return StringDictionaryStatus::InvalidHandle;
+        case foundation::StringStatus::ProbeExhausted:
+            return StringDictionaryStatus::InvalidState;
     }
     return StringDictionaryStatus::InvalidState;
 }
