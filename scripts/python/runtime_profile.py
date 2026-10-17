@@ -5,7 +5,7 @@
 scheduled ``performance`` workflow runs the same command on hosted runners and
 on opted-in self-hosted device lanes that declare a GPU class and identity.
 Correctness failures (non-zero exits, missing traces, unparseable or incomplete
-output, a software adapter where a physical GPU was declared) fail the run.
+output, a software rasterizer where a GPU was declared) fail the run.
 Timings never do: deltas against a baseline are reported until a device lane
 calibrates a variability bound (docs/architecture/engineering-quality.md,
 sections 4 and 6; docs/development/runtime-profiling.md).
@@ -619,7 +619,7 @@ def run_scenario(scenario: Scenario, build_dir: Path, output_dir: Path,
             return result
         observations = observed
         if adapter is not None and GPU_CAPABILITY in scenario.requires and adapter["software"] is True:
-            result["reason"] = f"{label} selected software adapter '{adapter['name']}', not physical GPU evidence"
+            result["reason"] = f"{label} selected software adapter '{adapter['name']}', not GPU evidence"
             return result
         if observed:
             result["observations"] = observed
