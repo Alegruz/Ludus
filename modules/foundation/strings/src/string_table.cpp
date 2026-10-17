@@ -106,19 +106,29 @@ uint64 StringTable::State::Hash(std::string_view value) const noexcept
     const std::span<const uint8> bytes{reinterpret_cast<const uint8*>(value.data()), value.size()};
     return Config.HashPolicy == StringHashPolicy::Trusted ? TableHash64(bytes) : KeyedTableHash64(bytes, Config.Key);
 }
-usize StringTable::State::FindSlot(std::string_view value, uint64 hash) const noexcept
+StringStatus StringTable::State::FindSlot(std::string_view value, uint64 hash, usize& outSlot) const noexcept
 {
-    usize slot = static_cast<usize>(hash) & (SlotCapacity - 1);
-    while (Slots[slot] != kInvalidIndex)
+    // The load-factor invariant guarantees an empty slot, but visiting each slot
+    // at most once keeps corrupted metadata from turning a lookup into a hang.
+    const usize mask = SlotCapacity - 1;
+    usize slot = static_cast<usize>(hash) & mask;
+    for (usize probe = 0; probe < SlotCapacity; ++probe)
     {
-        const Entry& entry = Entries[Slots[slot]];
+        const uint32 index = Slots[slot];
+        if (index == kInvalidIndex)
+        {
+            outSlot = slot;
+            return StringStatus::Ok;
+        }
+        const Entry& entry = Entries[index];
         if (entry.Hash == hash && entry.Spelling == value)
         {
-            break;
+            outSlot = slot;
+            return StringStatus::Ok;
         }
-        slot = (slot + 1) & (SlotCapacity - 1);
+        slot = (slot + 1) & mask;
     }
-    return slot;
+    return StringStatus::ProbeExhausted;
 }
 StringStatus StringTable::State::Find(std::string_view value, NameId& output) const noexcept
 {
@@ -127,7 +137,12 @@ StringStatus StringTable::State::Find(std::string_view value, NameId& output) co
     {
         return valid;
     }
-    const usize slot = FindSlot(value, Hash(value));
+    usize slot = 0;
+    const StringStatus probed = FindSlot(value, Hash(value), slot);
+    if (probed != StringStatus::Ok)
+    {
+        return probed;
+    }
     if (Slots[slot] == kInvalidIndex)
     {
         return StringStatus::NotFound;
@@ -216,6 +231,8 @@ StringStatus StringTable::State::EnsureSlots() noexcept
     {
         new (slots + i) uint32{kInvalidIndex};
     }
+    // Growth keeps Count below 3/8 of the new capacity, so every rehashed
+    // entry reaches an empty slot of this freshly cleared array.
     for (uint32 i = 0; i < Count; ++i)
     {
         usize slot = static_cast<usize>(Entries[i].Hash) & (capacity - 1);
@@ -269,10 +286,15 @@ StringStatus StringTable::State::Intern(std::string_view value, NameId& output) 
     const uint64 hash = Hash(value);
     if (SlotCapacity != 0)
     {
-        const usize slot = FindSlot(value, hash);
-        if (Slots[slot] != kInvalidIndex)
+        usize existing = 0;
+        const StringStatus probed = FindSlot(value, hash, existing);
+        if (probed != StringStatus::Ok)
         {
-            output = {Token, StringIndex{Slots[slot]}};
+            return probed;
+        }
+        if (Slots[existing] != kInvalidIndex)
+        {
+            output = {Token, StringIndex{Slots[existing]}};
             return StringStatus::Ok;
         }
     }
@@ -295,6 +317,12 @@ StringStatus StringTable::State::Intern(std::string_view value, NameId& output) 
     {
         return status;
     }
+    usize slot = 0;
+    status = FindSlot(value, hash, slot);
+    if (status != StringStatus::Ok)
+    {
+        return status;
+    }
     // All fallible work precedes this commit. Source may borrow an old page;
     // append-only storage keeps it valid across metadata growth and rehashing.
     char* spelling = Pages->Bytes() + Pages->Used;
@@ -303,7 +331,6 @@ StringStatus StringTable::State::Intern(std::string_view value, NameId& output) 
         std::memcpy(spelling, value.data(), value.size());
     }
     spelling[value.size()] = '\0';
-    const usize slot = FindSlot(value, hash);
     Entries[Count] = {hash, std::string_view{spelling, value.size()}};
     Slots[slot] = Count;
     output = {Token, StringIndex{Count}};
