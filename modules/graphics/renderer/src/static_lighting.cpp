@@ -7,6 +7,7 @@
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/math/status.hpp>
 #include <ludus/foundation/math/summation.hpp>
+#include <ludus/foundation/threading/job_profiling.hpp>
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/runtime/resources/scene.h>
 
@@ -638,8 +639,11 @@ Status StaticLightingBake::Submit(threading::JobSystem& inoutSystem,
     state->TotalSamples = triangleCount * description.SamplesPerTriangle;
     threading::JobGraph& graph = state->Graph;
     threading::JobHandle prepare;
+    // Labels name the jobs in profiler traces of the system (see job_profiling.hpp).
+    const threading::JobLabel prepareLabel = LUDUS_JOB_LABEL(StaticLightingPrepare);
+    const threading::JobLabel rangeLabel = LUDUS_JOB_LABEL(StaticLightingRange);
     if (graph.Initialize({ .MaxJobs = rangeCount + 1, .MaxDependencies = rangeCount }) != threading::JobStatus::Ok ||
-        graph.Add(&State::RunPrepare, state.Get(), prepare) != threading::JobStatus::Ok)
+        graph.Add(&State::RunPrepare, state.Get(), prepare, prepareLabel) != threading::JobStatus::Ok)
     {
         return Status::OutOfMemory;
     }
@@ -651,7 +655,7 @@ Status StaticLightingBake::Submit(threading::JobSystem& inoutSystem,
         range.Index = i;
         threading::JobHandle handle;
         // Capacity was reserved above, so neither call can fail for a valid graph.
-        LUDUS_REQUIRE(graph.Add(&State::RunRange, &range, handle) == threading::JobStatus::Ok);
+        LUDUS_REQUIRE(graph.Add(&State::RunRange, &range, handle, rangeLabel) == threading::JobStatus::Ok);
         LUDUS_REQUIRE(graph.DependsOn(handle, prepare) == threading::JobStatus::Ok);
         LUDUS_REQUIRE(state->Handles.TryAdd(handle) == true);
     }

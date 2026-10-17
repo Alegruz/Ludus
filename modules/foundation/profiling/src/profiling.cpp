@@ -1,3 +1,4 @@
+#include <ludus/foundation/profiling/integration.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
 
@@ -127,6 +128,68 @@ void RegisterSite(const ZoneDescriptor& descriptor) noexcept
 }
 
 } // namespace detail
+
+// ---- Integration emission API (integration.hpp) ----------------------------
+
+bool IsCaptureActive() noexcept
+{
+    return internal::IsCaptureActive();
+}
+
+void RegisterSite(const ZoneDescriptor& descriptor) noexcept
+{
+    detail::RegisterSite(descriptor);
+}
+
+void BeginSite(uint32 siteId) noexcept
+{
+    if (internal::IsCaptureActive() == false)
+    {
+        return;
+    }
+    const internal::TraceEvent event = MakeEvent(internal::TraceEventKind::Begin, siteId);
+    (void)internal::TraceRecorder::Instance().Emit(event);
+}
+
+void EndSite(uint32 siteId) noexcept
+{
+    detail::EmitEnd(siteId);
+}
+
+void StartFlow(const ZoneDescriptor& descriptor, uint64 flowId) noexcept
+{
+    if (internal::IsCaptureActive() == false)
+    {
+        return;
+    }
+    internal::TraceEvent event = MakeEvent(internal::TraceEventKind::FlowOut, descriptor.SiteId);
+    event.Flags |= internal::TRACE_FLAG_HAS_FLOW;
+    event.Aux = flowId;
+    (void)internal::TraceRecorder::Instance().Emit(event);
+}
+
+void FinishFlow(const ZoneDescriptor& descriptor, uint64 flowId) noexcept
+{
+    if (internal::IsCaptureActive() == false)
+    {
+        return;
+    }
+    internal::TraceEvent event = MakeEvent(internal::TraceEventKind::FlowIn, descriptor.SiteId);
+    event.Flags |= internal::TRACE_FLAG_HAS_FLOW;
+    event.Aux = flowId;
+    (void)internal::TraceRecorder::Instance().Emit(event);
+}
+
+void SampleCounter(const ZoneDescriptor& descriptor, uint64 value) noexcept
+{
+    if (internal::IsCaptureActive() == false)
+    {
+        return;
+    }
+    internal::TraceEvent event = MakeEvent(internal::TraceEventKind::Counter, descriptor.SiteId);
+    event.Aux = value;
+    (void)internal::TraceRecorder::Instance().Emit(event);
+}
 
 // ---- Public control API (trace_system.hpp) ---------------------------------
 

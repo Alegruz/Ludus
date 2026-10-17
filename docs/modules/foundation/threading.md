@@ -57,3 +57,59 @@ or TLS expectations. Jobs never wait on jobs or synchronous I/O and never call
 pool lifecycle methods. The owner retains immutable inputs and exclusive output
 ranges through Wait, then applies results in stable order. All errors use statuses;
 the engine library compiles with exceptions disabled.
+
+## Execution traces
+
+Jobs can carry an optional `JobLabel` (a borrowed name and a site ID), given as the
+last argument of `Add`. A `JobSystem` can observe its own scheduling through
+`JobSystemConfig::Hooks`: worker start/stop hooks that run once on each worker
+during `Initialize` and `Shutdown`, a trace function and a per-submission filter.
+Hooks run outside the scheduler lock and cannot call pool lifecycle methods. The
+[architecture](../../architecture/threading.md#task-identity-and-execution-traces)
+gives the event order and the lock and lifetime argument.
+
+To record Perfetto traces, link `Ludus::FoundationThreadingProfiling` and use the
+profiler hooks:
+
+```cpp
+#include <ludus/foundation/profiling/trace_system.hpp>
+#include <ludus/foundation/threading/job_profiling.hpp>
+
+namespace jobs = ludus::foundation::threading;
+namespace profiling = ludus::foundation::profiling;
+
+profiling::BeginCapture();
+jobs::JobSystem system;
+// Workers register as profiler threads "Bake worker 0", "Bake worker 1", ...
+if (system.Initialize({ .WorkerCount = 3, .Hooks = jobs::MakeProfilerJobHooks("Bake worker") }) !=
+    jobs::JobStatus::Ok)
+{
+    return 1;
+}
+jobs::JobHandle handle;
+if (graph.Add(Compute, &output, handle, LUDUS_JOB_LABEL(Compute)) != jobs::JobStatus::Ok)
+{
+    return 1;
+}
+// ... Seal, Submit and Wait as above ...
+(void)system.Shutdown(); // workers publish their partial trace chunks
+profiling::EndCapture();
+profiling::ExportPerfettoTrace("jobs.json");
+```
+
+Submissions are traced only while a profiler capture is active; otherwise each job
+costs one predictable branch. `LUDUS_JOB_LABEL(Name)` registers `Name` as a profiler
+site once and never allocates. A capture contains:
+
+| Track | Event | Meaning |
+| --- | --- | --- |
+| Owner thread | `JobSystem::Submit` slice | Admission; starts the dispatch flow of every job without prerequisites. |
+| Owner thread | `JobSystem::Wait` slice | Time the owner spends in `Wait`, including jobs it helps execute. |
+| Executing thread | Slice named by the job's label (`Job` when unlabelled) | The callback's execution. |
+| Flow arrows | `JobDispatch` | From Submit to a root's start, and from a succeeded prerequisite to the start of each dependent it released. The arrow's length is the dispatch-to-start latency. |
+| Counter | `JobReadyDepth` | Jobs waiting in the ready queue, sampled at Submit and at each job start. |
+
+Jobs skipped as Blocked or Cancelled have no slice. A dependent with several
+prerequisites receives the arrow of the prerequisite that released it. Workers
+publish their last partial trace chunk when they unregister, so shut the system
+down before `ExportPerfettoTrace` when the capture must include every worker event.

@@ -58,6 +58,7 @@ target_sources(
             include/ludus/foundation/profiling/clock.hpp
             include/ludus/foundation/profiling/zone.hpp
             include/ludus/foundation/profiling/trace_system.hpp
+            include/ludus/foundation/profiling/integration.hpp
             "${LUDUS_FOUNDATION_PROFILING_GENERATED_INCLUDE_DIR}/ludus/foundation/profiling/profiling_config.hpp"
 )
 

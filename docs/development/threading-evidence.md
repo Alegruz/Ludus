@@ -176,3 +176,33 @@ out/host-tools/venv/bin/cmake --preset macos-clang-development -B out/build/t1-b
 out/host-tools/venv/bin/cmake --build out/build/t1-benchmark --target ludus_static_lighting_benchmark
 out/build/t1-benchmark/modules/graphics/renderer/ludus_static_lighting_benchmark
 ```
+
+## Execution traces (T2)
+
+MEASUREMENTS_PLACEHOLDER
+
+Correctness evidence, in the threading suites:
+
+- `[threading][trace]` cases (0, 1 and 4 workers, helping and non-helping `Wait`, 20
+  reuses each): every executed job reports `Started`, its `Signalled` edges and
+  `Finished` on one thread, in that order. Ready sequences form a permutation with
+  roots first in Add order. A dependent's `Started` names the edge whose earlier
+  `Signalled` released it. Every report has returned when `Wait` returns. The serial
+  executor reports one fixed order. Failed jobs signal no edges, Blocked jobs are not
+  reported, a declining filter leaves a submission completely untraced, and worker
+  hooks run once per worker on the worker before `Initialize` returns and before
+  `Shutdown` joins. Lifecycle calls from hooks return `InsideJob`.
+- `ludus_threading_profiling_tests` exports a capture of a labelled fan-out graph and
+  checks named worker tracks, one slice per job under its label, balanced slices,
+  five `JobDispatch` flow starts with five matching ends, and six ready-depth samples.
+  A profiling-disabled build checks that the adapter returns empty hooks.
+- `ludus_threading_alloc_tests` counts zero allocations over 100
+  Add/DependsOn/Seal/Submit/Wait/Reset cycles, with 0 and 3 workers, in four modes: no
+  hooks, a plain trace hook, profiler hooks without a capture and profiler hooks
+  recording into an active capture.
+
+The trace cases passed 300 consecutive runs and the profiler/allocation executables
+50 runs each on this machine. The renderer suite (96 cases) and the full CTest run
+passed except `ludus_platform_cocoa_tests`, which skips every case without
+`LUDUS_TEST_COCOA=1` and is unaffected by this change. As in T0 and T1, ASan/UBSan and
+TSan results for these paths come from CI.
