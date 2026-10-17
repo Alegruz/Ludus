@@ -1021,6 +1021,9 @@ names must bind through the host API. Destruction, move and freeze require calle
 quiescence. Frozen owners must outlive every view/job; `NameId::IsValid` checks
 representation only. The untrusted mode requires caller-supplied secret entropy;
 `HasSecretKey` is a caller declaration, not an entropy-quality test.
+The interned-table declarations and `StringStatus` carry Doxygen contracts for
+budgets, failure statuses, output preservation, view lifetime, mutex-serialized
+mutable access, lock-free frozen reads and the quiescence each ownership change needs.
 
 ### Cooked dictionary format, writer and reader
 
@@ -1126,7 +1129,7 @@ not a new build, sanitizer run, or performance result.
 | Mutable and bounded storage | Add explicit shrinking, checked byte-range erase, and named display truncation where required by the initial consumers; enforce their byte limits. Insert/replace and mutable write reservations still require a concrete consumer | [Mutable string storage](#mutable-string-storage) |
 | Text and formatting boundaries | Checked UTF-8 slicing, explicit display repair, counted `char8_t` adapters, strict native UTF-16 conversion at OS boundaries, and exception-free builder/bounded formatting adapters | [Bytes and Unicode](#bytes-and-unicode) and [bounded strings and construction](#bounded-strings-and-construction) |
 | Table completion | Checked resolution from table-local `StringIndex`, reservation for known content counts, and explicit symbol-grammar adapters. Current public resolution accepts `NameId`. Bounded lookup probing is implemented; see [implementation status](#implementation-status) | [Interned names and indexed strings](#interned-names-and-indexed-strings) |
-| Diagnostics and validation | Counted debugger previews, opt-in footprint/probe/retention snapshots, appropriate public Doxygen contracts, reduced-width table-token exhaustion tests, and differential operation sequences; add reader/cooker and boundary tests with their implementation | [Debugging and observation](#debugging-and-observation) and [required correctness evidence](#required-correctness-evidence) |
+| Diagnostics and validation | Counted debugger previews, opt-in footprint/probe/retention snapshots, public Doxygen contracts for the owned, builder, shared, static and UTF-8 string APIs, reduced-width table-token exhaustion tests, and differential operation sequences; add reader/cooker and boundary tests with their implementation. The interned-table API (`string_table.hpp`) and `StringStatus` are documented; see [implementation status](#implementation-status) | [Debugging and observation](#debugging-and-observation) and [required correctness evidence](#required-correctness-evidence) |
 
 [Static localization catalogs](../../modules/localization/README.md) already
 use shared immutable storage, deterministic offset-based cooking, validation,
