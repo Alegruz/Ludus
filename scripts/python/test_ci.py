@@ -21,6 +21,20 @@ import web_build
 
 
 class ToolchainBootstrapTests(unittest.TestCase):
+    def test_macos_consumers_keep_the_configured_homebrew_compiler(self):
+        import re
+
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/ci.yml").read_text()
+        jobs = re.split(r"(?m)^  [a-z][a-z0-9_-]*:\n", workflow)[1:]
+        checked = 0
+        for job in jobs:
+            if re.search(r"runs-on: macos-", job) and "-DCMAKE_CXX_COMPILER=" in job:
+                self.assertNotIn("/usr/bin/clang++-", job)
+                self.assertIn('-DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++"', job)
+                checked += 1
+        self.assertGreater(checked, 0)
+
     def test_trusted_workflow_installers_follow_the_checked_out_source_pin(self):
         root = Path(__file__).resolve().parents[2]
         installers = (

@@ -127,7 +127,7 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$llvm_major" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_PREFIX_PATH="$PWD/out/install/macos-clang-development;$PWD/out/conan/macos-clang-development" \
             -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -isystem $PWD/out/host-tools/libcxx-include" \
@@ -229,7 +229,7 @@ jobs:
       - name: Verify installed Content persistence
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/content -B out/build/content-consumer -G Ninja \
-            -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$llvm_major" \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" \
             -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -isystem \"$PWD/out/host-tools/libcxx-include\"" \
@@ -311,7 +311,7 @@ jobs:
       - name: Validate installed Audio SDK and native workers
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/audio -B out/sdk-audio-consumer -G Ninja \
-            -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$llvm_major" \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" \
             -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
@@ -324,7 +324,7 @@ jobs:
       - name: Validate installed persistence and watcher SDK
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/persistence -B out/sdk-persistence-consumer -G Ninja \
-            -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$llvm_major" \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" \
             -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
@@ -775,7 +775,7 @@ jobs:
           python3 -c 'from pathlib import Path; text=Path("out/r18-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text and "R18 BC5 enabled true; sampled width 8240" in text and "R18 BC5 unaligned edges enabled true" in text, text'
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/raster -B out/r11-raster-sdk -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$llvm_major" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_PREFIX_PATH="$PWD/out/install/linux-clang-development;$PWD/out/conan/linux-clang-development" \
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
@@ -793,7 +793,7 @@ jobs:
           python3 -c 'from pathlib import Path; text=Path("out/renderer-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$llvm_major" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_PREFIX_PATH="$PWD/out/install/linux-clang-development;$PWD/out/conan/linux-clang-development" \
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
@@ -821,7 +821,7 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake -S examples/reference-scene -B out/reference-scene-sanitized -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLUDUS_SCENE_SANITIZERS=ON \
-            -DCMAKE_CXX_COMPILER="/usr/bin/clang++-$llvm_major" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_PREFIX_PATH="$PWD/out/install/linux-clang-development;$PWD/out/conan/linux-clang-development" \
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
