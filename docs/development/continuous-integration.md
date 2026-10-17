@@ -40,7 +40,7 @@ candidate skips validation and publication, so it does not exercise the change.
 Only one batch is active. New `develop` commits do not cancel it or change its input.
 Concurrent scheduler ticks coalesce into at most one pending run. A tick captured
 before `main` advanced skips, letting the next tick use the new stable revision.
-Native, SDK, wiki and browser workflows must all succeed. Filesystem block-prefix
+Native, SDK, wiki, browser and threading-platform workflows must all succeed. Filesystem block-prefix
 recovery additionally runs when its workflow, persistence implementation, recovery
 probe or recovery drivers changed anywhere in the complete batch diff. Invalid
 metadata, failed/cancelled checks and unexpectedly skipped required jobs cannot
@@ -234,6 +234,30 @@ Native jobs use `macos-15` arm64. Host and documentation tooling separately chec
 `macos-15-intel`. The SDK deployment target remains `14.0`; a macOS 15 runner does
 not establish macOS 14 runtime qualification. See GitHub's
 [macOS 14 deprecation notice](https://github.com/actions/runner-images/issues/13518).
+
+### Threading platform lanes
+
+`.github/workflows/threading-platforms.yml` runs the only Windows build and the
+macOS ThreadSanitizer run of `Ludus::FoundationThreading`
+([threading milestone T3](../architecture/threading.md#milestones)). Every batch
+calls it, and promotion requires it. Integration PRs run it only when they change
+the threading module, the Windows FoundationBase diagnostics backend, the Windows
+Conan profile or the workflow itself.
+
+The Windows job installs LLVM 18.1.8 from Chocolatey on `windows-2025` and drives
+`clang++` against the runner's Microsoft STL and dynamic CRT. It installs the
+pinned CMake/Ninja/Conan versions, exports the local Catch2 recipe and installs
+only that locked package with `config/conan/profiles/windows-clang-x86_64`. Ludus
+configures only the FoundationThreading closure on Windows (Base, Memory,
+Containers, Time, Profiling and Threading); other modules have no Windows backend
+and no SDK is installed. The job runs the threading, startup-seam, profiling-adapter
+and allocation suites once, then repeats the scheduler and startup suites 20 times.
+
+The macOS job prepares `macos-clang-development` without the editor or shader
+tools, proves TSan detection with the sanitizer control, then runs the threading,
+startup-seam and profiling-adapter suites under TSan, repeating the first two.
+The pinned LLVM 18 TSan runtime starts on the hosted macOS 15 image but not on
+macOS 26 hosts; see [macOS sanitizer runtimes](building.md#macos-sanitizer-runtimes).
 
 ## Dependencies and caches
 

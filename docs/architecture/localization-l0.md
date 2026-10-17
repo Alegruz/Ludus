@@ -150,7 +150,10 @@ player preferences, is a separate L3 policy.
 `scripts/localization-corpus validate` checks all of the above. It does not
 parse patterns: the probe validates them with ICU's own `MessagePattern`, so
 Ludus maintains no second MessageFormat grammar. A shipping cooker (L1) must run
-the same native profile check before it writes a catalog.
+the same native profile check before it writes a catalog; the L1 release cooker
+does so through `ludus_localization_profile`, which shares the probe's walk in
+[`tools/icu-probe/profile.hpp`](../../tools/icu-probe/profile.hpp) (see
+[release cooking](../modules/localization.md#release-cooking-ludus-icu-mf1-v1)).
 
 ## Message profile `ludus-icu-mf1-v1`
 
@@ -320,7 +323,14 @@ Ubuntu x86_64 under ASan/UBSan (`linux-clang-asan-ubsan`, the CI run above).
 `verify.py` keeps a signal, including one that ASan reports (`SEGV`, `BUS`,
 `FPE`, `ILL`, `ABRT`, stack overflow), as `crash` with its exit code; any other
 ASan or UBSan finding is `sanitizer-report` with its kind; a LeakSanitizer report
-at exit keeps the point's result and counts as a leak after cleanup. UBSan halts
+at exit keeps the point's result and counts as a leak after cleanup. Each sweep in
+`evidence.json` maps sanitizer-report points to their kind in
+`sanitizer_report_points` (the ASan kind, `undefined-behavior` or `leak`) and to
+the check that fired in `sanitizer_report_checks`: the ASan kind, `leak`, the
+UBSan check name when the report prints one (`report_error_type=1`), or else the
+first UBSan runtime error without its types, values and addresses, such as
+`reference binding to null pointer` or `member access within null pointer`. A
+UBSan report whose message cannot be parsed keeps `undefined-behavior`. UBSan halts
 on its first finding, so a sanitizer-report point never reformats or reaches
 `u_cleanup`, and Sticky and Leaks count only the points that ran to the end.
 
@@ -333,8 +343,8 @@ on its first finding, so a sanitizer-report point never reformats or reaches
 
 - No point crashes with a signal and ASan reports nothing. Every sanitizer report
   is a UBSan runtime error, and every leak after cleanup is also a LeakSanitizer
-  report. `verify.py` records the kind as `undefined-behavior` without the UBSan
-  check that fired.
+  report. This run predates `sanitizer_report_checks`, so its evidence records
+  only the kind `undefined-behavior`, not the UBSan check that fired.
 - Arabic, Russian and host initialization match macOS in every other column; each
   macOS crash count reappears as the same number of UBSan reports (2, 3 and 9).
 - French reports UBSan at points 8–27 and 30: by count, the macOS crash and 20
