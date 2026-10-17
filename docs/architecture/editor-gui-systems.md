@@ -309,6 +309,44 @@ seam; do not rely on Qt private globals as the enduring rendering API. A failed
 viewport leaves the document UI usable. [Browser strategy](editor-browser-strategy.md)
 defines the frontend selection gates and persistence limits.
 
+## Implementation boundaries and refactoring
+
+Large source files in scene cooking, rendering and the editor combine workflows
+with different failure and lifetime contracts. Reduce coupling through private
+components that own their state. Line counts prompt review; moving definitions
+into headers or several files around an unchanged shared state does not establish
+a boundary. Preserve public APIs and module dependency direction during the
+initial extractions. The contributor policy is in
+[AGENTS.md](../../AGENTS.md#responsibility-boundaries-and-incremental-refactoring).
+
+The first extraction introduces `PreviewGpuGeneration` in the editor's private
+implementation. Each generation freezes its validated scene and shading mode,
+owns its renderer, assets, snapshot and lighting resources, and advances named
+preparation stages through Pending, Ready or terminal Failed outcomes. The
+preview coordinator owns camera/view updates, producer completion, frame
+publication and routing image releases to the live or retired generation. It
+retains the previous consumer-leased generation while a replacement prepares.
+Preparation does not borrow the coordinator's mutable camera or asset handles.
+Static-lighting publication and frame routing still need their own focused
+extractions; this change does not complete the decomposition or qualify a new
+platform. Preserve existing native/browser behavior and explicit unavailable
+paths.
+
+| Sequence | Boundary | Required preservation evidence |
+| --- | --- | --- |
+| 1 | Preview GPU preparation and resource generations; then frame publication/retirement and lighting/bake coordination | Pending and failed replacements retain the prior leased image; successful replacements publish their own image; release reaches the correct generation; camera/shading/resize and shutdown still work |
+| 2 | World inspector presentation, import workflow, save/recovery and preview coordination | One document history; focused drafts survive failed replacement; stale document/project completions are rejected |
+| 3 | Scene asset preparation, catalog/dependency assembly and transactional publication | Conflict detection, cancellation, paired catalog/level rollback and output preservation |
+| 4 | Renderer resource/material/view/presentation and lighting/reference services | Stable handle ownership, bounded capacities and completion-based retirement; separately compiled private services |
+| 5 | Reference cooker parsing, geometry/image conversion and serialization | Byte-identical reference outputs; reuse the existing general PBRT importer where contracts agree |
+
+Use a separate reviewable change per boundary. Establish focused tests for the
+existing contracts before extraction, identify intentional fixes separately from
+moves, and run the applicable compiler, sanitizer, format/tidy and source-policy
+checks. Offscreen GPU tests establish resource/publication behavior; interactive
+native and browser viewport acceptance remains a separate requirement. Do not
+mark later stages complete because a file became shorter.
+
 ## Workspace and visual system
 
 Redesign around the active document, using the
