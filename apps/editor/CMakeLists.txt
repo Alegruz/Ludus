@@ -415,7 +415,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         target_sources(ludus_editor_tests PRIVATE tests/offscreen_viewport_tests.cpp tests/vulkan_viewport_tests.cpp)
     endif()
     if(APPLE AND LUDUS_EDITOR_RENDER_PREVIEW)
-        target_sources(ludus_editor_tests PRIVATE tests/scene_native_tests.mm tests/render_native_tests.mm)
+        target_sources(ludus_editor_tests PRIVATE tests/scene_native_tests.mm tests/render_native_tests.mm
+            tests/viewport_native_navigation.mm)
         # Test-only GPU pixel oracle; no RHI private header enters editor production or the SDK.
         target_include_directories(ludus_editor_tests PRIVATE "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/src")
         target_link_libraries(ludus_editor_tests PRIVATE "-framework Cocoa")

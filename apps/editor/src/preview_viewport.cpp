@@ -7,9 +7,11 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPointer>
 #include <QSignalBlocker>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
@@ -594,9 +596,10 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     mNavigationTimer.setInterval(16);
     connect(&mNavigationTimer, &QTimer::timeout, this, [this]() { advanceNavigation(); });
     connect(preview, &RenderPreview::Stopped, this, [this]() { stopNavigation(); });
-    setToolTip(QStringLiteral(
-        "Right-drag to look · hold right mouse + WASD/QE to fly · Alt/Option-left-drag to orbit · middle-drag to pan · "
-        "wheel to dolly (right mouse: speed) · F frames selection · Home frames all"));
+    setToolTip(
+        QStringLiteral("Right-drag to look · hold right mouse + WASD/QE to fly · Alt/Option-left-drag to orbit · "
+                       "Shift-Alt/Option-left-drag or middle-drag to pan · "
+                       "wheel to dolly (right mouse: speed) · F frames selection · Home frames all"));
     mState->Preview = preview;
     mState->IsAutomatic = isAutomatic;
     mState->CanShowFrames = isAutomatic;
@@ -606,6 +609,9 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     QComboBox* shading = new QComboBox(this);
     shading->setObjectName(QStringLiteral("viewportShading"));
     shading->setAccessibleName(QStringLiteral("Viewport shading"));
+    shading->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    shading->setMinimumContentsLength(4);
+    shading->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     shading->addItem(QStringLiteral("Solid — neutral preview shading"));
     shading->addItem(QStringLiteral("Albedo — unlit surface colors"));
     shading->addItem(QStringLiteral("Lit — scene lighting"));
@@ -613,7 +619,28 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
                                        "base colors without illumination. Lit shows emission; "
                                        "imported emitting surfaces do not yet illuminate the room."));
     shading->setCurrentIndex(static_cast<foundation::int32>(preview->GetShading()));
-    mState->Layout->addWidget(shading);
+    QHBoxLayout* controls = new QHBoxLayout;
+    controls->addWidget(shading, 1);
+    QToolButton* frameAll = new QToolButton(this);
+    frameAll->setObjectName(QStringLiteral("viewportFrameAll"));
+    frameAll->setText(QStringLiteral("Frame all"));
+    frameAll->setAccessibleName(QStringLiteral("Frame all visible objects"));
+    frameAll->setToolTip(QStringLiteral("Fit all visible geometry in the viewport (Home)."));
+    controls->addWidget(frameAll);
+    connect(frameAll, &QToolButton::clicked, preview, &RenderPreview::FrameAll);
+    mState->Layout->addLayout(controls);
+    QLabel* navigationHint = new QLabel(this);
+    navigationHint->setObjectName(QStringLiteral("viewportNavigationHint"));
+    navigationHint->setTextFormat(Qt::PlainText);
+#if defined(Q_OS_MACOS)
+    navigationHint->setText(QStringLiteral("Option-drag: orbit · Shift-Option-drag: pan · Scroll: zoom"));
+#else
+    navigationHint->setText(QStringLiteral("Alt-drag: orbit · Shift-Alt-drag: pan · Scroll: zoom"));
+#endif
+    navigationHint->setWordWrap(true);
+    navigationHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    navigationHint->setToolTip(toolTip());
+    mState->Layout->addWidget(navigationHint);
     connect(shading, &QComboBox::currentIndexChanged, this, [preview](foundation::int32 index) {
         preview->SetShading(static_cast<PreviewShading>(index));
     });
