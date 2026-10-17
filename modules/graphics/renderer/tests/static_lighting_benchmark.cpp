@@ -34,7 +34,9 @@ constexpr uint32 MAX_DEPTH = 4;    // Editor bake quality.
 constexpr uint32 RUNS = 21;        // Measured bakes per configuration, after one warm-up.
 constexpr uint32 STEP_PATHS = 256; // The editor's former QThread step size.
 constexpr usize TRIANGLE_CORNERS = 3;
+constexpr uint32 PERCENTILE_25 = 25;
 constexpr uint32 PERCENTILE_50 = 50;
+constexpr uint32 PERCENTILE_75 = 75;
 constexpr uint32 PERCENTILE_95 = 95;
 constexpr uint32 PERCENTILE_99 = 99;
 constexpr uint32 PERCENT = 100;
@@ -337,18 +339,35 @@ void PrintDistribution(const char* name, Array<uint64>& inoutValues, float64 uni
                 }
             }
         }
+        // Pair the two bakes of each round before sorting breaks the pairing.
+        Array<float64> overheadPercent;
+        if (overheadPercent.TryEnsureCapacity(RUNS) == false)
+        {
+            return 1;
+        }
+        for (usize pair = 0; pair < walls[0].GetSize(); ++pair)
+        {
+            static_cast<void>(
+                overheadPercent.TryAdd((float64(walls[1][pair]) / float64(walls[0][pair]) - 1) * float64(PERCENT)));
+        }
+        Sort(overheadPercent.GetData(), overheadPercent.GetSize(), [](float64 left, float64 right) noexcept {
+            return left < right;
+        });
+        const auto getOverhead = [&overheadPercent](uint32 percentile) noexcept {
+            const usize rank = (overheadPercent.GetSize() * percentile + PERCENT - 1) / PERCENT;
+            return overheadPercent[rank == 0 ? 0 : rank - 1];
+        };
         SortAscending(walls[0]);
-        SortAscending(walls[1]);
         // Standalone benchmark diagnostics; never used by engine code.
-        std::printf("capture=%s workers=%u off_ms p50=%.2f p95=%.2f traced_ms p50=%.2f p95=%.2f delta_ms p50=%.2f "
+        std::printf("capture=%s workers=%u pairs=%u overhead_pct p25=%.2f p50=%.2f p75=%.2f off_wall_ms p50=%.2f "
                     "identical=%u\n",
                     isCapturing == true ? "active" : "inactive",
                     workers,
+                    RUNS,
+                    getOverhead(PERCENTILE_25),
+                    getOverhead(PERCENTILE_50),
+                    getOverhead(PERCENTILE_75),
                     GetPercentile(walls[0], PERCENTILE_50),
-                    GetPercentile(walls[0], PERCENTILE_95),
-                    GetPercentile(walls[1], PERCENTILE_50),
-                    GetPercentile(walls[1], PERCENTILE_95),
-                    GetPercentile(walls[1], PERCENTILE_50) - GetPercentile(walls[0], PERCENTILE_50),
                     (RUNS + 1) * MODE_COUNT);
     }
     return 0;

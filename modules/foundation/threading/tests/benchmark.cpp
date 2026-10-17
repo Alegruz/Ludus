@@ -18,7 +18,13 @@ namespace
 {
 constexpr uint32 JOB_COUNT = 256;
 constexpr uint32 SAMPLES = 11;
-// 256 jobs x 5 events x 12 submissions x 15 configurations, plus partial chunks.
+// Paired off/traced submissions per configuration in the --tracing comparison.
+constexpr uint32 PAIRED_SAMPLES = 31;
+constexpr uint32 PERCENTILE_25 = 25;
+constexpr uint32 PERCENTILE_50 = 50;
+constexpr uint32 PERCENTILE_75 = 75;
+constexpr uint32 PERCENT = 100;
+// 256 jobs x 5 events x 32 submissions x 15 configurations, plus partial chunks.
 constexpr usize CAPTURE_CHUNKS = 512;
 constexpr uint32 MODE_COUNT = 2;
 
@@ -46,7 +52,7 @@ JobOutcome Compute(void* context) noexcept
 struct Bench
 {
     StaticArray<Work, JOB_COUNT> Data{};
-    StaticArray<uint64, SAMPLES> Times{};
+    StaticArray<uint64, PAIRED_SAMPLES> Times{};
     JobGraph Graph;
     JobSystem System;
 };
@@ -89,10 +95,17 @@ struct Bench
     return true;
 }
 
-[[nodiscard]] uint64 GetMedian(Bench& inoutBench)
+[[nodiscard]] uint64 GetMedian(Bench& inoutBench, uint32 sampleCount)
 {
-    Sort(inoutBench.Times.GetData(), SAMPLES, [](uint64 left, uint64 right) noexcept { return left < right; });
-    return inoutBench.Times[SAMPLES / 2];
+    Sort(inoutBench.Times.GetData(), sampleCount, [](uint64 left, uint64 right) noexcept { return left < right; });
+    return inoutBench.Times[sampleCount / 2];
+}
+
+// Nearest-rank percentile of an ascending sequence.
+[[nodiscard]] float64 GetPercentile(const StaticArray<float64, PAIRED_SAMPLES>& sorted, uint32 percentile)
+{
+    const uint32 rank = (PAIRED_SAMPLES * percentile + PERCENT - 1) / PERCENT;
+    return sorted[rank == 0 ? 0 : rank - 1];
 }
 
 // Compares every output with the oracle; the zero-worker run defines it.
@@ -145,7 +158,7 @@ int RunBaseline()
                         JOB_COUNT,
                         iterations,
                         workers,
-                        static_cast<unsigned long long>(GetMedian(bench)),
+                        static_cast<unsigned long long>(GetMedian(bench, SAMPLES)),
                         static_cast<unsigned long long>(checksum));
         }
     }
@@ -169,7 +182,7 @@ int RunTracingComparison(bool isCapturing)
             {
                 return 1;
             }
-            for (uint32 sample = 0; sample <= SAMPLES; ++sample)
+            for (uint32 sample = 0; sample <= PAIRED_SAMPLES; ++sample)
             {
                 const uint32 first = sample % MODE_COUNT;
                 if (RunSample(benches[first], sample) == false || RunSample(benches[1 - first], sample) == false)
@@ -184,18 +197,30 @@ int RunTracingComparison(bool isCapturing)
             {
                 return 2;
             }
-            const uint64 offMedian = GetMedian(benches[0]);
-            const uint64 tracedMedian = GetMedian(benches[1]);
+            // Pair the two submissions of each round before sorting breaks the pairing.
+            StaticArray<float64, PAIRED_SAMPLES> overheadPercent{};
+            for (uint32 pair = 0; pair < PAIRED_SAMPLES; ++pair)
+            {
+                overheadPercent[pair] =
+                    (static_cast<float64>(benches[1].Times[pair]) / static_cast<float64>(benches[0].Times[pair]) - 1) *
+                    PERCENT;
+            }
+            Sort(overheadPercent.GetData(), PAIRED_SAMPLES, [](float64 left, float64 right) noexcept {
+                return left < right;
+            });
+            const uint64 offMedian = GetMedian(benches[0], PAIRED_SAMPLES);
             // Standalone test/benchmark diagnostics; never used by engine code.
-            std::printf("jobs=%u iterations=%u workers=%u capture=%s off_median_ns=%llu traced_median_ns=%llu "
-                        "delta_ns_per_job=%.1f checksum=%llu\n",
+            std::printf("jobs=%u iterations=%u workers=%u capture=%s pairs=%u overhead_pct p25=%.2f p50=%.2f p75=%.2f "
+                        "off_median_ns=%llu checksum=%llu\n",
                         JOB_COUNT,
                         iterations,
                         workers,
                         isCapturing == true ? "active" : "inactive",
+                        PAIRED_SAMPLES,
+                        GetPercentile(overheadPercent, PERCENTILE_25),
+                        GetPercentile(overheadPercent, PERCENTILE_50),
+                        GetPercentile(overheadPercent, PERCENTILE_75),
                         static_cast<unsigned long long>(offMedian),
-                        static_cast<unsigned long long>(tracedMedian),
-                        (static_cast<float64>(tracedMedian) - static_cast<float64>(offMedian)) / JOB_COUNT,
                         static_cast<unsigned long long>(checksum));
         }
     }
