@@ -296,6 +296,108 @@ class LockedSetupTests(unittest.TestCase):
             self.assertEqual(command[command.index("--lockfile") + 1], str(root / "conan.lock"))
 
 
+class SharedConanHomeTests(unittest.TestCase):
+    def make_root(self, temporary: str) -> Path:
+        root = Path(temporary) / "checkout"
+        (root / "config").mkdir(parents=True)
+        (root / "config/tool_versions.json").write_text('{"managed": {"conan": "2.8.1"}, "minimum": {}}')
+        return root
+
+    def test_checkout_home_is_default_and_shared_home_is_versioned_and_absolute(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.make_root(temporary)
+            with patch.dict(os.environ, {engine.SHARED_CONAN_HOME_VARIABLE: ""}):
+                self.assertEqual(engine.conan_home(root), root / "out/conan/home")
+                self.assertEqual(engine.tool_env(root)["CONAN_HOME"], str(root / "out/conan/home"))
+            shared = Path(temporary) / "shared"
+            with patch.dict(os.environ, {engine.SHARED_CONAN_HOME_VARIABLE: str(shared)}):
+                self.assertEqual(engine.conan_home(root), shared / "conan-2.8.1")
+                self.assertEqual(engine.tool_env(root)["CONAN_HOME"], str(shared / "conan-2.8.1"))
+            with patch.dict(os.environ, {engine.SHARED_CONAN_HOME_VARIABLE: "relative/home"}):
+                with self.assertRaisesRegex(engine.EngineError, "absolute path"):
+                    engine.conan_home(root)
+
+    def test_profile_stays_in_checkout_when_home_is_shared(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {engine.SHARED_CONAN_HOME_VARIABLE: str(Path(temporary) / "shared")}):
+            root = self.make_root(temporary)
+            source = root / "config/conan/profiles" / engine.native_profile_name()
+            source.parent.mkdir(parents=True)
+            source.write_text("[settings]\n")
+            installed = engine.install_conan_profile(root)
+            self.assertEqual(installed, root / "out/conan/profiles" / engine.native_profile_name())
+            self.assertFalse((Path(temporary) / "shared").exists())
+
+    def test_shared_home_lock_excludes_other_checkouts_until_released(self):
+        import fcntl
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.make_root(temporary)
+            shared = Path(temporary) / "shared"
+            with patch.dict(os.environ, {engine.SHARED_CONAN_HOME_VARIABLE: str(shared)}):
+                lock_path = engine.conan_home(root) / ".ludus-cache.lock"
+                with engine.conan_cache_lock(root):
+                    with lock_path.open("a") as other:
+                        with self.assertRaises(BlockingIOError):
+                            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with lock_path.open("a") as other:
+                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.dict(os.environ, {engine.SHARED_CONAN_HOME_VARIABLE: ""}):
+                with engine.conan_cache_lock(root):
+                    pass
+            self.assertFalse((root / "out").exists())
+
+    def test_conan_cache_writes_run_inside_the_shared_lock(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            root = Path(temporary)
+            (root / "conan.lock").write_text('{"version": "0.5", "requires": []}\n')
+            held = []
+
+            @contextlib.contextmanager
+            def lock(_root):
+                held.append(True)
+                yield
+                held.append(False)
+
+            def record(*args, **kwargs):
+                self.assertEqual(held, [True])
+
+            for name in ("check_current_python", "create_or_update_venv", "install_managed_tools",
+                         "validate_managed_tools", "configure_system_tool_shims", "validate_required_system_tools"):
+                stack.enter_context(patch.object(engine, name))
+            stack.enter_context(patch.object(engine, "install_conan_profile", return_value=root / "profile"))
+            stack.enter_context(patch.object(engine, "tool_env", return_value={}))
+            stack.enter_context(patch.object(engine, "conan_cache_lock", side_effect=lock))
+            for name in ("run", "export_local_recipes", "create_conan_lock", "conan_install_for_preset"):
+                stack.enter_context(patch.object(engine, name, side_effect=record))
+            engine.prepare_conan_artifacts(root, {"minimum": {"python": "3.10"}}, (engine.DEFAULT_PRESET,))
+            self.assertEqual(held, [True, False])
+
+    def test_locked_export_rejects_recipe_revision_missing_from_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for recipe in engine.LOCAL_CONAN_RECIPES:
+                (root / recipe).mkdir(parents=True)
+                (root / recipe / "conanfile.py").write_text("")
+            (root / "conan.lock").write_text(json.dumps({
+                "version": "0.5",
+                "requires": ["harfbuzz/14.5.1#pinned%1790885077.9", "catch2/3.4.0#catch"],
+            }))
+            exported = {"third_party/harfbuzz": "harfbuzz/14.5.1#pinned", "third_party/catch2": "catch2/3.4.0#catch"}
+
+            def export(argv, **kwargs):
+                recipe = Path(argv[2]).relative_to(root).as_posix()
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"reference": exported[recipe]}))
+
+            with patch.object(engine, "tool_env", return_value={}), \
+                    patch.object(engine.subprocess, "run", side_effect=export):
+                engine.export_local_recipes(root, locked=True)
+                exported["third_party/harfbuzz"] = "harfbuzz/14.5.1#edited"
+                engine.export_local_recipes(root)
+                with self.assertRaisesRegex(engine.EngineError, "pins harfbuzz/14.5.1#pinned.*#edited"):
+                    engine.export_local_recipes(root, locked=True)
+
+
 class AnalysisTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
