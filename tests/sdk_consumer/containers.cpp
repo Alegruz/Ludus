@@ -1,4 +1,5 @@
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/fixed_array.hpp>
 #include <ludus/foundation/containers/sorted_map.hpp>
 
 int ExerciseInstalledContainers() noexcept
@@ -20,6 +21,13 @@ int ExerciseInstalledContainers() noexcept
         values.GetSize() != 2 || values[1] != 7)
     {
         return 32;
+    }
+    constexpr usize FIXED_CAPACITY = 2;
+    FixedArray<uint32, FIXED_CAPACITY> bounded;
+    if (bounded.TryAdd(5U) == false || bounded.TryInsertAt(0, bounded[0]) == nullptr || bounded.IsFull() == false ||
+        bounded.TryAdd(9U) == true || bounded[0] != 5 || bounded[1] != 5)
+    {
+        return 33;
     }
     return 0;
 }

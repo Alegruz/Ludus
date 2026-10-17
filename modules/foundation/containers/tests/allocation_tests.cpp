@@ -4,6 +4,7 @@
 // sanitizer runtimes provide their own operator new/delete).
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/fixed_array.hpp>
 #include <ludus/foundation/containers/sorted_map.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
 
@@ -159,6 +160,26 @@ TEST_CASE("StaticArray never allocates", "[alloc]")
         (void)sink;
     }
     REQUIRE(gCounters.news == 0);
+}
+
+TEST_CASE("FixedArray never allocates, including copies, moves and insertion", "[alloc][fixed-array]")
+{
+    TrackGuard guard;
+    {
+        ludus::foundation::FixedArray<ludus::foundation::uint64, 64> values;
+        for (ludus::foundation::uint64 i = 0; i < 64; ++i)
+        {
+            REQUIRE(values.TryInsertAt(0, i) != nullptr);
+        }
+        REQUIRE(values.TryAdd(1U) == false);
+        ludus::foundation::FixedArray<ludus::foundation::uint64, 64> copy = values;
+        ludus::foundation::FixedArray<ludus::foundation::uint64, 64> moved(static_cast<decltype(copy)&&>(copy));
+        values.RemoveAt(3);
+        values.Clear();
+        REQUIRE(moved.GetSize() == 64);
+    }
+    REQUIRE(gCounters.news == 0);
+    REQUIRE(gCounters.deletes == 0);
 }
 
 TEST_CASE("Array initializer list allocates exactly its element storage", "[alloc][initializer-list]")
