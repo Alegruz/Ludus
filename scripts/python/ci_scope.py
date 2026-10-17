@@ -9,6 +9,8 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 
 # Explicitly exempt documentation tooling only; unknown paths require native CI.
@@ -46,6 +48,8 @@ TIERS = frozenset({FULL_TIER, PULL_REQUEST_TIER, INTEGRATION_TIER, NIGHTLY_TIER}
 INTEGRATION_JOBS = tuple(name for name in NATIVE_JOBS if name != "formatting")
 # A pull request carrying this label runs the full tier before entering the queue.
 FULL_VALIDATION_LABEL = "ci:full"
+# Bounded GitHub run metadata read by a cancelled pull-request gate.
+MAX_RUN_METADATA_BYTES = 2 * 1024 * 1024
 
 
 def documentation_only(paths: list[str]) -> bool:
@@ -145,17 +149,91 @@ def gate_failures(results: dict) -> list[str]:
     return failures
 
 
+def has_cancelled_dependency(results: dict) -> bool:
+    return any(isinstance(job, dict) and job.get("result") == "cancelled" for job in results.values())
+
+
+def superseding_run(current: dict, runs: list[dict]) -> dict | None:
+    """Return a newer, uncancelled run of the same workflow, event and head commit.
+
+    Concurrency cancels only an older run, and the newer run publishes its own
+    required gate on the same commit, so that gate owns the result. A replacement
+    that was itself cancelled does not count; its own gate repeats this search.
+    """
+    for run in runs:
+        if (isinstance(run, dict) and isinstance(run.get("id"), int) and run["id"] > current["id"]
+                and run.get("workflow_id") == current["workflow_id"]
+                and run.get("event") == current["event"]
+                and run.get("head_sha") == current["head_sha"]
+                and run.get("conclusion") != "cancelled"):
+            return run
+    return None
+
+
+def read_github(path: str) -> dict:
+    # Thanks to GitHub, "REST API endpoints for workflow runs": a run reports its
+    # workflow, event and head commit; listings filter by head_sha and event.
+    # https://docs.github.com/en/rest/actions/workflow-runs
+    api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    request = urllib.request.Request(
+        f"{api}/repos/{os.environ['GITHUB_REPOSITORY']}/{path}",
+        headers={"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                 "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = response.read(MAX_RUN_METADATA_BYTES + 1)
+    if len(payload) > MAX_RUN_METADATA_BYTES:
+        raise ValueError("GitHub run metadata exceeded the bounded limit.")
+    result = json.loads(payload)
+    if not isinstance(result, dict):
+        raise ValueError("GitHub run metadata is not an object.")
+    return result
+
+
+def find_superseding_run() -> dict | None:
+    """Look up the replacement of a cancelled pull-request run; any failure finds none."""
+    if os.environ.get("GITHUB_EVENT_NAME") != "pull_request" or os.environ.get("LUDUS_CI_BATCH_SHA"):
+        return None
+    try:
+        current = read_github(f"actions/runs/{int(os.environ['GITHUB_RUN_ID'])}")
+        if (not isinstance(current.get("id"), int) or not isinstance(current.get("workflow_id"), int)
+                or re.fullmatch(r"[0-9a-f]{40}", str(current.get("head_sha"))) is None
+                or current.get("event") != "pull_request"):
+            return None
+        listing = read_github(f"actions/workflows/{current['workflow_id']}/runs"
+                              f"?head_sha={current['head_sha']}&event=pull_request&per_page=100")
+        runs = listing.get("workflow_runs")
+        return superseding_run(current, runs) if isinstance(runs, list) else None
+    except (KeyError, TypeError, ValueError, OSError, urllib.error.URLError):
+        return None
+
+
+def run_gate(results: dict) -> int:
+    failures = gate_failures(results)
+    if not failures:
+        print("Required CI gate passed for the classified change scope.")
+        return 0
+    if has_cancelled_dependency(results):
+        # A concurrency-cancelled duplicate must not leave a failing required
+        # check beside the run that replaced it. Without a replacement, the
+        # cancelled run validated nothing and the gate still fails.
+        replacement = find_superseding_run()
+        if replacement is not None:
+            print(f"::notice::Run cancelled before validation completed; superseded by run "
+                  f"{replacement['id']}, whose required gate owns this commit's result.")
+            return 0
+        failures.append("Validation was cancelled and no newer run of this workflow covers this commit; "
+                        "re-run this workflow.")
+    print("\n".join(failures), file=sys.stderr)
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("classify", "gate"))
     args = parser.parse_args()
     if args.command == "gate":
-        failures = gate_failures(json.loads(os.environ["RESULTS"]))
-        if failures:
-            print("\n".join(failures), file=sys.stderr)
-            return 1
-        print("Required CI gate passed for the classified change scope.")
-        return 0
+        return run_gate(json.loads(os.environ["RESULTS"]))
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     try:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))

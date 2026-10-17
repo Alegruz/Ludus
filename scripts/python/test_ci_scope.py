@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 import ci_scope
@@ -405,6 +406,119 @@ class RequiredGateTests(unittest.TestCase):
         results = self.results(False)
         results["unknown"] = {"result": "skipped"}
         self.assertTrue(ci_scope.gate_failures(results))
+
+
+
+class CancelledRunTests(unittest.TestCase):
+    """A superseded duplicate must not block a PR; an unreplaced cancellation still fails."""
+
+    SHA = "b062a93c" + "0" * 32
+    CURRENT = {"id": 487, "workflow_id": 7, "event": "pull_request", "head_sha": SHA, "conclusion": None}
+
+    def cancelled_results(self):
+        results = RequiredGateTests().results(tier=ci_scope.INTEGRATION_TIER)
+        results["changes"] = {"result": "cancelled", "outputs": {}}
+        for name in ci_scope.NATIVE_JOBS:
+            results[name]["result"] = "cancelled"
+        return results
+
+    def test_only_a_newer_uncancelled_run_of_the_same_commit_supersedes(self):
+        newer = dict(self.CURRENT, id=825, conclusion="success")
+        running = dict(self.CURRENT, id=826, conclusion=None)
+        self.assertEqual(ci_scope.superseding_run(self.CURRENT, [newer]), newer)
+        self.assertEqual(ci_scope.superseding_run(self.CURRENT, [running]), running)
+        for other in (dict(newer, id=400), dict(newer, id=487), dict(newer, conclusion="cancelled"),
+                      dict(newer, head_sha="1" * 40), dict(newer, workflow_id=8), dict(newer, event="merge_group"),
+                      dict(newer, id="825"), "825", None):
+            with self.subTest(run=other):
+                self.assertIsNone(ci_scope.superseding_run(self.CURRENT, [other]))
+        self.assertIsNone(ci_scope.superseding_run(self.CURRENT, []))
+
+    def test_superseded_cancelled_run_passes_and_names_the_owning_run(self):
+        with mock.patch.object(ci_scope, "find_superseding_run", return_value={"id": 825}), \
+                mock.patch("sys.stdout") as stdout:
+            self.assertEqual(ci_scope.run_gate(self.cancelled_results()), 0)
+        self.assertIn("superseded by run 825", "".join(call.args[0] for call in stdout.write.call_args_list))
+
+    def test_unreplaced_cancellation_still_fails(self):
+        with mock.patch.object(ci_scope, "find_superseding_run", return_value=None), \
+                mock.patch("sys.stderr") as stderr:
+            self.assertEqual(ci_scope.run_gate(self.cancelled_results()), 1)
+        output = "".join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertIn("Change classification did not succeed.", output)
+        self.assertIn("no newer run of this workflow covers this commit", output)
+
+    def test_genuine_failures_never_consult_replacement_runs(self):
+        failed_classifier = RequiredGateTests().results(False)
+        failed_classifier["changes"]["result"] = "failure"
+        failed_job = RequiredGateTests().results()
+        failed_job["formatting"]["result"] = "failure"
+        unexpected_skip = RequiredGateTests().results()
+        unexpected_skip["development"]["result"] = "skipped"
+        for results in (failed_classifier, failed_job, unexpected_skip):
+            with self.subTest(results=results), \
+                    mock.patch.object(ci_scope, "find_superseding_run", return_value={"id": 825}) as lookup, \
+                    mock.patch("sys.stderr"):
+                self.assertEqual(ci_scope.run_gate(results), 1)
+                lookup.assert_not_called()
+
+    def test_successful_gate_never_queries_github(self):
+        with mock.patch.object(ci_scope, "find_superseding_run") as lookup, mock.patch("sys.stdout"):
+            self.assertEqual(ci_scope.run_gate(RequiredGateTests().results()), 0)
+        lookup.assert_not_called()
+
+    def test_lookup_is_limited_to_pull_requests_and_fails_closed(self):
+        environment = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_RUN_ID": "487",
+                       "GITHUB_REPOSITORY": "The-Ludus-Project/Ludus", "GITHUB_TOKEN": "token"}
+        listing = {"workflow_runs": [dict(self.CURRENT, id=825, conclusion="success"), self.CURRENT]}
+
+        def read(path):
+            return dict(self.CURRENT) if path == "actions/runs/487" else listing
+
+        with mock.patch.dict(os.environ, environment, clear=True), \
+                mock.patch.object(ci_scope, "read_github", side_effect=read) as reader:
+            self.assertEqual(ci_scope.find_superseding_run()["id"], 825)
+            self.assertIn(f"head_sha={self.SHA}&event=pull_request", reader.call_args_list[1].args[0])
+        for overrides in ({"GITHUB_EVENT_NAME": "merge_group"}, {"GITHUB_EVENT_NAME": "schedule"},
+                          {"LUDUS_CI_BATCH_SHA": self.SHA}, {"GITHUB_RUN_ID": "not-a-run"}):
+            with self.subTest(overrides=overrides), mock.patch.dict(os.environ, {**environment, **overrides}, clear=True), \
+                    mock.patch.object(ci_scope, "read_github", side_effect=read):
+                self.assertIsNone(ci_scope.find_superseding_run())
+        for current in (dict(self.CURRENT, event="merge_group"), dict(self.CURRENT, head_sha="main"),
+                        dict(self.CURRENT, workflow_id=None)):
+            with self.subTest(current=current), mock.patch.dict(os.environ, environment, clear=True), \
+                    mock.patch.object(ci_scope, "read_github", side_effect=[current, listing]):
+                self.assertIsNone(ci_scope.find_superseding_run())
+        for error in (urllib.error.URLError("offline"), ValueError("bounded"), KeyError("GITHUB_TOKEN")):
+            with self.subTest(error=error), mock.patch.dict(os.environ, environment, clear=True), \
+                    mock.patch.object(ci_scope, "read_github", side_effect=error):
+                self.assertIsNone(ci_scope.find_superseding_run())
+
+    def test_gate_job_can_read_runs_and_receives_a_token(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+        gate = workflow.split("\n  linux:\n", 1)[1]
+        header = gate.split("\n    steps:", 1)[0]
+        self.assertIn("    if: always()\n", header)
+        self.assertIn("    permissions:\n      contents: read\n      actions: read", header)
+        self.assertIn("          GITHUB_TOKEN: ${{ github.token }}\n        run: python3 scripts/python/ci_scope.py gate",
+                      gate)
+
+    def test_only_pushes_cancel_required_pull_request_workflows(self):
+        root = Path(__file__).resolve().parents[2] / ".github/workflows"
+        for name, prefix in (("ci.yml", "ci"), ("wiki.yml", "wiki"), ("project-sdk.yml", "project-sdk")):
+            workflow = root.joinpath(name).read_text()
+            with self.subTest(workflow=name):
+                # Same-commit activity keeps full validation in its own non-cancelling group.
+                self.assertRegex(workflow.split("\npermissions:", 1)[0],
+                                 r"types: \[[^\]\n]*synchronize[^\]\n]*ready_for_review")
+                self.assertIn(
+                    "\nconcurrency:\n"
+                    f"  group: {prefix}-${{{{ inputs.batch_sha || github.ref }}}}"
+                    "${{ github.event_name == 'pull_request' && github.event.action != 'synchronize' && "
+                    "format('-head-{0}', github.event.pull_request.head.sha) || '' }}\n"
+                    "  cancel-in-progress: ${{ github.event_name == 'pull_request' && "
+                    "github.event.action == 'synchronize' }}\n",
+                    workflow)
 
 
 if __name__ == "__main__":
