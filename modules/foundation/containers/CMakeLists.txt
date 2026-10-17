@@ -20,6 +20,7 @@ target_sources(
         FILES
             include/ludus/foundation/containers/borrowed_view.hpp
             include/ludus/foundation/containers/static_array.hpp
+            include/ludus/foundation/containers/static_bit_set.hpp
             include/ludus/foundation/containers/fixed_array.hpp
             include/ludus/foundation/containers/ring_buffer.hpp
             include/ludus/foundation/containers/stable_sort.hpp
@@ -60,6 +61,7 @@ if(LUDUS_BUILD_TESTS)
             tests/static_array_tests.cpp
             tests/fixed_array_tests.cpp
             tests/ring_buffer_tests.cpp
+            tests/static_bit_set_tests.cpp
             tests/stable_sort_tests.cpp
             tests/sort_tests.cpp
             tests/array_tests.cpp
