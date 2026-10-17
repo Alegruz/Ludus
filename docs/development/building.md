@@ -559,6 +559,12 @@ foundational header (`core.h`/`config.h`/`compiler.h`/`types.h`) pulls a
 string/container/heavy STL header, or if any public header pulls a heavy STL or
 private `internal/` header. Header self-sufficiency (every public header
 compiles standalone) is checked by the `ludus_header_self_sufficiency` CTest.
+Its probes run concurrently; `LUDUS_HEADER_CHECK_JOBS` bounds the compiler
+processes (default: the CPUs available to the test). Every header keeps the
+flags reconstructed from `compile_commands.json` and its own failure report.
+The test's 600 s CTest timeout only detects a hung compiler: probe wall time
+follows host load, so heavily shared hosts need the headroom. Header parse cost
+is budgeted by `config/build_budget.json`, not by this timeout.
 See `docs/architecture/foundational-headers.md` and ADR 0007.
 
 ## Foundational header
