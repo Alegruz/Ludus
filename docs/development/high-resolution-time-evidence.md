@@ -481,13 +481,13 @@ rights), an idle host, battery or Low Power Mode, partial occlusion, Linux
 `deminiaturize:` to the first new frame beyond the 100 ms hidden interval bound.
 Two runs per arm on a loaded host support only the coarse rates above.
 
-| Validation (macOS arm64 host, pinned Clang 18, warnings as errors) | Result |
+| Validation (macOS arm64 host, pinned Clang 23.1.3 after merging `develop`, warnings as errors) | Result |
 | --- | --- |
 | Development full build with `-DLUDUS_BUILD_WORLD_DEMO=ON` | Passed, warning-clean. |
-| `ctest --preset macos-clang-development` with `LUDUS_TEST_COCOA=1` | 114 of 115 passed. `ludus_dependency_diagnostics` exceeded its 120 s timeout at load average 65-80; run directly, its 19 cases passed in 171 s. |
-| `ludus_world_demo_pacing_tests`, `ludus_platform_cocoa_tests` | 9 cases (441 assertions) and 7 cases passed; the Cocoa suite passed three consecutive runs. |
+| `ctest --preset macos-clang-development` with `LUDUS_TEST_COCOA=1` | 115 of 116 passed. `ludus_renderer_pixels` fails because Metal rejects the `renderer_output` fragment shader; it passed on the Clang 18 base with this same change, which touches no renderer, RHI or shader code. On the Clang 18 base, `ludus_dependency_diagnostics` once exceeded its 120 s timeout under load and passed when run directly. |
+| `ludus_world_demo_pacing_tests`, `ludus_platform_cocoa_tests` | 9 cases (441 assertions) and 7 cases passed; the Cocoa suite also passed three consecutive runs on the Clang 18 base. |
 | `source_policy.py`, `./scripts/check --format` | Passed. |
-| clang-tidy 18 on the changed native sources | No findings. The browser `window_web.cpp` change is compiled by the browser presets in CI. |
+| clang-tidy on the changed native sources | No findings. The browser `window_web.cpp` change is compiled by the browser presets in CI. |
 | Documentation: `check-docs`, strict MkDocs build, `test_docs.py`, `test_wiki.py`, `check-wiki --documentation-only` | Passed. |
 | `scripts/build-api` | 185 headers; no new documentation gaps. |
 
