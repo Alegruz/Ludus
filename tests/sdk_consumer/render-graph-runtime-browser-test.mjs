@@ -57,6 +57,8 @@ try {
 } catch (error) {
   report.outcome='failed'; report.error=String(error);
   report.lastStatus = page ? await page.locator('#status').evaluate(node => ({text:node.textContent,...node.dataset})).catch(() => null) : null;
+  // The page reports its step, capture sub-step and last RasterStatus; show them beside a timeout.
+  console.error('Last fixture status:', JSON.stringify(report.lastStatus));
   throw error;
 } finally {
   await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2)+'\n');

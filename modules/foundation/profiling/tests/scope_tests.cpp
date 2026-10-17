@@ -40,6 +40,7 @@ struct Drained
     uint64 frameCount = 0;
     uint64 flowOut = 0;
     uint64 flowIn = 0;
+    uint64 counterCount = 0;
 };
 
 Drained drainAll()
@@ -74,6 +75,9 @@ Drained drainAll()
                     break;
                 case internal::TraceEventKind::FlowIn:
                     ++result.flowIn;
+                    break;
+                case internal::TraceEventKind::Counter:
+                    ++result.counterCount;
                     break;
             }
         }

@@ -8,7 +8,7 @@ add_library(Ludus::SceneCook ALIAS ludus_scene_cook)
 set_target_properties(ludus_scene_cook PROPERTIES EXPORT_NAME SceneCook)
 target_sources(ludus_scene_cook PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
     FILES include/ludus/content/scene_cook/scene_cook.h include/ludus/content/scene_cook/scene_assets.h
-    include/ludus/content/scene_cook/best_effort_import.h)
+    include/ludus/content/scene_cook/best_effort_import.h include/ludus/content/scene_cook/limits.h)
 target_link_libraries(ludus_scene_cook
     PUBLIC Ludus::Content Ludus::FoundationContainers Ludus::FoundationIdentity Ludus::FoundationStrings
     PRIVATE Ludus::SceneFormat Ludus::FoundationMath Ludus::FoundationParsingJson ludus_stb_image)
@@ -28,7 +28,7 @@ add_executable(ludus_cook tool/ludus_cook.cpp)
 set_target_properties(ludus_cook PROPERTIES OUTPUT_NAME ludus-cook)
 # The CLI supplies operating-system entropy for new UUIDs; the entropy target
 # avoids linking Platform's window backends into a command-line tool.
-target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook Ludus::PlatformEntropy)
+target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook Ludus::ContentIdentity Ludus::PlatformEntropy)
 ludus_apply_project_defaults(ludus_cook)
 
 if(LUDUS_BUILD_TESTS)

@@ -1,4 +1,5 @@
 #include "internal/software_viewport.h"
+#include "internal/preview_shading.h"
 
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/scalar.hpp>

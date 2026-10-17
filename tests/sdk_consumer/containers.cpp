@@ -1,6 +1,8 @@
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/fixed_array.hpp>
+#include <ludus/foundation/containers/ring_buffer.hpp>
 #include <ludus/foundation/containers/sorted_map.hpp>
+#include <ludus/foundation/containers/static_bit_set.hpp>
 
 int ExerciseInstalledContainers() noexcept
 {
@@ -28,6 +30,25 @@ int ExerciseInstalledContainers() noexcept
         bounded.TryAdd(9U) == true || bounded[0] != 5 || bounded[1] != 5)
     {
         return 33;
+    }
+    constexpr usize RING_CAPACITY = 2;
+    RingBuffer<uint32, RING_CAPACITY> ring;
+    if (ring.TryAdd(1U) == false || ring.TryAdd(2U) == false || ring.TryAdd(3U) == true)
+    {
+        return 34;
+    }
+    ring.RemoveFirst();
+    if (ring.TryAdd(3U) == false || ring.GetFirst() != 2 || ring.GetLast() != 3 || ring.GetTrailingSpan().size() != 1)
+    {
+        return 35;
+    }
+    constexpr usize FLAG_COUNT = 65;
+    StaticBitSet<FLAG_COUNT> flags;
+    flags.Set(64);
+    flags <<= 0;
+    if (flags.IsSet(64) == false || flags.CountSet() != 1 || flags.FindNextSet(0) != 64 || (~flags).CountSet() != 64)
+    {
+        return 36;
     }
     return 0;
 }

@@ -3,8 +3,10 @@
 Status: the bounded graph kernel is implemented, and [milestone T0](#milestones)
 closed its documentation, contract-test and macOS validation gaps. Milestone T1
 moved the [first engine consumer](#first-engine-consumer-static-lighting-bake), the
-editor's static-lighting bake, onto an explicit worker budget. Tracing and work
-stealing are later, measured milestones. This design builds on
+editor's static-lighting bake, onto an explicit worker budget. Milestone T2 added
+[task identity and execution traces](#task-identity-and-execution-traces), and
+milestone T3 completed [platform validation](../development/threading-evidence.md#platform-completion-t3)
+on Windows and macOS. Work stealing is a later, measured milestone. This design builds on
 [frame ownership](frame-update.md#background-work-and-eventual-jobs) and
 [profiling](profiling-final.md). It does not claim universal optimality or AAA
 scale performance from a small synthetic benchmark.
@@ -149,8 +151,8 @@ releases the gate; wakes and completion transitions occur with it held. Broadcas
 ready work transitions from empty to nonempty, all jobs complete, or control
 changes require it. Every
 wake rechecks predicates, including spurious wakes. There is no spin loop, lost
-wake gap, second lock order, or executing user callback under a scheduler lock.
-Each node enters ready once, so the graph's MaxJobs ring can never overflow.
+wake gap, second lock order, or executing user callback or hook under a scheduler
+lock. Each node enters ready once, so the graph's MaxJobs ring can never overflow.
 
 Snapshot gives pending/running/succeeded/failed/cancelled/blocked counts while
 holding the gate. GetOutcome identifies the exact node. Debug a suspect graph
@@ -241,6 +243,69 @@ preview. [Bake measurements](../development/threading-evidence.md#static-lightin
 report latency percentiles, critical path and dispatch overhead against the serial
 executor and the former single-thread `Step` loop.
 
+## Task identity and execution traces
+
+Milestone T2 implements staged slice 2. The kernel reports scheduler transitions to
+optional hooks and stays free of profiler, logging and container dependencies; a
+separate adapter target connects those reports to FoundationProfiling.
+
+**Identity.** `JobGraph::Add` takes an optional `JobLabel`: a borrowed name pointer
+and a caller-chosen site ID. The node stores the label by value, so scheduling never
+copies a string or allocates. A trace event identifies work by submission ID, graph
+ID, job index, *ready sequence* (the order in which the job became ready) and edge
+index. Within one submission the ready ring never wraps, so the popped position is
+the ready sequence, and roots always occupy sequences 0..R-1 in Add order. When an
+edge's satisfaction makes a dependent ready, the node records that edge under the gate.
+
+**Hooks.** `JobSystemConfig::Hooks` holds worker start/stop hooks, a trace function,
+a per-submission filter and one context pointer, all fixed at `Initialize`.
+`Initialize` returns only after every worker's start hook has run on that worker,
+which lets the profiler register named threads and initialize thread-local state
+before any graph is admitted; stop hooks run on each worker before `Shutdown` joins
+it. `Submit` asks the filter once, outside the gate, so a submission is traced
+completely or not at all. Hooks run with the same `InsideJob` guard as callbacks.
+
+**Ordering and lock discipline.** Every report runs outside the gate, with values
+copied while the gate was held:
+
+- `Submit` admits a traced graph with an empty ready ring, releases the gate, reports
+  `Submitted`, then reacquires the gate and publishes its roots. No job can start
+  before its dispatch is reported.
+- The executing thread reports `Started` before the callback and, after it, one
+  `Signalled` per outgoing edge (only when the callback succeeded) and `Finished`.
+  All three precede the outcome's publication. A dependent therefore starts only
+  after the report of the edge that released it, and `Wait` cannot release the
+  graph, its edges or its labels while a report is running.
+- `Wait` reports `WaitEntered` after it confirms an admitted graph, and `WaitReturned`
+  after releasing it, before returning. Submit and Wait are owner-serialized, so the
+  active submission cannot change while the gate is released for these reports.
+
+Jobs resolved without running (Blocked, or skipped by Cancel) are not reported; the
+`WaitReturned` outcome records the aggregate. Untraced submissions add one
+predictable branch per job and one stored edge index per release; with no hooks
+there is nothing else.
+
+**Profiler adapter.** `Ludus::FoundationThreadingProfiling` (`job_profiling.hpp`)
+supplies hooks that name workers, filter on an active capture and translate reports
+into the Perfetto layout described in the
+[module guide](../modules/foundation/threading.md#execution-traces): Submit/Wait
+slices on the owner, one slice per executed job named by its label, `JobDispatch`
+flows from Submit to each root and from each succeeded prerequisite to every
+dependent edge, and a `JobReadyDepth` counter sampled at Submit and at each job
+start. Flow IDs are derived from the submission ID and the root sequence or edge
+index, so neither side stores per-job trace state. `LUDUS_JOB_LABEL(Name)` produces
+a label whose site ID is the profiler's compile-time site hash. The profiler gained
+an [integration emission API](../modules/foundation/profiling.md#integration-emission-api)
+for runtime site IDs, caller-owned flow IDs and counter samples, and now exports
+registered thread names.
+
+Limits: for a fan-in dependent, only the releasing edge's flow ends at its slice;
+the other prerequisites' flow starts remain unmatched and Perfetto draws no arrow
+for them. Ready depth is sampled, not recorded at every release. The
+static-lighting bake labels its preparation and range jobs;
+[tracing overhead and bake latencies](../development/threading-evidence.md#execution-traces-t2)
+are recorded with the evidence.
+
 ## Milestones
 
 Each milestone is one reviewable change with its own validation. T0 completes the
@@ -251,8 +316,8 @@ and T5 are conditional on measurements and are not scheduled by default.
 | --- | --- | --- |
 | T0 (done) | Public API contracts beside `jobs.hpp` declarations; naming-rule migration of the module; tests for failure-over-cancellation, cancel-after-completion, cancel precedence over Blocked, snapshot counts, concurrent Cancel/Snapshot during Wait, recursive calls into any pool and serial order; macOS runtime tests in CI | Module docs list no undocumented public symbols; macOS development and ASan/UBSan CI run the threading suite; [macOS ARM64 evidence](../development/threading-evidence.md) recorded |
 | T1 (done) | First engine consumer (staged slice 1): move the static-lighting irradiance bake from its dedicated editor thread onto an explicit JobSystem budget, with disjoint output ranges and a stable owner merge | Serial-oracle equality, cancellation and shutdown tests; bake p50/p95/p99, critical path and dispatch overhead against the serial executor, [recorded](../development/threading-evidence.md#static-lighting-bake-t1) |
-| T2 | Task identity and traces (staged slice 2): optional job names/site IDs, profiler dispatch-to-start and completion flows, queue depth and wait duration | Tracing on/off overhead measured; scheduling allocation and lock contracts unchanged |
-| T3 | Platform completion: compile and execute the Windows backend, macOS startup-failure injection and a completed macOS TSan run | Evidence recorded for each target; Windows still blocks shipping until this exits |
+| T2 (done) | [Task identity and traces](#task-identity-and-execution-traces) (staged slice 2): optional job names/site IDs, profiler dispatch-to-start and completion flows, queue depth and wait duration | Tracing on/off overhead [measured](../development/threading-evidence.md#execution-traces-t2); scheduling allocation and lock contracts unchanged |
+| T3 (done) | Platform completion: compile and execute the Windows backend, macOS startup-failure injection and a completed macOS TSan run | [Evidence recorded](../development/threading-evidence.md#platform-completion-t3) for each target; CI lanes run Windows and macOS TSan in every batch |
 | T4 | Conditional (staged slice 3): worker-local queues and work stealing, only for measured contention | The [research plan](#turning-research-into-an-improvement) comparison shows a repeatable benefit |
 | T5 | Conditional (staged slices 4-5): concurrent admission/priority lanes, browser pthreads, render ownership, NUMA or fibers | A separate measured design decision for each |
 
@@ -260,9 +325,9 @@ and T5 are conditional on measurements and are not scheduled by default.
 
 Finish the initial architecture and its engine integration before changing the
 scheduler in response to the resources below. The bounded kernel is already
-implemented, its public API is documented (T0) and its first real consumer is
-integrated (T1); the remaining baseline work is useful execution traces and
-platform validation. The existing
+implemented, its public API is documented (T0), its first real consumer is
+integrated (T1), its execution traces exist (T2) and its Windows and macOS
+platform validation is recorded (T3). The existing
 [staged growth plan](#performance-and-staged-growth) determines implementation
 order. This reading path supplies questions and comparison methods for later
 improvements; it does not select a replacement backend or expand the public API.
@@ -283,7 +348,8 @@ Before starting a scheduler optimization experiment:
   serial-web validation in the [evidence owner](../development/threading-evidence.md).
   Close the macOS CI runtime-test gap and obtain a completed sanitizer result;
   a sanitizer-runtime failure before test entry is not a passing engine test.
-  Windows validation remains required before shipping the existing Windows backend.
+  The Windows backend is validated by its own CI lane; Windows SDK packaging and
+  other engine modules on Windows remain outside this gate.
 - Preserve a reproducible baseline: revision, compiler/build flavor, hardware,
   worker/helping configuration, graph shape, workload inputs, output checks and
   background load. Retain the bounded admission, zero steady scheduler allocation,

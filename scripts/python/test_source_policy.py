@@ -14,6 +14,25 @@ class SourcePolicyTests(unittest.TestCase):
             "modules/example/source" + suffix, text, set(range(1, text.count("\n") + 2))
         )
 
+    def test_admission_capacity_literals_use_their_owner(self):
+        paths = ["modules/content/scene_cook/src/scene_cook.cpp",
+                 "modules/content/scene_cook/src/scene_assets.cpp",
+                 "modules/content/src/files.cpp", "apps/editor/src/render_scene.cpp"]
+        for path in paths:
+            for expression in ["500000", "1048576", "4194304", "8388608U", "67108864LL",
+                               "usize{16} * 1024 * 1024", "usize{1024} * 1024",
+                               "32ULL * 1024U * 1024", "usize{8} << 20"]:
+                with self.subTest(path=path, expression=expression):
+                    self.assertTrue(violations(path, f"if (count > {expression}) {{}}", {1}))
+            for expression in ["format::MAX_VERTICES", "MAX_SAVE_BYTES", "MAX_CATALOG_BYTES",
+                               "usize{256} * 1024 * 1024", "128 * 1024 * 1024"]:
+                self.assertFalse(violations(path, f"if (count > {expression}) {{}}", {1}))
+        self.assertFalse(violations(paths[0], '// 500000\nconst char* text = "1048576";\n#define CAP 4194304\n', {1, 2, 3}))
+        self.assertFalse(violations(paths[0], "if (count > 500000) {}\n", {2}))
+        for path in ["modules/content/scene_format/include/ludus/content/scene_format/limits.h",
+                     "modules/content/tests/native_saves_tests.cpp", "modules/example/source.cpp"]:
+            self.assertFalse(violations(path, "constexpr usize MAX_BYTES = usize{32} * 1024 * 1024;", {1}))
+
     def test_nullable_variables_and_move_parameters(self):
         for source in ["Thing* value = nullptr;", "struct A { Thing* mValue{}; };", "Thing* const value = nullptr;",
                        "void Move(Thing&& inoutOther);", "void Move(Thing&& outOther);"]:

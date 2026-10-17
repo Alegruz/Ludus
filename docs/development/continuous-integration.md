@@ -40,7 +40,7 @@ candidate skips validation and publication, so it does not exercise the change.
 Only one batch is active. New `develop` commits do not cancel it or change its input.
 Concurrent scheduler ticks coalesce into at most one pending run. A tick captured
 before `main` advanced skips, letting the next tick use the new stable revision.
-Native, SDK, wiki and browser workflows must all succeed. Filesystem block-prefix
+Native, SDK, wiki, browser and threading-platform workflows must all succeed. Filesystem block-prefix
 recovery additionally runs when its workflow, persistence implementation, recovery
 probe or recovery drivers changed anywhere in the complete batch diff. Invalid
 metadata, failed/cancelled checks and unexpectedly skipped required jobs cannot
@@ -171,7 +171,8 @@ and owning API/wiki tools. Unknown paths, mixed changes, malformed metadata and
 missing comparisons require native routing. Rename detection is disabled so a
 move into docs does not hide an engine change. The `Ubuntu Clang` gate checks the
 complete job inventory and requires exactly the successes/skips selected by the
-tier. Missing outputs or failed/cancelled dependencies fail the gate.
+tier. Missing outputs or failed/cancelled dependencies fail the gate; the only
+exception is a superseded pull-request run, described below.
 
 Required checks use job conditions instead of workflow-level path filtering, so
 branch protection receives a result even when expensive jobs are intentionally
@@ -180,6 +181,39 @@ relocation, ASan/UBSan and TSan controls, static analysis, editor journeys, PCH,
 uncached build budgets, browser backends and documentation tooling on both macOS
 architectures. The independent public API check still enforces the shrink-only
 legacy baseline against the captured main SHA.
+
+### Superseded pull-request runs
+
+GitHub evaluates every check run with a required name on the PR head commit, one
+per workflow run, so a cancelled duplicate blocks merging even when another run
+of the same commit passed. Several PR activities can fire for one commit at
+once; for example, pushing and marking a draft ready produce `synchronize`,
+`ready_for_review` and often `edited` in the same second. `ci`, `Ludus Wiki` and
+`project-sdk` therefore cancel in-progress runs only for `synchronize`, which
+always carries a new head. Its runs share one group per PR and supersede runs for
+earlier commits. Every other activity revalidates the head in a group named for
+that commit that never cancels an in-progress run. GitHub keeps at most one run
+pending per group and cancels an older pending run, which has created no checks.
+A same-commit duplicate therefore waits and runs completely; it costs a duplicate
+run, not a blocked check. A later push does not cancel such a run for an earlier commit.
+
+The `Ubuntu Clang` gate still runs after cancellation. If a dependency was
+cancelled, it reads this workflow's runs with the job's read-only `actions`
+token. It passes only when a newer, uncancelled pull-request run of the same
+workflow exists for the same head commit. That run publishes its own required
+gate, which owns the result. Otherwise, or if the lookup fails, the gate fails
+and asks for a rerun. Classification failures, failed jobs and unexpected skips
+never consult other runs. Merge-group, scheduled, manual and batch runs never
+treat cancellation as success. Other workflows' required checks are ordinary
+jobs; the per-commit group prevents them from being cancelled by duplicates.
+
+To recover a PR blocked by a cancelled or failed check left before this rule,
+rerun that cancelled workflow run; its new attempt replaces the check in the
+same check suite. Do not manually cancel a PR's newest run. The gate of the run
+it replaced may already have passed while the newest run was pending, so the
+commit has no validation until the newest run is rerun. Rerunning an older
+commit's push run joins the push group and cancels the head's in-progress push
+run; rerun the head commit's runs instead.
 
 `.github/actions/native-setup` prepares only the job's selected preset. `CI=true`
 enables warnings as errors without invoking the full `init.sh --ci` validation.
@@ -192,6 +226,30 @@ Native jobs use `macos-15` arm64. Host and documentation tooling separately chec
 `macos-15-intel`. The SDK deployment target remains `14.0`; a macOS 15 runner does
 not establish macOS 14 runtime qualification. See GitHub's
 [macOS 14 deprecation notice](https://github.com/actions/runner-images/issues/13518).
+
+### Threading platform lanes
+
+`.github/workflows/threading-platforms.yml` runs the only Windows build and the
+macOS ThreadSanitizer run of `Ludus::FoundationThreading`
+([threading milestone T3](../architecture/threading.md#milestones)). Every batch
+calls it, and promotion requires it. Integration PRs run it only when they change
+the threading module, the Windows FoundationBase diagnostics backend, the Windows
+Conan profile or the workflow itself.
+
+The Windows job installs LLVM 18.1.8 from Chocolatey on `windows-2025` and drives
+`clang++` against the runner's Microsoft STL and dynamic CRT. It installs the
+pinned CMake/Ninja/Conan versions, exports the local Catch2 recipe and installs
+only that locked package with `config/conan/profiles/windows-clang-x86_64`. Ludus
+configures only the FoundationThreading closure on Windows (Base, Memory,
+Containers, Time, Profiling and Threading); other modules have no Windows backend
+and no SDK is installed. The job runs the threading, startup-seam, profiling-adapter
+and allocation suites once, then repeats the scheduler and startup suites 20 times.
+
+The macOS job prepares `macos-clang-development` without the editor or shader
+tools, proves TSan detection with the sanitizer control, then runs the threading,
+startup-seam and profiling-adapter suites under TSan, repeating the first two.
+The pinned LLVM 18 TSan runtime starts on the hosted macOS 15 image but not on
+macOS 26 hosts; see [macOS sanitizer runtimes](building.md#macos-sanitizer-runtimes).
 
 ## Dependencies and caches
 
@@ -242,10 +300,12 @@ The separate `performance` workflow runs runtime profiling scenarios nightly on
 hosted Ubuntu and macOS runners, and on manual dispatch. It is not a pull-request
 or batch check: scenario correctness failures fail that workflow, and
 timings are report-only. Reports, Perfetto traces and logs are kept as artifacts
-for 90 days. See [Runtime profiling](runtime-profiling.md).
+for 90 days. See [Runtime profiling](runtime-profiling.md). The hosted macOS
+lane also runs the RHI and renderer GPU scenarios on its paravirtual Metal GPU,
+for correctness and rough trends rather than hardware timing.
 
 Its opt-in `device` job adds self-hosted machines with a declared physical GPU,
-where the RHI and renderer GPU scenarios run. Lanes are listed in the
+where the same GPU scenarios produce hardware timings. Lanes are listed in the
 `LUDUS_PERF_DEVICE_LANES` repository variable; without it the job is skipped.
 The job runs only scheduled or manually dispatched `main` code, never pull
 requests or forks. Each device runner's job-started hook

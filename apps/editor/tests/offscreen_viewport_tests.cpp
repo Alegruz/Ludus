@@ -1,4 +1,6 @@
 #include "internal/offscreen_frame_reader.h"
+#include "internal/preview_bake.h"
+#include "internal/preview_shading.h"
 #include "internal/preview_viewport.h"
 #include "internal/render_preview.h"
 #include "internal/render_scene.h"

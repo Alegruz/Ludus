@@ -1,4 +1,6 @@
 #include "internal/preview_viewport.h"
+#include "internal/preview_bake.h"
+#include "internal/preview_shading.h"
 
 #include <ludus/foundation/base/core.h>
 

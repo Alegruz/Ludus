@@ -24,11 +24,34 @@ constexpr uint32 MAX_WORKERS = 64;
 constexpr uint32 MAX_RECORDS = 1u << 20;
 thread_local bool isInsideJob = false;
 
+// Marks a hook call: lifecycle calls from a hook return InsideJob, exactly as
+// they do from a job callback. Hooks always run outside the system gate.
+class HookScope final
+{
+public:
+    HookScope() noexcept : mIsCallerInsideJob(isInsideJob)
+    {
+        isInsideJob = true;
+    }
+    ~HookScope() noexcept
+    {
+        isInsideJob = mIsCallerInsideJob;
+    }
+    HookScope(const HookScope&) = delete;
+    HookScope& operator=(const HookScope&) = delete;
+
+private:
+    bool mIsCallerInsideJob;
+};
+
 struct Node
 {
     JobFunction Function = nullptr;
     void* ContextOrNull = nullptr;
+    JobLabel Label{};
     uint32 FirstEdge = INVALID_INDEX;
+    // The edge whose satisfaction made this node ready in the current submission.
+    uint32 ReleasingEdge = INVALID_INDEX;
     uint32 Incoming = 0;
     uint32 Remaining = 0;
     bool HasFailedPrerequisite = false;
@@ -64,6 +87,10 @@ struct GraphState
     uint64 Generation = 1;
     uint32 JobCount = 0;
     uint32 EdgeCount = 0;
+    // Each submission pushes every node at most once and starts Head at zero, so
+    // the ring never wraps within a submission: position Head is the popped node's
+    // ready sequence number, and Ready[0, RootCount) always holds the roots in Add
+    // order (Seal and Submit both push them first, in index order).
     uint32 Head = 0;
     uint32 ReadyCount = 0;
     uint32 Unfinished = 0;
@@ -91,20 +118,34 @@ struct GraphState
         return index;
     }
 };
+struct SystemState;
+struct WorkerContext
+{
+    SystemState* SystemOrNull = nullptr;
+    uint32 Index = 0;
+};
 struct SystemState
 {
     NativeGate Gate{};
     // FoundationThreading depends only on FoundationBase, so the fixed worker
-    // table stays a raw array rather than a Containers StaticArray.
+    // tables stay raw arrays rather than Containers StaticArrays.
     NativeThread Threads[MAX_WORKERS]{};
+    WorkerContext Workers[MAX_WORKERS]{};
+    JobSystemHooks Hooks{};
     uint32 WorkerCount = 0;
+    uint32 StartedWorkerCount = 0;
     GraphState* ActiveOrNull = nullptr;
+    // Identity of the active submission while IsTraced; written under the gate by Submit.
+    uint64 SubmissionId = 0;
+    bool IsTraced = false;
     bool ShouldStop = false;
 };
 
 namespace
 {
 std::atomic<uint64> gNextGraphId{1};
+// Traced submissions only; a 64-bit counter cannot wrap in practice.
+std::atomic<uint64> gNextSubmissionId{1};
 // Returns zero once the identity space is exhausted; it never wraps.
 [[nodiscard]] uint64 AllocateGraphId() noexcept
 {
@@ -135,6 +176,7 @@ void CompleteJob(SystemState& inoutSystem, uint32 index, JobOutcome outcome) noe
         LUDUS_REQUIRE(dependent.Remaining > 0);
         if (--dependent.Remaining == 0)
         {
+            dependent.ReleasingEdge = edge;
             graph.PushReady(graph.Edges[edge].To);
         }
     }
@@ -158,14 +200,23 @@ void CompleteJob(SystemState& inoutSystem, uint32 index, JobOutcome outcome) noe
     return node.HasFailedPrerequisite == true ? JobOutcome::Blocked : JobOutcome::Pending;
 }
 
-// The caller holds the gate on entry and return. User code runs outside it.
-bool ExecuteOneJob(SystemState& inoutSystem) noexcept
+void ReportTrace(const SystemState& system, const JobTraceEvent& event) noexcept
+{
+    const HookScope scope{};
+    system.Hooks.TraceOrNull(system.Hooks.ContextOrNull, event);
+}
+
+// The caller holds the gate on entry and return. User code and trace hooks run
+// outside it. Every report for a job precedes the publication of its outcome, so
+// Wait cannot release the graph (or its labels) while a report is running.
+bool ExecuteOneJob(SystemState& inoutSystem, uint32 workerIndex) noexcept
 {
     GraphState* graphOrNull = inoutSystem.ActiveOrNull;
     if (graphOrNull == nullptr || graphOrNull->ReadyCount == 0)
     {
         return false;
     }
+    const uint32 sequence = graphOrNull->Head;
     const uint32 index = graphOrNull->PopReady();
     Node& node = graphOrNull->Nodes[index];
     const JobOutcome skippedOutcome = GetSkippedOutcome(*graphOrNull, node);
@@ -175,13 +226,54 @@ bool ExecuteOneJob(SystemState& inoutSystem) noexcept
         return true;
     }
     node.Outcome.store(JobOutcome::Running, std::memory_order_release);
+    const bool isTraced = inoutSystem.IsTraced;
+    JobTraceEvent event{};
+    if (isTraced == true)
+    {
+        event =
+        {
+            .SubmissionId = inoutSystem.SubmissionId,
+            .GraphId = graphOrNull->Id,
+            .Label = node.Label,
+            .JobIndex = index,
+            .Sequence = sequence,
+            .EdgeIndex = node.ReleasingEdge,
+            .ReadyDepth = graphOrNull->ReadyCount,
+            .WorkerIndex = workerIndex,
+            .Kind = JobTraceKind::Started,
+        };
+    }
     inoutSystem.Gate.Unlock();
+    if (isTraced == true)
+    {
+        ReportTrace(inoutSystem, event);
+    }
     isInsideJob = true;
     JobOutcome outcome = node.Function(node.ContextOrNull);
     isInsideJob = false;
     if (outcome != JobOutcome::Succeeded && outcome != JobOutcome::Failed && outcome != JobOutcome::Cancelled)
     {
         outcome = JobOutcome::Failed;
+    }
+    if (isTraced == true)
+    {
+        // The sealed edge list is immutable while the graph is submitted.
+        event.ReadyDepth = 0;
+        if (outcome == JobOutcome::Succeeded)
+        {
+            event.Kind = JobTraceKind::Signalled;
+            for (uint32 edge = node.FirstEdge; edge != INVALID_INDEX; edge = graphOrNull->Edges[edge].Next)
+            {
+                event.EdgeIndex = edge;
+                event.DependentIndex = graphOrNull->Edges[edge].To;
+                ReportTrace(inoutSystem, event);
+            }
+        }
+        event.Kind = JobTraceKind::Finished;
+        event.EdgeIndex = NO_JOB_EDGE;
+        event.DependentIndex = 0;
+        event.Outcome = outcome;
+        ReportTrace(inoutSystem, event);
     }
     inoutSystem.Gate.Lock();
     CompleteJob(inoutSystem, index, outcome);
@@ -190,13 +282,42 @@ bool ExecuteOneJob(SystemState& inoutSystem) noexcept
 
 void RunWorker(void* context) noexcept
 {
-    SystemState& system = *static_cast<SystemState*>(context);
-    GateLock lock(system.Gate);
+    const WorkerContext& worker = *static_cast<const WorkerContext*>(context);
+    LUDUS_REQUIRE(worker.SystemOrNull != nullptr);
+    SystemState& system = *worker.SystemOrNull;
+    if (system.Hooks.WorkerStartOrNull != nullptr)
+    {
+        const HookScope scope{};
+        system.Hooks.WorkerStartOrNull(system.Hooks.ContextOrNull, worker.Index);
+    }
+    system.Gate.Lock();
+    if (system.Hooks.WorkerStartOrNull != nullptr)
+    {
+        ++system.StartedWorkerCount;
+        system.Gate.WakeAll();
+    }
     while (system.ShouldStop == false)
     {
-        if (ExecuteOneJob(system) == false)
+        if (ExecuteOneJob(system, worker.Index) == false)
         {
             system.Gate.Wait();
+        }
+    }
+    system.Gate.Unlock();
+    if (system.Hooks.WorkerStopOrNull != nullptr)
+    {
+        const HookScope scope{};
+        system.Hooks.WorkerStopOrNull(system.Hooks.ContextOrNull, worker.Index);
+    }
+}
+
+// Called with the gate held after the graph's roots are published.
+void ExecuteSerially(SystemState& inoutSystem) noexcept
+{
+    if (inoutSystem.WorkerCount == 0)
+    {
+        while (ExecuteOneJob(inoutSystem, CALLING_THREAD_WORKER_INDEX) == true)
+        {
         }
     }
 }
@@ -263,7 +384,7 @@ JobStatus JobGraph::Initialize(JobGraphConfig config) noexcept
     return JobStatus::Ok;
 }
 
-JobStatus JobGraph::Add(JobFunction function, void* contextOrNull, JobHandle& outHandle) noexcept
+JobStatus JobGraph::Add(JobFunction function, void* contextOrNull, JobHandle& outHandle, JobLabel label) noexcept
 {
     outHandle = {};
     if (mStateOrNull == nullptr)
@@ -287,6 +408,7 @@ JobStatus JobGraph::Add(JobFunction function, void* contextOrNull, JobHandle& ou
     Node& node = graph.Nodes[index];
     node.Function = function;
     node.ContextOrNull = contextOrNull;
+    node.Label = label;
     outHandle = { .GraphId = graph.Id, .Generation = graph.Generation, .Index = index };
     return JobStatus::Ok;
 }
@@ -387,6 +509,7 @@ JobStatus JobGraph::Reset() noexcept
         Node& node = graph.Nodes[index];
         node.Function = nullptr;
         node.ContextOrNull = nullptr;
+        node.Label = {};
         node.FirstEdge = INVALID_INDEX;
         node.Incoming = 0;
         node.Outcome.store(JobOutcome::Pending, std::memory_order_relaxed);
@@ -449,15 +572,26 @@ JobStatus JobSystem::Initialize(JobSystemConfig config) noexcept
         delete stateOrNull;
         return JobStatus::ThreadCreationFailed;
     }
+    stateOrNull->Hooks = config.Hooks;
     mStateOrNull = stateOrNull;
     for (uint32 index = 0; index < config.WorkerCount; ++index)
     {
-        if (stateOrNull->Threads[index].Start(detail::RunWorker, stateOrNull) == false)
+        stateOrNull->Workers[index] = { .SystemOrNull = stateOrNull, .Index = index };
+        if (stateOrNull->Threads[index].Start(detail::RunWorker, &stateOrNull->Workers[index]) == false)
         {
             (void)Shutdown();
             return JobStatus::ThreadCreationFailed;
         }
         ++stateOrNull->WorkerCount;
+    }
+    if (config.Hooks.WorkerStartOrNull != nullptr)
+    {
+        // Worker setup hooks complete before any graph can be submitted.
+        GateLock lock(stateOrNull->Gate);
+        while (stateOrNull->StartedWorkerCount < stateOrNull->WorkerCount)
+        {
+            stateOrNull->Gate.Wait();
+        }
     }
     return JobStatus::Ok;
 }
@@ -472,19 +606,29 @@ JobStatus JobSystem::Submit(JobGraph& inoutGraph) noexcept
     {
         return JobStatus::NotInitialized;
     }
-    GateLock lock(mStateOrNull->Gate);
-    GraphState& graph = *inoutGraph.mStateOrNull;
-    if (mStateOrNull->ActiveOrNull != nullptr)
+    detail::SystemState& system = *mStateOrNull;
+    bool shouldTrace = system.Hooks.TraceOrNull != nullptr;
+    if (shouldTrace == true && system.Hooks.ShouldTraceOrNull != nullptr)
     {
+        const detail::HookScope scope{};
+        shouldTrace = system.Hooks.ShouldTraceOrNull(system.Hooks.ContextOrNull);
+    }
+    GraphState& graph = *inoutGraph.mStateOrNull;
+    system.Gate.Lock();
+    if (system.ActiveOrNull != nullptr)
+    {
+        system.Gate.Unlock();
         return JobStatus::Busy;
     }
     if (graph.IsSealed == false)
     {
+        system.Gate.Unlock();
         return JobStatus::NotSealed;
     }
     JobSystem* expectedOrNull = nullptr;
     if (graph.OwnerOrNull.compare_exchange_strong(expectedOrNull, this, std::memory_order_acq_rel) == false)
     {
+        system.Gate.Unlock();
         return JobStatus::Busy;
     }
     graph.Head = 0;
@@ -497,6 +641,7 @@ JobStatus JobSystem::Submit(JobGraph& inoutGraph) noexcept
     {
         Node& node = graph.Nodes[index];
         node.Remaining = node.Incoming;
+        node.ReleasingEdge = INVALID_INDEX;
         node.HasFailedPrerequisite = false;
         node.Outcome.store(JobOutcome::Pending, std::memory_order_relaxed);
         if (node.Remaining == 0)
@@ -504,14 +649,31 @@ JobStatus JobSystem::Submit(JobGraph& inoutGraph) noexcept
             graph.PushReady(index);
         }
     }
-    mStateOrNull->ActiveOrNull = &graph;
-    mStateOrNull->Gate.WakeAll();
-    if (mStateOrNull->WorkerCount == 0)
+    system.ActiveOrNull = &graph;
+    system.IsTraced = shouldTrace;
+    if (shouldTrace == true)
     {
-        while (detail::ExecuteOneJob(*mStateOrNull) == true)
+        // Admit the graph without ready work, report it outside the gate, then
+        // publish the roots: no job can start before Submitted is reported.
+        const uint32 rootCount = graph.ReadyCount;
+        graph.ReadyCount = 0;
+        system.SubmissionId = detail::gNextSubmissionId.fetch_add(1, std::memory_order_relaxed);
+        const JobTraceEvent event
         {
-        }
+            .SubmissionId = system.SubmissionId,
+            .GraphId = graph.Id,
+            .ReadyDepth = rootCount,
+            .JobCount = graph.JobCount,
+            .Kind = JobTraceKind::Submitted,
+        };
+        system.Gate.Unlock();
+        detail::ReportTrace(system, event);
+        system.Gate.Lock();
+        graph.ReadyCount = rootCount;
     }
+    system.Gate.WakeAll();
+    detail::ExecuteSerially(system);
+    system.Gate.Unlock();
     return JobStatus::Ok;
 }
 
@@ -526,29 +688,56 @@ JobStatus JobSystem::Wait(JobOutcome& outOutcome, bool shouldHelp) noexcept
     {
         return JobStatus::NotInitialized;
     }
-    GateLock lock(mStateOrNull->Gate);
-    GraphState* graphOrNull = mStateOrNull->ActiveOrNull;
+    detail::SystemState& system = *mStateOrNull;
+    system.Gate.Lock();
+    GraphState* graphOrNull = system.ActiveOrNull;
     if (graphOrNull == nullptr)
     {
+        system.Gate.Unlock();
         return JobStatus::InvalidArgument;
+    }
+    // Submit and Wait are serialized by the owner, so the active submission
+    // cannot change while the gate is released for the reports below.
+    const bool isTraced = system.IsTraced;
+    JobTraceEvent event
+    {
+        .SubmissionId = system.SubmissionId,
+        .GraphId = graphOrNull->Id,
+        .Kind = JobTraceKind::WaitEntered,
+    };
+    if (isTraced == true)
+    {
+        system.Gate.Unlock();
+        detail::ReportTrace(system, event);
+        system.Gate.Lock();
     }
     while (graphOrNull->Unfinished > 0)
     {
-        if (shouldHelp == false || detail::ExecuteOneJob(*mStateOrNull) == false)
+        if (shouldHelp == false || detail::ExecuteOneJob(system, CALLING_THREAD_WORKER_INDEX) == false)
         {
-            mStateOrNull->Gate.Wait();
+            system.Gate.Wait();
         }
     }
+    JobOutcome outcome = JobOutcome::Succeeded;
     if (graphOrNull->HasFailure == true)
     {
-        outOutcome = JobOutcome::Failed;
+        outcome = JobOutcome::Failed;
     }
-    else
+    else if (graphOrNull->HasCancellation == true)
     {
-        outOutcome = graphOrNull->HasCancellation == true ? JobOutcome::Cancelled : JobOutcome::Succeeded;
+        outcome = JobOutcome::Cancelled;
     }
-    mStateOrNull->ActiveOrNull = nullptr;
+    system.ActiveOrNull = nullptr;
+    system.IsTraced = false;
     graphOrNull->OwnerOrNull.store(nullptr, std::memory_order_release);
+    system.Gate.Unlock();
+    if (isTraced == true)
+    {
+        event.Kind = JobTraceKind::WaitReturned;
+        event.Outcome = outcome;
+        detail::ReportTrace(system, event);
+    }
+    outOutcome = outcome;
     return JobStatus::Ok;
 }
 

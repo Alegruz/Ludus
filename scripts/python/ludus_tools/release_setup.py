@@ -12,6 +12,7 @@ from .package_verify import file_digest
 from .release_model import canonical, fail, json_bytes, load_release
 from .release_template import release_files
 from .templates import TemplateFile
+from .toolchain import PINNED_LLVM_MAJOR
 
 WORKFLOW = r'''name: itch.io release
 on:
@@ -41,7 +42,7 @@ jobs:
       - name: Install build prerequisites
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python3-venv clang-18 lld-18 binutils libwayland-dev wayland-protocols
+          sudo apt-get install -y -qq python3-venv clang-LLVM_MAJOR_TOKEN lld-LLVM_MAJOR_TOKEN binutils libwayland-dev wayland-protocols
           python3 -m venv /tmp/ludus-release-tools
           ref=$(cat config/ludus-tools-revision.txt)
           [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
@@ -169,14 +170,15 @@ def workflow_text(profile: str, destination: str, platform: str) -> str:
         text = text.split("  upload:\n", 1)[0].replace("name: itch.io release", "name: macOS release package").replace("runs-on: ubuntu-24.04", "runs-on: " + runner)
         start = text.index("          sudo apt-get update -qq")
         end = text.index("          ref=$(cat", start)
-        text = text[:start] + """          brew install python@3.12 llvm@18
+        text = text[:start] + """          brew install python@3.12 llvm@LLVM_MAJOR_TOKEN
           python_bin="$(brew --prefix python@3.12)/bin/python3.12"
-          llvm_prefix="$(brew --prefix llvm@18)"
+          llvm_prefix="$(brew --prefix llvm@LLVM_MAJOR_TOKEN)"
           "$python_bin" -m venv /tmp/ludus-release-tools
           echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
           echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
           echo "CXXFLAGS=-stdlib=libc++ -nostdinc++ -isystem $llvm_prefix/include/c++/v1" >> "$GITHUB_ENV"
 """ + text[end:]
+    text = text.replace('LLVM_MAJOR_TOKEN', str(PINNED_LLVM_MAJOR))
     return text.replace('PROFILE_TOKEN', profile).replace('DESTINATION_TOKEN', destination).replace('NATIVE_SDK_STEP', NATIVE_SDK_STEP.rstrip() if platform != 'web' else '')
 
 

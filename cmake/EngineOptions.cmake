@@ -36,6 +36,12 @@ function(ludus_configure_project_options target_name)
         # Map diagnostic literals without breaking DWARF's source/comp-dir pair.
         target_compile_options(${target_name} INTERFACE "-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=")
     endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        # The Microsoft CRT deprecates portable ISO C calls such as fopen in favour
+        # of its non-portable Annex K variants. Ludus bounds and checks those calls
+        # explicitly, so keep the portable spelling warning-clean on Windows.
+        target_compile_definitions(${target_name} INTERFACE _CRT_SECURE_NO_WARNINGS)
+    endif()
     if(EMSCRIPTEN)
         # Keep __FILE__/source_location diagnostics portable in shipped wasm.
         target_compile_options(${target_name} INTERFACE "-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=")
@@ -90,4 +96,17 @@ function(ludus_configure_project_options target_name)
             message(FATAL_ERROR "LUDUS_ENABLE_TIME_TRACE requires Clang")
         endif()
     endif()
+endfunction()
+
+# Read the LLVM major pinned by config/tool_versions.json (minimum.clang) so
+# compiler gates follow the single toolchain pin instead of a literal.
+function(ludus_get_pinned_llvm_major output)
+    set(pin "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/tool_versions.json")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${pin}")
+    file(READ "${pin}" document)
+    string(JSON clang ERROR_VARIABLE pin_error GET "${document}" minimum clang)
+    if(pin_error OR NOT clang MATCHES "^([0-9]+)\\.")
+        message(FATAL_ERROR "config/tool_versions.json must pin minimum.clang as a version")
+    endif()
+    set(${output} "${CMAKE_MATCH_1}" PARENT_SCOPE)
 endfunction()

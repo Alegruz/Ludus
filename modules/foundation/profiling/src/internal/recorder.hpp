@@ -125,6 +125,8 @@ public:
     // Thread name for a registered id (for export). Empty view if unknown.
     [[nodiscard]] std::string_view ThreadName(uint32 threadId) const noexcept;
     [[nodiscard]] usize ThreadCount() const noexcept;
+    // Thread id stored in name-table slot `index` (< ThreadCount()), for export.
+    [[nodiscard]] uint32 ThreadIdAt(usize index) const noexcept;
 
     // Site registry (§13/§14). RegisterSite records id -> {name,file,line} once
     // per site (the instrumentation macro guards it with a function-local

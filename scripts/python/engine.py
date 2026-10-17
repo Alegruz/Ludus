@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
 import difflib
 import hashlib
 import json
@@ -18,9 +19,9 @@ import urllib.request
 import venv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Iterator, Sequence
 
-from formatting import format_source
+from formatting import FormattingError, format_source
 from analysis_inventory import compilation_entries, inventory, request_codemodel, SOURCE_ROOTS
 from quality_process import ANALYSIS_SECONDS, LANE_BYTES, LOG_BYTES, LogBudget, run_bounded
 
@@ -303,11 +304,64 @@ def managed_executable(root: Path, name: str) -> Path:
     return venv_bin_dir(root) / f"{name}{suffix}"
 
 
+# Opt-in Conan home shared by every checkout of this repository on the host
+# (for example concurrent agent worktrees), so third-party packages are built
+# once instead of once per checkout. See docs/development/building.md.
+SHARED_CONAN_HOME_VARIABLE = "LUDUS_CONAN_HOME"
+
+
+def shared_conan_root() -> Path | None:
+    value = os.environ.get(SHARED_CONAN_HOME_VARIABLE, "")
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise EngineError(f"{SHARED_CONAN_HOME_VARIABLE} must be an absolute path, not {value!r}")
+    if os.name == "nt":
+        raise EngineError(f"{SHARED_CONAN_HOME_VARIABLE} is supported on macOS and Linux hosts only")
+    return path
+
+
+def conan_home(root: Path) -> Path:
+    shared = shared_conan_root()
+    if shared is None:
+        return root / "out" / "conan" / "home"
+    # One home per pinned Conan version: checkouts on different pins must not
+    # migrate the same cache database back and forth.
+    return shared / ("conan-" + load_tool_versions(root)["managed"]["conan"])
+
+
+@contextlib.contextmanager
+def conan_cache_lock(root: Path) -> Iterator[None]:
+    """Serialize Conan cache writes when the Conan home is shared.
+
+    Conan 2 does not lock its package cache between processes, so exports,
+    lock creation and --build=missing installs from concurrent checkouts must
+    not overlap. A checkout-local home needs no lock."""
+    if shared_conan_root() is None:
+        yield
+        return
+    import fcntl
+
+    home = conan_home(root)
+    home.mkdir(parents=True, exist_ok=True)
+    with (home / ".ludus-cache.lock").open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(f"Waiting for another checkout to finish with the shared Conan cache: {home}", flush=True)
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def tool_env(root: Path) -> dict[str, str]:
     env = os.environ.copy()
     path_entries = [host_tools_bin_dir(root), venv_bin_dir(root)]
     env["PATH"] = os.pathsep.join(str(path) for path in path_entries) + os.pathsep + env.get("PATH", "")
-    env["CONAN_HOME"] = str(root / "out" / "conan" / "home")
+    env["CONAN_HOME"] = str(conan_home(root))
     env["CONAN_NON_INTERACTIVE"] = "1"
     return env
 
@@ -460,7 +514,7 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
         return
 
     minimum = versions["minimum"]
-    clang_major = version_tuple(minimum["clang"])[0] if version_tuple(minimum["clang"]) else 18
+    clang_major = llvm_major_version(versions)
     if platform.system() == "Darwin":
         brew = shutil.which("brew")
         if brew:
@@ -482,7 +536,7 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
             link_or_replace_symlink(host_tools_bin_dir(root) / shim_name, Path(target))
 
     if platform.system() == "Darwin" and clang_cxx(root).is_file():
-        configure_macos_sdk(root)
+        configure_macos_sdk(root, clang_major)
 
 
 def macos_toolchain_identity(root: Path) -> dict[str, str]:
@@ -520,12 +574,18 @@ def probe_macos_sdk(root: Path, sdk: Path, libcxx: Path) -> tuple[int, str]:
     # Compile and link rather than checking a version label: Apple SDK math
     # headers can require compiler-resource macros absent from older Clang.
     # This exercises the NAN/INFINITY contract that HarfBuzz's source uses.
+    # <cfloat> after <cmath> catches libc++ 22 with the macOS 27 SDK (C++23): math.h's
+    # partial float.h include sets libc++'s guard, leaving <cfloat> empty
+    # (Catch2 needs DBL_MAX_10_EXP). Thanks to Ian Anderson (LLVM), "[libc++]
+    # Remove libc++'s <float.h>", llvm/llvm-project#175849 (LLVM 23):
+    # https://github.com/llvm/llvm-project/pull/175849
     for metadata in (sdk / "SDKSettings.json", libcxx / "__config"):
         if not metadata.is_file():
             return 1, f"Incomplete SDK/header installation: missing {metadata}"
-    source = ("#include <cmath>\n#include <string_view>\n"
+    source = ("#include <cmath>\n#include <cfloat>\n#include <string_view>\n"
               "#ifndef NAN\n#error LudusSDK_missing_NAN\n#endif\n"
               "#ifndef INFINITY\n#error LudusSDK_missing_INFINITY\n#endif\n"
+              "#ifndef DBL_MAX_10_EXP\n#error LudusSDK_missing_DBL_MAX_10_EXP\n#endif\n"
               "int main() { volatile double n = NAN; volatile double i = INFINITY; "
               "return std::isnan(n) && std::isinf(i) && std::string_view(\"sdk\").size() == 3 ? 0 : 1; }\n")
     import tempfile
@@ -537,7 +597,8 @@ def probe_macos_sdk(root: Path, sdk: Path, libcxx: Path) -> tuple[int, str]:
             cwd=root, input_text=source, timeout=30)
 
 
-def configure_macos_sdk(root: Path) -> None:
+def configure_macos_sdk(root: Path, llvm_major: int) -> None:
+    """Select and link a macOS SDK that the pinned Clang ``llvm_major`` can compile and link with."""
     explicit = os.environ.get("SDKROOT", "")
     sdk = explicit
     if not sdk:
@@ -552,7 +613,8 @@ def configure_macos_sdk(root: Path) -> None:
         raise EngineError(f"macOS SDK is missing: {sdk}. Set SDKROOT to an installed SDK and rerun ./init.sh.")
     libcxx = clang_cxx(root).resolve().parent.parent / "include/c++/v1"
     if not libcxx.is_dir():
-        raise EngineError(f"Clang libc++ headers are missing: {libcxx}. Restore llvm@18 and rerun ./init.sh.")
+        raise EngineError(f"Clang libc++ headers are missing: {libcxx}. "
+                          f"Restore llvm@{llvm_major} and rerun ./init.sh.")
     candidates = [Path(sdk).resolve()] if explicit else macos_sdk_candidates(Path(sdk))
     failures = []
     for candidate in candidates:
@@ -560,7 +622,7 @@ def configure_macos_sdk(root: Path) -> None:
         if code == 0:
             link_or_replace_symlink(root / "out/host-tools/macos-sdk", candidate)
             link_or_replace_symlink(root / "out/host-tools/libcxx-include", libcxx)
-            print(f"Validated macOS SDK: {candidate} (Clang compile/link and NAN/INFINITY checks passed)")
+            print(f"Validated macOS SDK: {candidate} (Clang compile/link, NAN/INFINITY and <cfloat> checks passed)")
             if failures:
                 print(f"Skipped incompatible SDK: {Path(sdk).resolve()}")
             return
@@ -570,7 +632,8 @@ def configure_macos_sdk(root: Path) -> None:
         f"{selection} with {clang_cxx(root).resolve()}.\n"
         "Compiler/SDK compile-link validation failed before dependency downloads or HarfBuzz builds.\n"
         + "\n".join(failures) + "\nHow to fix:\n"
-        "  Install a macOS SDK compatible with Clang 18 (macOS 26.5 passes the current math-header probe).\n"
+        f"  Install a macOS SDK compatible with Clang {llvm_major} "
+        "(macOS 26.5 passes the current math-header probe).\n"
         "  SDKROOT=/absolute/path/to/MacOSX26.5.sdk ./init.sh\n"
         "  If SDKROOT was set accidentally, unset SDKROOT and rerun ./init.sh to test installed sibling SDKs.\n"
         "Changing only the deployment target does not change the SDK headers.")
@@ -598,7 +661,7 @@ def executable_version(path: str, args: Sequence[str], root: Path) -> str:
 
 def system_tool_statuses(root: Path, versions: dict[str, dict[str, str]]) -> list[ToolStatus]:
     minimum = versions["minimum"]
-    clang_major = version_tuple(minimum["clang"])[0] if version_tuple(minimum["clang"]) else 14
+    clang_major = llvm_major_version(versions)
     shim_dir = host_tools_bin_dir(root)
     tool_specs: list[tuple[str, bool, Sequence[str], Sequence[str], str]] = [
         ("Git", True, ("git",), ("--version",), ""),
@@ -671,7 +734,7 @@ def managed_tool_statuses(root: Path, versions: dict[str, dict[str, str]]) -> li
 
 
 def project_state_statuses(root: Path) -> list[ToolStatus]:
-    installed_profile = root / "out" / "conan" / "home" / "profiles" / native_profile_name()
+    installed_profile = conan_profile_path(root)
     source_profile = root / "config" / "conan" / "profiles" / native_profile_name()
     lockfile = root / "conan.lock"
     environment = venv_dir(root)
@@ -737,7 +800,8 @@ def print_status_table(statuses: Sequence[ToolStatus]) -> None:
         print(" | ".join(value.ljust(widths[index]) for index, value in enumerate(row)))
 
 
-def print_missing_tool_help(name: str, version: str, path: str, minimum: str) -> None:
+def print_missing_tool_help(name: str, version: str, path: str, minimum: str,
+                            llvm_major: int | None = None) -> None:
     print("")
     print(f"Missing or invalid required tool: {name}")
     print(f"Detected host: {platform.platform()}")
@@ -746,21 +810,33 @@ def print_missing_tool_help(name: str, version: str, path: str, minimum: str) ->
     print(f"Minimum required version: {minimum}")
     print("One-command onboarding command:")
     print("  ./init.sh")
-    if name != "Python":
-        major = version_tuple(minimum)[0] if version_tuple(minimum) else 18
+    if name != "Python" and llvm_major is not None:
         print("Manual Ubuntu fallback, if automatic sudo installation is unavailable:")
         print(
             "  sudo apt-get update && sudo apt-get install -y "
-            f"git python3 python3-venv ca-certificates clang-{major} lld-{major} "
-            f"clang-format-{major} clang-tidy-{major}"
+            f"git python3 python3-venv ca-certificates clang-{llvm_major} lld-{llvm_major} "
+            f"clang-format-{llvm_major} clang-tidy-{llvm_major}"
         )
         print("  If apt cannot find those packages, enable Ubuntu universe first:")
         print("  sudo add-apt-repository -y universe && sudo apt-get update")
 
 
 def llvm_major_version(versions: dict[str, dict[str, str]]) -> int:
-    parts = version_tuple(versions["minimum"]["clang"])
-    return parts[0] if parts else 18
+    """Return the pinned LLVM major from ``minimum.clang`` in config/tool_versions.json."""
+    parts = version_tuple(versions["minimum"].get("clang", ""))
+    if not parts:
+        raise EngineError("config/tool_versions.json must pin minimum.clang as a version")
+    return parts[0]
+
+
+def pinned_llvm_major(root: Path) -> int:
+    """Read the pinned LLVM major for the checkout at ``root``."""
+    return llvm_major_version(load_tool_versions(root))
+
+
+def pinned_llvm_tool(root: Path, tool: str) -> str:
+    """Return the versioned executable name of a pinned LLVM tool, such as ``clang-format-<major>``."""
+    return f"{tool}-{pinned_llvm_major(root)}"
 
 
 def host_is_ubuntu() -> bool:
@@ -1033,7 +1109,8 @@ def validate_required_system_tools(root: Path, versions: dict[str, dict[str, str
     print_status_table(statuses)
     for failure in failures:
         minimum = versions["minimum"].get(failure.name.lower(), failure.requirement.removeprefix(">= "))
-        print_missing_tool_help(failure.name, failure.version, failure.path, minimum)
+        print_missing_tool_help(failure.name, failure.version, failure.path, minimum,
+                                llvm_major_version(versions))
     raise EngineError("required system-level tools are missing or below the supported version")
 
 
@@ -1044,8 +1121,14 @@ def validate_managed_tools(root: Path, versions: dict[str, dict[str, str]]) -> N
         raise EngineError("project-managed tools are missing or do not match pinned versions")
 
 
+def conan_profile_path(root: Path) -> Path:
+    # The profile names this checkout's compiler, SDK and libc++ links, so it
+    # stays beside the checkout even when the Conan home is shared.
+    return root / "out" / "conan" / "profiles" / native_profile_name()
+
+
 def install_conan_profile(root: Path) -> Path:
-    destination = root / "out" / "conan" / "home" / "profiles" / native_profile_name()
+    destination = conan_profile_path(root)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(native_profile_contents(root), encoding="utf-8")
     print(f"Installed Conan profile: {destination}")
@@ -1075,13 +1158,48 @@ def clang_cxx(root: Path) -> Path:
 LOCAL_CONAN_RECIPES: tuple[str, ...] = ("third_party/harfbuzz", "third_party/catch2")
 
 
-def export_local_recipes(root: Path) -> None:
+def locked_recipe_revisions(root: Path) -> dict[str, set[str]]:
+    lockfile = root / "conan.lock"
+    try:
+        data = json.loads(lockfile.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise EngineError(f"failed to read {lockfile}: {exc}") from exc
+    result: dict[str, set[str]] = {}
+    for section in ("requires", "build_requires", "python_requires"):
+        for entry in data.get(section, []):
+            reference, _, revision = entry.partition("%")[0].partition("#")
+            if revision:
+                result.setdefault(reference, set()).add(revision)
+    return result
+
+
+def export_local_recipes(root: Path, *, locked: bool = False) -> None:
+    # A locked install must use the recipes in this checkout. A cache that
+    # already holds the pinned revision (a shared home, or one used by another
+    # branch) would otherwise hide a recipe edit that conan.lock lacks.
+    pinned = locked_recipe_revisions(root) if locked else {}
     for recipe in LOCAL_CONAN_RECIPES:
         recipe_dir = root / recipe
         if not (recipe_dir / "conanfile.py").is_file():
             continue
         print(f"Exporting local Conan recipe: {recipe}")
-        run([conan(root), "export", str(recipe_dir)], cwd=root, env=tool_env(root))
+        argv = [conan(root), "export", str(recipe_dir), "--format", "json"]
+        print(f"+ {command_line(argv)}", flush=True)
+        # Conan logs to stderr (left on the terminal) and prints the exported
+        # reference as JSON on stdout.
+        try:
+            completed = subprocess.run([str(arg) for arg in argv], cwd=str(root), env=tool_env(root),
+                                       check=False, text=True, stdout=subprocess.PIPE)
+        except OSError as exc:
+            raise EngineError(f"command not found while running: {command_line(argv)}") from exc
+        if completed.returncode != 0:
+            raise EngineError(f"command failed with exit code {completed.returncode}: {command_line(argv)}")
+        reference, _, revision = json.loads(completed.stdout)["reference"].partition("#")
+        expected = pinned.get(reference)
+        if expected is not None and revision not in expected:
+            raise EngineError(
+                f"conan.lock pins {reference}#{', #'.join(sorted(expected))}, but {recipe} exports "
+                f"#{revision}. Run ./init.sh without --locked to update conan.lock.")
 
 
 def prepare_conan_artifacts(
@@ -1102,16 +1220,20 @@ def prepare_conan_artifacts(
     install_managed_tools(root, versions)
     validate_managed_tools(root, versions)
     profile_path = install_conan_profile(root)
-    run(
-        [conan(root), "remote", "update", "conancenter", "--url", "https://center2.conan.io"],
-        cwd=root,
-        env=tool_env(root),
-    )
-    export_local_recipes(root)
-    if not locked:
-        create_conan_lock(root, profile_path)
-    for preset in presets:
-        conan_install_for_preset(root, profile_path, preset, locked=locked)
+    # Exporting makes this checkout's recipe revisions the latest in the cache,
+    # so a shared cache must not interleave another checkout's export before
+    # this one resolves its lock and installs.
+    with conan_cache_lock(root):
+        run(
+            [conan(root), "remote", "update", "conancenter", "--url", "https://center2.conan.io"],
+            cwd=root,
+            env=tool_env(root),
+        )
+        export_local_recipes(root, locked=locked)
+        if not locked:
+            create_conan_lock(root, profile_path)
+        for preset in presets:
+            conan_install_for_preset(root, profile_path, preset, locked=locked)
 
 
 def cmake_cache_value(cache_path: Path, name: str) -> str | None:
@@ -1370,8 +1492,9 @@ def command_init(args: argparse.Namespace) -> int:
             if system_prerequisites_need_install(root, versions):
                 brew = shutil.which("brew")
                 if not brew:
-                    raise EngineError("macOS setup requires Homebrew and Xcode Command Line Tools; install llvm@18 first")
-                run([brew, "install", "llvm@18"], cwd=root)
+                    raise EngineError("macOS setup requires Homebrew and Xcode Command Line Tools; "
+                                      f"install llvm@{llvm_major_version(versions)} first")
+                run([brew, "install", f"llvm@{llvm_major_version(versions)}"], cwd=root)
                 configure_system_tool_shims(root, versions)
         else:
             install_ubuntu_system_prerequisites(root, versions)
@@ -1517,7 +1640,7 @@ def find_system_tool(root: Path, name: str, versions: dict[str, dict[str, str]])
             if status.ok:
                 return status.path
             minimum = versions["minimum"].get(name.lower(), "")
-            print_missing_tool_help(name, status.version, status.path, minimum)
+            print_missing_tool_help(name, status.version, status.path, minimum, llvm_major_version(versions))
             raise EngineError(f"{name} is required")
     raise EngineError(f"unknown tool status requested: {name}")
 
@@ -1558,6 +1681,8 @@ def run_format_check(root: Path, *, fix: bool) -> None:
             formatted = format_source(source, path, clang_format)
         except subprocess.CalledProcessError as exc:
             raise EngineError(exc.stderr) from exc
+        except FormattingError as exc:
+            raise EngineError(str(exc)) from exc
         if source == formatted:
             continue
         if fix:
@@ -1585,7 +1710,7 @@ def run_tidy(root: Path, preset: str, *, analyzer: bool = False) -> None:
     clang_tidy = find_system_tool(root, "clang-tidy", versions)
     actual_version = executable_version(clang_tidy, ("--version",), root)
     if not version_tuple(actual_version) or version_tuple(actual_version)[0] != llvm_major_version(versions):
-        raise EngineError("Static analysis requires reference clang-tidy 18")
+        raise EngineError(f"Static analysis requires reference clang-tidy {llvm_major_version(versions)}")
     build_dir = build_dir_for_preset(root, preset)
     if not (build_dir / "compile_commands.json").is_file() or not list(
             (build_dir / ".cmake/api/v1/reply").glob("index-*.json")):

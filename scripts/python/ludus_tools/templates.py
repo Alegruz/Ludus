@@ -30,6 +30,7 @@ from typing import Callable, Optional
 
 from .descriptor import TARGET_NAME_RE
 from .errors import DESTINATION_EXISTS, GENERATION_FAILED, INVALID_PROJECT, ToolingError
+from .toolchain import pinned_llvm_tool
 
 TEMPLATE_SCHEMA_VERSION = 1
 
@@ -137,7 +138,7 @@ endif()
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
-        "CMAKE_CXX_COMPILER": "clang++-18",
+        "CMAKE_CXX_COMPILER": "{{ LINUX_CXX_COMPILER }}",
         "BUILD_TESTING": "ON"
       }
     },
@@ -148,7 +149,7 @@ endif()
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
-        "CMAKE_CXX_COMPILER": "clang++-18",
+        "CMAKE_CXX_COMPILER": "{{ LINUX_CXX_COMPILER }}",
         "BUILD_TESTING": "ON"
       }
     },
@@ -159,7 +160,7 @@ endif()
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
-        "CMAKE_CXX_COMPILER": "clang++-18",
+        "CMAKE_CXX_COMPILER": "{{ LINUX_CXX_COMPILER }}",
         "BUILD_TESTING": "ON"
       }
     },
@@ -345,6 +346,7 @@ def render_files(template: Template, inputs: ProjectInputs) -> list[TemplateFile
         "LINK_TARGETS": link_targets,
         "ENGINE_VERSION": inputs.engine_version,
         "PRESET": inputs.preset,
+        "LINUX_CXX_COMPILER": pinned_llvm_tool("clang++"),
     }
     rendered: list[TemplateFile] = []
     for f in template.files:

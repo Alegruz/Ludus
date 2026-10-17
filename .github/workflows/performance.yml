@@ -61,13 +61,20 @@ jobs:
             runner: ubuntu-24.04
             preset: linux-clang-profile
             capabilities: ""
+            gpu_class: ""
+            device: ""
           # Hosted macOS runners already present Metal frames in ci.yml.
           # Thanks to GitHub Actions runner-images, macOS 14 deprecation #13518:
           # https://github.com/actions/runner-images/issues/13518
+          # Its paravirtual Metal GPU runs the GPU scenarios nightly for correctness
+          # and a rough trend; the class and identity say it is a virtual GPU, so
+          # its timings are not hardware evidence.
           - lane: macos
             runner: macos-15
             preset: macos-clang-profile
             capabilities: presentation
+            gpu_class: gpu-apple-paravirtual
+            device: "GitHub-hosted macos-15 arm64 runner, Apple paravirtual Metal GPU (virtual machine)"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
@@ -114,12 +121,15 @@ jobs:
           PRESET: ${{ matrix.preset }}
           LANE: ${{ matrix.lane }}
           CAPABILITIES: ${{ matrix.capabilities }}
+          GPU_CLASS: ${{ matrix.gpu_class }}
+          DEVICE: ${{ matrix.device }}
           BASELINE: ${{ steps.baseline.outputs.report }}
           SCENARIOS: ${{ inputs.scenarios }}
           REPETITIONS: ${{ inputs.repetitions }}
         run: |
           arguments=("$PRESET" --output "$PWD/out/runtime-profile/$LANE")
           for capability in $CAPABILITIES; do arguments+=(--capability "$capability"); done
+          if [[ -n "$GPU_CLASS" ]]; then arguments+=(--capability "$GPU_CLASS" --device "$DEVICE"); fi
           for scenario in $SCENARIOS; do arguments+=(--scenario "$scenario"); done
           if [[ -n "$REPETITIONS" ]]; then arguments+=(--repetitions "$REPETITIONS"); fi
           if [[ -n "$BASELINE" ]]; then arguments+=(--baseline "$BASELINE"); fi

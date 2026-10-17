@@ -56,8 +56,9 @@ class DebugClient(fixtures.ProtocolClient):
 class DebuggerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not shutil.which("clang-18"):
-            raise unittest.SkipTest("Requires the reference clang-18 to generate native ELF fixtures")
+        cls.compiler = engine.pinned_llvm_tool(engine.repo_root(), "clang")
+        if not shutil.which(cls.compiler):
+            raise unittest.SkipTest(f"Requires the reference {cls.compiler} to generate native ELF fixtures")
 
     def setUp(self):
         self.fixture = fixtures.RealProcessTests()
@@ -71,7 +72,7 @@ class DebuggerTests(unittest.TestCase):
         source = f.root / "game.c"
         source.write_text('#include <unistd.h>\nint main(void) { for (;;) pause(); }\n')
         self.game = f.root / "game with symbols"
-        subprocess.run(["clang-18", "-g", str(source), "-o", str(self.game)], check=True,
+        subprocess.run([self.compiler, "-g", str(source), "-o", str(self.game)], check=True,
                        capture_output=True)
         self.rad = f.root / "RAD executable"
         self.make_rad('print("RAD fixture ready", flush=True)\n')

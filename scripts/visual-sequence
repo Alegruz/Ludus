@@ -48,9 +48,10 @@ def main():
         S2['check'](args.preset, args.fix)
         sys.path.insert(0, str(ROOT / 'scripts/python'))
         from formatting import format_source
+        from engine import pinned_llvm_tool
         source = ROOT / 'tools/visual-sequence/bridge.cpp'
         text = source.read_text()
-        formatted = format_source(text, source, 'clang-format-18')
+        formatted = format_source(text, source, pinned_llvm_tool(ROOT, 'clang-format'))
         if args.fix:
             source.write_text(formatted)
             return
@@ -59,11 +60,11 @@ def main():
         entry = next(e for e in entries if e['file'] == str(source))
         if args.preset.startswith('web-'):
             from web_build import analysis_commands
-            command = analysis_commands(ROOT, [entry], 'clang-tidy-18',
+            command = analysis_commands(ROOT, [entry], pinned_llvm_tool(ROOT, 'clang-tidy'),
                 ROOT / 'out/host-tools/emsdk/upstream/emscripten/cache/sysroot')[0]
             S2['run']([flag for flag in command if flag != '-sSUPPORT_LONGJMP=wasm'])
         else:
-            S2['run'](['clang-tidy-18', '-p', str(ROOT / 'out/build' / args.preset), '--quiet', '--warnings-as-errors=*', str(source)])
+            S2['run']([pinned_llvm_tool(ROOT, 'clang-tidy'), '-p', str(ROOT / 'out/build' / args.preset), '--quiet', '--warnings-as-errors=*', str(source)])
     else:
         model.require(not args.preset.startswith('web-'), 'serve uses a native POSIX owner; use run for Wasm conformance')
         import server

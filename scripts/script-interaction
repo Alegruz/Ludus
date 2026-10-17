@@ -46,6 +46,7 @@ def cook():
     check_host()
     sys.path.insert(0, str(ROOT / "scripts/python"))
     from formatting import format_source
+    from engine import pinned_llvm_tool
     generator = runpy.run_path(str(GENERATOR), run_name="s1_generator")
     data = generator["load"](MANIFEST)
     generated = generator["generate"](data, sha(MANIFEST.read_bytes()))
@@ -53,7 +54,7 @@ def cook():
     output.mkdir(parents=True, exist_ok=True)
     for name, content in generated.items():
         if name.endswith((".cpp", ".h")):
-            content = format_source(content, output / name, "clang-format-18")
+            content = format_source(content, output / name, pinned_llvm_tool(ROOT, "clang-format"))
         (output / name).write_text(content)
     definitions = generated["contract.d.luau"]
     sources = {p.stem: p.read_text() for p in sorted(FIXTURES.glob("*.luau"))}
@@ -97,7 +98,7 @@ struct CookedProgram { const foundation::uint8* Code; foundation::usize Bytes; c
             programs.append(f'{{ {name.upper()}, sizeof({name.upper()}), "@{name}.luau" }}')
         evidence[name] = {"source": sha(path.read_bytes()), "bytecode": sha(result.stdout), "bytes": len(result.stdout)}
     header += "inline constexpr CookedProgram INVALID_PROGRAMS[] = {\n" + ",\n".join(programs) + "\n};\n}\n"
-    (output / "fixtures.h").write_text(format_source(header, output / "fixtures.h", "clang-format-18"))
+    (output / "fixtures.h").write_text(format_source(header, output / "fixtures.h", pinned_llvm_tool(ROOT, "clang-format")))
     hashes = {p.name: sha(p.read_bytes()) for p in sorted(output.iterdir()) if p.is_file() and p.name != "evidence.json"}
     (output / "evidence.json").write_text(json.dumps({"inputs": inputs(), "outputs": hashes,
         "programs": evidence, "checked": ["door"], "host": json.loads((WORK / "host.json").read_text())}, indent=2) + "\n")
@@ -116,13 +117,14 @@ def verify():
 def check(preset, fix):
     sys.path.insert(0, str(ROOT / "scripts/python"))
     from formatting import format_source
+    from engine import pinned_llvm_tool
     sources = list((ROOT / "tools/script-interaction").glob("*.cpp"))
     sources += list((ROOT / "tools/script-interaction").glob("*.h"))
     sources += list((ROOT / "modules/runtime/scripting").rglob("*.cpp"))
     sources += list((ROOT / "modules/runtime/scripting").rglob("*.h"))
     for source in sources:
         code = source.read_text()
-        formatted = format_source(code, source, "clang-format-18")
+        formatted = format_source(code, source, pinned_llvm_tool(ROOT, "clang-format"))
         if fix: source.write_text(formatted)
         else: require(code == formatted, f"Format {source} with scripts/script-interaction check --fix")
     if fix: return
@@ -134,7 +136,7 @@ def check(preset, fix):
         if preset.startswith("web-"):
             from web_build import analysis_commands
             sysroot = ROOT / "out/host-tools/emsdk/upstream/emscripten/cache/sysroot"
-            command = analysis_commands(ROOT, [entry], "clang-tidy-18", sysroot,
+            command = analysis_commands(ROOT, [entry], pinned_llvm_tool(ROOT, "clang-tidy"), sysroot,
                                         owned_generated=(WORK / "cooked/bindings.cpp",))[0]
             run([flag for flag in command if flag != "-sSUPPORT_LONGJMP=wasm"])
         else:
@@ -147,7 +149,7 @@ def check(preset, fix):
                     continue
                 if flag not in ("-c", entry["file"]) and not flag.startswith("@"): clean.append(flag)
                 index += 1
-            run(["clang-tidy-18", entry["file"], "--quiet", "--warnings-as-errors=*", "--", *clean])
+            run([pinned_llvm_tool(ROOT, "clang-tidy"), entry["file"], "--quiet", "--warnings-as-errors=*", "--", *clean])
 
 
 def main():

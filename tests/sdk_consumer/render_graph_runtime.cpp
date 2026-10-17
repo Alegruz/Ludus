@@ -78,6 +78,8 @@ Step gStep = Step::StartCompiled;
 Capture gCapture = Capture::Render;
 uint64 gRevision = 0;
 uint64 gGeneration = 0;
+/// Generation whose first extraction was accepted; its preparation may complete over later frames.
+uint64 gUpdatedGeneration = 0;
 usize gMismatches = 0;
 rhi::RasterStatus gLastStatus = rhi::RasterStatus::Ready;
 bool gIsDone = false;
@@ -86,10 +88,10 @@ bool gHasFailed = false;
 core::UniquePtr<ludus::platform::Window> gWindow;
 // clang-format off
 EM_JS(int32, Selection, (), { const s = new URL(location.href).searchParams.get('backend'); return s === 'webgpu' ? 1 : s === 'webgl2' ? 2 : 0; });
-EM_JS(void, Report, (int32 state, uint32 step, uint32 generation, uint32 mismatches, uint32 center, int32 backend, uint32 status), {
+EM_JS(void, Report, (int32 state, uint32 step, uint32 capture, uint32 generation, uint32 mismatches, uint32 center, int32 backend, uint32 status), {
     const node = document.querySelector('#status');
     node.dataset.state = state === 2 ? 'failed' : state === 1 ? 'passed' : 'loading';
-    Object.assign(node.dataset, {step, generation, mismatches, center, status, backend: backend === 1 ? 'webgpu' : backend === 2 ? 'webgl2' : 'native'});
+    Object.assign(node.dataset, {step, capture, generation, mismatches, center, status, backend: backend === 1 ? 'webgpu' : backend === 2 ? 'webgl2' : 'native'});
     node.textContent = node.dataset.state + ' generation=' + generation + ' mismatches=' + mismatches;
 });
 // clang-format on
@@ -98,7 +100,7 @@ int32 Selection() noexcept
 {
     return 0;
 }
-void Report(int32, uint32, uint32, uint32, uint32, int32, uint32) noexcept {}
+void Report(int32, uint32, uint32, uint32, uint32, uint32, int32, uint32) noexcept {}
 #endif
 void Publish(int32 state) noexcept
 {
@@ -106,6 +108,7 @@ void Publish(int32 state) noexcept
     static_cast<void>(rhi::GetDeviceInfo(gDevice, information));
     Report(state,
            static_cast<uint32>(gStep),
+           static_cast<uint32>(gCapture),
            static_cast<uint32>(gGeneration),
            static_cast<uint32>(gMismatches),
            gExpected[CENTER_PIXEL],
@@ -184,10 +187,17 @@ bool CaptureFrame(renderer::RenderGraph& inoutGraph) noexcept
 {
     if (gCapture == Capture::Render)
     {
+        // The browser surface starts with a zero frame target, which skips acquisition; size it every frame.
+        if (rhi::SetFrameTarget(gDevice, gSurface, { .Width = WIDTH, .Height = HEIGHT }) != rhi::DeviceStatus::Ready)
+        {
+            Fail(rhi::RasterStatus::InvalidState);
+            return false;
+        }
         rhi::SubmissionToken completion;
         const rhi::RasterStatus rendered = inoutGraph.Render(gSurface, WIDTH, HEIGHT, completion);
         if (rendered == rhi::RasterStatus::NotReady)
         {
+            gLastStatus = rendered;
             return false;
         }
         if (IsAccepted(rendered) == false)
@@ -254,14 +264,21 @@ bool AdvanceActivation() noexcept
     }
     renderer::RenderGraph* activeOrNull = gActivation.GetActiveOrNull();
     const bool isTargetActive = report.ActiveGeneration == gGeneration && activeOrNull != nullptr;
-    if (report.Candidate == renderer::RenderGraphCandidateState::NeedsUpdate ||
-        (isTargetActive == true && activeOrNull->GetDrawableSceneRevision() == 0))
+    // Update a newly active generation once, then wait: on WebGPU its scene uploads complete over later
+    // frames, and another Update would replace that pending preparation before it ever becomes drawable.
+    const bool needsFirstScene =
+        isTargetActive == true && activeOrNull->GetDrawableSceneRevision() == 0 && gUpdatedGeneration != gGeneration;
+    if (report.Candidate == renderer::RenderGraphCandidateState::NeedsUpdate || needsFirstScene == true)
     {
         const rhi::RasterStatus updated = UpdateScene(true);
         if (updated != rhi::RasterStatus::NotReady && IsAccepted(updated) == false)
         {
             Fail(updated);
             return false;
+        }
+        if (IsAccepted(updated) == true && isTargetActive == true)
+        {
+            gUpdatedGeneration = gGeneration;
         }
     }
     return isTargetActive == true && activeOrNull->GetDrawableSceneRevision() != 0;
@@ -290,6 +307,8 @@ void Tick() noexcept
         Fail(lifetime);
         return;
     }
+    // Publish progress first, so a page that never finishes still reports where it waits.
+    Publish(0);
     if (gStep == Step::StartCompiled)
     {
         const rhi::RasterStatus initialized = gCompiled.Initialize(gDevice, graph::MakePlan(), MakeCompiledPrograms());
@@ -381,7 +400,6 @@ void Tick() noexcept
         }
         gStep = Step::Activate;
     }
-    Publish(0);
 }
 } // namespace
 int main()

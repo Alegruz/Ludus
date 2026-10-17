@@ -20,7 +20,9 @@ target_sources(
         FILES
             include/ludus/foundation/containers/borrowed_view.hpp
             include/ludus/foundation/containers/static_array.hpp
+            include/ludus/foundation/containers/static_bit_set.hpp
             include/ludus/foundation/containers/fixed_array.hpp
+            include/ludus/foundation/containers/ring_buffer.hpp
             include/ludus/foundation/containers/stable_sort.hpp
             include/ludus/foundation/containers/sort.hpp
             include/ludus/foundation/containers/array.hpp
@@ -28,6 +30,7 @@ target_sources(
             include/ludus/foundation/containers/relocation.hpp
             include/ludus/foundation/containers/containers.hpp
             include/ludus/foundation/containers/detail/contiguous_storage.hpp
+            include/ludus/foundation/containers/detail/inline_slots.hpp
 )
 
 # Dependency direction: FoundationContainers may use FoundationBase (types,
@@ -57,6 +60,8 @@ if(LUDUS_BUILD_TESTS)
             tests/borrowed_view_tests.cpp
             tests/static_array_tests.cpp
             tests/fixed_array_tests.cpp
+            tests/ring_buffer_tests.cpp
+            tests/static_bit_set_tests.cpp
             tests/stable_sort_tests.cpp
             tests/sort_tests.cpp
             tests/array_tests.cpp

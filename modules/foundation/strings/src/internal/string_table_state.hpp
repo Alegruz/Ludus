@@ -41,7 +41,9 @@ struct StringTable::State final
     ~State() noexcept;
     [[nodiscard]] StringStatus Validate(std::string_view value) const noexcept;
     [[nodiscard]] uint64 Hash(std::string_view value) const noexcept;
-    [[nodiscard]] usize FindSlot(std::string_view value, uint64 hash) const noexcept;
+    // Writes the matching or first empty slot; ProbeExhausted when neither exists
+    // within SlotCapacity probes (corrupted metadata) and outSlot is preserved.
+    [[nodiscard]] StringStatus FindSlot(std::string_view value, uint64 hash, usize& outSlot) const noexcept;
     [[nodiscard]] StringStatus Find(std::string_view value, NameId& output) const noexcept;
     [[nodiscard]] StringStatus Resolve(NameId id, std::string_view& output) const noexcept;
     [[nodiscard]] StringStatus Intern(std::string_view value, NameId& output) noexcept;

@@ -36,7 +36,7 @@ enum class StringDictionaryStatus : uint8
     OutOfMemory,        ///< The allocation domain could not supply working storage.
     InvalidHandle,      ///< The dictionary or writer is empty, or an index is out of range.
     NotFound,           ///< No entry has exactly the requested spelling.
-    InvalidState,       ///< The writer is not in the lifecycle state that the operation requires.
+    InvalidState,       ///< The writer is not in the required lifecycle state, or its table metadata is corrupt.
 };
 
 /// Failure detail without owned text; Offset is a byte offset into the dictionary.

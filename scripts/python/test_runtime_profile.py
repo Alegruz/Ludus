@@ -246,6 +246,18 @@ class Workflow(unittest.TestCase):
                 if expected:
                     self.assertIn("refusing job", completed.stderr)
 
+    def test_hosted_macos_lane_runs_gpu_scenarios_on_a_declared_virtual_gpu(self):
+        workflow = (ROOT / ".github/workflows/performance.yml").read_text()
+        hosted = workflow[workflow.index("\n  hosted:\n"):workflow.index("\n  device:\n")]
+        self.assertIn("gpu_class: gpu-apple-paravirtual", hosted)
+        self.assertRegex(hosted, r'device: "[^"]*paravirtual[^"]*virtual machine[^"]*"')
+        self.assertIn('arguments+=(--capability "$GPU_CLASS" --device "$DEVICE")', hosted)
+        self.assertEqual(hosted.count('gpu_class: ""'), 1, "the Ubuntu lane declares no GPU")
+        scenarios = runtime_profile.load_manifest(ROOT / runtime_profile.MANIFEST_PATH)
+        macos = runtime_profile.resolve_capabilities({"shader-tools"}, ["presentation", "gpu-apple-paravirtual"],
+                                                    "GitHub-hosted macos-15 arm64 runner, Apple paravirtual Metal GPU")
+        self.assertTrue(all(reason is None for _, reason in runtime_profile.select_scenarios(scenarios, [], macos)))
+
     def test_scheduled_workflow_runs_the_runner_and_keeps_its_baseline_artifact_name(self):
         workflow = (ROOT / ".github/workflows/performance.yml").read_text()
         self.assertRegex(workflow, r"(?m)^  schedule:\n    - cron: ")
@@ -303,7 +315,7 @@ class Capabilities(unittest.TestCase):
             with self.subTest(case=name), self.assertRaises(runtime_profile.ProfileError):
                 runtime_profile.resolve_capabilities(set(), declared, device)
 
-    def test_gpu_scenarios_are_skipped_on_hosted_lanes(self):
+    def test_gpu_scenarios_are_skipped_without_a_gpu_class(self):
         scenarios = runtime_profile.load_manifest(ROOT / runtime_profile.MANIFEST_PATH)
         hosted = runtime_profile.select_scenarios(scenarios, [], {"shader-tools", "presentation"})
         device = runtime_profile.select_scenarios(scenarios, [], runtime_profile.resolve_capabilities(

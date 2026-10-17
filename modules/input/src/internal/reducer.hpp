@@ -7,12 +7,15 @@
 //
 // This is a private implementation header: it is never installed and never
 // included by a public header. All state is fixed and embedded; no method
-// allocates heap memory or takes a lock (K12). Bounded buffers use FixedArray,
-// whose inline storage never allocates.
+// allocates heap memory or takes a lock (K12). Bounded buffers use FixedArray
+// and RingBuffer and key masks use StaticBitSet; their inline storage never
+// allocates.
 
 #include <ludus/foundation/base/core.h>
 
 #include <ludus/foundation/containers/fixed_array.hpp>
+#include <ludus/foundation/containers/ring_buffer.hpp>
+#include <ludus/foundation/containers/static_bit_set.hpp>
 #include <ludus/input/actions.h>
 #include <ludus/input/input_debug.h>
 #include <ludus/input/key.h>
@@ -43,7 +46,7 @@ struct ResetMailbox final
     bool Pending = false;
     ResetReason Reason = ResetReason::None;
     bool Focused = false;
-    bool Baseline[KEY_COUNT] = {};
+    foundation::StaticBitSet<KEY_COUNT> Baseline;
     uint32 ReasonMask = 0; // OR of (1u << reason) for every coalesced reset
 };
 
@@ -80,7 +83,7 @@ public:
     // ---- Live/snapshot access ------------------------------------------
     [[nodiscard]] bool getLiveDown(Key key) const noexcept
     {
-        return IsValidKey(key) && mLiveDown[KeyIndex(key)];
+        return IsValidKey(key) && mLiveDown.IsSet(KeyIndex(key));
     }
     [[nodiscard]] const KeyboardSnapshot& snapshot() const noexcept
     {
@@ -141,7 +144,7 @@ public:
         // Redundant transitions: duplicate down on an already-down key, or an up
         // on an already-up key. Live state is unchanged; no queue entry (K04).
         const bool down = record.Transition == KeyTransition::Down;
-        if (down == mLiveDown[index])
+        if (down == mLiveDown.IsSet(index))
         {
             ++mCounters.Duplicates;
             ++mCounters.Ignored;
@@ -151,14 +154,14 @@ public:
 
         // Update live state immediately — even if the queue cannot accept the
         // transition (K07: overflow must not corrupt live Down).
-        mLiveDown[index] = down;
+        mLiveDown.Assign(index, down);
 
         // An Up for a suppressed key clears suppression without a gameplay
         // release (K05/K06). The reducer applies suppression at step time, but
         // live suppression is cleared here so a later Down is a genuine press.
         if (!down)
         {
-            mLiveSuppressed[index] = false;
+            mLiveSuppressed.Reset(index);
         }
 
         const uint64 sequence = nextSequence();
@@ -170,30 +173,28 @@ public:
             return AdmissionStatus::RecoveredWithLoss;
         }
 
-        if (mPendingCount >= PendingCap)
-        {
-            // Bounded overflow (K07): discard the incomplete pending batch,
-            // snapshot live Down into the reset mailbox, suppress held keys, and
-            // keep focus. Live Down already reflects this record.
-            overflowRecover(ResetReason::Overflow);
-            return AdmissionStatus::RecoveredWithLoss;
-        }
-
-        const usize slot = (mPendingHead + mPendingCount) % PendingCap;
-        mPending[slot] = PendingTransition
+        // Accepted transitions are traced at step time (applyTransition) so the
+        // entry carries its assigned step id. Carry the record's native-time and
+        // source on the pending entry for that later trace.
+        const bool isQueued = mPending.TryAdd(PendingTransition
         {
             .Transition = record.Transition,
             .PhysicalKey = record.PhysicalKey,
             .Source = record.Source,
             .Sequence = sequence,
-        };
-        ++mPendingCount;
+            .HasNativeTime = record.HasNativeTime,
+            .NativeTimeMs = record.NativeTimeMs,
+        });
+        if (isQueued == false)
+        {
+            // Bounded overflow (K07): the full ring is unchanged. Discard the
+            // incomplete pending batch, snapshot live Down into the reset
+            // mailbox, suppress held keys, and keep focus. Live Down already
+            // reflects this record.
+            overflowRecover(ResetReason::Overflow);
+            return AdmissionStatus::RecoveredWithLoss;
+        }
         ++mCounters.Accepted;
-        // Accepted transitions are traced at step time (applyTransition) so the
-        // entry carries its assigned step id. Carry the record's native-time and
-        // source on the pending entry for that later trace.
-        mPending[slot].HasNativeTime = record.HasNativeTime;
-        mPending[slot].NativeTimeMs = record.NativeTimeMs;
         return AdmissionStatus::Accepted;
     }
 
@@ -216,24 +217,19 @@ public:
         {
             for (usize i = 0; i < KEY_COUNT; ++i)
             {
-                mMailbox.Baseline[i] = baseline.Keys[i];
+                mMailbox.Baseline.Assign(i, baseline.Keys[i]);
             }
         }
         else
         {
-            for (usize i = 0; i < KEY_COUNT; ++i)
-            {
-                mMailbox.Baseline[i] = false;
-            }
+            mMailbox.Baseline.ResetAll();
         }
 
         // Live state follows the baseline immediately so GetLiveDown reflects the
-        // synchronized physical set even before the next step.
-        for (usize i = 0; i < KEY_COUNT; ++i)
-        {
-            mLiveDown[i] = mMailbox.Baseline[i];
-            mLiveSuppressed[i] = mMailbox.Baseline[i]; // held keys suppressed
-        }
+        // synchronized physical set even before the next step. Held keys are
+        // suppressed.
+        mLiveDown = mMailbox.Baseline;
+        mLiveSuppressed = mMailbox.Baseline;
         mFocused = focused;
     }
 
@@ -264,12 +260,10 @@ public:
 
         // Reduce all queued transitions in order (K03): every pending event is
         // assigned to THIS step; none spill to later catch-up steps.
-        while (mPendingCount > 0)
+        while (mPending.IsEmpty() == false)
         {
-            const PendingTransition& pending = mPending[mPendingHead];
-            applyTransition(pending, stepId);
-            mPendingHead = (mPendingHead + 1) % PendingCap;
-            --mPendingCount;
+            applyTransition(mPending.GetFirst(), stepId);
+            mPending.RemoveFirst();
         }
 
         publishSnapshot(stepId);
@@ -342,7 +336,7 @@ public:
         baseline.Focused = mFocused;
         for (usize i = 0; i < KEY_COUNT; ++i)
         {
-            baseline.Keys[i] = mLiveDown[i];
+            baseline.Keys[i] = mLiveDown.IsSet(i);
         }
         requestReset(ResetReason::MapReplaced, baseline);
         return BindingStatus::Ok;
@@ -366,13 +360,9 @@ public:
 
     void reset() noexcept
     {
-        for (usize i = 0; i < KEY_COUNT; ++i)
-        {
-            mLiveDown[i] = false;
-            mLiveSuppressed[i] = false;
-        }
-        mPendingHead = 0;
-        mPendingCount = 0;
+        mLiveDown.ResetAll();
+        mLiveSuppressed.ResetAll();
+        mPending.Clear();
         mMailbox = ResetMailbox{};
         mFocused = false;
         mSequence = 0;
@@ -420,12 +410,8 @@ private:
 
     void discardPending() noexcept
     {
-        if (mPendingCount > 0)
-        {
-            mCounters.DiscardedEvents += mPendingCount;
-        }
-        mPendingHead = 0;
-        mPendingCount = 0;
+        mCounters.DiscardedEvents += mPending.GetSize();
+        mPending.Clear();
     }
 
     void overflowRecover(ResetReason reason) noexcept
@@ -438,7 +424,7 @@ private:
         baseline.Focused = mFocused;
         for (usize i = 0; i < KEY_COUNT; ++i)
         {
-            baseline.Keys[i] = mLiveDown[i];
+            baseline.Keys[i] = mLiveDown.IsSet(i);
         }
         requestReset(reason, baseline);
     }
@@ -485,11 +471,11 @@ private:
         mFocused = mMailbox.Focused;
         for (usize i = 0; i < KEY_COUNT; ++i)
         {
-            mSnapshot.Down[i] = mMailbox.Baseline[i];
-            mSnapshot.Suppressed[i] = mMailbox.Baseline[i];
-            mLiveSuppressed[i] = mMailbox.Baseline[i];
-            // Live down is already the baseline (set in requestReset), keep it.
+            mSnapshot.Down[i] = mMailbox.Baseline.IsSet(i);
+            mSnapshot.Suppressed[i] = mMailbox.Baseline.IsSet(i);
         }
+        mLiveSuppressed = mMailbox.Baseline;
+        // Live down is already the baseline (set in requestReset), keep it.
 
         // Record the reset boundary in the step-event stream (K02, K13).
         appendStepEvent(StepEvent
@@ -537,7 +523,7 @@ private:
             mSnapshot.Released[index] = true;
             // An Up clears suppression (release); a later Down is a genuine press.
             mSnapshot.Suppressed[index] = false;
-            mLiveSuppressed[index] = false;
+            mLiveSuppressed.Reset(index);
         }
 
         // Action evaluation uses the EFFECTIVE down state: a suppressed key does
@@ -704,14 +690,12 @@ private:
     }
 
     // --- Live (callback-visible) state ----------------------------------
-    bool mLiveDown[KEY_COUNT];
-    bool mLiveSuppressed[KEY_COUNT];
+    foundation::StaticBitSet<KEY_COUNT> mLiveDown;
+    foundation::StaticBitSet<KEY_COUNT> mLiveSuppressed;
     bool mFocused;
 
     // --- Pending ring ---------------------------------------------------
-    PendingTransition mPending[PendingCap];
-    usize mPendingHead;
-    usize mPendingCount;
+    foundation::RingBuffer<PendingTransition, PendingCap> mPending;
     uint64 mSequence;
 
     // --- Reset mailbox --------------------------------------------------

@@ -444,7 +444,7 @@ struct TraceEvent            // POD, trivially copyable; target 16–24 B (gate 
 | **Hitch capture (ring + pre/post trigger)** | ✅ (Phase 3) | | | | Retains temporal evidence historical summaries lack (D9). **[FP+R]** |
 | **Perfetto/Chrome export** | ✅ (Phase 1) | | | | Universal; primary viewer path. **[FP+R]** |
 | **Tracy integration (live)** | | ✅ (Phase 3) | ✅ | | Best live UX; validate cost first (§5, [?meas]). **[FP+R]** |
-| **Flow events (job/async correlation)** | ✅ (primitive now) | ⏳ (scheduler stamping when jobs exist) | | | Cross-context truth is a DAG, not a spanning scope (C1, C5, D16). **[R→adopt]** |
+| **Flow events (job/async correlation)** | ✅ (primitive now) | ✅ (JobSystem dispatch flows, [threading T2](threading.md#task-identity-and-execution-traces)) | | | Cross-context truth is a DAG, not a spanning scope (C1, C5, D16). **[R→adopt]** |
 | **GPU profiling (timestamp queries)** | | ⏳ (needs RHI) | RenderDoc/PIX/Nsight for capture | | Engine does pass *timing*; tools do per-draw/pixel (D14). **[FP+R]** |
 | **PIX / vendor debug markers** | | ✅ (with GPU scope) | ✅ | | Near-free; annotates vendor captures with our pass names. **[FP]** |
 | **Memory tracking (tag totals)** | ⏳ (needs allocator; always-on tier) | | | | Cheap atomics; keep in all builds (C4, §7). **[FP+R]** |
@@ -471,7 +471,7 @@ inclusive/exclusive, honest stats) land *with* the first CPU trace, not after.
 | **1. CPU Trace MVP + Perfetto export** | `SCOPE/FUNCTION/FRAME`, TLS chunk ring, `ZoneRegistry`, collector, **derived tree**, **inclusive/exclusive + calls/frame + unlogged remainder**, Perfetto JSON | Phase 0, MPSC queue (exists) | **Highest** — "where did the frame go," honestly | Med | Med (hot-path push) | Scope overhead; disabled = 0 codegen; multi-thread flood; tree/incl-excl correctness; **captures load in ui.perfetto.dev**; header build budget |
 | **2. Counters + tiny overlay** | `COUNT/GAUGE/MARK`, per-frame snapshot, named windows, text HUD | Phase 1 | High — cheap always-on trends | Low–Med | Low | Counter contention; **every stat names window+denominator (C6)**; snapshot correctness under overlapping frame flip |
 | **3. Hitch capture (+ optional Tracy)** | Rolling ring, trigger policy, auto-export; optional Tracy live backend | Phase 1 | High — catch unexpected spikes | Med | Low (off hot path) | Pre-trigger survives overload; **export doesn't induce a second hitch**; Tracy cost measured before adoption ([?meas]) |
-| **4. Flow correlation** | Scheduler stamps `flow_id`; job/async DAG view | **Job system (not yet)** | High once jobs exist | Med | Low | Flow linkage correctness across migration; no hot-path cost added |
+| **4. Flow correlation** | Scheduler stamps `flow_id`; job/async DAG view | **Job system ([threading T2](threading.md#task-identity-and-execution-traces) stamps dispatch flows)** | High once jobs exist | Med | Low | Flow linkage correctness across migration; no hot-path cost added |
 | **5. GPU Trace** | `GPU_SCOPE`, query pools, deferred readback, vendor labels | **RHI (Milestone 2+)** | High once GPU exists | High | Med (no stalls) | No GPU stall; N-in-flight readback correctness; CPU-vs-GPU time not conflated |
 | **6. Memory profiler** | Allocator provenance + tag totals (all builds); activity/live/lifetime (dev); per-alloc capture (opt-in, off-line symbols) | **Allocator (Milestone ?)** | High for mem bugs | High | Med (capture mode) | Lossless-or-marked semantics (C4); cross-thread free accounting; capture-mode overhead bounded |
 

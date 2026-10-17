@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ludus/content/content.h>
+#include <ludus/content/scene_cook/limits.h>
 #include <ludus/content/scene_cook/scene_cook.h>
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/identity/uuid.hpp>
@@ -28,17 +29,6 @@ namespace ludus::content::scene_cook
 {
 /// Profile identifier stored in every level document.
 inline constexpr std::string_view LEVEL_PROFILE = "resident-reference-v1";
-/// Largest artifact, bundle or resident closure in bytes.
-inline constexpr usize MAX_ASSET_BYTES = usize{64} * 1024 * 1024;
-/// Largest level or metadata document in bytes.
-inline constexpr usize MAX_METADATA_BYTES = usize{1024} * 1024;
-/// Largest project catalog (assets/catalog.json) in bytes. Every artifact's build
-/// record carries the full source_inputs digest map of its import (it feeds the
-/// frozen artifact key), so a catalog grows with resources x source files:
-/// two imports of ~800-file pbrt scenes already pass 1 MiB. Matches the
-/// artifact limit rather than the small-document limit.
-inline constexpr usize MAX_CATALOG_BYTES = usize{64} * 1024 * 1024;
-
 /// Stable failure vocabulary shared with the Editor result protocol.
 enum class AssetErrorCode : uint8
 {

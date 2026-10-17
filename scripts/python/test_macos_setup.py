@@ -8,6 +8,8 @@ from unittest.mock import patch
 import engine
 import init_ui
 
+LLVM_MAJOR = engine.pinned_llvm_major(engine.repo_root())
+
 
 class MacosSetupTests(unittest.TestCase):
     def test_native_profiles_distinguish_mac_architectures(self):
@@ -56,17 +58,17 @@ class MacosSetupTests(unittest.TestCase):
             (root / "toolchain/include/c++/v1/__config").write_text("fixture")
             with patch.dict(engine.os.environ, {"SDKROOT": ""}), \
                     patch.object(engine, "capture_command_quiet", return_value=(0, f'"-isysroot" "{first}"')):
-                engine.configure_macos_sdk(root)
+                engine.configure_macos_sdk(root, LLVM_MAJOR)
             link = root / "out/host-tools/macos-sdk"
             self.assertEqual(link.resolve(), first.resolve())
             with patch.dict(engine.os.environ, {"SDKROOT": str(second)}), \
                     patch.object(engine, "probe_macos_sdk", return_value=(0, "")):
-                engine.configure_macos_sdk(root)
-                engine.configure_macos_sdk(root)
+                engine.configure_macos_sdk(root, LLVM_MAJOR)
+                engine.configure_macos_sdk(root, LLVM_MAJOR)
             self.assertEqual(link.resolve(), second.resolve())
             with patch.dict(engine.os.environ, {"SDKROOT": str(root / "missing")}):
                 with self.assertRaises(engine.EngineError):
-                    engine.configure_macos_sdk(root)
+                    engine.configure_macos_sdk(root, LLVM_MAJOR)
             self.assertEqual(link.resolve(), second.resolve())
 
     def test_incompatible_default_sdk_falls_back_to_validated_sibling(self):
@@ -85,7 +87,7 @@ class MacosSetupTests(unittest.TestCase):
                     patch.object(engine, "clang_cxx", return_value=compiler), \
                     patch.object(engine, "capture_command_quiet", return_value=(0, f'"-isysroot" "{newest}"')), \
                     patch.object(engine, "probe_macos_sdk", side_effect=[(1, "NAN missing"), (0, "")]) as probe:
-                engine.configure_macos_sdk(root)
+                engine.configure_macos_sdk(root, LLVM_MAJOR)
             self.assertEqual((root / "out/host-tools/macos-sdk").resolve(), older.resolve())
             self.assertEqual([call.args[1] for call in probe.call_args_list], [newest.resolve(), older.resolve()])
 
@@ -106,7 +108,7 @@ class MacosSetupTests(unittest.TestCase):
                     patch.object(engine, "clang_cxx", return_value=compiler), \
                     patch.object(engine, "probe_macos_sdk", return_value=(1, "NAN missing")) as probe:
                 with self.assertRaisesRegex(engine.EngineError, "Explicit SDKROOT is incompatible") as failure:
-                    engine.configure_macos_sdk(root)
+                    engine.configure_macos_sdk(root, LLVM_MAJOR)
             self.assertIn("SDKROOT=/absolute/path", str(failure.exception))
             self.assertIn("before dependency downloads", str(failure.exception))
             self.assertEqual(probe.call_count, 1)
@@ -126,7 +128,7 @@ class MacosSetupTests(unittest.TestCase):
                     patch.object(engine, "capture_command_quiet", return_value=(0, f'"-isysroot" "{sdk}"')), \
                     patch.object(engine, "probe_macos_sdk", return_value=(1, "NAN missing")):
                 with self.assertRaisesRegex(engine.EngineError, "No installed compatible") as failure:
-                    engine.configure_macos_sdk(root)
+                    engine.configure_macos_sdk(root, LLVM_MAJOR)
             self.assertIn("Changing only the deployment target", str(failure.exception))
             self.assertFalse((root / "out/host-tools/macos-sdk").exists())
 
@@ -148,6 +150,30 @@ class MacosSetupTests(unittest.TestCase):
             self.assertIn("-o", command)
             self.assertEqual(capture.call_args.kwargs["timeout"], 30)
             self.assertIn("LudusSDK_missing_NAN", capture.call_args.kwargs["input_text"])
+
+    def test_probe_requires_cfloat_limits_after_cmath(self):
+        # libc++ 22 with the macOS 27 SDK leaves <cfloat> empty after <cmath>
+        # (llvm/llvm-project#175849); the probe must reject that pairing.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "SDKSettings.json").write_text("{}")
+            (root / "__config").write_text("fixture")
+            with patch.object(engine, "capture_command_quiet", return_value=(0, "")) as capture:
+                engine.probe_macos_sdk(root, root, root)
+            source = capture.call_args.kwargs["input_text"]
+            self.assertLess(source.index("#include <cmath>"), source.index("#include <cfloat>"))
+            self.assertIn("#ifndef DBL_MAX_10_EXP\n#error LudusSDK_missing_DBL_MAX_10_EXP", source)
+
+    def test_sdk_recovery_names_the_pinned_llvm(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            compiler = root / "llvm/bin/clang++"
+            compiler.parent.mkdir(parents=True)
+            compiler.touch()
+            with patch.dict(engine.os.environ, {"SDKROOT": str(root)}), \
+                    patch.object(engine, "clang_cxx", return_value=compiler):
+                with self.assertRaisesRegex(engine.EngineError, "Restore llvm@23 "):
+                    engine.configure_macos_sdk(root, 23)
 
     def test_bootstrap_identity_changes_when_sdk_moves_at_same_link(self):
         with tempfile.TemporaryDirectory() as temporary:

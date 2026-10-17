@@ -77,8 +77,9 @@ public:
     /// A duplicate succeeds without allocating, even at the configured limits.
     /// @param spelling Counted bytes, validated against the byte policy and limits.
     /// @param outProvisionalIndex Receives the arrival-order index. Unchanged on failure.
-    /// @return Ok, InvalidHandle, InvalidState after TryFinish, LimitExceeded,
-    /// InvalidUtf8, EmbeddedZero or OutOfMemory. Failure leaves the writer unchanged.
+    /// @return Ok, InvalidHandle, InvalidState after TryFinish or for corrupted
+    /// table metadata, LimitExceeded, InvalidUtf8, EmbeddedZero or OutOfMemory.
+    /// Failure leaves the writer unchanged.
     [[nodiscard]] StringDictionaryStatus TryAdd(std::string_view spelling,
                                                 foundation::StringIndex& outProvisionalIndex) noexcept;
     /// @brief Sorts the unique spellings and fixes the final directory indices.

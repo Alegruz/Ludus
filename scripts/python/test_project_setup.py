@@ -11,6 +11,7 @@ from unittest.mock import patch
 from ludus_tools.create import create_project
 from ludus_tools.errors import ToolingError
 from ludus_tools import project_setup as setup
+from ludus_tools.toolchain import pinned_llvm_tool
 from test_ludus_tools import _manifest_json, _write_sdk_prefix
 
 
@@ -33,7 +34,7 @@ class ProjectSetupTests(unittest.TestCase):
             path.symlink_to(cmake if name == "cmake" else shutil.which(name) or cmake)
         path = self.tools / "out/host-tools/bin/clang++"
         path.parent.mkdir(parents=True)
-        path.symlink_to(shutil.which("clang++-18") or shutil.which("clang++"))
+        path.symlink_to(shutil.which(pinned_llvm_tool("clang++")) or shutil.which("clang++"))
         self.sdk = _write_sdk_prefix(self.root / "sdk", self.manifest())
         self.project = self.root / "Game"
         create_project(self.project, name="Game", template_id="minimal", engine_version="", local_sdk_prefix=self.sdk, preset=self.profile)
