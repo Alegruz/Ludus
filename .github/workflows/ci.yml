@@ -549,6 +549,7 @@ jobs:
       - name: Test L0 localization document, receipt and manifest contracts
         run: |
           python3 -m unittest discover -s scripts/python -p 'test_localization_corpus.py' -v
+          python3 -m unittest discover -s tools/icu-probe -p 'test_*.py' -v
           ./scripts/localization-corpus validate --manifest modules/localization/corpus/release.json
       - name: Test S1 manifest and cook admission contracts
         run: python3 -m unittest discover -s tools/script-cook -p 'test_*.py' -v
