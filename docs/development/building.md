@@ -516,7 +516,11 @@ The formatter uses clang-format 18 and preserves compact designated initializers
 on one line (`value = { .A = 0, .B = 1 };`). Multiline initializers place the
 opening brace on its own line, with one member per line and a trailing comma.
 Clang-format 18 alone cannot express the opening-brace rule, so run the project
-command for both applying and checking formatting.
+command for both applying and checking formatting. The brace normalization
+changes only whitespace: where clang-format keeps a closing brace on the last
+member's line, such as an initializer in a ternary operand, that list keeps
+clang-format's layout. If normalization would change any other token, the
+formatter reports an error and leaves the file unchanged.
 
 Local `./init.sh` enables the pre-commit formatter. To enable it in an existing
 checkout, run `./scripts/install-hooks`. It formats only staged C/C++ in
