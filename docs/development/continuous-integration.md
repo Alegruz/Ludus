@@ -37,6 +37,19 @@ revision through the last job. Verify changed coordinator behavior with a later
 `develop` candidate after the repair reaches `main`. Dispatching without a new
 candidate skips validation and publication, so it does not exercise the change.
 
+Before changing the compiler pin, prepare the trusted validation workflows to
+read the captured candidate's `config/tool_versions.json`. Install its LLVM major
+and use its configured compiler/formatter paths, including installed-SDK and
+generated-project checks. When the candidate supplies `llvm_apt_source.py`, run
+it before apt so newer pins can use their committed package-source key. Older
+candidates without that helper keep their existing Ubuntu package source.
+Land this compatible workflow preparation before the new pin: changing both
+together in `develop` cannot update the workflow definitions already on `main`.
+If recovery requires landing that preparation directly on `main`, bring its
+history into `develop` through an integration PR using a merge commit. Squashing
+or rebasing that PR discards the ancestry link; promotion rejects a candidate
+that diverges from `main`, even when the files contain the same repair.
+
 Only one batch is active. New `develop` commits do not cancel it or change its input.
 Concurrent scheduler ticks coalesce into at most one pending run. A tick captured
 before `main` advanced skips, letting the next tick use the new stable revision.
