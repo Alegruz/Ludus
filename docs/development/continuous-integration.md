@@ -171,7 +171,8 @@ and owning API/wiki tools. Unknown paths, mixed changes, malformed metadata and
 missing comparisons require native routing. Rename detection is disabled so a
 move into docs does not hide an engine change. The `Ubuntu Clang` gate checks the
 complete job inventory and requires exactly the successes/skips selected by the
-tier. Missing outputs or failed/cancelled dependencies fail the gate.
+tier. Missing outputs or failed/cancelled dependencies fail the gate; the only
+exception is a superseded pull-request run, described below.
 
 Required checks use job conditions instead of workflow-level path filtering, so
 branch protection receives a result even when expensive jobs are intentionally
@@ -180,6 +181,39 @@ relocation, ASan/UBSan and TSan controls, static analysis, editor journeys, PCH,
 uncached build budgets, browser backends and documentation tooling on both macOS
 architectures. The independent public API check still enforces the shrink-only
 legacy baseline against the captured main SHA.
+
+### Superseded pull-request runs
+
+GitHub evaluates every check run with a required name on the PR head commit, one
+per workflow run, so a cancelled duplicate blocks merging even when another run
+of the same commit passed. Several PR activities can fire for one commit at
+once; for example, pushing and marking a draft ready produce `synchronize`,
+`ready_for_review` and often `edited` in the same second. `ci`, `Ludus Wiki` and
+`project-sdk` therefore cancel in-progress runs only for `synchronize`, which
+always carries a new head. Its runs share one group per PR and supersede runs for
+earlier commits. Every other activity revalidates the head in a group named for
+that commit that never cancels an in-progress run. GitHub keeps at most one run
+pending per group and cancels an older pending run, which has created no checks.
+A same-commit duplicate therefore waits and runs completely; it costs a duplicate
+run, not a blocked check. A later push does not cancel such a run for an earlier commit.
+
+The `Ubuntu Clang` gate still runs after cancellation. If a dependency was
+cancelled, it reads this workflow's runs with the job's read-only `actions`
+token. It passes only when a newer, uncancelled pull-request run of the same
+workflow exists for the same head commit. That run publishes its own required
+gate, which owns the result. Otherwise, or if the lookup fails, the gate fails
+and asks for a rerun. Classification failures, failed jobs and unexpected skips
+never consult other runs. Merge-group, scheduled, manual and batch runs never
+treat cancellation as success. Other workflows' required checks are ordinary
+jobs; the per-commit group prevents them from being cancelled by duplicates.
+
+To recover a PR blocked by a cancelled or failed check left before this rule,
+rerun that cancelled workflow run; its new attempt replaces the check in the
+same check suite. Do not manually cancel a PR's newest run. The gate of the run
+it replaced may already have passed while the newest run was pending, so the
+commit has no validation until the newest run is rerun. Rerunning an older
+commit's push run joins the push group and cancels the head's in-progress push
+run; rerun the head commit's runs instead.
 
 `.github/actions/native-setup` prepares only the job's selected preset. `CI=true`
 enables warnings as errors without invoking the full `init.sh --ci` validation.

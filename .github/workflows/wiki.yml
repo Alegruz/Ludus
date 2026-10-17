@@ -23,9 +23,16 @@ on:
 permissions:
   contents: read
 
+# Thanks to GitHub's "Concurrency" guidance: superseded PR checks can cancel.
+# https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency
+# Only a push (synchronize) supersedes the runs for earlier commits. Other PR
+# activity (opened, ready_for_review, edited, ...) can fire for the commit a
+# concurrent push run is validating, so it runs in a per-commit group that never
+# cancels. A cancelled duplicate would otherwise leave a cancelled or failed
+# required check on the head commit and block the PR.
 concurrency:
-  group: wiki-${{ inputs.batch_sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: wiki-${{ inputs.batch_sha || github.ref }}${{ github.event_name == 'pull_request' && github.event.action != 'synchronize' && format('-head-{0}', github.event.pull_request.head.sha) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 jobs:
   api-documentation:
