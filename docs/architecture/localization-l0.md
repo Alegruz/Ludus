@@ -254,7 +254,9 @@ own initialization on that macOS version, even for an empty program, so sanitize
 evidence comes from batched CI. Run
 [39026440464](https://github.com/The-Ludus-Project/Ludus/actions/runs/39026440464)
 (develop `ea1c7d6`) repeated the probe on Ubuntu 24.04 x86_64 with `linux-clang-asan-ubsan` and
-uploaded its `evidence.json` as `localization-l0-linux-sanitized-evidence`. The
+uploaded its `evidence.json` as `localization-l0-linux-sanitized-evidence`. Its
+`ASan and UBSan` job passed; other jobs failed and the candidate was not promoted,
+so the run is sanitizer evidence for this probe, not platform qualification. The
 corpus run, cost measurements and host cleanup completed there without an ASan,
 UBSan or LeakSanitizer report; UBSan halts on its first finding
 (`-fno-sanitize-recover=undefined`), so any report would have failed the run.
@@ -331,7 +333,8 @@ on its first finding, so a sanitizer-report point never reformats or reaches
 
 - No point crashes with a signal and ASan reports nothing. Every sanitizer report
   is a UBSan runtime error, and every leak after cleanup is also a LeakSanitizer
-  report.
+  report. `verify.py` records the kind as `undefined-behavior` without the UBSan
+  check that fired.
 - Arabic, Russian and host initialization match macOS in every other column; each
   macOS crash count reappears as the same number of UBSan reports (2, 3 and 9).
 - French reports UBSan at points 8–27 and 30: by count, the macOS crash and 20
