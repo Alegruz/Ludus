@@ -140,3 +140,31 @@ or lookup algorithm, so there are no timing claims.
   SDK consumer and the browser foundation probe both build, exercises
   `FixedArray`. Those targets were not built locally; CI's SDK and browser jobs
   build them.
+
+## M4 RingBuffer and Input pending queue
+
+Recorded 2026-10-17 for [M4](../architecture/container-systems.md#ringbuffer-contract)
+on the same host and pinned toolchain as M1. Inline storage with compile-time
+capacity was selected. `RingBuffer` adds no algorithm choice beyond wrapping by
+subtraction, so there are no timing claims.
+
+- **Correctness.** `[ring-buffer]` in `ludus_foundation_containers_tests` has
+  eight cases with about 287,000 assertions. They cover FIFO order with full
+  status, wrapped leading/trailing spans and their reset to the first slot after
+  draining, zero capacity, construction of occupied slots only, move-only and
+  non-default-constructible values, aliased appends with stable borrows across
+  wraparound, copy, move and assignment of wrapped contents, and over-aligned
+  elements. A 20,000-operation seeded stream on a seven-slot ring (not a power
+  of two) is compared after every step with a shifting-array model, covering
+  indexing, both spans and the live-object count.
+- **Allocation.** `ludus_containers_alloc_tests` counts every global
+  `operator new`/`delete`. A 16-slot ring that wraps through 1,000 additions,
+  then is copied, moved and cleared, makes no allocation.
+- **Consumer.** The Input reducer's pending-transition queue now uses
+  `RingBuffer`, replacing a raw array with a hand-maintained head and count.
+  Overflow recovery still runs when the queue is full, and the rejected
+  transition leaves the queue unchanged. The existing reducer, action, trace and
+  Input allocation suites pass unchanged, including their overflow tests.
+- **SDK and browser.** `tests/sdk_consumer/containers.cpp` exercises full
+  rejection and wraparound, but those targets were not built locally; CI's SDK
+  and browser jobs build them.
