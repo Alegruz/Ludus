@@ -10,6 +10,16 @@ using ludus::foundation::time::FrameSample;
 using ludus::foundation::time::NANOSECONDS_PER_SECOND;
 using ludus::foundation::time::Timestamp;
 using ludus::foundation::time::TimeStatus;
+namespace ludus::world_demo::internal
+{
+struct WorldTestAccess final
+{
+    static void SetTick(GameWorld& inoutWorld, uint64 tick) noexcept
+    {
+        inoutWorld.mTick = tick;
+    }
+};
+} // namespace ludus::world_demo::internal
 namespace
 {
 constexpr uint64 MILLISECOND = NANOSECONDS_PER_SECOND / 1000;
@@ -44,6 +54,56 @@ void Load(Session& session)
         REQUIRE(session.PollLoad() == Status::Success);
     }
     REQUIRE(session.Activate());
+}
+struct TickAccounting final
+{
+    uint64 Ticks = 0;
+    uint64 Phase = 0;
+    uint64 DiscardedTicks = 0;
+    uint64 AcceptedNanoseconds = 0;
+};
+// Drive a fresh world from a baseline at zero to `span`, asking `getFrameLength` for each frame.
+template <typename FrameLength>
+TickAccounting DriveFrames(uint64 span, FrameLength getFrameLength)
+{
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    uint64 now = 0;
+    uint64 frame = 0;
+    while (now < span)
+    {
+        const uint64 length = getFrameLength(frame);
+        REQUIRE(length > 0);
+        now = length < span - now ? now + length : span;
+        REQUIRE(driver.Advance(world, At(now), {}) == Status::Success);
+        REQUIRE(driver.GetTickPhase() < PHASE_UNITS_PER_TICK);
+        ++frame;
+    }
+    REQUIRE(driver.GetClampedTime() == Duration{});
+    return
+    {
+        .Ticks = world.GetTick(),
+        .Phase = driver.GetTickPhase(),
+        .DiscardedTicks = driver.GetDiscardedTicks(),
+        .AcceptedNanoseconds = driver.GetAcceptedTime().Nanoseconds,
+    };
+}
+// Deterministic irregular frame lengths in [1 ns, 50 ms]: short enough that no whole tick is discarded.
+struct IrregularFrames final
+{
+    uint64 State = 0;
+    uint64 operator()(uint64 /*frame*/) noexcept
+    {
+        State = State * 6364136223846793005ULL + 1442695040888963407ULL;
+        return (State >> 33U) % (50 * MILLISECOND) + 1;
+    }
+};
+// Accepted phase equals run ticks plus discarded ticks plus the carried remainder, when no reset dropped phase.
+void RequirePhaseConservation(const TickAccounting& accounting, uint64 ticksPerSecond = TICKS_PER_SECOND)
+{
+    REQUIRE(accounting.AcceptedNanoseconds * ticksPerSecond ==
+            (accounting.Ticks + accounting.DiscardedTicks) * PHASE_UNITS_PER_TICK + accounting.Phase);
 }
 Recipe ExtraGuard()
 {
@@ -133,8 +193,10 @@ TEST_CASE("Input edges survive zero ticks, catch-up consumes once, and suspensio
     REQUIRE(world.GetTick() == 0);
     REQUIRE(driver.Advance(world, At(100 * MILLISECOND), {}) == Status::Success);
     REQUIRE(world.GetTick() == 4);
-    REQUIRE(driver.GetDiscardedTime() > 0.03);
-    REQUIRE(driver.GetAlpha() < 1);
+    // 100 ms is six ticks of debt: four run, two whole ticks are discarded and nothing remains.
+    REQUIRE(driver.GetDiscardedTicks() == 2);
+    REQUIRE(driver.GetTickPhase() == 0);
+    REQUIRE(driver.GetAlpha() == 0);
     driver.SetMode(Mode::Paused);
     REQUIRE(driver.Advance(world, At(8 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
     REQUIRE(world.GetTick() == 4);
@@ -164,9 +226,9 @@ TEST_CASE("Frame integration: startup is a zero baseline and accepted time is ex
     REQUIRE(driver.GetAcceptedTime() == Duration{NANOSECONDS_PER_SECOND});
     REQUIRE(driver.GetClampedTime() == Duration{});
     REQUIRE(driver.GetExcludedTime() == Duration{});
-    REQUIRE(driver.GetDiscardedTime() == 0);
-    REQUIRE(world.GetTick() >= 59);
-    REQUIRE(world.GetTick() <= 60);
+    REQUIRE(driver.GetDiscardedTicks() == 0);
+    REQUIRE(world.GetTick() == 60);
+    REQUIRE(driver.GetTickPhase() == 0);
     // Equal readings are valid zero-length frames.
     const uint64 tick = world.GetTick();
     REQUIRE(driver.Advance(world, At(previous), {}) == Status::Success);
@@ -187,10 +249,9 @@ TEST_CASE("Frame integration: a stall is clamped once and its loss stays visible
     REQUIRE(driver.GetAcceptedTime() == MAXIMUM_FRAME_DELTA);
     REQUIRE(driver.GetClampedTime() == stall.Discarded);
     REQUIRE(world.GetTick() == 4);
-    const float64 clamped = ludus::foundation::time::ToSeconds(driver.GetClampedTime());
-    const float64 trimmed = driver.GetDiscardedTime() - clamped;
-    REQUIRE(trimmed > 0);
-    REQUIRE(trimmed < ludus::foundation::time::ToSeconds(MAXIMUM_FRAME_DELTA));
+    // The clamp and the catch-up trim are reported separately: 15 ticks of debt, four run, 11 discarded.
+    REQUIRE(driver.GetDiscardedTicks() == 11);
+    REQUIRE(driver.GetTickPhase() == 0);
     // The stall advanced the baseline: the next frame measures from the stalled sample.
     REQUIRE(driver.Advance(world, At(2 * NANOSECONDS_PER_SECOND + 10 * MILLISECOND), {}) == Status::Success);
     REQUIRE(driver.GetFrameSample().Elapsed == Duration{10 * MILLISECOND});
@@ -311,6 +372,177 @@ TEST_CASE("Frame integration: clock regression adds no time and cannot rebase be
     REQUIRE(driver.GetFrameSample().Elapsed == Duration{10 * MILLISECOND});
     REQUIRE(driver.GetAcceptedTime() == Duration{70 * MILLISECOND});
     REQUIRE(GetAccountedTime(driver) == 90 * MILLISECOND);
+}
+TEST_CASE("Integer driver: tick and remainder accounting is independent of frame partitioning", "[world-demo][frame]")
+{
+    // 1.234567891 s at 60 Hz is 74.07407346 ticks: 74 ticks and 74,073,460 phase units remain.
+    constexpr uint64 SPAN = 1'234'567'891;
+    constexpr uint64 EXPECTED_TICKS = SPAN * TICKS_PER_SECOND / PHASE_UNITS_PER_TICK;
+    constexpr uint64 EXPECTED_PHASE = SPAN * TICKS_PER_SECOND % PHASE_UNITS_PER_TICK;
+    STATIC_REQUIRE(EXPECTED_TICKS == 74);
+    STATIC_REQUIRE(EXPECTED_PHASE == 74'073'460);
+    const TickAccounting partitions[] = {
+        DriveFrames(SPAN, [](uint64 /*frame*/) { return MILLISECOND; }),
+        DriveFrames(SPAN, [](uint64 /*frame*/) { return uint64{16'666'667}; }),
+        DriveFrames(SPAN, [](uint64 /*frame*/) { return uint64{6'944'444}; }),
+        DriveFrames(SPAN, [](uint64 /*frame*/) { return 50 * MILLISECOND; }),
+        DriveFrames(SPAN, [](uint64 frame) { return frame % 2 == 0 ? uint64{1} : 49 * MILLISECOND; }),
+        DriveFrames(SPAN, IrregularFrames{ .State = 1 }),
+        DriveFrames(SPAN, IrregularFrames{ .State = 0x5eedULL }),
+    };
+    for (const TickAccounting& accounting : partitions)
+    {
+        REQUIRE(accounting.AcceptedNanoseconds == SPAN);
+        REQUIRE(accounting.Ticks == EXPECTED_TICKS);
+        REQUIRE(accounting.Phase == EXPECTED_PHASE);
+        REQUIRE(accounting.DiscardedTicks == 0);
+        RequirePhaseConservation(accounting);
+    }
+}
+TEST_CASE("Integer driver: one second at 60 Hz is exactly 60 ticks", "[world-demo][frame]")
+{
+    const TickAccounting partitions[] = {
+        DriveFrames(NANOSECONDS_PER_SECOND, [](uint64 /*frame*/) { return MILLISECOND; }),
+        DriveFrames(NANOSECONDS_PER_SECOND, [](uint64 /*frame*/) { return uint64{16'666'666}; }),
+        DriveFrames(NANOSECONDS_PER_SECOND, [](uint64 /*frame*/) { return uint64{16'666'667}; }),
+        DriveFrames(NANOSECONDS_PER_SECOND, [](uint64 /*frame*/) { return uint64{6'944'445}; }),
+        DriveFrames(NANOSECONDS_PER_SECOND, [](uint64 /*frame*/) { return uint64{33'333'333}; }),
+        DriveFrames(NANOSECONDS_PER_SECOND, [](uint64 /*frame*/) { return 50 * MILLISECOND; }),
+        DriveFrames(NANOSECONDS_PER_SECOND, IrregularFrames{ .State = 60 }),
+    };
+    for (const TickAccounting& accounting : partitions)
+    {
+        REQUIRE(accounting.Ticks == TICKS_PER_SECOND);
+        REQUIRE(accounting.Phase == 0);
+        REQUIRE(accounting.DiscardedTicks == 0);
+    }
+    // 25 ms is exactly 1.5 ticks: one runs and the remaining half tick is half of the interpolation interval.
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(driver.GetAlpha() == 0);
+    REQUIRE(driver.Advance(world, At(25 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(world.GetTick() == 1);
+    REQUIRE(driver.GetTickPhase() == PHASE_UNITS_PER_TICK / 2);
+    REQUIRE(driver.GetAlpha() == 0.5F);
+}
+TEST_CASE("Integer driver: frame clamp and catch-up loss are explicit and separate", "[world-demo][frame]")
+{
+    GameWorld world = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    // 2 s stall: 1.75 s clamped by the FrameClock; 250 ms is 15 ticks, four run and 11 are discarded.
+    REQUIRE(driver.Advance(world, At(2 * NANOSECONDS_PER_SECOND), {}) == Status::Success);
+    REQUIRE(driver.GetClampedTime() == Duration{2 * NANOSECONDS_PER_SECOND - MAXIMUM_FRAME_DELTA.Nanoseconds});
+    REQUIRE(world.GetTick() == MAXIMUM_CATCH_UP_TICKS);
+    REQUIRE(driver.GetDiscardedTicks() == 11);
+    // 70 ms is 4.2 ticks: within budget, so nothing is discarded and 0.2 tick carries.
+    uint64 now = 2 * NANOSECONDS_PER_SECOND + 70 * MILLISECOND;
+    REQUIRE(driver.Advance(world, At(now), {}) == Status::Success);
+    REQUIRE(world.GetTick() == 8);
+    REQUIRE(driver.GetDiscardedTicks() == 11);
+    REQUIRE(driver.GetTickPhase() == PHASE_UNITS_PER_TICK / 5);
+    // 100 ms plus the carried 0.2 tick is 6.2 ticks: four run, two whole ticks are discarded, 0.2 carries.
+    now += 100 * MILLISECOND;
+    REQUIRE(driver.Advance(world, At(now), {}) == Status::Success);
+    REQUIRE(world.GetTick() == 12);
+    REQUIRE(driver.GetDiscardedTicks() == 13);
+    REQUIRE(driver.GetTickPhase() == PHASE_UNITS_PER_TICK / 5);
+    REQUIRE(driver.GetClampedTime() == Duration{2 * NANOSECONDS_PER_SECOND - MAXIMUM_FRAME_DELTA.Nanoseconds});
+    RequirePhaseConservation(
+    {
+        .Ticks = world.GetTick(),
+        .Phase = driver.GetTickPhase(),
+        .DiscardedTicks = driver.GetDiscardedTicks(),
+        .AcceptedNanoseconds = driver.GetAcceptedTime().Nanoseconds,
+    });
+    REQUIRE(GetAccountedTime(driver) == now);
+    // A smaller catch-up budget discards more whole ticks of the same debt.
+    TickDriver single;
+    REQUIRE(single.Configure({ .MaximumCatchUpTicks = 1 }) == Status::Success);
+    GameWorld other = Build();
+    REQUIRE(single.Advance(other, At(0), {}) == Status::Success);
+    REQUIRE(single.Advance(other, At(100 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(other.GetTick() == 1);
+    REQUIRE(single.GetDiscardedTicks() == 5);
+    // The largest carried remainder still interpolates strictly below one.
+    TickDriver slow;
+    REQUIRE(slow.Configure({ .TicksPerSecond = 1, .MaximumFrameDelta = Duration{NANOSECONDS_PER_SECOND} }) ==
+            Status::Success);
+    GameWorld third = Build();
+    REQUIRE(slow.Advance(third, At(0), {}) == Status::Success);
+    REQUIRE(slow.Advance(third, At(PHASE_UNITS_PER_TICK - 1), {}) == Status::Success);
+    REQUIRE(third.GetTick() == 0);
+    REQUIRE(slow.GetTickPhase() == PHASE_UNITS_PER_TICK - 1);
+    REQUIRE(slow.GetAlpha() < 1);
+    REQUIRE(slow.GetAlpha() > 0.99F);
+}
+TEST_CASE("Integer driver: configuration rejects zero rates, zero budgets and phase overflow", "[world-demo][frame]")
+{
+    TickDriver driver;
+    REQUIRE(driver.GetPolicy().TicksPerSecond == TICKS_PER_SECOND);
+    REQUIRE(driver.GetPolicy().MaximumFrameDelta == MAXIMUM_FRAME_DELTA);
+    REQUIRE(driver.GetPolicy().MaximumCatchUpTicks == MAXIMUM_CATCH_UP_TICKS);
+    REQUIRE(driver.Configure({}) == Status::Success);
+    REQUIRE(driver.Configure({ .TicksPerSecond = 0 }) == Status::InvalidConfiguration);
+    REQUIRE(driver.Configure({ .MaximumCatchUpTicks = 0 }) == Status::InvalidConfiguration);
+    // MaximumFrameDelta * TicksPerSecond overflows.
+    constexpr uint64 MAXIMUM = std::numeric_limits<uint64>::max();
+    REQUIRE(driver.Configure({ .TicksPerSecond = MAXIMUM / MAXIMUM_FRAME_DELTA.Nanoseconds + 1 }) ==
+            Status::InvalidConfiguration);
+    // The product fits, but adding the largest carried remainder does not.
+    constexpr uint64 LARGEST_RATE = MAXIMUM - (PHASE_UNITS_PER_TICK - 1);
+    const Duration nanosecond{1};
+    REQUIRE(driver.Configure({ .TicksPerSecond = LARGEST_RATE + 1, .MaximumFrameDelta = nanosecond }) ==
+            Status::InvalidConfiguration);
+    // Every failure preserved the defaults.
+    REQUIRE(driver.GetPolicy().TicksPerSecond == TICKS_PER_SECOND);
+    REQUIRE(driver.GetPolicy().MaximumFrameDelta == MAXIMUM_FRAME_DELTA);
+    REQUIRE(driver.GetPolicy().MaximumCatchUpTicks == MAXIMUM_CATCH_UP_TICKS);
+    // The exact bound is accepted and sufficient: repeated clamped frames never overflow the phase.
+    REQUIRE(driver.Configure({ .TicksPerSecond = LARGEST_RATE, .MaximumFrameDelta = nanosecond }) == Status::Success);
+    GameWorld world = Build();
+    REQUIRE(driver.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(driver.Advance(world, At(1), {}) == Status::Success);
+    REQUIRE(world.GetTick() == MAXIMUM_CATCH_UP_TICKS);
+    REQUIRE(driver.GetDiscardedTicks() == LARGEST_RATE / PHASE_UNITS_PER_TICK - MAXIMUM_CATCH_UP_TICKS);
+    REQUIRE(driver.GetTickPhase() == LARGEST_RATE % PHASE_UNITS_PER_TICK);
+    REQUIRE(driver.Advance(world, At(2 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetClampedTime() == Duration{2 * MILLISECOND - 2});
+    REQUIRE(world.GetTick() == uint64{2} * MAXIMUM_CATCH_UP_TICKS);
+    REQUIRE(driver.GetMode() == Mode::Playing);
+    // Configure drops the carried phase and the frame baseline.
+    REQUIRE(driver.Configure({}) == Status::Success);
+    REQUIRE(driver.GetTickPhase() == 0);
+    REQUIRE(driver.Advance(world, At(3 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(driver.GetFrameSample().IsBaseline);
+}
+TEST_CASE("Integer driver: a failed or exhausted tick is not completed and stops the session", "[world-demo][frame]")
+{
+    // An invalid tick input faults the world before it publishes a tick.
+    GameWorld faulted = Build();
+    TickDriver driver;
+    REQUIRE(driver.Advance(faulted, At(0), {}) == Status::Success);
+    const TickInput invalid{ .Axis = {std::numeric_limits<float32>::quiet_NaN(), 0} };
+    REQUIRE(driver.Advance(faulted, At(20 * MILLISECOND), invalid) == Status::InvalidConfiguration);
+    REQUIRE(faulted.GetTick() == 0);
+    REQUIRE(driver.GetMode() == Mode::Faulted);
+    REQUIRE(driver.GetTickPhase() == 0);
+    // The last representable tick completes; the next one exhausts the tick identity.
+    GameWorld world = Build();
+    ludus::world_demo::internal::WorldTestAccess::SetTick(world, std::numeric_limits<uint64>::max() - 1);
+    TickDriver exhausted;
+    REQUIRE(exhausted.Advance(world, At(0), {}) == Status::Success);
+    REQUIRE(exhausted.Advance(world, At(40 * MILLISECOND), {}) == Status::IdentityExhausted);
+    REQUIRE(world.GetTick() == std::numeric_limits<uint64>::max());
+    REQUIRE(world.GetPhase() == Phase::Faulted);
+    REQUIRE(exhausted.GetMode() == Mode::Faulted);
+    REQUIRE(exhausted.GetTickPhase() == 0);
+    REQUIRE(exhausted.GetAlpha() == 1);
+    // The stopped session runs no more ticks and cannot single-step.
+    REQUIRE(exhausted.Advance(world, At(100 * MILLISECOND), {}) == Status::Success);
+    REQUIRE(world.GetTick() == std::numeric_limits<uint64>::max());
+    REQUIRE(exhausted.Step(world) == Status::InvalidPhase);
 }
 TEST_CASE("Deferred spawn and destruction publish complete bundles and stale handles fail", "[world-demo]")
 {

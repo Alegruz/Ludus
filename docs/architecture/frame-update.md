@@ -18,19 +18,22 @@ metadata. They are not engine performance guarantees.
 
 Read the FoundationTime monotonic clock once per presentation callback and
 sample one [FrameClock](high-resolution-time.md#elapsed-time-state-and-failure-behavior)
-with the 250 ms cap; it is the only clamp. Accumulate accepted elapsed time in
-`float64` seconds; a rational integer accumulator is planned separately.
+with the 250 ms cap; it is the only clamp. Accumulate accepted elapsed time as a
+[rational integer phase](high-resolution-time.md#frame-and-simulation-integration):
+each frame adds `elapsed_ns * rate` checked `uint64` units and one tick consumes
+exactly `1e9`, so tick counts never depend on how time was split into frames.
 While at least one tick remains and the catch-up budget allows it, execute one
-tick and subtract its fixed duration. Increment a `uint64` tick index only after
-a successful tick; exhaustion stops the session rather than wrapping.
+tick and subtract its phase. Increment a `uint64` tick index only after a
+successful tick; exhaustion stops the session rather than wrapping.
 
 After the budget is exhausted, discard remaining whole ticks and retain only the
-fractional remainder. Count all discarded time, including the initial frame-delta
-clamp. This policy deliberately slows simulation under sustained overload; it
-does not skip tick numbers or run physics with an enormous delta. Clamp negligible
-numeric drift at the accumulator boundary so render alpha stays in [0, 1).
-For example, 100 ms of debt permits four ticks and discards approximately two
-ticks. The [fixed-timestep reference](https://gafferongames.com/post/fix_your_timestep/)
+fractional remainder. Report the discarded whole ticks and the initial frame-delta
+clamp separately. This policy deliberately slows simulation under sustained
+overload; it does not skip tick numbers or run physics with an enormous delta.
+Render alpha is the remainder over one tick's phase, kept in [0, 1).
+For example, 100 ms of debt at 60 Hz is exactly six ticks: four run and two are
+discarded. Configuration rejects a zero rate or catch-up budget and any rate/clamp
+pair whose largest frame contribution plus remainder could overflow. The [fixed-timestep reference](https://gafferongames.com/post/fix_your_timestep/)
 explains why catch-up needs a bound and how interpolation decouples rendering.
 
 ```mermaid

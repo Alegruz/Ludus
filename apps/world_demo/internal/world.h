@@ -10,6 +10,10 @@ namespace ludus::world_demo
 {
 using gameplay::world::EntityId;
 using gameplay::world::Status;
+namespace internal
+{
+struct WorldTestAccess;
+}
 struct Transform final
 {
     Vec2 Current{};
@@ -241,6 +245,7 @@ public:
     }
 
 private:
+    friend struct internal::WorldTestAccess;
     enum class CommandKind : uint8
     {
         Spawn,
@@ -312,33 +317,74 @@ enum class Mode : uint8
 };
 /// Largest presentation interval accepted as simulation debt; the excess is reported as discarded.
 inline constexpr foundation::time::Duration MAXIMUM_FRAME_DELTA{foundation::time::NANOSECONDS_PER_SECOND / 4};
+/// Simulation rate the world reference's RunTick step is authored for: each tick advances 1/60 second.
+inline constexpr uint64 TICKS_PER_SECOND = 60;
+/// Most ticks one presentation callback may run before whole-tick debt is discarded.
+inline constexpr uint32 MAXIMUM_CATCH_UP_TICKS = 4;
+/// Phase units one tick consumes. A frame adds elapsed nanoseconds times ticks per second,
+/// so a tick is exactly 1/rate second without rounding the tick length to whole nanoseconds.
+inline constexpr uint64 PHASE_UNITS_PER_TICK = foundation::time::NANOSECONDS_PER_SECOND;
+/// Fixed-step policy; record it with replay metadata. RunTick's step stays 1/TICKS_PER_SECOND,
+/// so another rate changes the simulation's real-time speed rather than its step.
+struct TickPolicy final
+{
+    /// Simulation ticks per second of accepted frame time; must be nonzero.
+    uint64 TicksPerSecond = TICKS_PER_SECOND;
+    /// FrameClock cap: the only clamp on a presentation interval. Zero freezes accepted time.
+    foundation::time::Duration MaximumFrameDelta = MAXIMUM_FRAME_DELTA;
+    /// Catch-up budget per presentation callback; must be nonzero.
+    uint32 MaximumCatchUpTicks = MAXIMUM_CATCH_UP_TICKS;
+};
 /// Frame-to-simulation boundary: owns the one FrameClock, so every debt reset also drops the frame baseline.
 /// Pause/resume, suspension, faults and session replacement therefore never catch up excluded time.
+/// Debt is a rational phase in checked uint64 units (see PHASE_UNITS_PER_TICK), so tick and remainder
+/// accounting is exact and independent of how accepted time is partitioned into frames.
 class TickDriver final
 {
 public:
+    /// Validate and adopt a policy, then drop debt, pending input edges and the frame baseline.
+    /// The largest frame contribution plus the largest carried remainder,
+    /// MaximumFrameDelta * TicksPerSecond + PHASE_UNITS_PER_TICK - 1, must fit uint64.
+    /// @return InvalidConfiguration for a zero rate, a zero catch-up budget or that overflow;
+    /// failure preserves the previous policy and all timing state.
+    [[nodiscard]] Status Configure(const TickPolicy& policy) noexcept;
     /// Sample the timestamp read once at this presentation callback and run bounded fixed ticks.
     /// Hidden or non-Playing frames reset debt, input edges and the frame baseline instead.
     /// A sample below the highest observed timestamp counts a regression and adds no time.
+    /// Each successful tick consumes PHASE_UNITS_PER_TICK; whole ticks beyond the catch-up budget are
+    /// discarded and counted, and only the fractional remainder carries to the next frame.
+    /// @return A failed tick's status; the driver then enters Faulted and drops its debt. The world's
+    /// completed tick advances only for successful ticks, so tick exhaustion stops the session.
     [[nodiscard]] Status
     Advance(GameWorld& inoutWorld, foundation::time::Timestamp now, TickInput input, bool isVisible = true) noexcept;
     [[nodiscard]] Status Step(GameWorld& world) noexcept;
     void SetMode(Mode mode) noexcept;
     /// Drop debt, pending input edges and the frame baseline without changing mode.
     void Interrupt() noexcept;
+    /// Return to Playing and drop debt, pending input edges and the frame baseline; the policy is kept.
     void Reset() noexcept;
     [[nodiscard]] Mode GetMode() const noexcept
     {
         return mMode;
     }
-    [[nodiscard]] float32 GetAlpha() const noexcept
+    /// Interpolation factor in [0, 1) derived from the carried phase remainder while Playing;
+    /// 1 (exact current transforms) otherwise.
+    [[nodiscard]] float32 GetAlpha() const noexcept;
+    /// Policy adopted by the latest successful Configure (the defaults until then).
+    [[nodiscard]] LUDUS_INLINE const TickPolicy& GetPolicy() const noexcept
     {
-        return mMode == Mode::Playing ? static_cast<float32>(mDebt * 60.0) : 1.0F;
+        return mPolicy;
     }
-    /// Seconds lost to the frame clamp plus whole ticks trimmed beyond the catch-up budget.
-    [[nodiscard]] float64 GetDiscardedTime() const noexcept
+    /// Carried fractional debt in phase units, always below PHASE_UNITS_PER_TICK between callbacks.
+    [[nodiscard]] LUDUS_INLINE uint64 GetTickPhase() const noexcept
     {
-        return mDiscarded;
+        return mTickPhase;
+    }
+    /// Whole ticks of accepted time discarded because they exceeded the catch-up budget.
+    /// Reported separately from GetClampedTime, the frame clamp applied before accumulation.
+    [[nodiscard]] LUDUS_INLINE uint64 GetDiscardedTicks() const noexcept
+    {
+        return mDiscardedTicks;
     }
     /// Sample from the latest Advance, for presentation and diagnostics.
     [[nodiscard]] LUDUS_INLINE const foundation::time::FrameSample& GetFrameSample() const noexcept
@@ -350,7 +396,7 @@ public:
     {
         return mAccepted;
     }
-    /// Total frame time beyond MAXIMUM_FRAME_DELTA; included in GetDiscardedTime.
+    /// Total frame time beyond the policy's MaximumFrameDelta, discarded before accumulation.
     [[nodiscard]] LUDUS_INLINE foundation::time::Duration GetClampedTime() const noexcept
     {
         return mClamped;
@@ -370,6 +416,7 @@ private:
     void dropTiming() noexcept;
     void recordFrame(foundation::time::Duration interval) noexcept;
     InputBridge mInput;
+    TickPolicy mPolicy;
     foundation::time::FrameClock mFrameClock{MAXIMUM_FRAME_DELTA};
     foundation::time::FrameSample mFrameSample;
     foundation::time::Timestamp mObserved;
@@ -377,8 +424,8 @@ private:
     foundation::time::Duration mClamped;
     foundation::time::Duration mExcluded;
     uint64 mClockRegressions = 0;
-    float64 mDebt = 0;
-    float64 mDiscarded = 0;
+    uint64 mTickPhase = 0;
+    uint64 mDiscardedTicks = 0;
     bool mHasObserved = false;
     Mode mMode = Mode::Playing;
 };
