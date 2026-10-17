@@ -49,6 +49,8 @@ public:
         mNativeWindowInfo.CanvasSelector = mSelector.c_str();
         mNativeWindowInfo.Width = 0;
         mNativeWindowInfo.Height = 0;
+        // Mirrors WindowState::Visible, which stays false until the bridge reports the canvas.
+        mVisibility = WindowVisibility::Occluded;
     }
 
     ~BrowserWindow() noexcept override
@@ -89,6 +91,7 @@ public:
             ResetInput();
             mState.Attached = false;
             mState.Visible = false;
+            mVisibility = WindowVisibility::Occluded;
             mState.Focused = false;
             mNativeWindowInfo.Width = 0;
             mNativeWindowInfo.Height = 0;
@@ -152,6 +155,7 @@ public:
                 break;
             case EventKind::Visibility:
                 mState.Visible = packet.A != 0;
+                mVisibility = mState.Visible == true ? WindowVisibility::Visible : WindowVisibility::Occluded;
                 if (!mState.Visible)
                 {
                     ResetInput();
