@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <ludus/content/content.h>
+#include <ludus/content/limits.h>
 #include <ludus/foundation/base/config.h>
+#include <string>
 namespace ludus::content
 {
 struct JsonValue;
@@ -222,4 +224,19 @@ TEST_CASE("Content JSON canonical output and failed writes preserve the caller",
     invalid.String("\xff");
     REQUIRE(invalid.Finish(output) == Status::Limit);
     REQUIRE(output.String().starts_with("{\"s\":"));
+}
+
+TEST_CASE("Content JSON byte admission uses its own inclusive document policy", "[content][parsing][limits]")
+{
+    std::string input(MAX_DOCUMENT_BYTES, ' ');
+    input[0] = '0';
+    Diagnostic diagnostic;
+    JsonDocument exact;
+    REQUIRE(exact.Read(input, diagnostic) == Status::Ok);
+    JsonDocument oversized;
+    input += ' ';
+    REQUIRE(oversized.Read(input, diagnostic) == Status::Limit);
+    REQUIRE(oversized.Root().Value == nullptr);
+    input.pop_back();
+    REQUIRE(oversized.Read(input, diagnostic) == Status::Ok);
 }
