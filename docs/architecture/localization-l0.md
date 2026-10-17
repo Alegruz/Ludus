@@ -250,15 +250,20 @@ validates UTF-8 and the full schema first and adopts its own null-checked copies
 Recorded on macOS 26.6 arm64 with the pinned Clang 18 (`macos-clang-development`)
 and Emscripten 4.0.23 in its bundled Node 22.16 (`web-emscripten-development`,
 `web-emscripten-release`). The pinned Clang 18 ASan runtime deadlocks during its
-own initialization on that macOS version, even for an empty program, so sanitizer
-evidence comes from CI: it repeats the run on Ubuntu with ASan/UBSan and on both
-browser presets, and uploads each `evidence.json`.
+own initialization on that macOS version, even for an empty program, so sanitized
+evidence comes from batched CI. Run
+[38973276690](https://github.com/The-Ludus-Project/Ludus/actions/runs/38973276690)
+repeated the probe on Ubuntu 24.04 x86_64 with `linux-clang-asan-ubsan` and
+uploaded its `evidence.json` as `localization-l0-linux-sanitized-evidence`. The
+corpus run, cost measurements and host cleanup completed there without an ASan,
+UBSan or LeakSanitizer report; UBSan halts on its first finding
+(`-fno-sanitize-recover=undefined`), so any report would have failed the run.
 
 **Build.** All 457 upstream `common/`, `i18n/` and `stubdata/` translation units compile with
 `-fno-exceptions` under C++23 on both targets; `verify.py` rejects any ICU or
 probe compile command without it. No ICU source is modified.
 
-**Semantics.** Identical on native and wasm32:
+**Semantics.** Identical on macOS arm64, wasm32 and sanitized Ubuntu x86_64:
 
 - The pinned service reports ICU 78.3, CLDR 48 and Unicode 17.0 and round-trips
   every corpus tag; each locale's number symbols come from its own data, not root.
@@ -284,10 +289,10 @@ UTF-8 and time code without ICU. Totals include the 601,168-byte data slice.
 **Cost.** For the nested Arabic select/plural message: a cold first format after
 host start makes 161 ICU allocations, constructing a `MessageFormat` with warm
 caches makes 3, and reformatting a prepared formatter with a changed count makes
-2, on both targets. Native Development times were stable at about 61 µs, 2.7 µs
-and 1.1 µs. wasm32 Release times in Node varied widely across repeated runs
-(cold 0.17–0.30 ms, construction 6–23 µs, reformat 3–87 µs), so they are not
-usable as estimates. Peak ICU heap was about 100 KB. These are single-machine
+2, on both targets and under the Ubuntu sanitizers. Native Development times
+were stable at about 61 µs, 2.7 µs and 1.1 µs. wasm32 Release times in Node
+varied widely across repeated runs (cold 0.17–0.30 ms, construction 6–23 µs,
+reformat 3–87 µs), so they are not usable as estimates. Peak ICU heap was about 100 KB. These are single-machine
 diagnostics, not budgets.
 
 ### Allocation-failure findings
@@ -299,7 +304,7 @@ process formats again without injection, then calls `u_cleanup` and counts
 blocks still live. The final point of each sweep, with no denial, must be
 correct and leak-free.
 
-| Sweep (native Development) | Points | Crash | Reported OOM | Other error | Silent wrong output | Correct | Sticky | Leaks after cleanup |
+| Sweep (macOS arm64 Development) | Points | Crash | Reported OOM | Other error | Silent wrong output | Correct | Sticky | Leaks after cleanup |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Arabic nested select/plural | 161 | 2 | 83 | 47 | 7 | 22 | 80 | 16 |
 | French `::.0` with grouping | 61 | 1 | 51 | 0 | 1 | 8 | 12 | 25 |
@@ -308,6 +313,41 @@ correct and leak-free.
 
 wasm32 Release shows the same classes with fewer crashes (1, 0, 1 and 1): a null
 read in linear memory does not trap, so the same defects continue silently.
+
+Ubuntu x86_64 under ASan/UBSan (`linux-clang-asan-ubsan`, the CI run above):
+
+| Sweep (Ubuntu ASan/UBSan) | Points | Abnormal exit | Reported OOM | Other error | Silent wrong output | Correct | Sticky |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Arabic nested select/plural | 161 | 18 | 83 | 31 | 7 | 22 | 64 |
+| French `::.0` with grouping | 61 | 36 | 18 | 0 | 1 | 6 | 0 |
+| Russian offset plural with text | 201 | 28 | 90 | 34 | 21 | 28 | 86 |
+| Host initialization and warm-up | 41 | 11 | 25 (init failed) | 0 | 0 | 5 | 0 |
+
+That run's `verify.py` recorded every nonzero exit, or a point without its result
+line, as `crash`. Under sanitizers that folds three things together: a fault that
+ASan reports before exiting with status 1, a halting UBSan finding, and a
+LeakSanitizer report at exit when ICU blocks are still live after `u_cleanup`.
+Its `leaking_after_cleanup` of 0 therefore means the leaking points never reached
+that count, not that the leaks disappeared, and the table has no leak column. The
+artifact supports this reading:
+
+- Every macOS crash point also exits abnormally here.
+- In the Arabic, Russian and host sweeps the additional abnormal exits (16, 25
+  and 2) equal the macOS points that leak after cleanup, and the other outcome
+  columns shrink by the same totals.
+- The French sweep adds 35 abnormal exits against 25 macOS leaks. The remaining
+  10 are sanitizer findings or crashes that the recorded artifact cannot separate.
+- The silent wrong outputs are the same fail points (7, 1 and 21) on macOS,
+  wasm32 and sanitized Ubuntu. Those processes exit cleanly under ASan, UBSan and
+  LeakSanitizer: ICU selects the wrong branch with a success status, which
+  sanitized testing does not detect.
+
+`verify.py` now keeps these apart. A signal, including one that ASan reports
+(`SEGV`, `BUS`, `FPE`, `ILL`, `ABRT`, stack overflow), stays `crash` and its exit
+code is recorded; any other ASan or UBSan finding is `sanitizer-report` with its
+kind; a LeakSanitizer report keeps the point's result and counts as a leak after
+cleanup. Sanitized runs after this change record `crash_exit_codes`,
+`sanitizer_report_points` and `sanitizer_leak_reports` per sweep.
 
 Causes confirmed in the pinned sources:
 
@@ -334,9 +374,10 @@ branch, and once an empty string), and the sticky and leaking states.
 Consequences for L2: a recoverable-OOM contract for dynamic formatting cannot be
 built on ICU4C 78.3. Ludus warms the singletons at startup, bounds inputs with
 the profile limits, measures and budgets ICU memory, and makes an allocation
-failure inside ICU fatal. Static catalogs never call ICU and keep their
-transactional OOM contract. These defects should be reported upstream with the
-fail-point reproductions; a later ICU version must pass this sweep before Ludus
+failure inside ICU fatal. Sanitized testing cannot stand in for that policy:
+the wrong-branch results pass ASan, UBSan and LeakSanitizer cleanly. Static
+catalogs never call ICU and keep their transactional OOM contract. These defects
+should be reported upstream with the fail-point reproductions; a later ICU version must pass this sweep before Ludus
 offers recoverable formatting.
 
 ## CAT interchange profile (candidate)
@@ -362,8 +403,11 @@ the empty Japanese translation, plus a stale-import conflict.
 
 - **CAT/TMS profile:** unconfirmed (above).
 - **Platforms:** local native evidence is macOS arm64 Development; wasm32
-  evidence runs in the SDK's Node. Ubuntu ASan/UBSan evidence comes from CI.
-  Windows, Android, iOS and real browsers have no L0 evidence.
+  evidence runs in the SDK's Node. Ubuntu x86_64 ASan/UBSan evidence from batched
+  CI shows the same semantics and allocation-failure classes; its recorded crash
+  counts include sanitizer and leak reports (above). The pinned macOS ASan
+  runtime does not start on macOS 26.6. Windows, Android, iOS and real browsers
+  have no L0 evidence.
 - **Recoverable allocation failure:** ICU4C 78.3 fails this gate. The defects
   above are not yet reported upstream; a newer ICU must pass the sweep before L2
   can offer anything but fail-stop. ICU memory is measured, not capped.

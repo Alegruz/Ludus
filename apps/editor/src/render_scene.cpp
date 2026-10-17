@@ -78,12 +78,22 @@ bool WriteChartedMesh(QDataStream& inoutStream,
             }
         }
         math::Vector3 faceNormal;
-        if (normals.IsEmpty() == true &&
-            math::TryNormalize(math::Cross(positions[indices[triangle * 3 + 1]] - positions[indices[triangle * 3]],
-                                           positions[indices[triangle * 3 + 2]] - positions[indices[triangle * 3]]),
-                               faceNormal) != math::MathStatus::Success)
+        if (normals.IsEmpty() == true)
         {
-            return Fail(outError, QStringLiteral("Schema mesh has a degenerate shading normal."));
+            const math::Vector3 cross =
+                math::Cross(positions[indices[triangle * 3 + 1]] - positions[indices[triangle * 3]],
+                            positions[indices[triangle * 3 + 2]] - positions[indices[triangle * 3]]);
+            if (math::IsFinite(cross) == false)
+            {
+                return Fail(outError, QStringLiteral("Schema mesh triangle area is not representable."));
+            }
+            if (math::TryNormalize(cross, faceNormal) != math::MathStatus::Success)
+            {
+                // A collapsed (zero-area) triangle covers no pixels and has no face
+                // normal; any unit normal is inert. The static bake skips and reports it
+                // instead of rejecting the World.
+                faceNormal = {0, 0, 1};
+            }
         }
         for (uint32 corner = 0; corner < 3; ++corner)
         {

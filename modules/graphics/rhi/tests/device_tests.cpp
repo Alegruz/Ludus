@@ -264,3 +264,97 @@ TEST_CASE("Device identity exhaustion never wraps to an old owner", "[rhi][devic
     CHECK(sequence.Take() == 0);
     CHECK(sequence.Take() == 0);
 }
+TEST_CASE("Resources from a destroyed RHI session are rejected by the next session", "[rhi][device][resources]")
+{
+    // Device owners and legacy resource IDs come from separate process-wide RHI
+    // counters that never reuse a value (docs/architecture/object-handles-uuid.md,
+    // stage 2). The replacement session reuses the same backend slots, so only the
+    // identity checks separate the old handles from the new resources.
+    Reset();
+    const ShaderDescription vertexDescription
+    {
+        .Stage = ShaderStage::Vertex,
+        .UniformSize = 48,
+        .Spirv = {},
+        .Wgsl = "generated vertex",
+        .SpirvEntry = {},
+        .WgslEntry = "vertexMain",
+    };
+    const ShaderDescription fragmentDescription
+    {
+        .Stage = ShaderStage::Fragment,
+        .Spirv = {},
+        .Wgsl = "generated fragment",
+        .SpirvEntry = {},
+        .WgslEntry = "fragmentMain",
+    };
+    DeviceHandle oldDevice;
+    SurfaceHandle oldSurface;
+    REQUIRE(CreateDevice({}, {}, {}, oldDevice, oldSurface) == DeviceStatus::Pending);
+    Ready();
+    ShaderHandle oldVertex;
+    ShaderHandle oldFragment;
+    UniformHandle oldUniform;
+    PipelineHandle oldPipeline;
+    REQUIRE(CreateShader(oldDevice, vertexDescription, oldVertex) == ResourceStatus::Ready);
+    REQUIRE(CreateShader(oldDevice, fragmentDescription, oldFragment) == ResourceStatus::Ready);
+    REQUIRE(CreateUniform(oldDevice, 48, oldUniform) == ResourceStatus::Ready);
+    REQUIRE(CreatePipeline(oldDevice, {oldVertex, oldFragment, oldUniform}, oldPipeline) == ResourceStatus::Ready);
+    // Ending the session releases every resource without explicit destruction.
+    REQUIRE(DestroyDevice(oldDevice) == DeviceStatus::Ready);
+
+    DeviceHandle device;
+    SurfaceHandle surface;
+    REQUIRE(CreateDevice({}, {}, {}, device, surface) == DeviceStatus::Pending);
+    Ready();
+    ShaderHandle vertex;
+    ShaderHandle fragment;
+    UniformHandle uniform;
+    PipelineHandle pipeline;
+    REQUIRE(CreateShader(device, vertexDescription, vertex) == ResourceStatus::Ready);
+    REQUIRE(CreateShader(device, fragmentDescription, fragment) == ResourceStatus::Ready);
+    REQUIRE(CreateUniform(device, 48, uniform) == ResourceStatus::Ready);
+    REQUIRE(CreatePipeline(device, {vertex, fragment, uniform}, pipeline) == ResourceStatus::Ready);
+
+    UniformHandle unissued;
+    CHECK(CreateUniform(oldDevice, 48, unissued) == ResourceStatus::InvalidHandle);
+    CHECK(GetStatus(device, oldVertex) == ResourceStatus::InvalidHandle);
+    CHECK(GetStatus(device, oldFragment) == ResourceStatus::InvalidHandle);
+    CHECK(GetStatus(device, oldUniform) == ResourceStatus::InvalidHandle);
+    CHECK(GetStatus(device, oldPipeline) == ResourceStatus::InvalidHandle);
+    ludus::foundation::uint8 bytes[48]{};
+    CHECK(UpdateUniform(device, oldUniform, bytes) == ResourceStatus::InvalidHandle);
+    PipelineHandle mixed;
+    CHECK(CreatePipeline(device, {oldVertex, fragment, uniform}, mixed) == ResourceStatus::InvalidHandle);
+    CHECK(CreatePipeline(device, {vertex, fragment, oldUniform}, mixed) == ResourceStatus::InvalidHandle);
+    CHECK(GetStatus(device, mixed) == ResourceStatus::InvalidHandle);
+
+    // A draw requires written uniform contents. The stale update above did not mark
+    // the replacement uniform in the reused slot as written.
+    REQUIRE(BeginFrame(device, surface) == DeviceStatus::Ready);
+    CHECK(DrawFullscreen(device, pipeline) == ResourceStatus::InvalidState);
+    REQUIRE(EndFrame(device) == DeviceStatus::Ready);
+    REQUIRE(UpdateUniform(device, uniform, bytes) == ResourceStatus::Ready);
+    REQUIRE(BeginFrame(device, surface) == DeviceStatus::Ready);
+    const ludus::foundation::uint32 submitted = backend::Draws;
+    CHECK(DrawFullscreen(device, oldPipeline) == ResourceStatus::InvalidHandle);
+    CHECK(backend::Draws == submitted);
+    REQUIRE(DrawFullscreen(device, pipeline) == ResourceStatus::Ready);
+    CHECK(backend::Draws == submitted + 1);
+    REQUIRE(EndFrame(device) == DeviceStatus::Ready);
+
+    CHECK(Destroy(device, oldPipeline) == ResourceStatus::InvalidHandle);
+    CHECK(Destroy(device, oldUniform) == ResourceStatus::InvalidHandle);
+    CHECK(Destroy(device, oldVertex) == ResourceStatus::InvalidHandle);
+    CHECK(Destroy(device, oldFragment) == ResourceStatus::InvalidHandle);
+
+    // The rejected calls left the replacement resources in the reused slots intact.
+    CHECK(GetStatus(device, pipeline) == ResourceStatus::Ready);
+    CHECK(GetStatus(device, uniform) == ResourceStatus::Ready);
+    CHECK(UpdateUniform(device, uniform, bytes) == ResourceStatus::Ready);
+    REQUIRE(Destroy(device, pipeline) == ResourceStatus::Ready);
+    REQUIRE(Destroy(device, uniform) == ResourceStatus::Ready);
+    REQUIRE(Destroy(device, vertex) == ResourceStatus::Ready);
+    REQUIRE(Destroy(device, fragment) == ResourceStatus::Ready);
+    REQUIRE(DestroyDevice(device) == DeviceStatus::Ready);
+}

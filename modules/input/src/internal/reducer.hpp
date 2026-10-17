@@ -7,9 +7,12 @@
 //
 // This is a private implementation header: it is never installed and never
 // included by a public header. All state is fixed and embedded; no method
-// allocates heap memory or takes a lock (K12).
+// allocates heap memory or takes a lock (K12). Bounded buffers use FixedArray,
+// whose inline storage never allocates.
 
 #include <ludus/foundation/base/core.h>
+
+#include <ludus/foundation/containers/fixed_array.hpp>
 #include <ludus/input/actions.h>
 #include <ludus/input/input_debug.h>
 #include <ludus/input/key.h>
@@ -85,11 +88,11 @@ public:
     }
     [[nodiscard]] const StepEvent* stepEvents() const noexcept
     {
-        return mStepEvents;
+        return mStepEvents.GetData();
     }
     [[nodiscard]] usize stepEventCount() const noexcept
     {
-        return mStepEventCount;
+        return mStepEvents.GetSize();
     }
     [[nodiscard]] const InputCounters& counters() const noexcept
     {
@@ -251,7 +254,7 @@ public:
 
         // Clear previous-step edges on keys and actions.
         clearStepEdges();
-        mStepEventCount = 0;
+        mStepEvents.Clear();
 
         // Apply a pending reset first, if any (K05).
         if (mMailbox.Pending)
@@ -318,12 +321,12 @@ public:
             }
         }
 
-        // Commit: copy bindings and action kinds into owned storage.
-        mBindingCount = 0;
-        for (const Binding& binding : bindings)
-        {
-            mBindings[mBindingCount++] = binding;
-        }
+        // Commit: copy bindings and action kinds into owned storage. The size
+        // check above guarantees the copy fits.
+        mBindings.Clear();
+        const bool isCopied = mBindings.TryAddRange(bindings);
+        LUDUS_ASSERT(isCopied);
+        (void)isCopied;
         for (usize id = 0; id < ActionCap; ++id)
         {
             mActions[id].Present = present[id];
@@ -375,8 +378,8 @@ public:
         mSequence = 0;
         mLastStepId = 0;
         mHasConsumed = false;
-        mStepEventCount = 0;
-        mBindingCount = 0;
+        mStepEvents.Clear();
+        mBindings.Clear();
         mMapVersion = 0;
         mCounters = InputCounters{};
         for (usize i = 0; i < ActionCap; ++i)
@@ -573,9 +576,8 @@ private:
     // changed to `effectiveDown`, folding Pressed/Released edges (K08).
     void updateActionsForKey(Key key, bool effectiveDown) noexcept
     {
-        for (usize b = 0; b < mBindingCount; ++b)
+        for (const Binding& binding : mBindings)
         {
-            const Binding& binding = mBindings[b];
             if (binding.PhysicalKey != key)
             {
                 continue;
@@ -653,10 +655,11 @@ private:
 
     void appendStepEvent(const StepEvent& event) noexcept
     {
-        if (mStepEventCount < stepEventCap())
-        {
-            mStepEvents[mStepEventCount++] = event;
-        }
+        // A step appends at most one reset marker plus the pending batch, which
+        // the capacity covers; a full buffer would indicate a reducer bug.
+        const bool isAppended = mStepEvents.TryAdd(event);
+        LUDUS_ASSERT(isAppended);
+        (void)isAppended;
     }
 
     void publishSnapshot(uint64 stepId) noexcept
@@ -700,15 +703,6 @@ private:
         });
     }
 
-    // Output step-event buffer capacity: the full pending batch plus its reset
-    // marker. A static constexpr member in a header trips
-    // bugprone-dynamic-static-initializers under some clang-tidy configs, so this
-    // is a constant-expression function (purely compile-time) instead.
-    static constexpr usize stepEventCap() noexcept
-    {
-        return PendingCap + 1;
-    }
-
     // --- Live (callback-visible) state ----------------------------------
     bool mLiveDown[KEY_COUNT];
     bool mLiveSuppressed[KEY_COUNT];
@@ -729,12 +723,11 @@ private:
     uint64 mLastStepId;
     bool mHasConsumed;
     KeyboardSnapshot mSnapshot;
-    StepEvent mStepEvents[PendingCap + 1]; // batch + reset marker (see stepEventCap())
-    usize mStepEventCount;
+    // The full pending batch plus its reset marker.
+    foundation::FixedArray<StepEvent, PendingCap + 1> mStepEvents;
 
     // --- Actions / bindings --------------------------------------------
-    Binding mBindings[BindingCap];
-    usize mBindingCount;
+    foundation::FixedArray<Binding, BindingCap> mBindings;
     ActionAggregate mActions[ActionCap];
     uint32 mMapVersion;
 

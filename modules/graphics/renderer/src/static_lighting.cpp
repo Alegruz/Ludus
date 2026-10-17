@@ -37,7 +37,13 @@ struct ChartRecord final
     uint32 FirstTriangle = 0;
     uint64 SourceId = 0;
     math::Affine3 Transform;
+    uint32 SkippedTriangleCount = 0;
 };
+/// Zero-area triangles are kept as empty chart tiles but carry no surface.
+[[nodiscard]] bool IsCollapsed(const internal::ReferenceTriangle& triangle) noexcept
+{
+    return triangle.Area <= 0;
+}
 [[nodiscard]] uint64 GetElapsed(uint64 startTicks, uint64 endTicks) noexcept
 {
     return endTicks > startTicks ? endTicks - startTicks : 0;
@@ -91,6 +97,10 @@ struct StaticLightingBake::State final
     uint64 TotalSamples = 0;
     StaticLightingBakeProfile Profile;
     std::atomic<bool> ShouldStop{false};
+    // Published by preparation with release order; read by GetDiagnostics while ranges run.
+    std::atomic<bool> IsPrepared{false};
+    std::atomic<uint32> SkippedTriangleCount{0};
+    std::atomic<uint32> AffectedObjectCount{0};
     bool IsScheduled = false;
     bool IsInFlight = false;
     // Declared last so it is destroyed, and any submission drained, before its contexts.
@@ -426,10 +436,19 @@ Status StaticLightingBake::State::Prepare(const resources::SceneDefinition& scen
             triangle.GeometricNormal = internal::ReferenceNormalize(normalMeshToWorld * normalMesh);
             const float32 extent = math::Max(math::Length(edgeWorld1), math::Length(edgeWorld2));
             triangle.Error = triangle.Error + math::Vector3{extent, extent, extent} * (2 * AFFINE_ERROR_ALLOWANCE);
-            if (math::IsFinite(triangle.Area) == false || triangle.Area <= 0 ||
-                math::Length(triangle.GeometricNormal) == 0)
+            if (math::IsFinite(triangle.Area) == false || math::IsFinite(triangle.GeometricNormal) == false)
             {
                 return Status::InvalidDescription;
+            }
+            if (triangle.Area <= 0 || math::Length(triangle.GeometricNormal) == 0)
+            {
+                // Collapsed: no surface, power or normal. Keep its chart tile (zero
+                // irradiance) so layout and bake coordinates stay valid, and leave it
+                // out of emitter selection; the BVH and probes skip it by area.
+                triangle.Area = 0;
+                ++chart.SkippedTriangleCount;
+                ++triangleIndex;
+                continue;
             }
             objectArea.Add(float64(triangle.Area));
             if ((surface.Emission.X > 0 || surface.Emission.Y > 0 || surface.Emission.Z > 0) &&
@@ -446,7 +465,12 @@ Status StaticLightingBake::State::Prepare(const resources::SceneDefinition& scen
                 return Status::CapacityExceeded;
             }
             const float32 luminance = math::Dot(material.Emission, math::Vector3{.2126F, .7152F, .0722F});
-            if (luminance > 0)
+            if (objectArea.GetResult() <= 0)
+            {
+                // Every triangle collapsed: there is no surface to emit the authored power.
+                surface.Emission = {};
+            }
+            else if (luminance > 0)
             {
                 surface.Emission =
                     material.Emission *
@@ -464,6 +488,16 @@ Status StaticLightingBake::State::Prepare(const resources::SceneDefinition& scen
     {
         return bvhStatus;
     }
+    uint32 skippedTriangles = 0;
+    uint32 affectedObjects = 0;
+    for (const ChartRecord& chart : state->Charts)
+    {
+        skippedTriangles += chart.SkippedTriangleCount;
+        affectedObjects += chart.SkippedTriangleCount != 0 ? 1U : 0U;
+    }
+    SkippedTriangleCount.store(skippedTriangles, std::memory_order_relaxed);
+    AffectedObjectCount.store(affectedObjects, std::memory_order_relaxed);
+    IsPrepared.store(true, std::memory_order_release);
     return Status::Pending;
 }
 Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
@@ -483,6 +517,13 @@ Status StaticLightingBake::Step(uint32 maxPathSamples) noexcept
     }
     for (uint32 i = 0; i < maxPathSamples && state.Triangle < state.Job.Scene.Triangles.GetSize(); ++i)
     {
+        if (IsCollapsed(state.Job.Scene.Triangles[state.Triangle]) == true)
+        {
+            // No surface to gather about; its tile keeps zero irradiance.
+            state.Sample = 0;
+            ++state.Triangle;
+            continue;
+        }
         math::Vector3 irradiance;
         const Status status =
             internal::EvaluateReferenceDiffuseProbe(state.Job,
@@ -588,6 +629,7 @@ Status StaticLightingBake::GetChart(usize objectIndex, StaticLightingChart& outC
         .SceneRevision = mStateOrNull->Description.SceneRevision,
         .DependencyRevision = mStateOrNull->Description.DependencyRevision,
         .Transform = chart.Transform,
+        .SkippedTriangleCount = chart.SkippedTriangleCount,
     };
     return Status::Ready;
 }
@@ -743,6 +785,41 @@ Status StaticLightingBake::GetProfile(StaticLightingBakeProfile& outProfile) con
     outProfile = mStateOrNull->Profile;
     return Status::Ready;
 }
+Status StaticLightingBake::GetDiagnostics(StaticLightingBakeDiagnostics& outDiagnostics) const noexcept
+{
+    if (mStateOrNull == nullptr)
+    {
+        return Status::InvalidState;
+    }
+    const State& state = *mStateOrNull;
+    if (state.IsPrepared.load(std::memory_order_acquire) == false)
+    {
+        // Serial preparation completes inside Initialize, so only a scheduled one can be unresolved.
+        return state.IsInFlight == true ? Status::Pending : Status::NotReady;
+    }
+    outDiagnostics =
+    {
+        .SkippedTriangleCount = state.SkippedTriangleCount.load(std::memory_order_relaxed),
+        .AffectedObjectCount = state.AffectedObjectCount.load(std::memory_order_relaxed),
+    };
+    return Status::Ready;
+}
+Status StaticLightingBake::GetSkippedTriangleCount(usize objectIndex, uint32& outSkippedTriangleCount) const noexcept
+{
+    StaticLightingBakeDiagnostics diagnostics;
+    const Status prepared = GetDiagnostics(diagnostics);
+    if (prepared != Status::Ready)
+    {
+        return prepared;
+    }
+    // Preparation wrote the per-object counts before its release store; ranges never touch them.
+    if (objectIndex >= mStateOrNull->Charts.GetSize())
+    {
+        return Status::InvalidDescription;
+    }
+    outSkippedTriangleCount = mStateOrNull->Charts[objectIndex].SkippedTriangleCount;
+    return Status::Ready;
+}
 void StaticLightingBake::State::RequestStop() noexcept
 {
     ShouldStop.store(true, std::memory_order_relaxed);
@@ -782,6 +859,12 @@ threading::JobOutcome StaticLightingBake::State::RunRange(void* context) noexcep
     range.Result = Status::Ready;
     for (uint32 triangle = first; triangle < last && outcome == threading::JobOutcome::Succeeded; ++triangle)
     {
+        if (IsCollapsed(state.Job.Scene.Triangles[triangle]) == true)
+        {
+            // Skipped as in Step; count its samples so progress still reaches the total.
+            completed.store(completed.load(std::memory_order_relaxed) + samples, std::memory_order_relaxed);
+            continue;
+        }
         // Same per-triangle accumulation order as Step, so results are bit-identical.
         internal::ReferenceSum sum;
         for (uint32 sample = 0; sample < samples; ++sample)

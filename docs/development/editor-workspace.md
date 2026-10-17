@@ -828,7 +828,13 @@ contribution. HDR/constant authored environments supply the initial irradiance
 and retain specular reflection after the bake. No editor fill is added to Lit.
 
 The status shows planar proxy/shadow counts, bake progress, completion or failure.
-A failed bake retains the direct-lit viewport and camera controls. Camera, orbit,
+A failed bake retains the direct-lit viewport and camera controls. While the bake
+runs, **Cancel bake** below the shading selector stops it and keeps direct
+lighting; **Bake again** restarts it. When the bake tolerates input flaws, such as
+zero-area triangles in imported meshes, the bake controls show a warning with the
+skipped count, and its tooltip names each affected object, as soon as preparation
+completes. The status line repeats the count, so you can fix the meshes or cancel
+the bake instead of waiting for a rejection. Camera, orbit,
 exposure and layout changes do not restart this view-independent bake; geometry,
 material, light and environment changes create a new exact revision. Saved World
 assets preserve authored lighting through reopen and relocation. Legacy v1/v2
@@ -839,10 +845,10 @@ planar emitter patch and hard cube-map shadows. It supports up to 128 admitted
 lights and 80 shadow regions: point/area lights consume six faces, while
 spot/directional lights consume one. The 2048-pixel atlas packs guttered cells;
 capacity, malformed or unsupported source topology rejects rather than dropping
-illumination. Zero-area emitter triangles, common in imported meshes, carry no
-power and form no proxy. The static bake still rejects any instance with a
-zero-area triangle (for example the staircase2 reference scene); Lit then keeps
-its shadowed direct lighting and reports the bake failure. Curved or concave sources can exceed this proxy profile. The
+illumination. Zero-area triangles, common in imported meshes, never reject a scene:
+they carry no power and form no area proxy, an authored World mesh gives them an
+inert placeholder normal, and the static bake skips and reports them (for example
+the staircase2 reference scene). Curved or concave sources can exceed this proxy profile. The
 static bake uses 64 cosine samples per triangle, depth four, and separate
 4×4 guttered triangle tiles; it can show spatial discontinuities and sampling
 noise. It includes diffuse bounces, with finite-depth bias, rather than glossy

@@ -54,6 +54,78 @@ TEST_CASE("Fabricated / cross-system / stale handles are rejected safely", "[aud
     REQUIRE(sys.PlayClip(p, v) == Status::InvalidHandle);
 }
 
+TEST_CASE("Handles from an ended audio session are rejected by the next session", "[audio][admission]")
+{
+    // Audio keeps its own uint32 session source (docs/architecture/object-handles-uuid.md,
+    // stage 2). Each session restarts slots and generations, so the session field
+    // alone separates these handles from the successor's identical slot values.
+    const Array<uint8> wav = test::MakeSineWav(48000, 1, 4800);
+    const ModifierValue modifierValue{ .BusIndex = 0, .TargetDb = -6.0F };
+    uint32 oldSession = 0;
+    ClipHandle oldClip{};
+    VoiceHandle oldVoice{};
+    StreamHandle oldStream{};
+    ModifierHandle oldModifier{};
+    {
+        AudioSystem first;
+        InitOffline(first);
+        oldSession = first.GetSession();
+        oldClip = PrepareSine(first);
+        PlayParams play{};
+        play.Clip = oldClip;
+        REQUIRE(IsOk(first.PlayClip(play, oldVoice)));
+        REQUIRE(
+            IsOk(first.PrepareStream(std::span<const uint8>(wav.data(), wav.size()), StreamDescriptor{}, oldStream)));
+        REQUIRE(IsOk(first.AcquireModifier(std::span<const ModifierValue>(&modifierValue, 1), 1.0F, oldModifier)));
+    }
+
+    AudioSystem second;
+    InitOffline(second);
+    REQUIRE(second.GetSession() != 0);
+    REQUIRE(second.GetSession() != oldSession);
+    const ClipHandle clip = PrepareSine(second);
+    PlayParams play{};
+    play.Clip = clip;
+    VoiceHandle voice{};
+    REQUIRE(IsOk(second.PlayClip(play, voice)));
+    StreamHandle stream{};
+    REQUIRE(IsOk(second.PrepareStream(std::span<const uint8>(wav.data(), wav.size()), StreamDescriptor{}, stream)));
+    ModifierHandle modifier{};
+    REQUIRE(IsOk(second.AcquireModifier(std::span<const ModifierValue>(&modifierValue, 1), 1.0F, modifier)));
+    REQUIRE(clip.Slot == oldClip.Slot);
+    REQUIRE(clip.Generation == oldClip.Generation);
+    REQUIRE(voice.Slot == oldVoice.Slot);
+    REQUIRE(voice.Generation == oldVoice.Generation);
+    REQUIRE(stream.Slot == oldStream.Slot);
+    REQUIRE(stream.Generation == oldStream.Generation);
+    REQUIRE(modifier.Slot == oldModifier.Slot);
+    REQUIRE(modifier.Generation == oldModifier.Generation);
+
+    REQUIRE_FALSE(second.IsClipReady(oldClip));
+    PlayParams stalePlay{};
+    stalePlay.Clip = oldClip;
+    VoiceHandle rejected{};
+    REQUIRE(second.PlayClip(stalePlay, rejected) == Status::InvalidHandle);
+    REQUIRE_FALSE(rejected.IsValid());
+    REQUIRE(second.RetireClip(oldClip) == Status::InvalidHandle);
+    VoiceInfo info{};
+    REQUIRE(second.GetVoiceInfo(oldVoice, info) == Status::InvalidHandle);
+    REQUIRE(second.Stop(oldVoice) == Status::InvalidHandle);
+    REQUIRE(second.PlayStream(oldStream, 0, 6, 1.0F, rejected) == Status::InvalidHandle);
+    REQUIRE_FALSE(rejected.IsValid());
+    REQUIRE(second.RetireStream(oldStream) == Status::InvalidHandle);
+    REQUIRE(second.UpdateModifier(oldModifier, 0.5F) == Status::InvalidHandle);
+    REQUIRE(second.ReleaseModifier(oldModifier) == Status::InvalidHandle);
+
+    // The successor's live objects in the same slots were not touched.
+    REQUIRE(second.IsClipReady(clip));
+    REQUIRE(IsOk(second.GetVoiceInfo(voice, info)));
+    REQUIRE(IsOk(second.UpdateModifier(modifier, 0.5F)));
+    REQUIRE(IsOk(second.RetireStream(stream)));
+    REQUIRE(IsOk(second.ReleaseModifier(modifier)));
+    REQUIRE(IsOk(second.Stop(voice)));
+}
+
 TEST_CASE("An invalid last record rejects the whole batch with no leaked pins", "[audio][admission]")
 {
     AudioSystem sys;

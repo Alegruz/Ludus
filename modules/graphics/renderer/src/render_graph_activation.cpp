@@ -357,6 +357,17 @@ RenderGraphPackage::GetPrograms(const rhi::RasterShaderDescription& compositeVer
     for (usize role = 0; role < format::STAGE_ROLE_COUNT; ++role)
     {
         rhi::RasterShaderDescription& description = *members[role];
+        const StaticArray<State::StageView, format::SHADER_TARGET_COUNT>& views = state.Stages[role];
+        bool hasArtifact = false;
+        for (const State::StageView& view : views)
+        {
+            hasArtifact = hasArtifact == true || view.IsPresent == true;
+        }
+        // Like a compiled header, a role the generation does not carry stays an empty description.
+        if (hasArtifact == false)
+        {
+            continue;
+        }
         const bool isVertex = role == static_cast<usize>(format::StageRole::ColorVertex) ||
                               role == static_cast<usize>(format::StageRole::DepthVertex);
         description.Artifact.Stage = isVertex == true ? rhi::ShaderStage::Vertex : rhi::ShaderStage::Fragment;
@@ -364,7 +375,6 @@ RenderGraphPackage::GetPrograms(const rhi::RasterShaderDescription& compositeVer
         {
             description.Inputs = state.Inputs.AsSpan();
         }
-        const StaticArray<State::StageView, format::SHADER_TARGET_COUNT>& views = state.Stages[role];
         const State::StageView& metal = views[static_cast<usize>(format::ShaderTarget::Metal)];
         const State::StageView& spirv = views[static_cast<usize>(format::ShaderTarget::Spirv)];
         const State::StageView& wgsl = views[static_cast<usize>(format::ShaderTarget::Wgsl)];
