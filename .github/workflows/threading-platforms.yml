@@ -98,7 +98,7 @@ jobs:
             -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON -DLUDUS_ENABLE_CCACHE=OFF
           cmake --build out/build/windows-clang-development --target \
             ludus_foundation_threading_tests ludus_threading_startup_tests \
-            ludus_threading_profiling_tests ludus_threading_alloc_tests
+            ludus_threading_profiling_tests ludus_threading_alloc_tests -- -k 0
       - name: Test the Windows backend
         run: |
           export PATH="$PWD/out/host-tools/venv/Scripts:$PATH"
