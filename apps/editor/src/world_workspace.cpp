@@ -427,9 +427,9 @@ WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent)
         }
     });
 #if defined(Q_OS_WASM)
-    help->setText(QStringLiteral("Browser Worlds live in this session's in-memory project; export the project to keep "
-                                 "them. Import scene… copies a scene folder, .zip or .pbrt with its files into the "
-                                 "session and cooks it here. Play and runtime binding require the native editor."));
+    intro->setText(QStringLiteral("Browser Worlds live in this session's in-memory project; export the project to keep "
+                                  "them. Import scene… copies a scene folder, .zip or .pbrt with its files into the "
+                                  "session and cooks it here. Play and runtime binding require the native editor."));
 #endif
     DraftTimer_.setSingleShot(true);
     DraftTimer_.setInterval(180);

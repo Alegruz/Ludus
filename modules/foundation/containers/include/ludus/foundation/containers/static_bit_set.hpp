@@ -87,7 +87,7 @@ public:
     /// Bits stored per word.
     static constexpr usize BITS_PER_WORD = 64;
     /// Number of words holding the bits; 0 when BitCount is 0.
-    static constexpr usize WORD_COUNT = (BitCount + BITS_PER_WORD - 1) / BITS_PER_WORD;
+    inline static constexpr usize WORD_COUNT = (BitCount + BITS_PER_WORD - 1) / BITS_PER_WORD;
 
     /// Every bit reset.
     constexpr StaticBitSet() noexcept = default;
@@ -369,10 +369,10 @@ public:
     }
 
 private:
-    static constexpr usize TAIL_BITS = BitCount % BITS_PER_WORD;
+    inline static constexpr usize TAIL_BITS = BitCount % BITS_PER_WORD;
     // A zero-bit set stores one always-zero word so every operation compiles
     // without a separate specialization; WORD_COUNT stays 0 for all logic.
-    static constexpr usize STORAGE_WORD_COUNT = WORD_COUNT == 0 ? 1 : WORD_COUNT;
+    inline static constexpr usize STORAGE_WORD_COUNT = WORD_COUNT == 0 ? 1 : WORD_COUNT;
 
     [[nodiscard]] static constexpr uint64 bitMask(usize index) noexcept
     {
