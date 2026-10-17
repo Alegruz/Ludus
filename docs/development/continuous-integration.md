@@ -244,8 +244,9 @@ calls it, and promotion requires it. Integration PRs run it only when they chang
 the threading module, the Windows FoundationBase diagnostics backend, the Windows
 Conan profile or the workflow itself.
 
-The Windows job installs LLVM 18.1.8 from Chocolatey on `windows-2025` and drives
-`clang++` against the runner's Microsoft STL and dynamic CRT. It installs the
+The Windows job installs the upstream LLVM 23.1.3 installer on `windows-2022`, after
+checking it against its pinned SHA-256 digest (Chocolatey does not package LLVM 23
+yet), and drives `clang++` against the runner's Microsoft STL and dynamic CRT. It installs the
 pinned CMake/Ninja/Conan versions, exports the local Catch2 recipe and installs
 only that locked package with `config/conan/profiles/windows-clang-x86_64`. Ludus
 configures only the FoundationThreading closure on Windows (Base, Memory,
@@ -256,8 +257,8 @@ and allocation suites once, then repeats the scheduler and startup suites 20 tim
 The macOS job prepares `macos-clang-development` without the editor or shader
 tools, proves TSan detection with the sanitizer control, then runs the threading,
 startup-seam and profiling-adapter suites under TSan, repeating the first two.
-The pinned LLVM 18 TSan runtime starts on the hosted macOS 15 image but not on
-macOS 26 hosts; see [macOS sanitizer runtimes](building.md#macos-sanitizer-runtimes).
+The pinned LLVM 23 TSan runtime also starts on local macOS 26 hosts, which LLVM
+before 22.1.3 could not; see [macOS sanitizer runtimes](building.md#macos-sanitizer-runtimes).
 
 ## Dependencies and caches
 

@@ -99,6 +99,16 @@ class ToolchainPinTests(unittest.TestCase):
                 if "apt-get" in text and apt_package.search(text):
                     self.assertIn("llvm_apt_source.py", text)
 
+    def test_windows_threading_lane_installs_the_pinned_llvm_major(self):
+        import re
+
+        workflow = (self.ROOT / ".github/workflows/threading-platforms.yml").read_text()
+        version = re.search(r"LLVM_WINDOWS_VERSION: (\d+)\.(\d+)\.(\d+)\n", workflow)
+        self.assertIsNotNone(version)
+        self.assertEqual(int(version.group(1)), LLVM_MAJOR)
+        self.assertRegex(workflow, r"LLVM_WINDOWS_SHA256: [0-9a-f]{64}\n")
+        self.assertIn("Get-FileHash -Algorithm SHA256", workflow)
+
     def test_committed_llvm_apt_key_matches_the_published_fingerprint(self):
         import llvm_apt_source
 
