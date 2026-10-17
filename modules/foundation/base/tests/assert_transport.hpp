@@ -7,7 +7,8 @@
 inline void ConfigureTestTransport()
 {
     const char* descriptor = std::getenv("LUDUS_TEST_DIAGNOSTIC_FD");
-    if (descriptor != nullptr && !ludus::foundation::diagnostics::ConfigureEmergencySocket(std::atoi(descriptor)))
+    if (descriptor != nullptr &&
+        ludus::foundation::diagnostics::ConfigureEmergencySocket(std::atoi(descriptor)) == false)
     {
         std::_Exit(79);
     }

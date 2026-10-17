@@ -80,7 +80,7 @@ struct Gate final
         AllowExit();
         if (Started)
         {
-            while (!Exited.load(std::memory_order_acquire))
+            while (Exited.load(std::memory_order_acquire) == false)
             {
                 WaitTurn();
             }
@@ -297,7 +297,7 @@ TEST_CASE("Final sound waiter cancellation drains completed worker without nativ
     REQUIRE(manager.Cancel(request) == r::Status::Ok);
     manager.Service(64);
     REQUIRE(manager.Inspect().PreparationBytes == (late ? 0 : descriptor.Peak.PreparationBytes));
-    if (!late)
+    if (late == false)
     {
         gate.AllowWork();
         REQUIRE(Wait(gate.Completed));

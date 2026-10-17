@@ -50,7 +50,7 @@ int main(int argc, char** argv)
     // Configure transports exactly like the startup integration would. Report is
     // optional here; the control endpoint is what drives the decision.
     const int report_fd = ReadFd("LUDUS_DIAGNOSTIC_REPORT_FD");
-    if (report_fd >= 0 && !fbd::ConfigureEmergencySocket(report_fd))
+    if (report_fd >= 0 && fbd::ConfigureEmergencySocket(report_fd) == false)
     {
         return 79;
     }
@@ -118,7 +118,7 @@ int main(int argc, char** argv)
         // opens a dialog or sends a DecisionRequest.
         const bool ok = LUDUS_CHECK(FailingCondition(), "check-recovery-probe");
         Mark(ok ? "CHECK-TRUE\n" : "CHECK-FALSE\n");
-        return !ok && gConditions == 1 ? 0 : 66;
+        return ok == false && gConditions == 1 ? 0 : 66;
     }
 
     Mark("UNKNOWN-MODE\n");

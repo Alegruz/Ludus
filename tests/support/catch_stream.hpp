@@ -22,7 +22,7 @@ void Insert(std::ostream& stream, double value);
 void Insert(std::ostream& stream, long double value);
 
 template <typename T>
-    requires std::is_integral_v<T> && (!std::is_same_v<T, char>) && (!std::is_same_v<T, bool>)
+    requires std::is_integral_v<T> && (std::is_same_v<T, char> == false) && (std::is_same_v<T, bool> == false)
 void Insert(std::ostream& stream, T value)
 {
     if constexpr (std::is_signed_v<T>)
@@ -38,8 +38,8 @@ void Insert(std::ostream& stream, T value)
 // User-defined stream printers remain available by ADL. Their owners explicitly
 // include <ostream>; scalar/range diagnostics use the compiled overloads above.
 template <typename T>
-    requires(!std::is_arithmetic_v<T>) && (!std::is_convertible_v<const T&, const char*>) &&
-            (!std::is_same_v<T, std::string>)
+    requires(std::is_arithmetic_v<T> == false) && (std::is_convertible_v<const T&, const char*> == false) &&
+            (std::is_same_v<T, std::string> == false)
 void Insert(std::ostream& stream, const T& value)
 {
     stream << value;

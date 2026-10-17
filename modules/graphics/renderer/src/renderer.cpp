@@ -187,7 +187,7 @@ Status FreeSlot(const T* slots, usize count, usize& output) noexcept
     bool exhausted = false;
     for (usize i = 0; i < count; ++i)
     {
-        if (!slots[i].Used)
+        if (slots[i].Used == false)
         {
             if (slots[i].Generation != LAST_ID)
             {
@@ -587,7 +587,7 @@ struct Renderer::State final
     void DropProgram(usize index) noexcept
     {
         auto& p = Programs[index];
-        if (!p.Owned && p.References == 0)
+        if (p.Owned == false && p.References == 0)
         {
             for (auto& request : p.Requests)
             {
@@ -606,7 +606,7 @@ struct Renderer::State final
     void DropMaterial(usize index) noexcept
     {
         auto& m = Materials[index];
-        if (!m.Owned && m.References == 0)
+        if (m.Owned == false && m.References == 0)
         {
             static_cast<void>(rhi::Destroy(Device, m.Bindings));
             static_cast<void>(rhi::Destroy(Device, m.Texture));
@@ -641,7 +641,7 @@ struct Renderer::State final
     void DropShadow(usize index) noexcept
     {
         auto& shadow = Shadows[index];
-        if (!shadow.Owned && shadow.References == 0)
+        if (shadow.Owned == false && shadow.References == 0)
         {
             for (usize i = 0; i < shadow.Count; ++i)
             {
@@ -702,7 +702,7 @@ struct Renderer::State final
                 found = true;
                 break;
             }
-            if (!found)
+            if (found == false)
             {
                 return false;
             }
@@ -727,7 +727,7 @@ struct Renderer::State final
     void DropMesh(usize index) noexcept
     {
         auto& mesh = MeshRecords[index];
-        if (!mesh.Owned && mesh.References == 0)
+        if (mesh.Owned == false && mesh.References == 0)
         {
             static_cast<void>(rhi::Destroy(Device, mesh.Vertices));
             static_cast<void>(rhi::Destroy(Device, mesh.Indices));
@@ -742,7 +742,7 @@ struct Renderer::State final
     void DropSnapshot(usize index) noexcept
     {
         auto& scene = SnapshotRecords[index];
-        if (!scene.Owned && scene.References == 0)
+        if (scene.Owned == false && scene.References == 0)
         {
             for (usize i = 0; i < scene.Count; ++i)
             {
@@ -797,17 +797,21 @@ Status Renderer::State::ReserveStorage(const Limits& limits) noexcept
         return TryMultiply(count, width, requested) && TryAdd(bytes, requested, bytes);
     };
     usize snapshotItems = 0, snapshotGroups = 0, viewPackets = 0;
-    if (!TryMultiply(usize(limits.Snapshots), usize(limits.Objects), snapshotItems) ||
-        !TryMultiply(usize(limits.Snapshots), groups, snapshotGroups) ||
-        !TryMultiply(usize(limits.Views), usize(limits.Objects), viewPackets) ||
-        !charge(limits.Meshes, sizeof(MeshRecord)) || !charge(limits.Snapshots, sizeof(SnapshotRecord)) ||
-        !charge(limits.Views, sizeof(ViewRecord)) || !charge(limits.Materials, sizeof(MaterialRecord)) ||
-        !charge(limits.MaterialPrograms, sizeof(ProgramRecord)) ||
-        !charge(limits.ShadowAtlases, sizeof(ShadowRecord)) ||
-        !charge(limits.Presentations, sizeof(PresentationRecord)) || !charge(snapshotItems, sizeof(Item)) ||
-        !charge(snapshotGroups, sizeof(math::Aabb3) + sizeof(bool)) || !charge(viewPackets, sizeof(Packet)) ||
-        !charge(limits.Objects, 2 * sizeof(Candidate) + sizeof(Instance)) ||
-        !charge(groups, sizeof(math::FrustumRelation)) || bytes > limits.HostBytes)
+    if (TryMultiply(usize(limits.Snapshots), usize(limits.Objects), snapshotItems) == false ||
+        TryMultiply(usize(limits.Snapshots), groups, snapshotGroups) == false ||
+        TryMultiply(usize(limits.Views), usize(limits.Objects), viewPackets) == false ||
+        charge(limits.Meshes, sizeof(MeshRecord)) == false ||
+        charge(limits.Snapshots, sizeof(SnapshotRecord)) == false ||
+        charge(limits.Views, sizeof(ViewRecord)) == false ||
+        charge(limits.Materials, sizeof(MaterialRecord)) == false ||
+        charge(limits.MaterialPrograms, sizeof(ProgramRecord)) == false ||
+        charge(limits.ShadowAtlases, sizeof(ShadowRecord)) == false ||
+        charge(limits.Presentations, sizeof(PresentationRecord)) == false ||
+        charge(snapshotItems, sizeof(Item)) == false ||
+        charge(snapshotGroups, sizeof(math::Aabb3) + sizeof(bool)) == false ||
+        charge(viewPackets, sizeof(Packet)) == false ||
+        charge(limits.Objects, 2 * sizeof(Candidate) + sizeof(Instance)) == false ||
+        charge(groups, sizeof(math::FrustumRelation)) == false || bytes > limits.HostBytes)
     {
         return Status::CapacityExceeded;
     }
@@ -816,25 +820,26 @@ Status Renderer::State::ReserveStorage(const Limits& limits) noexcept
     const auto reserve = []<typename T>(Array<T>& values, usize count) noexcept {
         return values.TryEnsureCapacity(count) && values.TryResize(count);
     };
-    if (!reserve(MeshRecords, limits.Meshes) || !reserve(SnapshotRecords, limits.Snapshots) ||
-        !reserve(ViewRecords, limits.Views) || !reserve(Materials, limits.Materials) ||
-        !reserve(Programs, limits.MaterialPrograms) || !reserve(Shadows, limits.ShadowAtlases) ||
-        !reserve(Presentations, limits.Presentations) || !reserve(Candidates, limits.Objects) ||
-        !reserve(Scratch, limits.Objects) || !reserve(Instances, limits.Objects) || !reserve(GroupRelations, groups))
+    if (reserve(MeshRecords, limits.Meshes) == false || reserve(SnapshotRecords, limits.Snapshots) == false ||
+        reserve(ViewRecords, limits.Views) == false || reserve(Materials, limits.Materials) == false ||
+        reserve(Programs, limits.MaterialPrograms) == false || reserve(Shadows, limits.ShadowAtlases) == false ||
+        reserve(Presentations, limits.Presentations) == false || reserve(Candidates, limits.Objects) == false ||
+        reserve(Scratch, limits.Objects) == false || reserve(Instances, limits.Objects) == false ||
+        reserve(GroupRelations, groups) == false)
     {
         return Status::OutOfMemory;
     }
     for (auto& snapshot : SnapshotRecords)
     {
-        if (!reserve(snapshot.Items, limits.Objects) || !reserve(snapshot.Groups, groups) ||
-            !reserve(snapshot.HasGroup, groups))
+        if (reserve(snapshot.Items, limits.Objects) == false || reserve(snapshot.Groups, groups) == false ||
+            reserve(snapshot.HasGroup, groups) == false)
         {
             return Status::OutOfMemory;
         }
     }
     for (auto& view : ViewRecords)
     {
-        if (!reserve(view.Packets, limits.Objects))
+        if (reserve(view.Packets, limits.Objects) == false)
         {
             return Status::OutOfMemory;
         }
@@ -870,7 +875,7 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
     {
         return Status::InvalidState;
     }
-    if (!ValidCapacities(limits))
+    if (ValidCapacities(limits) == false)
     {
         return Status::InvalidDescription;
     }
@@ -885,7 +890,8 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
         return Status::Unsupported;
     }
     if (vertex.Artifact.Stage != rhi::ShaderStage::Vertex || fragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
-        !vertex.Bindings.empty() || !fragment.Bindings.empty() || vertex.Inputs.size() != 6 || !fragment.Inputs.empty())
+        vertex.Bindings.empty() == false || fragment.Bindings.empty() == false || vertex.Inputs.size() != 6 ||
+        fragment.Inputs.empty() == false)
     {
         return Status::InvalidDescription;
     }
@@ -921,13 +927,13 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
     {
         status = rhi::CreateRasterShader(device, fragment, state->Fragment);
     }
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         Reset();
         return status;
     }
     status = Poll();
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         Reset();
     }
@@ -935,7 +941,7 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
 }
 Status Renderer::Poll() noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidState;
     }
@@ -1024,7 +1030,7 @@ Status Renderer::Poll() noexcept
 Status Renderer::InitializeViews(const rhi::RasterShaderDescription& vertex,
                                  const rhi::RasterShaderDescription& fragment) noexcept
 {
-    if (!mState || mState->Setup != Status::Ready)
+    if (mState.Get() == nullptr || mState->Setup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -1035,8 +1041,8 @@ Status Renderer::InitializeViews(const rhi::RasterShaderDescription& vertex,
     }
     if (vertex.Artifact.Stage != rhi::ShaderStage::Vertex || fragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
         vertex.Inputs.size() != 1 || vertex.Inputs[0].Location != 0 ||
-        vertex.Inputs[0].Format != rhi::RasterVertexFormat::Float4 || !vertex.Bindings.empty() ||
-        !fragment.Inputs.empty() || fragment.Bindings.size() != 2)
+        vertex.Inputs[0].Format != rhi::RasterVertexFormat::Float4 || vertex.Bindings.empty() == false ||
+        fragment.Inputs.empty() == false || fragment.Bindings.size() != 2)
     {
         return Status::InvalidDescription;
     }
@@ -1054,7 +1060,7 @@ Status Renderer::InitializeViews(const rhi::RasterShaderDescription& vertex,
     {
         status = rhi::CreateRasterShader(s.Device, fragment, s.CompositeFragment);
     }
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         static_cast<void>(rhi::Destroy(s.Device, s.CompositeVertex));
         static_cast<void>(rhi::Destroy(s.Device, s.CompositeFragment));
@@ -1067,7 +1073,7 @@ Status Renderer::InitializeViews(const rhi::RasterShaderDescription& vertex,
 }
 Status Renderer::PollViews() noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidState;
     }
@@ -1210,7 +1216,7 @@ Status Renderer::DrawView(PreparedView handle, const rhi::RasterPassDescription&
     pass.ClearDepth = view.Depth == DepthConvention::ReverseZ ? 0 : 1;
     const bool surface = rhi::IsNull(description.Color);
     bool hdr = false;
-    if (!surface)
+    if (surface == false)
     {
         rhi::TextureDescription texture;
         const auto targetStatus = rhi::GetTextureDescription(s.Device, description.Color, texture);
@@ -1219,7 +1225,7 @@ Status Renderer::DrawView(PreparedView handle, const rhi::RasterPassDescription&
             return targetStatus;
         }
         hdr = texture.Format == rhi::RasterFormat::Rgba16Float;
-        if (!texture.Attachment || (texture.Format != rhi::RasterFormat::Rgba8Unorm && !hdr) ||
+        if (texture.Attachment == false || (texture.Format != rhi::RasterFormat::Rgba8Unorm && hdr == false) ||
             (hdr && mState->LightingSetup != Status::Ready))
         {
             return Status::Unsupported;
@@ -1228,7 +1234,7 @@ Status Renderer::DrawView(PreparedView handle, const rhi::RasterPassDescription&
     for (usize i = 0; i < view.DrawCount; ++i)
     {
         const auto slot = view.Packets[i].MaterialSlot;
-        if (slot != NO_MATERIAL && ((s.Materials[slot].Lit && surface) || (!s.Materials[slot].Lit && hdr)))
+        if (slot != NO_MATERIAL && ((s.Materials[slot].Lit && surface) || (s.Materials[slot].Lit == false && hdr)))
         {
             return Status::Unsupported;
         }
@@ -1288,7 +1294,7 @@ Status Renderer::PreparePresentationData(rhi::TextureHandle source,
                                          const LightingOutput* lighting,
                                          Presentation& output) noexcept
 {
-    if (!mState || mState->ViewsSetup != Status::Ready)
+    if (mState.Get() == nullptr || mState->ViewsSetup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -1302,7 +1308,7 @@ Status Renderer::PreparePresentationData(rhi::TextureHandle source,
         return Status::NotReady;
     }
     if (lighting != nullptr &&
-        (!math::IsFinite(lighting->Exposure) || lighting->Exposure < 0.000001F || lighting->Exposure > 1000))
+        (math::IsFinite(lighting->Exposure) == false || lighting->Exposure < 0.000001F || lighting->Exposure > 1000))
     {
         return Status::InvalidDescription;
     }
@@ -1319,8 +1325,9 @@ Status Renderer::PreparePresentationData(rhi::TextureHandle source,
     {
         return status;
     }
-    if (!description.Attachment || (description.Format != rhi::RasterFormat::Rgba8Unorm &&
-                                    (lighting == nullptr || description.Format != rhi::RasterFormat::Rgba16Float)))
+    if (description.Attachment == false ||
+        (description.Format != rhi::RasterFormat::Rgba8Unorm &&
+         (lighting == nullptr || description.Format != rhi::RasterFormat::Rgba16Float)))
     {
         return Status::Unsupported;
     }
@@ -1366,7 +1373,7 @@ Status Renderer::PreparePresentationData(rhi::TextureHandle source,
                                        p.OutputParameters[mode]);
         }
     }
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         for (auto& buffer : p.OutputParameters)
         {
@@ -1381,7 +1388,7 @@ Status Renderer::PreparePresentationData(rhi::TextureHandle source,
     p.Used = p.Owned = true;
     output = Access::Make<Presentation>({s.Owner, p.Generation, index});
     status = GetStatus(output);
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         static_cast<void>(Release(output));
     }
@@ -1389,7 +1396,7 @@ Status Renderer::PreparePresentationData(rhi::TextureHandle source,
 }
 Status Renderer::GetStatus(Presentation handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -1437,7 +1444,7 @@ Status Renderer::GetStatus(Presentation handle) noexcept
                                                          {1, {}, 0, 0, p->Texture, {}},
                                                          {2, {}, 0, 0, {}, s.CompositeSampler}};
             status = rhi::CreateBindingSet(s.Device, s.OutputLayout, resources, p->OutputBindings[mode]);
-            if (!Accepted(status))
+            if (Accepted(status) == false)
             {
                 return p->Setup = status;
             }
@@ -1467,7 +1474,7 @@ Status Renderer::GetStatus(Presentation handle) noexcept
             const rhi::RasterBindingResource resources[]{{ .Binding = 0, .Texture = p->Texture },
                                                          { .Binding = 1, .Sampler = s.CompositeSampler }};
             status = rhi::CreateBindingSet(s.Device, s.CompositeLayout, resources, p->Bindings);
-            if (!Accepted(status))
+            if (Accepted(status) == false)
             {
                 return p->Setup = status;
             }
@@ -1483,7 +1490,7 @@ Status Renderer::GetStatus(Presentation handle) noexcept
 }
 Status Renderer::DrawPresentation(Presentation handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -1525,7 +1532,7 @@ Status Renderer::DrawPresentation(Presentation handle) noexcept
 }
 Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::RasterPassDescription& description) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -1535,7 +1542,7 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
     {
         return Status::InvalidHandle;
     }
-    if (!p->Lighting)
+    if (p->Lighting == false)
     {
         return Status::InvalidDescription;
     }
@@ -1550,7 +1557,7 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
     }
     const bool surface = rhi::IsNull(description.Color);
     uint32 width = frame.Width, height = frame.Height;
-    if (!surface)
+    if (surface == false)
     {
         rhi::TextureDescription target;
         const auto status = rhi::GetTextureDescription(s.Device, description.Color, target);
@@ -1558,7 +1565,7 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
         {
             return status;
         }
-        if (!target.Attachment || target.Format != rhi::RasterFormat::Rgba8Unorm)
+        if (target.Attachment == false || target.Format != rhi::RasterFormat::Rgba8Unorm)
         {
             return Status::Unsupported;
         }
@@ -1578,7 +1585,7 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
     {
         return status;
     }
-    const usize mode = p->Encode && (!surface || frame.Encoding == rhi::SurfaceEncoding::Unorm) ? 1U : 0U;
+    const usize mode = p->Encode && (surface == false || frame.Encoding == rhi::SurfaceEncoding::Unorm) ? 1U : 0U;
     const rhi::RasterVertexSlice vertices[]{{p->Vertices, 0, 4 * sizeof(math::Vector4)}};
     return rhi::DrawIndexed(
         s.Device,
@@ -1586,7 +1593,7 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
 }
 Status Renderer::Release(Presentation& handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -1639,7 +1646,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
                                : lit     ? 11U
                                          : 3U) +
                               (hasSurfaceMapProfile ? 1U : 0U) + (hasAuthoredProfile ? 2U : 0U);
-    if (!mState || mState->Setup != Status::Ready || (lit && mState->LightingSetup != Status::Ready))
+    if (mState.Get() == nullptr || mState->Setup != Status::Ready || (lit && mState->LightingSetup != Status::Ready))
     {
         return Status::NotReady;
     }
@@ -1697,7 +1704,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
             found |= binding.Binding == required.Binding && binding.Kind == required.Kind &&
                      binding.Visibility == required.Visibility && binding.MinSize == required.MinSize;
         }
-        if (!found)
+        if (found == false)
         {
             return Status::InvalidDescription;
         }
@@ -1730,7 +1737,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
         {
             found |= member.Binding == 0 && member.Name == names[i] && member.Offset == offset && member.Shape == shape;
         }
-        if (!found)
+        if (found == false)
         {
             return Status::InvalidDescription;
         }
@@ -1770,7 +1777,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     }
     if (lit)
     {
-        if (shadow->Artifact.Stage != rhi::ShaderStage::Fragment || !shadow->Inputs.empty() ||
+        if (shadow->Artifact.Stage != rhi::ShaderStage::Fragment || shadow->Inputs.empty() == false ||
             shadow->Bindings.size() != 3 || shadow->UniformMembers.size() != fragment.UniformMembers.size())
         {
             return Status::InvalidDescription;
@@ -1783,7 +1790,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
                 found |= binding.Binding == expected[i].Binding && binding.Kind == expected[i].Kind &&
                          binding.MinSize == expected[i].MinSize && binding.Visibility == expected[i].Visibility;
             }
-            if (!found)
+            if (found == false)
             {
                 return Status::InvalidDescription;
             }
@@ -1796,7 +1803,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
                 found |= member.Binding == expectedMember.Binding && member.Name == expectedMember.Name &&
                          member.Offset == expectedMember.Offset && member.Shape == expectedMember.Shape;
             }
-            if (!found)
+            if (found == false)
             {
                 return Status::InvalidDescription;
             }
@@ -1826,7 +1833,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     p.HasSurfaceMapProfile = hasSurfaceMapProfile;
     p.HasAuthoredProfile = hasAuthoredProfile;
     p.Hdr = lit && s.Hdr;
-    p.VariantCount = lit && !p.Hdr ? 3U : 6U;
+    p.VariantCount = lit && p.Hdr == false ? 3U : 6U;
     status = rhi::CreateRasterShader(s.Device, vertex, p.Vertex);
     if (Accepted(status))
     {
@@ -1847,7 +1854,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     {
         status = rhi::CreateTexture(s.Device, texture, {white, 4}, p.White);
     }
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         p.Owned = false;
         s.DropProgram(slot);
@@ -1855,7 +1862,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     }
     const auto handle = Access::Make<MaterialProgram>({s.Owner, p.Generation, slot});
     status = GetStatus(handle);
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         p.Owned = false;
         s.DropProgram(slot);
@@ -1866,7 +1873,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
 }
 Status Renderer::GetStatus(MaterialProgram handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -1984,7 +1991,7 @@ Status Renderer::GetStatus(MaterialProgram handle) noexcept
             description.DepthCompare = rhi::RasterDepthCompare::Less;
         }
         const auto requested = rhi::RequestPipeline(s.Device, description, p->Requests[p->Phase]);
-        if (!Accepted(requested))
+        if (Accepted(requested) == false)
         {
             return p->Setup = requested;
         }
@@ -1998,7 +2005,7 @@ Status Renderer::GetStatus(MaterialProgram handle) noexcept
 }
 Status Renderer::Release(MaterialProgram& handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -2035,7 +2042,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
                                     MaterialVersion& output,
                                     const LightClusters* clusters) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::NotReady;
     }
@@ -2048,8 +2055,8 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     {
         return status == Status::Pending ? Status::NotReady : status;
     }
-    if (!ValidColor(description.Tint) || !math::IsFinite(description.UvTransform) ||
-        static_cast<uint8>(description.Alpha) > 2 || !math::IsFinite(description.AlphaCutoff) ||
+    if (ValidColor(description.Tint) == false || math::IsFinite(description.UvTransform) == false ||
+        static_cast<uint8>(description.Alpha) > 2 || math::IsFinite(description.AlphaCutoff) == false ||
         description.AlphaCutoff < 0 || description.AlphaCutoff > 1 ||
         (description.Alpha == MaterialAlpha::Opaque && description.Tint.W != 1))
     {
@@ -2072,7 +2079,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     {
         return Status::InvalidDescription;
     }
-    if (!math::IsFinite(description.Lod) ||
+    if (math::IsFinite(description.Lod) == false ||
         (description.Lod != -1 &&
          (description.Lod < 0 || description.Lod > static_cast<float32>(texture.MipLevels - 1))))
     {
@@ -2111,7 +2118,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
         m.EnvironmentOrNull = Access::GetEnvironment(lighting->EnvironmentOrNull);
         internal::RetainEnvironment(m.EnvironmentOrNull);
         m.Bake = lighting->Bake;
-        m.HasBake = !rhi::IsNull(lighting->Bake.Texture);
+        m.HasBake = rhi::IsNull(lighting->Bake.Texture) == false;
         if (Access::Owner(lighting->Shadows) != 0)
         {
             m.ShadowSlot = Access::Slot(lighting->Shadows);
@@ -2169,7 +2176,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
                                     {{clusters->Texels, sizeof(clusters->Texels)}, 256},
                                     m.ClusterTexture);
     }
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         m.Owned = false;
         s.DropMaterial(slot);
@@ -2177,7 +2184,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     }
     const auto handle = Access::Make<MaterialVersion>({s.Owner, m.Generation, slot});
     status = GetStatus(handle);
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         m.Owned = false;
         s.DropMaterial(slot);
@@ -2188,7 +2195,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
 }
 Status Renderer::GetStatus(MaterialVersion handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -2275,11 +2282,11 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
             }
             return texture;
         }
-        if (!m->ClusterViewCreated)
+        if (m->ClusterViewCreated == false)
         {
             const auto created = rhi::CreateTextureView(s.Device, m->ClusterTexture, m->ClusterView);
             m->ClusterViewCreated = Accepted(created);
-            if (!Accepted(created))
+            if (Accepted(created) == false)
             {
                 return m->Setup = created;
             }
@@ -2294,7 +2301,7 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
             return ready;
         }
     }
-    if (!m->BindingCreated)
+    if (m->BindingCreated == false)
     {
         const bool hasSurfaceMapProfile = s.Programs[m->ProgramSlot].HasSurfaceMapProfile;
         rhi::RasterBindingResource values[]{{0, m->Parameters, 0, m->ParameterSize, {}, {}},
@@ -2331,7 +2338,7 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
         }
         const Status created =
             rhi::CreateBindingSet(s.Device, s.Programs[m->ProgramSlot].Layout, {values, bindingCount}, m->Bindings);
-        if (!Accepted(created))
+        if (Accepted(created) == false)
         {
             return m->Setup = created;
         }
@@ -2346,7 +2353,7 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
 }
 Status Renderer::PublishMaterial(MaterialVersion& candidate, MaterialVersion& current) noexcept
 {
-    if (!mState ||
+    if (mState.Get() == nullptr ||
         (Access::Owner(candidate) == Access::Owner(current) && Access::Slot(candidate) == Access::Slot(current) &&
          Access::Generation(candidate) == Access::Generation(current)))
     {
@@ -2371,7 +2378,7 @@ Status Renderer::PublishMaterial(MaterialVersion& candidate, MaterialVersion& cu
 }
 Status Renderer::Release(MaterialVersion& handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -2388,7 +2395,7 @@ Status Renderer::Release(MaterialVersion& handle) noexcept
 
 Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) noexcept
 {
-    if (!mState || mState->Setup != Status::Ready)
+    if (mState.Get() == nullptr || mState->Setup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -2457,9 +2464,11 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
     for (usize i = 0; i < input.VertexCount; ++i)
     {
         const auto position = input.Positions[i];
-        if (!math::IsFinite(position) || (input.Texcoords != nullptr && !math::IsFinite(input.Texcoords[i])) ||
-            (input.BakeTexcoords != nullptr && !math::IsFinite(input.BakeTexcoords[i])) ||
-            (input.Normals != nullptr && (!math::IsFinite(input.Normals[i]) || math::Length(input.Normals[i]) == 0)))
+        if (math::IsFinite(position) == false ||
+            (input.Texcoords != nullptr && math::IsFinite(input.Texcoords[i]) == false) ||
+            (input.BakeTexcoords != nullptr && math::IsFinite(input.BakeTexcoords[i]) == false) ||
+            (input.Normals != nullptr &&
+             (math::IsFinite(input.Normals[i]) == false || math::Length(input.Normals[i]) == 0)))
         {
             return Status::InvalidDescription;
         }
@@ -2480,7 +2489,7 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
     }
     auto& mesh = mState->MeshRecords[slot];
     foundation::Array<Vertex> vertices;
-    if (!vertices.TryResize(input.VertexCount))
+    if (vertices.TryResize(input.VertexCount) == false)
     {
         return Status::OutOfMemory;
     }
@@ -2529,7 +2538,7 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
                                {rhi::BufferRole::Vertex, vertexBytes},
                                {reinterpret_cast<const uint8*>(vertices.GetData()), vertexBytes},
                                mesh.Vertices);
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         return status;
     }
@@ -2537,7 +2546,7 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
                                     {rhi::BufferRole::Index32, indexBytes},
                                     {reinterpret_cast<const uint8*>(input.Indices), indexBytes},
                                     mesh.Indices);
-    if (!Accepted(second))
+    if (Accepted(second) == false)
     {
         static_cast<void>(rhi::Destroy(mState->Device, mesh.Vertices));
         return second;
@@ -2561,7 +2570,7 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
 }
 Status Renderer::GetStatus(Mesh handle) const noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -2583,7 +2592,7 @@ Status Renderer::GetStatus(Mesh handle) const noexcept
 }
 Status Renderer::Release(Mesh& handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -2599,7 +2608,7 @@ Status Renderer::Release(Mesh& handle) noexcept
 }
 Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& output) noexcept
 {
-    if (!mState || mState->Setup != Status::Ready)
+    if (mState.Get() == nullptr || mState->Setup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -2625,10 +2634,10 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
     for (usize i = 0; i < count; ++i)
     {
         const auto& item = items[i];
-        if (item.SourceId == 0 || !math::IsFinite(item.Transform) ||
+        if (item.SourceId == 0 || math::IsFinite(item.Transform) == false ||
             (item.Pass != Layer::Opaque && item.Pass != Layer::Overlay) ||
             (Access::Owner(item.Surface) == 0 &&
-             (!ValidColor(item.Material.Color) || (item.Pass == Layer::Opaque && item.Material.Color.W != 1))))
+             (ValidColor(item.Material.Color) == false || (item.Pass == Layer::Opaque && item.Material.Color.W != 1))))
         {
             return Status::InvalidDescription;
         }
@@ -2651,7 +2660,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
             {
                 return status == Status::Pending ? Status::NotReady : status;
             }
-            if (item.Pass != Layer::Opaque || !math::IsFinite(item.LodPixels) || item.LodPixels <= 0)
+            if (item.Pass != Layer::Opaque || math::IsFinite(item.LodPixels) == false || item.LodPixels <= 0)
             {
                 return Status::InvalidDescription;
             }
@@ -2670,9 +2679,9 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
             }
             materialSlot = Access::Slot(item.Surface);
             const auto& material = mState->Materials[materialSlot];
-            if (material.Lit && (!mState->MeshRecords[Access::Slot(item.Geometry)].HasNormals ||
+            if (material.Lit && (mState->MeshRecords[Access::Slot(item.Geometry)].HasNormals == false ||
                                  (Access::Owner(item.LodGeometry) != 0 &&
-                                  !mState->MeshRecords[Access::Slot(item.LodGeometry)].HasNormals)))
+                                  mState->MeshRecords[Access::Slot(item.LodGeometry)].HasNormals == false)))
             {
                 return Status::InvalidDescription;
             }
@@ -2746,7 +2755,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
         {
             const auto group = i / 16;
             auto& b = snapshot.Groups[group];
-            if (!snapshot.HasGroup[group])
+            if (snapshot.HasGroup[group] == false)
             {
                 b = item.Bounds;
             }
@@ -2779,7 +2788,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
 }
 Status Renderer::Release(Snapshot& handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -2795,7 +2804,7 @@ Status Renderer::Release(Snapshot& handle) noexcept
 }
 Status Renderer::ReplaceSnapshot(const SceneItem* items, usize count, Snapshot& current) noexcept
 {
-    if (!mState || Resolve(mState->SnapshotRecords, mState->Owner, current) == nullptr)
+    if (mState.Get() == nullptr || Resolve(mState->SnapshotRecords, mState->Owner, current) == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -2819,7 +2828,7 @@ Status Renderer::PrepareView(Snapshot handle,
                              PreparedView& output,
                              ViewReport& report) noexcept
 {
-    if (!mState || mState->Setup != Status::Ready)
+    if (mState.Get() == nullptr || mState->Setup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -2832,16 +2841,16 @@ Status Renderer::PrepareView(Snapshot handle,
     {
         return Status::InvalidHandle;
     }
-    if (!math::IsFinite(description.WorldToClip) || !math::IsFinite(description.CullMargin) ||
-        description.CullMargin < 0 || !math::IsFinite(description.OverlayToClip) ||
-        !math::IsFinite(description.CameraPosition) || math::Abs(description.CameraPosition.X) > 1000000 ||
+    if (math::IsFinite(description.WorldToClip) == false || math::IsFinite(description.CullMargin) == false ||
+        description.CullMargin < 0 || math::IsFinite(description.OverlayToClip) == false ||
+        math::IsFinite(description.CameraPosition) == false || math::Abs(description.CameraPosition.X) > 1000000 ||
         math::Abs(description.CameraPosition.Y) > 1000000 || math::Abs(description.CameraPosition.Z) > 1000000 ||
         static_cast<uint8>(description.Depth) > static_cast<uint8>(DepthConvention::ReverseZ) ||
         (description.InfiniteFar && description.Depth != DepthConvention::ReverseZ))
     {
         return Status::InvalidDescription;
     }
-    if (!math::IsFinite(description.LodHysteresis) || description.LodHysteresis < 0 ||
+    if (math::IsFinite(description.LodHysteresis) == false || description.LodHysteresis < 0 ||
         description.LodHysteresis > 0.5F ||
         (description.EnableLod && (description.LodWidth == 0 || description.LodHeight == 0)))
     {
@@ -2879,11 +2888,11 @@ Status Renderer::PrepareView(Snapshot handle,
     usize count = 0, opaqueCount = 0;
     uint32 boundsTests = 0, culledGroups = 0;
     auto& groups = mState->GroupRelations;
-    if (!description.Reference)
+    if (description.Reference == false)
     {
         for (usize i = 0; i < (snapshot->Count + 15) / 16; ++i)
         {
-            if (!snapshot->HasGroup[i])
+            if (snapshot->HasGroup[i] == false)
             {
                 continue;
             }
@@ -2906,11 +2915,13 @@ Status Renderer::PrepareView(Snapshot handle,
                 continue;
             }
             math::FrustumRelation relation;
-            if (!description.Reference && pass == Layer::Opaque && groups[i / 16] == math::FrustumRelation::Outside)
+            if (description.Reference == false && pass == Layer::Opaque &&
+                groups[i / 16] == math::FrustumRelation::Outside)
             {
                 continue;
             }
-            if (!description.Reference && (pass != Layer::Opaque || groups[i / 16] != math::FrustumRelation::Inside))
+            if (description.Reference == false &&
+                (pass != Layer::Opaque || groups[i / 16] != math::FrustumRelation::Inside))
             {
                 ++boundsTests;
                 if (math::TryClassifyAabb(pass == Layer::Opaque ? frustum : overlay,
@@ -2933,7 +2944,7 @@ Status Renderer::PrepareView(Snapshot handle,
             candidate.Coarse = false;
             const auto clip = (pass == Layer::Opaque ? description.WorldToClip : description.OverlayToClip) *
                               Matrix(item.Input.Transform);
-            if (!math::IsFinite(clip))
+            if (math::IsFinite(clip) == false)
             {
                 return Status::InvalidDescription;
             }
@@ -3002,7 +3013,7 @@ Status Renderer::PrepareView(Snapshot handle,
                 ProjectBounds(item.Bounds,
                               pass == Layer::Opaque ? description.WorldToClip : description.OverlayToClip,
                               pass == Layer::Opaque && description.Depth == DepthConvention::ReverseZ);
-            if (pass == Layer::Opaque && !description.Reference && !description.ShadowCasters &&
+            if (pass == Layer::Opaque && description.Reference == false && description.ShadowCasters == false &&
                 description.EnableLod && Access::Owner(item.Input.LodGeometry) != 0)
             {
                 const auto pixels =
@@ -3036,7 +3047,7 @@ Status Renderer::PrepareView(Snapshot handle,
     }
     // Already compatible objects need no reordering or pairwise overlap search;
     // preserving their source order also preserves equal-depth ownership.
-    if (!description.Reference && !homogeneous)
+    if (description.Reference == false && homogeneous == false)
     {
         for (usize first = 0; first < opaqueCount;)
         {
@@ -3095,7 +3106,7 @@ Status Renderer::PrepareView(Snapshot handle,
             result.ShadowFallbacks +=
                 material.ShadowSlot != NO_SHADOW && (static_cast<uint32>(candidate.Data.Eye.W) & 1U) == 0 ? 1U : 0U;
         }
-        if (!description.Reference && view.DrawCount != 0 &&
+        if (description.Reference == false && view.DrawCount != 0 &&
             view.Packets[view.DrawCount - 1].MeshSlot == candidate.MeshSlot &&
             view.Packets[view.DrawCount - 1].Pass == item.Pass &&
             view.Packets[view.DrawCount - 1].MaterialSlot == candidate.MaterialSlot)
@@ -3127,7 +3138,7 @@ Status Renderer::PrepareView(Snapshot handle,
                                        {reinterpret_cast<const uint8*>(instances.GetData()), bytes},
                                        view.Instances);
         }
-        if (!Accepted(status))
+        if (Accepted(status) == false)
         {
             return status;
         }
@@ -3156,7 +3167,7 @@ Status Renderer::PrepareView(Snapshot handle,
 }
 Status Renderer::GetStatus(PreparedView handle) const noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -3207,7 +3218,7 @@ Status Renderer::Submit(PreparedView handle, rhi::SurfaceHandle surface, rhi::Su
     {
         return Status::InvalidDescription;
     }
-    if (!view.HasRetry)
+    if (view.HasRetry == false)
     {
         status = rhi::BeginCommands(mState->Device, view.Retry);
         if (status != Status::Ready)
@@ -3264,7 +3275,7 @@ Status Renderer::Submit(PreparedView handle, rhi::SurfaceHandle surface, rhi::Su
 }
 Status Renderer::Release(PreparedView& handle) noexcept
 {
-    if (!mState || Resolve(mState->ViewRecords, mState->Owner, handle) == nullptr)
+    if (mState.Get() == nullptr || Resolve(mState->ViewRecords, mState->Owner, handle) == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -3277,7 +3288,7 @@ Status Renderer::InitializeLighting(const rhi::RasterShaderDescription& outputVe
                                     const rhi::RasterShaderDescription& outputFragment,
                                     const rhi::RasterShaderDescription& shadowFragment) noexcept
 {
-    if (!mState || mState->ViewsSetup != Status::Ready)
+    if (mState.Get() == nullptr || mState->ViewsSetup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -3288,13 +3299,13 @@ Status Renderer::InitializeLighting(const rhi::RasterShaderDescription& outputVe
     }
     if (outputVertex.Artifact.Stage != rhi::ShaderStage::Vertex || outputVertex.Inputs.size() != 1 ||
         outputVertex.Inputs[0].Location != 0 || outputVertex.Inputs[0].Format != rhi::RasterVertexFormat::Float4 ||
-        !outputVertex.Bindings.empty() || outputFragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
-        !outputFragment.Inputs.empty() || outputFragment.Bindings.size() != 3 ||
+        outputVertex.Bindings.empty() == false || outputFragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
+        outputFragment.Inputs.empty() == false || outputFragment.Bindings.size() != 3 ||
         outputFragment.UniformMembers.size() != 1 || outputFragment.UniformMembers[0].Binding != 0 ||
         outputFragment.UniformMembers[0].Name != "Output" || outputFragment.UniformMembers[0].Offset != 0 ||
         outputFragment.UniformMembers[0].Shape != rhi::RasterUniformShape::Float4 ||
-        shadowFragment.Artifact.Stage != rhi::ShaderStage::Fragment || !shadowFragment.Inputs.empty() ||
-        !shadowFragment.Bindings.empty())
+        shadowFragment.Artifact.Stage != rhi::ShaderStage::Fragment || shadowFragment.Inputs.empty() == false ||
+        shadowFragment.Bindings.empty() == false)
     {
         return Status::InvalidDescription;
     }
@@ -3309,7 +3320,7 @@ Status Renderer::InitializeLighting(const rhi::RasterShaderDescription& outputVe
             found |= binding.Binding == expected.Binding && binding.Kind == expected.Kind &&
                      binding.Visibility == expected.Visibility && binding.MinSize == expected.MinSize;
         }
-        if (!found)
+        if (found == false)
         {
             return Status::InvalidDescription;
         }
@@ -3339,7 +3350,7 @@ Status Renderer::InitializeLighting(const rhi::RasterShaderDescription& outputVe
 }
 Status Renderer::PollLighting() noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::NotReady;
     }
@@ -3418,7 +3429,7 @@ Status Renderer::PollLighting() noexcept
             description.DepthCompare = phase == 4 ? rhi::RasterDepthCompare::Greater : rhi::RasterDepthCompare::Less;
         }
         const auto created = rhi::CreateRasterPipeline(s.Device, description, *targets[phase]);
-        if (!Accepted(created))
+        if (Accepted(created) == false)
         {
             return s.LightingSetup = created;
         }
@@ -3435,7 +3446,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                                    MaterialVersion& output,
                                    LightSelection& report) noexcept
 {
-    if (!mState || mState->LightingSetup != Status::Ready)
+    if (mState.Get() == nullptr || mState->LightingSetup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -3445,7 +3456,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         return Status::InvalidHandle;
     }
-    if (!p->Lit)
+    if (p->Lit == false)
     {
         return Status::InvalidDescription;
     }
@@ -3454,11 +3465,11 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                value.Y <= 10000 && value.Z <= 10000;
     };
     const auto& bake = description.Bake;
-    if (!math::IsFinite(description.Metallic) || description.Metallic < 0 || description.Metallic > 1 ||
-        !math::IsFinite(description.Roughness) || description.Roughness < 0.045F || description.Roughness > 1 ||
-        !bounded(description.Emission) || !bounded(description.EnvironmentIrradiance) ||
-        !bounded(description.EnvironmentRadiance) || !bounded(bake.Scale) || !math::IsFinite(bake.UvTransform) ||
-        !math::IsFinite(bake.Transform))
+    if (math::IsFinite(description.Metallic) == false || description.Metallic < 0 || description.Metallic > 1 ||
+        math::IsFinite(description.Roughness) == false || description.Roughness < 0.045F || description.Roughness > 1 ||
+        bounded(description.Emission) == false || bounded(description.EnvironmentIrradiance) == false ||
+        bounded(description.EnvironmentRadiance) == false || bounded(bake.Scale) == false ||
+        math::IsFinite(bake.UvTransform) == false || math::IsFinite(bake.Transform) == false)
     {
         return Status::InvalidDescription;
     }
@@ -3593,7 +3604,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         return status;
     }
-    if (!rhi::IsNull(bake.Texture))
+    if (rhi::IsNull(bake.Texture) == false)
     {
         rhi::TextureDescription texture;
         status = rhi::GetTextureDescription(s.Device, bake.Texture, texture);
@@ -3638,7 +3649,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
         {
             return status == Status::Pending ? Status::NotReady : status;
         }
-        if (!atlas->Rendered)
+        if (atlas->Rendered == false)
         {
             return Status::NotReady;
         }
@@ -3654,7 +3665,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                          actual.Range == expected.Range && actual.InnerCos == expected.InnerCos &&
                          actual.OuterCos == expected.OuterCos;
             }
-            if (!match)
+            if (match == false)
             {
                 return Status::InvalidDescription;
             }
@@ -3783,7 +3794,7 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
 Status
 Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& description, ShadowAtlas& output) noexcept
 {
-    if (!mState || mState->LightingSetup != Status::Ready)
+    if (mState.Get() == nullptr || mState->LightingSetup != Status::Ready)
     {
         return Status::NotReady;
     }
@@ -3849,7 +3860,7 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
             return Status::InvalidDescription;
         }
         const auto& r = region.Interior;
-        if (!math::IsFinite(region.WorldToClip) || !math::IsFinite(region.Bias) || region.Bias < 0 ||
+        if (math::IsFinite(region.WorldToClip) == false || math::IsFinite(region.Bias) == false || region.Bias < 0 ||
             region.Bias > 0.01F || r.X < 1 || r.Y < 1 || r.Width < 2 || r.Height < 2 || r.X >= description.Width - 1 ||
             r.Y >= description.Height - 1 || r.Width > description.Width - 1 - r.X ||
             r.Height > description.Height - 1 - r.Y)
@@ -3909,7 +3920,8 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
     {
         const auto& item = snapshot->Items[i];
         if (item.Input.Pass == Layer::Opaque && item.MaterialSlot != NO_MATERIAL &&
-            s.Materials[item.MaterialSlot].Alpha == MaterialAlpha::Masked && !s.Materials[item.MaterialSlot].Lit)
+            s.Materials[item.MaterialSlot].Alpha == MaterialAlpha::Masked &&
+            s.Materials[item.MaterialSlot].Lit == false)
         {
             return Status::Unsupported;
         }
@@ -3943,12 +3955,12 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
             atlas.Regions[i] = regions[i];
             ++atlas.Count;
         }
-        if (!Accepted(ready) || ready == Status::Pending)
+        if (Accepted(ready) == false || ready == Status::Pending)
         {
             status = ready;
         }
     }
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         atlas.Owned = false;
         s.DropShadow(slot);
@@ -3956,7 +3968,7 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
     }
     const auto handleOut = Access::Make<ShadowAtlas>({s.Owner, atlas.Generation, slot});
     status = GetStatus(handleOut);
-    if (!Accepted(status))
+    if (Accepted(status) == false)
     {
         atlas.Owned = false;
         s.DropShadow(slot);
@@ -3967,7 +3979,7 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
 }
 Status Renderer::GetStatus(ShadowAtlas handle) const noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }
@@ -4070,7 +4082,7 @@ Status Renderer::DrawShadowAtlas(ShadowAtlas handle, uint32 reservedDraws) noexc
 }
 Status Renderer::Release(ShadowAtlas& handle) noexcept
 {
-    if (!mState)
+    if (mState.Get() == nullptr)
     {
         return Status::InvalidHandle;
     }

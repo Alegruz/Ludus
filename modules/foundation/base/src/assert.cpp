@@ -265,7 +265,7 @@ void BeginAssert(const AssertionSite& site) noexcept
 
 [[noreturn]] static void FinishFatalImpl(const char* message, const DiagnosticText* rendered) noexcept
 {
-    if (!gEntry.Active || gEntry.Kind == FailureKind::Check)
+    if (gEntry.Active == false || gEntry.Kind == FailureKind::Check)
     {
         constexpr char marker[] = "[LUDUS invalid fatal protocol]\n";
         Compromised(marker, sizeof(marker) - 1);
@@ -281,7 +281,7 @@ void BeginAssert(const AssertionSite& site) noexcept
 
 static bool FinishCheckImpl(const char* message, const DiagnosticText* rendered) noexcept
 {
-    if (!gEntry.Active || gEntry.Kind != FailureKind::Check)
+    if (gEntry.Active == false || gEntry.Kind != FailureKind::Check)
     {
         constexpr char marker[] = "[LUDUS invalid Check protocol]\n";
         Compromised(marker, sizeof(marker) - 1);
@@ -292,7 +292,7 @@ static bool FinishCheckImpl(const char* message, const DiagnosticText* rendered)
     // CHECK stays boolean and keeps its budget; the inspection break is suppressed
     // under CI (no intentional debugger stop in CI), matching the ASSERT/dialog
     // policy. CHECK never opens a dialog and never waits.
-    if (LUDUS_BREAK_ON_CHECK != 0 && !IsContinuousIntegration())
+    if (LUDUS_BREAK_ON_CHECK != 0 && (IsContinuousIntegration() == false))
     {
         InspectIfAttached();
     }
@@ -311,7 +311,7 @@ static bool FinishCheckImpl(const char* message, const DiagnosticText* rendered)
 // continue path.
 static void FinishAssertImpl(const char* message, const DiagnosticText* rendered) noexcept
 {
-    if (!gEntry.Active || gEntry.Kind != FailureKind::Assert)
+    if (gEntry.Active == false || gEntry.Kind != FailureKind::Assert)
     {
         constexpr char marker[] = "[LUDUS invalid assert protocol]\n";
         Compromised(marker, sizeof(marker) - 1);

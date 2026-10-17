@@ -63,7 +63,7 @@ template <typename T>
 T* Allocate() noexcept
 {
 #if defined(LUDUS_FILESYSTEM_FAULT_TESTING)
-    if (!test::AllocationAllowed())
+    if (test::AllocationAllowed() == false)
     {
         return nullptr;
     }
@@ -149,7 +149,7 @@ Result CheckRevision(int descriptor, const struct stat& original) noexcept
     {
     };
     const auto result = Metadata(descriptor, current);
-    if (!result.Succeeded())
+    if (result.Succeeded() == false)
     {
         return result;
     }
@@ -252,13 +252,13 @@ ReadResult File::ReadAt(uint64 offset, std::span<uint8> destination) const noexc
         return {{Status::InvalidArgument}};
     }
     auto result = CheckRevision(mImpl->Handle.Value, mImpl->Original);
-    if (!result.Succeeded())
+    if (result.Succeeded() == false)
     {
         return {result};
     }
     const uint64 left = Size() - offset;
     usize wanted = destination.size();
-    if (left < wanted && !TryIntegerCast(left, wanted))
+    if (left < wanted && TryIntegerCast(left, wanted) == false)
     {
         return {{Status::InvalidArgument}};
     }
@@ -271,7 +271,7 @@ ReadResult File::ReadAt(uint64 offset, std::span<uint8> destination) const noexc
         const usize count = remaining < MAX_TRANSFER ? remaining : MAX_TRANSFER;
         off_t nativeOffset = 0;
         // offset + total is bounded by captured Length (a nonnegative off_t).
-        if (!TryIntegerCast(offset + total, nativeOffset))
+        if (TryIntegerCast(offset + total, nativeOffset) == false)
         {
             return {{Status::InvalidArgument}, total};
         }
@@ -353,7 +353,7 @@ Result Directory::Open(std::string_view nativeRoot) noexcept
 }
 Result Directory::OpenRead(std::string_view relativePath, File& output) const noexcept
 {
-    if (mImpl == nullptr || !ValidPath(relativePath))
+    if (mImpl == nullptr || ValidPath(relativePath) == false)
     {
         return {Status::InvalidArgument};
     }
@@ -391,11 +391,11 @@ Result Directory::OpenRead(std::string_view relativePath, File& output) const no
     {
     };
     const auto result = Metadata(file.Value, info);
-    if (!result.Succeeded())
+    if (result.Succeeded() == false)
     {
         return result;
     }
-    if (!S_ISREG(info.st_mode) || info.st_size < 0)
+    if (S_ISREG(info.st_mode) == false || info.st_size < 0)
     {
         return {Status::NotRegularFile};
     }
@@ -404,7 +404,7 @@ Result Directory::OpenRead(std::string_view relativePath, File& output) const no
     {
         return {Status::OutOfMemory};
     }
-    if (!TryIntegerCast(info.st_size, next->Length))
+    if (TryIntegerCast(info.st_size, next->Length) == false)
     {
         delete next;
         return {Status::InvalidArgument};
@@ -418,7 +418,7 @@ Result Directory::OpenRead(std::string_view relativePath, File& output) const no
 }
 Result Directory::Observe(std::string_view relativePath, FileStamp& output) const noexcept
 {
-    if (mImpl == nullptr || !ValidPath(relativePath))
+    if (mImpl == nullptr || ValidPath(relativePath) == false)
     {
         return {Status::InvalidArgument};
     }
@@ -461,7 +461,7 @@ Result Directory::Observe(std::string_view relativePath, FileStamp& output) cons
     {
         return {Status::AccessDenied};
     }
-    if (!S_ISREG(info.st_mode) || info.st_size < 0)
+    if (S_ISREG(info.st_mode) == false || info.st_size < 0)
     {
         return {Status::NotRegularFile};
     }
