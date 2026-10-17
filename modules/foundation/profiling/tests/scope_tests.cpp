@@ -51,7 +51,7 @@ Drained drainAll()
     ludus::foundation::Array<internal::TraceChunk*> chunks;
     while (chunk != nullptr)
     {
-        internal::TraceChunk* next = chunk->PoolNext;
+        internal::TraceChunk* next = chunk->PoolNextOrNull;
         for (uint32 i = 0; i < chunk->Count; ++i)
         {
             const internal::TraceEvent& event = chunk->Events[i];

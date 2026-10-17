@@ -71,7 +71,8 @@ target_include_directories(
 )
 
 # Dependency direction (AGENTS.md): FoundationProfiling may use FoundationTime/Base
-# (types, defines), never a higher-level module. It deliberately does NOT depend
+# (types, defines) and FoundationMemory (the aligned trace slab), never a
+# higher-level module. It deliberately does NOT depend
 # on FoundationLogging — it keeps its own thread identity so the ubiquitous
 # instrumentation header stays minimal and the layering clean.
 target_link_libraries(
@@ -80,6 +81,7 @@ target_link_libraries(
         Ludus::FoundationBase
         Ludus::FoundationContainers
     PRIVATE
+        Ludus::FoundationMemory
         Ludus::FoundationTime
 )
 
@@ -107,6 +109,7 @@ if(LUDUS_BUILD_TESTS)
             tests/clock_tests.cpp
             tests/scope_tests.cpp
             tests/export_tests.cpp
+            tests/recorder_tests.cpp
             tests/disabled_tests.cpp
     )
     target_link_libraries(

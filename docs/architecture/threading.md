@@ -300,11 +300,9 @@ registered thread names.
 
 Limits: for a fan-in dependent, only the releasing edge's flow ends at its slice;
 the other prerequisites' flow starts remain unmatched and Perfetto draws no arrow
-for them. Ready depth is sampled, not recorded at every release. The profiler
-publishes a worker's partial chunk only when the chunk fills or the worker
-unregisters, so a capture that must contain every worker event is exported after
-the system shuts down. The static-lighting bake labels its preparation and range
-jobs; [tracing overhead and bake latencies](../development/threading-evidence.md#execution-traces-t2)
+for them. Ready depth is sampled, not recorded at every release. The
+static-lighting bake labels its preparation and range jobs;
+[tracing overhead and bake latencies](../development/threading-evidence.md#execution-traces-t2)
 are recorded with the evidence.
 
 ## Milestones

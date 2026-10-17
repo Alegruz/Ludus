@@ -1,3 +1,18 @@
+# The entropy adapter is its own small target so tools that need only UUIDv4
+# entropy (ludus-cook) do not link the window backends, AppKit or Wayland
+# (docs/architecture/object-handles-uuid.md). Ludus::Platform re-exports it.
+add_library(ludus_platform_entropy STATIC)
+add_library(Ludus::PlatformEntropy ALIAS ludus_platform_entropy)
+set_target_properties(ludus_platform_entropy PROPERTIES
+    OUTPUT_NAME ludus_platform_entropy EXPORT_NAME PlatformEntropy)
+target_sources(ludus_platform_entropy
+    PRIVATE src/entropy.cpp
+    PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
+        FILES include/ludus/platform/entropy.h)
+# FoundationIdentity owns the EntropySource contract; Identity never depends on Platform.
+target_link_libraries(ludus_platform_entropy PUBLIC Ludus::FoundationBase Ludus::FoundationIdentity)
+ludus_apply_project_defaults(ludus_platform_entropy)
+
 add_library(ludus_platform STATIC)
 add_library(Ludus::Platform ALIAS ludus_platform)
 
@@ -68,6 +83,7 @@ target_link_libraries(
     ludus_platform
     PUBLIC
         Ludus::FoundationBase
+        Ludus::PlatformEntropy
         Ludus::FoundationLogging
         # One-way dependency: Platform depends on Input for the normalized
         # keyboard record/sink vocabulary. Input never depends on Platform.
@@ -147,6 +163,14 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_platform_headless_tests COMMAND ludus_platform_headless_tests)
     set_tests_properties(ludus_platform_headless_tests PROPERTIES LABELS "unit;platform")
 
+    add_executable(ludus_platform_entropy_tests tests/entropy_tests.cpp)
+    target_link_libraries(ludus_platform_entropy_tests PRIVATE
+        Ludus::PlatformEntropy Ludus::FoundationIdentity Ludus::FoundationContainers Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_platform_entropy_tests)
+    ludus_enable_test_exceptions(ludus_platform_entropy_tests)
+    add_test(NAME ludus_platform_entropy_tests COMMAND ludus_platform_entropy_tests)
+    set_tests_properties(ludus_platform_entropy_tests PROPERTIES LABELS "unit;platform;identity")
+
     add_executable(ludus_platform_cocoa_keymap_tests tests/cocoa_keymap_tests.cpp)
     target_include_directories(ludus_platform_cocoa_keymap_tests PRIVATE src)
     target_link_libraries(ludus_platform_cocoa_keymap_tests PRIVATE Ludus::Input Catch2::Catch2WithMain)
@@ -203,7 +227,7 @@ if(LUDUS_BUILD_TESTS AND LUDUS_PLATFORM_ENABLE_WAYLAND)
 endif()
 
 install(
-    TARGETS ludus_platform
+    TARGETS ludus_platform_entropy ludus_platform
     EXPORT LudusTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"

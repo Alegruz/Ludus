@@ -56,12 +56,16 @@ struct IsTriviallyRelocatableTrait : std::bool_constant<std::is_trivially_copyab
 {
 };
 
+/// @brief True when containers may relocate ElementType by copying bytes and skipping destruction of the source.
+///
+/// Defaults to trivially copyable; extend only with LUDUS_TRIVIALLY_RELOCATABLE.
 template <typename ElementType>
 // Clang-tidy 18 with the web SDK misclassifies dependent constexpr
 // initializers; constexpr forbids dynamic initialization here.
 // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
 inline constexpr bool IsTriviallyRelocatable = IsTriviallyRelocatableTrait<ElementType>::value;
 
+/// Concept form of IsTriviallyRelocatable.
 template <typename ElementType>
 concept TriviallyRelocatable = IsTriviallyRelocatable<ElementType>;
 } // namespace ludus::foundation::core

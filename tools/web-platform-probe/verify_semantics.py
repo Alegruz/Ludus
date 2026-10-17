@@ -7,4 +7,4 @@ result = subprocess.run([node, executable, "automated"], cwd=Path(executable).pa
                         capture_output=True, text=True, timeout=20)
 output = result.stdout + result.stderr
 assert result.returncode == 0 and "[W3:passed]" in output, output
-print("W3 canvas/input lifecycle semantics verified (Node DOM fixture)")
+print("W3 canvas/input lifecycle and entropy semantics verified (Node DOM fixture)")

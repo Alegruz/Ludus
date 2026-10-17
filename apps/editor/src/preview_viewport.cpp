@@ -356,8 +356,14 @@ private:
         if (Device.Get() == nullptr || Device->PrepareWindow(*Window) == false)
         {
             destroyWindow();
+#    if defined(Q_OS_MACOS)
             Preview->Stop();
             Message->setText(QStringLiteral("Qt GPU initialization failed. Editing remains available."));
+#    else
+            // No adapter can present to this window with a shareable device; keep an
+            // interactive view through the engine-owned offscreen device instead.
+            createCanvas();
+#    endif
             return;
         }
         QObject::connect(
@@ -369,7 +375,8 @@ private:
                 rhi::NativeDeviceDescription description;
                 if (Device->GetDescription(*Window, description) == false)
                 {
-                    Message->setText(QStringLiteral("Native GPU sharing is unavailable (Vulkan needs Qt 6.6+)."));
+                    Message->setText(QStringLiteral("Qt Quick did not adopt the shared GPU device. Editing remains "
+                                                    "available."));
                     QTimer::singleShot(0, Widget, [this]() { Preview->Stop(); });
                     return;
                 }
@@ -811,12 +818,9 @@ ViewportPresentation PreviewViewport::GetPresentation() noexcept
     {
         return ViewportPresentation::Unavailable;
     }
-#        if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+    // The editor creates the Vulkan device and Qt Quick adopts it, so every Qt 6
+    // release shares GPU textures; readback remains the fallback when that fails.
     return ViewportPresentation::SharedDevice;
-#        else
-    // Qt before 6.6 cannot report its Vulkan graphics queue, so the engine owns its device.
-    return ViewportPresentation::OffscreenReadback;
-#        endif
 #    endif
 #else
     return ViewportPresentation::Unavailable;

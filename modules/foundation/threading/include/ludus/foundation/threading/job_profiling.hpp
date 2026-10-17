@@ -33,9 +33,6 @@ namespace ludus::foundation::threading
 /// @param workerNamePrefixOrNull Static NUL-terminated thread-name prefix; null selects "Job worker".
 ///        Names are truncated to the profiler's thread-name capacity.
 /// @return Hooks whose context is the prefix pointer; it must outlive the system.
-/// @note Worker partial chunks reach an export only when a chunk fills or the
-///       worker unregisters, so shut the system down before exporting a capture
-///       that must include every worker event.
 [[nodiscard]] JobSystemHooks MakeProfilerJobHooks(const char* workerNamePrefixOrNull = nullptr) noexcept;
 } // namespace ludus::foundation::threading
 

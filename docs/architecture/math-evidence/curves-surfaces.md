@@ -1,9 +1,149 @@
-# Curves and surfaces evidence (G0-G1)
+# Curves and surfaces evidence (G0-G2)
 
-This ledger records the G0 contract freeze and reference corpus, then the G1
-cubic and bicubic kernel. See the [architecture](../curves-surfaces.md),
+This ledger records the G0 contract freeze and reference corpus, the G1 cubic
+and bicubic kernel, and the G2 prepared paths, tracks and distance maps. See the
+[architecture](../curves-surfaces.md),
 [ADR 0024](../../decisions/0024-curves-surfaces-contracts.md) and the
 [consulted-source review](../curves-surfaces-gems-review.md).
+
+## G2 prepared paths, tracks and distance maps
+
+Implementation date: 2026-10-16. Base: `cb6f02a` (the G0 branch). Scope: the new
+`Ludus::FoundationGeometry` module (`status.hpp`, `path.hpp`, `distance.hpp`,
+`track.hpp`), FoundationMath `enclosure.hpp`, and their tests, SDK-consumer and
+Wasm probe coverage. Usage is documented in the
+[module guide](../../modules/foundation/geometry.md). No frame, projection,
+surface, mesh, cooked format, cursor or editor binding is added.
+
+### Outward-rounding helper
+
+ADR 0024 makes Certified bounds conditional on reviewed outward-rounded
+arithmetic validated with the pinned native and Wasm toolchains. `enclosure.hpp`
+adds float64 enclosures with outward add, subtract, multiply, square and square
+root. Each operation rounds to nearest, then steps each bound at most one unit
+outward with `std::nextafter`; the process rounding mode is never changed. For a
+correctly rounded operation without overflow, the exact result lies strictly
+between the neighbors of the rounded one. Knuth's TwoSum detects exact sums and
+differences, which are not widened. Products and roots are always widened unless
+an operand is zero, and widened square lower bounds are clamped at zero. Overflow
+is `OutOfRange`, never a truncated bound.
+
+The oracle (`math/tests/enclosure_oracle.hpp`) never calls the helpers' rounding
+code. It rebuilds each exact sum or product as an unevaluated pair with Dekker's
+Fast2Sum and Veltkamp-split product, then compares every returned bound with that
+pair without rounding. A square root is checked by squaring its bounds exactly.
+The deterministic corpus has 200,000 cases. Each case checks point sums,
+differences, products and roots, plus a random interval product against all four
+exact endpoint products. Magnitudes range over 2^-200 to 2^200, and half the
+cases are near-cancelling. The native `[enclosure]` tests and the Wasm
+`ludus_web_math_corpus` run the same corpus. A mutation that drops the outward
+step from sums and products fails it.
+
+The helper lives in FoundationMath rather than Geometry, as the architecture's
+"behind Math's implementation boundary" asks. It is compiled with
+`-ffp-contract=off`, and the existing Wasm math probe can then run it. Geometry is
+also compiled with contraction disabled.
+
+### Prepared owners and conversions
+
+| Gate | Test evidence |
+| --- | --- |
+| Uneven Catmull-Rom knots | `centripetal_uneven`: knots 0, 1, 3, 6 exactly; the middle span's controls and tangents match the exact references within 1e-12 (Rounded float64 arithmetic); converted joints are C1 in the knot domain |
+| Duplicate and closed endpoints | `duplicate_waypoint` is `InvalidDomain` with outputs unchanged; a closed loop's last span ends bitwise at the first waypoint and its closing joint is C1; a closed source that repeats its first waypoint is `InvalidDomain`; `Wrap` on an open path is `InvalidArgument`; a closed path whose ends do not meet is `InvalidTopology` |
+| Holds | Track `Hold` returns the endpoint with zero derivative; equal-value keys form a stationary interval whose incoming and outgoing sides differ at its end; a stationary span occupies no distance interval |
+| Prefix uncertainty | For all nine cubic fixtures, `TotalLower <= ArcLength <= TotalUpper`, and every reference distance lies inside `TryBoundDistance` at its reference parameter, which includes all preceding leaves |
+| Zero speed | All five zero-speed parameters return `Degenerate` tangents with valid positions. Distances at, before and after them resolve within the residual bound, including the cusp's exact zero speed |
+| Inversion residual | Every fixture distance resolves with a Certified residual of at most 1e-7. Parameters match the reference within 1e-5, or 2e-3 at the cusp, where u(s) grows like the square root of the residual |
+| Budget exhaustion | Leaf, depth, subdivision, byte and zero limits return `BudgetExceeded`, report the achieved Certified gap and keep the previous map; inversion with too few iterations is `BudgetExceeded` with its output unchanged |
+
+The corpus also covers: exact endpoints and stored controls, and reference
+samples within 1e-6 relative (Rounded). Far-origin controls narrow bitwise to the
+fixture's relative controls only after subtracting the origin; without it, the
+256-unit floor yields `UnsupportedPrecision`. Further cases cover the position
+floor for every fixture, Hermite conversion, capacity checks, line spans, corner
+and domain-scaled continuity, and every frozen status and guarantee name. They
+also cover all 19 `mixed_track` samples (Step, Linear, Hermite, both span sides
+and every boundary policy), the 43/27 Hermite overshoot left unclamped,
+`duplicate_time`, `MissingCache`, `StaleRevision` and deterministic refinement.
+The allocation probe fails every preparation allocation in turn. It finds
+`OutOfMemory` with the active owner preserved, and zero allocations during
+sampling, inversion and caller-owned conversion.
+
+### Numerical limits observed
+
+Building each single-span fixture to a whole-path gap of 1e-7 used the leaf
+counts below, at a maximum depth of 12-13 below the span. These are workload
+observations, not budgets.
+
+| Fixture | Leaves | Fixture | Leaves |
+| --- | --- | --- | --- |
+| `line_uniform`, `line_ease` | 1 | `inflection` | 4281 |
+| `line_backtrack` | 25 | `twisted` | 3590 |
+| `cusp` | 2012 | `vertical_start` | 2788 |
+| `parabola` | 2107 | `arch` | 4771 |
+
+The collinear ease line needs no split, because its control polygon equals its
+chord. Polygon-minus-chord gaps shrink about fourfold per uniform halving, so the
+leaf count grows like the inverse square root of the requested gap. Performance
+and memory budgets for prepared assets and integrated consumers remain
+unmeasured.
+
+### Departures and limits
+
+- The strict profile is the only build: every length bound is Certified, and
+  the map reports that class. There is no Estimated Visual build.
+- Inversion bisects on the Estimated partial-span midpoint, then accepts only by
+  the Certified residual. It returns the earliest parameter within float64
+  resolution, and an exact stored boundary estimate maps to its boundary.
+  Safeguarded Newton steps, cursors and linear-table Approximate lookup are
+  later work.
+- Continuity classification compares float32-rounded controls, so thresholds
+  below float32 relative rounding report C1 joints as not C1.
+- A closed Catmull-Rom source must not repeat its first waypoint: the repeated
+  pair is coincident and is rejected rather than silently dropped.
+
+### G2 validation record
+
+Host: macOS 26 on arm64 with the pinned host tools (Clang/LLVM 18.1.8, CMake
+3.29.6), preset `macos-clang-development`.
+
+The local preset does not treat warnings as errors. The build reported no
+warnings, and CI enforces warnings as errors.
+
+| Check | Result |
+| --- | --- |
+| Full `macos-clang-development` build | Passed with no warnings (968 build steps) |
+| `ludus_foundation_geometry_tests` | Passed: 23 test cases, 83,831 assertions |
+| `ludus_geometry_alloc_tests` | Passed: every preparation allocation failure injected; sampling allocates nothing |
+| `ludus_foundation_math_tests` including `[enclosure]` | Passed: 112 test cases, 420,773 assertions; the enclosure corpus has 200,000 cases |
+| Full CTest | 87 of 88 passed. `ludus_platform_cocoa_tests` reports failure because every case skips without `LUDUS_TEST_COCOA=1` and a WindowServer session, so it is unrelated to this change |
+| Header self-sufficiency and foundational include gate | Passed: 158 public headers |
+| Pinned clang-tidy on every new translation unit | Passed after naming-rule fixes and documented `bugprone-easily-swappable-parameters` suppressions |
+| Format, naming (`check_naming.py`) and changed-line source policy | Passed against the G0 branch |
+| Docs index, strict MkDocs, `check-wiki --documentation-only`, docs/wiki regressions | Passed |
+| API reference with pinned Doxygen | Passed: no new gaps |
+| ASan/UBSan | Built warning-clean. Execution hit the documented local Clang 18 ASan startup deadlock on macOS 26 (no output after 90 s), so the CI sanitizer lanes remain required |
+| Wasm math probe (enclosure corpus and Geometry exercise) | Not run locally because the host has no Emscripten SDK. The `webgpu-probe` workflow now triggers on Geometry changes and runs `ludus_web_math_corpus`. The Certified claim depends on that CI result |
+| Installed SDK consumer, build-time budget | Not run locally. The consumer gains `geometry.cpp` and links `Ludus::FoundationGeometry`; both run in CI |
+
+```sh
+./scripts/build macos-clang-development
+out/host-tools/venv/bin/ctest --test-dir out/build/macos-clang-development \
+  -R 'geometry|math|foundational_includes' --output-on-failure
+python3 tests/build_contract/verify_header_self_sufficiency.py out/build/macos-clang-development
+out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --quiet \
+  modules/foundation/geometry/src/*.cpp modules/foundation/geometry/tests/*.cpp \
+  modules/foundation/math/src/enclosure.cpp modules/foundation/math/tests/enclosure_tests.cpp
+./scripts/check --format
+python3 scripts/python/source_policy.py --base cb6f02a
+```
+
+The arc-length code acknowledges Jens Gravesen's Graphics Gems V chapter IV.7
+(reviewed in the [Gems review](../curves-surfaces-gems-review.md#length-of-bezier-curves))
+and Lyle Ramshaw's blossoming report. The conversion code acknowledges Barry and
+Goldman, and Yuksel, Schaefer and Keyser. The enclosure code acknowledges Moore,
+Kearfott and Cloud's interval analysis text and Knuth's TwoSum, and its oracle
+acknowledges Dekker. No source code from those works is copied.
 
 ## G0 contract freeze and reference corpus
 

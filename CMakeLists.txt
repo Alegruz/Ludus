@@ -142,6 +142,8 @@ add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/network/core)
 add_subdirectory(modules/foundation/memory)
 add_subdirectory(modules/foundation/hash)
+# FoundationIdentity depends only on FoundationBase and builds for native and web.
+add_subdirectory(modules/foundation/identity)
 add_subdirectory(modules/foundation/strings)
 add_subdirectory(modules/localization)
 add_subdirectory(modules/foundation/containers)
@@ -152,11 +154,14 @@ add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.
 add_subdirectory(modules/foundation/math)
+# FoundationGeometry (ADR 0024) depends on Base, Math and Containers only.
+add_subdirectory(modules/foundation/geometry)
 add_subdirectory(modules/gameplay/camera)
 add_subdirectory(modules/physics/fluid)
 add_subdirectory(modules/foundation/time)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
+add_subdirectory(tools/memory-bench)
 # Runtime Ui has no Platform/RHI/Text dependency and builds on both toolchains.
 add_subdirectory(modules/ui)
 # Input is configured before Platform: Platform depends on Input for the
@@ -333,7 +338,7 @@ write_basic_package_version_file(
 # --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
-    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
+    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationGeometry FoundationTime FoundationLogging
     FoundationProfiling FoundationThreadingProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneFormat RenderGraphFormat StringDictionaryFormat StringDictionary StringDictionaryWriter SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
@@ -344,12 +349,12 @@ if(LUDUS_BUILD_BEHAVIOR)
     ludus_sdk_register_dependency(Luau "1eca9fda3e4753a1592000f6cfdf659aaa778b7d-reviewed-loader-v1" "MIT" bundled)
 endif()
 if(NOT EMSCRIPTEN)
-    foreach(_component Platform GraphicsRhi GraphicsRenderer Text GameHost)
+    foreach(_component Platform PlatformEntropy GraphicsRhi GraphicsRenderer Text GameHost)
         ludus_sdk_register_component(${_component})
         ludus_sdk_register_feature(${_component})
     endforeach()
 else()
-    foreach(_component Platform GraphicsRhi GraphicsRenderer)
+    foreach(_component Platform PlatformEntropy GraphicsRhi GraphicsRenderer)
         ludus_sdk_register_component(${_component})
         ludus_sdk_register_feature(${_component})
     endforeach()

@@ -92,8 +92,7 @@ if (graph.Add(Compute, &output, handle, LUDUS_JOB_LABEL(Compute)) != jobs::JobSt
     return 1;
 }
 // ... Seal, Submit and Wait as above ...
-(void)system.Shutdown(); // workers publish their partial trace chunks
-profiling::EndCapture();
+profiling::EndCapture(); // publishes every thread's partial trace chunk
 profiling::ExportPerfettoTrace("jobs.json");
 ```
 
@@ -110,6 +109,4 @@ site once and never allocates. A capture contains:
 | Counter | `JobReadyDepth` | Jobs waiting in the ready queue, sampled at Submit and at each job start. |
 
 Jobs skipped as Blocked or Cancelled have no slice. A dependent with several
-prerequisites receives the arrow of the prerequisite that released it. Workers
-publish their last partial trace chunk when they unregister, so shut the system
-down before `ExportPerfettoTrace` when the capture must include every worker event.
+prerequisites receives the arrow of the prerequisite that released it.

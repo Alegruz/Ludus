@@ -1,3 +1,5 @@
+#include "entropy_fixture.h"
+#include "internal/editor_identity.h"
 #include "internal/world_demo_adapter.h"
 #include "internal/world_workspace.h"
 
@@ -217,4 +219,28 @@ TEST_CASE("World demo preview gestures commit once to World and cancel without a
     Type(Field(view, QStringLiteral("transform/x")), QStringLiteral("-"));
     CHECK_FALSE(view.StartPreview());
     CHECK(view.Document().Draft() == original);
+}
+TEST_CASE("World demo entity IDs keep the legacy prefix and fail without entropy",
+          "[editor][world][world-demo][identity]")
+{
+    namespace fixture = ludus::editor::tests;
+    QTemporaryDir directory;
+    const QString path = WorldFile(directory);
+    WorldWorkspace view;
+    view.SetProject(directory.path(), 1);
+    REQUIRE(view.Open(path));
+    REQUIRE(IsWorldDemo(view.Document()));
+    WorldDocument candidate = view.Document();
+    const QJsonObject before = candidate.Draft();
+    QString error;
+    QString id = QStringLiteral("unchanged");
+    CHECK_FALSE(
+        candidate.DuplicateEntity(fixture::MakeUnavailableEntropySource(), error, QStringLiteral("player-start"), id));
+    CHECK(error == DescribeEntropyUnavailable());
+    CHECK(id == QStringLiteral("unchanged"));
+    CHECK(candidate.Draft() == before);
+    CHECK_FALSE(candidate.CanUndo());
+    REQUIRE(candidate.DuplicateEntity(fixture::MakeFixedEntropySource(), error, QStringLiteral("guard-a"), id));
+    // `entity-` and the first 24 characters of the UUID text fit the sample's 32-byte name field.
+    CHECK(id == QStringLiteral("entity-") + QLatin1String(fixture::FIXED_UUID_TEXT).left(24));
 }

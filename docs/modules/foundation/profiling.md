@@ -13,12 +13,33 @@ clock)** and **Phase 1 (CPU Trace MVP + Perfetto export)** of the finalized
   - `LUDUS_PROFILE_FRAME()` — frame boundary marker (advances the frame epoch).
   - `LUDUS_PROFILE_MARK(Name)` — zero-duration instant marker.
   - `LUDUS_PROFILE_FLOW_OUT(Name)` / `LUDUS_PROFILE_FLOW_IN(id)` — cross-context links.
-- Per-thread lock-free recording into fixed, pre-reserved chunk buffers.
+- Per-thread recording into fixed, pre-reserved chunk buffers. Writing an event
+  takes no lock; a full chunk is handed over under one recorder mutex, once per
+  4,096 events.
 - Capture lifecycle (`BeginCapture` / `EndCapture`) and Chrome/Perfetto JSON
   export (`ExportPerfettoTrace`) — open the file in <https://ui.perfetto.dev>.
   The export names each registered thread's track.
 - An [integration emission API](#integration-emission-api) for runtime systems,
   such as the job scheduler, that identify their work at run time.
+
+## Capture lifecycle contract
+
+- `BeginCapture(maxChunks)` reserves one slab of `maxChunks` 96 KiB chunks from
+  the system allocation domain at the chunks' 64-byte alignment, using checked
+  size arithmetic. It returns `false` and leaves capture disarmed when a capture
+  is active, the size overflows or the reservation fails. It discards any events
+  from a previous capture that were not exported.
+- `EndCapture()` joins the capture. It disarms recording, waits for producer
+  threads that are writing an event, and publishes every thread's partial chunk.
+  All events accepted before it returns are exported, including those of threads
+  that are still running or that exited during the capture.
+- Thread exit (or `UnregisterThreadForTrace`) publishes the thread's partial chunk.
+- `BeginCapture`, `EndCapture` and `ExportPerfettoTrace` are control calls. Call
+  them from one coordinating thread, or serialize them yourself. Producers may
+  keep emitting across any of them.
+- Site and thread registration publish each table entry completely before it
+  becomes visible to the exporter. A site that several threads reach for the
+  first time is registered once.
 
 ## Usage
 
@@ -91,29 +112,39 @@ does not currently record allocation lifetimes.
 These are the smallest defensible deviations from the architecture document,
 recorded per the implementation brief:
 
-1. **Synchronous drain instead of a dedicated collector thread.** The producer
-   hot path is exactly the design's (timestamp + relaxed stores into a TLS chunk;
-   full chunks published to a lock-free stack). For Phase 1 — explicit capture
-   *sessions*, not the continuous rolling ring of Phase 3 — the collector drains
-   on the calling thread at export time. A background collector thread buys
-   nothing here and adds join/lifetime surface; it lands with Phase 3, where
-   continuous capture needs it. No hot-path property changes.
-2. **No dependency on FoundationLogging.** To keep the FoundationBase-only
+1. **Synchronous drain instead of a dedicated collector thread.** For Phase 1 —
+   explicit capture *sessions*, not the continuous rolling ring of Phase 3 — the
+   collector drains on the calling thread at export time. A background collector
+   thread buys nothing here and adds join/lifetime surface; it lands with Phase 3,
+   where continuous capture needs it.
+2. **Mutex-guarded chunk handoff and an explicit producer join.** Memory
+   profiling [phase 0](../../development/memory-phase-0.md) replaced the
+   lock-free chunk stacks, which were ABA-prone with several concurrent free-list
+   poppers. They also gave `EndCapture` no way to know that producers had stopped
+   writing, so it could not safely publish their partial chunks. While capture is
+   armed, each event still costs a thread-local chunk write, but it now also
+   sets and clears that thread's in-flight flag with a sequentially consistent
+   store. The design's "no atomics on the common push" no longer holds; the
+   phase 0 page records the measured per-event cost.
+3. **No dependency on FoundationLogging.** To keep the FoundationBase-only
    dependency direction (AGENTS.md), profiling keeps its own thread-identity
    table rather than reusing the logging TLS identity.
-3. **`TraceEvent` is a single 24-byte record** with an `Aux` field carrying the
+4. **`TraceEvent` is a single 24-byte record** with an `Aux` field carrying the
    optional flow id or category id. The design's separate side-channel stream is
    deferred until the event-size measurement (gates G4/G5) says it is worth it.
-4. **`LUDUS_PROFILE_FUNCTION` builds its descriptor at runtime** (`constexpr`,
+5. **`LUDUS_PROFILE_FUNCTION` builds its descriptor at runtime** (`constexpr`,
    not `consteval`) because `__func__` is not a constant expression; the cost is
    two `string_view` assignments, and site registration still happens once.
 
 ## Validation status
 
-Unit tests (`clock`, `scope`, `export`, `disabled`) cover the §11 correctness
+The `clock`, `scope`, `export` and `disabled` tests cover the §11 correctness
 matrix (single/nested/recursive/early-return/multi-thread/frame-boundary/
 incomplete) and gates G1 (disabled = no evaluation), G3 (clock monotonicity),
-and G13 (incomplete scopes exported as `"incomplete":true`). An export test
+and G13 (incomplete scopes exported as `"incomplete":true`). The `recorder`
+tests cover slab alignment and overflow, joins with live and exiting threads,
+stop/restart while producers keep emitting, concurrent drain/recycle and
+concurrent registration; run them under ASan/UBSan and TSan. An export test
 checks integration slices, matched caller flows, counter samples and thread-name
 records. The pinned toolchain
 (Clang 18 + Conan + Catch2) runs the authoritative warnings-as-errors, ASan/UBSan

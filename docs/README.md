@@ -58,6 +58,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Building Ludus](development/building.md)
 - [Building the browser editor](development/browser-editor.md)
 - [Checked drag and radial contact kernels](development/dynamics-kernels.md)
+- [Choose and use containers](wiki/guides/containers.md)
 - [Continuous integration](development/continuous-integration.md)
 - [Filesystem measurements](development/filesystem-benchmark.md)
 - [Game release setup, packaging and publishing](development/editor-game-releases.md)
@@ -66,6 +67,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Independent Ludus game projects and shared SDKs — user guide](development/project-sdk-workflow.md)
 - [Ludus Wiki: development and publication](development/wiki.md)
 - [ludus-tools](development/host-tools.md)
+- [Memory Phase 0: Trace Prerequisites and Baselines](development/memory-phase-0.md)
 - [Mobile support implementation plan](development/mobile-support-plan.md)
 - [Native debugging with RAD on Linux](development/debugging.md)
 - [Native diagnostics and assertion policies](development/diagnostics.md)
@@ -86,6 +88,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 
 ## Module usage
 
+- [FoundationIdentity](modules/foundation/identity.md)
 - [FoundationLogging](modules/foundation/logging.md)
 - [FoundationParsing](modules/foundation/parsing.md)
 - [FoundationProfiling](modules/foundation/profiling.md)
@@ -93,6 +96,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Gameplay world storage](modules/gameplay/world.md)
 - [Graphics RHI](modules/graphics/rhi.md)
 - [Localization: static UTF-8 catalogs](modules/localization.md)
+- [Ludus::FoundationGeometry](modules/foundation/geometry.md)
 - [Ludus::FoundationMath](modules/foundation/math.md)
 
 ## Examples and probes
@@ -269,7 +273,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Assertion startup / report-delivery — validation record](architecture/assertions-startup-validation.md)
 - [Assertion subsystem: M0 + M1 implementation evidence](architecture/assertions-m0-m1.md)
 - [Audio content implementation evidence](development/audio-content-evidence.md)
-- [Curves and surfaces evidence (G0-G1)](architecture/math-evidence/curves-surfaces.md)
+- [Curves and surfaces evidence (G0-G2)](architecture/math-evidence/curves-surfaces.md)
 - [Evidence for the September 23, 2026 logging review](architecture/logging-review-evidence/README.md)
 - [First container-system increment: evidence](development/container-systems-evidence.md)
 - [FoundationMath evidence ledger](architecture/math-evidence/README.md)

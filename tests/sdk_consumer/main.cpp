@@ -39,8 +39,10 @@ bool ExerciseInstalledParsing() noexcept;
 bool ExerciseInstalledConfiguration() noexcept;
 bool ExerciseInstalledReflection() noexcept;
 int ExerciseInstalledTime() noexcept;
+int ExerciseInstalledIdentity() noexcept;
 bool ExerciseInstalledFluid() noexcept;
 bool ExerciseInstalledCurves() noexcept;
+bool ExerciseInstalledGeometry() noexcept;
 bool ExerciseInstalledCamera() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
@@ -249,6 +251,10 @@ int main()
     {
         return 31;
     }
+    if (ExerciseInstalledGeometry() == false)
+    {
+        return 32;
+    }
     if (!ExerciseInstalledConfiguration())
     {
         return 90;
@@ -379,6 +385,10 @@ int main()
     if (const int timeResult = ExerciseInstalledTime(); timeResult != 0)
     {
         return timeResult;
+    }
+    if (const int identityResult = ExerciseInstalledIdentity(); identityResult != 0)
+    {
+        return identityResult;
     }
     if (const int worldResult = ExerciseInstalledWorld(); worldResult != 0)
     {

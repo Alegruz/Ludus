@@ -52,9 +52,10 @@ if(TARGET ludus_rhi_render_tests)
     if(APPLE)
         target_compile_definitions(ludus_renderer_render_tests PRIVATE LUDUS_TEST_METAL=1)
     endif()
-    # Test-only kernel exercising FoundationMath's shader addressed-random port.
+    # Test-only kernel exercising FoundationMath's shader addressed-random port;
+    # shared with the WebGPU browser fixture in tests/sdk_consumer.
     ludus_compile_shader(TARGET ludus_renderer_render_tests NAME random_parity
-        SOURCE tests/random_parity.slang COMPUTE ComputeMain
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/random_parity.slang" COMPUTE ComputeMain
         INCLUDES "${PROJECT_SOURCE_DIR}/modules/foundation/math/shaders")
     ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_gpu_preview)
     ludus_compile_renderer_shaders(TARGET ludus_renderer_render_tests SHADERS renderer_gpu_preview_image)

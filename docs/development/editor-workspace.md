@@ -474,7 +474,10 @@ object keyed by property ID. Every attached component supplies every declared
 property. Required components are present on every entity. Deleting an entity
 referenced by another entity is rejected with the referring property; clear or
 reassign that reference first. Duplicate creates a new stable ID, remaps its
-self-references, and preserves references to other entities.
+self-references, and preserves references to other entities. New entity IDs are
+FoundationIdentity UUIDv4 text from the operating system's entropy source; if it
+is unavailable, Add and Duplicate change nothing and report that in the status
+line (see [the UUID architecture](../architecture/object-handles-uuid.md#implementation-sequence)).
 
 Runtime integration stays game-owned: parse/validate into temporary owned data;
 create registry entities; map persisted IDs to new runtime handles; populate
@@ -838,19 +841,26 @@ indirect transport, soft area shadows or spectral PBRT parity. See the owning
 Optional GPU path tracing remains a separate renderer API.
 
 Qt Quick's native surface is embedded in the World splitter and uses the basic
-owner-thread render loop. The adapter admits Qt's exact device and queue, imports
+owner-thread render loop. The adapter admits the device and queue Qt Quick renders with, imports
 its RGBA8 texture, and retires replaced reads only after Qt submits the consumer
 frame. Resize, scene replacement, Stop and source invalidation release texture
 leases before renderer/device cleanup. Camera and splitter restoration keep the
 existing project-local preferences. The native child surface follows Qt window
 container stacking rules; widgets cannot overlay it arbitrarily.
 
-Metal sharing requires Qt 6.4+ with Qt Quick and the Cocoa display plugin. Vulkan
-sharing requires Qt 6.6+ with Qt Quick and an X11/Wayland display, because older Qt
-cannot report which graphics queue its Vulkan device uses.
+Metal sharing requires Qt 6.4+ with Qt Quick and the Cocoa display plugin. On
+Linux (X11 or Wayland) the editor creates the Vulkan device itself, on Qt's
+`QVulkanInstance`, choosing a graphics queue that can present to the viewport
+window and enabling `VK_KHR_swapchain`. Qt Quick adopts that device through
+`QQuickGraphicsDevice::fromDeviceObjects`, available in every Qt 6 release, and
+the RHI admits the same device and queue. Qt before 6.6 cannot report the queue of
+a device it created itself; with this ownership it never has to, so Ubuntu 24.04's
+Qt 6.4 shares GPU textures without CPU readback. Hardware adapters are preferred
+over software rasterizers. The editor destroys the device only after Qt Quick and
+the RHI have released it.
 
-On Linux with Qt 6.4 or 6.5 (for example Ubuntu 24.04's packages) the viewport uses
-an offscreen fallback instead. The engine creates its own headless Vulkan device,
+If no adapter can present to the window with a shareable device, the viewport
+falls back to an offscreen path. The engine creates its own headless Vulkan device,
 renders the same raster viewport into its two display images, and copies the
 latest completed image back to the CPU in bands that each fit one RHI transfer
 slice. A plain widget paints that `QImage`. The renderer keeps drawing into the
@@ -858,11 +868,9 @@ other image while one is being copied, and the GUI thread only polls, so no call
 waits for the GPU. [World navigation controls](#world-viewport-navigation) work as
 in the shared path; resizing recreates the offscreen targets. The headless device
 admits the same storage budgets and raster profile as the shared device, so Lit
-shadow atlases fit on both paths. The copy costs some latency and
-bandwidth, and the frame is capped at 1024 pixels on its long side, the same as
-the shared path. Set `LUDUS_EDITOR_VIEWPORT=offscreen` to force this path on any
-Linux build (useful for testing it on newer Qt). Qt 6.6+ keeps the shared path
-unchanged.
+shadow atlases fit on both paths. The copy costs some latency and bandwidth, and the
+frame is capped at 1024 pixels on its long side, the same as the shared path. Set
+`LUDUS_EDITOR_VIEWPORT=offscreen` to force this path for testing.
 
 Offscreen Qt plugins without that variable, or machines with no Vulkan driver,
 keep document editing and asset validation available, and the viewport explains

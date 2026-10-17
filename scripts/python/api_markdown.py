@@ -15,6 +15,9 @@ import xml.etree.ElementTree as ET
 
 
 KINDS = {"class", "struct", "union", "concept", "namespace", "file"}
+# Mirrors docs/Doxyfile EXCLUDE_SYMBOLS so implementation scopes stay out of the
+# reference and coverage even if Doxygen's wildcard matching changes.
+HIDDEN_SCOPES = {"detail", "internal"}
 SECTIONS = {
     "public-type": "Types", "public-func": "Methods",
     "public-static-func": "Static methods", "public-attrib": "Fields",
@@ -22,6 +25,16 @@ SECTIONS = {
     "typedef": "Aliases", "enum": "Enumerations", "var": "Constants and variables",
     "define": "Macros", "user-defined": "Members",
 }
+
+
+def is_hidden_scope(name):
+    """Return whether a qualified C++ scope lies in a `detail`/`internal` namespace."""
+    return not HIDDEN_SCOPES.isdisjoint(name.split("::"))
+
+
+def is_hidden_member(member):
+    """Classify a member by its enclosing scope, so a member named `detail` stays public."""
+    return is_hidden_scope(member.findtext("qualifiedname", "").rpartition("::")[0])
 
 
 def text(node):
@@ -166,12 +179,13 @@ def render_reference(root, xml, output, inputs):
     for entry in ET.parse(xml / "index.xml").getroot().findall("compound"):
         if entry.get("kind") in KINDS:
             compound = ET.parse(xml / (entry.get("refid") + ".xml")).getroot().find("compounddef")
-            if compound.get("prot") in {None, "public"}:
+            name = compound.findtext("compoundname", "")
+            if compound.get("prot") in {None, "public"} and not is_hidden_scope(name):
                 compounds[entry.get("refid")] = compound
     references = {refid: refid + ".html" for refid in compounds}
     for refid, compound in compounds.items():
         for member in compound.findall("sectiondef/memberdef"):
-            if member.get("prot") not in {None, "public"}:
+            if member.get("prot") not in {None, "public"} or is_hidden_member(member):
                 continue
             for node in [member, *member.findall("enumvalue")]:
                 identifier = node.get("id")
@@ -237,7 +251,8 @@ def render_reference(root, xml, output, inputs):
         seen = set()
         for section in compound.findall("sectiondef"):
             members = [member for member in section.findall("memberdef")
-                       if member.get("prot") in {None, "public"} and member.get("id") not in seen]
+                       if member.get("prot") in {None, "public"} and not is_hidden_member(member)
+                       and member.get("id") not in seen]
             if not members:
                 continue
             title = section.findtext("header") or SECTIONS.get(section.get("kind"), "Members")

@@ -1,9 +1,11 @@
 # Curves and surfaces architecture
 
-Status: G0 contracts frozen in [ADR 0024](../decisions/0024-curves-surfaces-contracts.md)
-and the G1 fixed-size math kernel implemented; G2-G6 remain proposed.
+Status: G0 contracts frozen in [ADR 0024](../decisions/0024-curves-surfaces-contracts.md),
+the G1 fixed-size math kernel and the G2 prepared paths, tracks and distance
+maps implemented; G3-G6 remain proposed.
 Design baseline: `52e29ce`, inspected on 2026-10-04. Implementation baselines:
-`95683aa` (G1, 2026-10-05) and `5117c8c` (G0, 2026-10-15). Validation is
+`95683aa` (G1, 2026-10-05), `5117c8c` (G0, 2026-10-15) and `cb6f02a` (G2,
+2026-10-16). Validation is
 recorded in the [evidence ledger](math-evidence/curves-surfaces.md). Performance
 budgets for prepared assets and integrated consumers remain unmeasured.
 
@@ -17,9 +19,10 @@ them.
 
 This is a production-oriented design judgment, informed by current primary
 sources and the [Gems review](curves-surfaces-gems-review.md). It does not claim
-universal optimality or measured Ludus performance. The kernel, owners, caches,
-codecs and adapters below remain proposed; the fixed-size kernel is implemented
-and their domains, statuses and guarantee classes are frozen.
+universal optimality or measured Ludus performance. The fixed-size kernel and
+the G2 path, track and distance owners are implemented; frames, queries,
+surfaces, meshes, codecs and adapters remain proposed. Domains, statuses and
+guarantee classes are frozen.
 The final section preserves the baseline written before the chapter review.
 
 ## Implementation and research sequence
@@ -45,9 +48,10 @@ selection and boundary policies, the `GeometryStatus` enumerators, the Exact,
 Rounded, Certified, Estimated and Approximate guarantee classes for every
 planned result, tolerance profile fields and units, the float32 position floor,
 and the module, header and cooked-format boundaries. This page keeps the
-rationale. Strict profiles stay unavailable until a Certified outward-rounding
-helper exists, so G2 must add and validate one before it advertises a strict
-bound.
+rationale. G2 added the outward-rounding helper (FoundationMath `enclosure.hpp`)
+and validates it with an exact-oracle corpus on the pinned native toolchain and
+in the Wasm math probe. The strict distance profile accepts only its Certified
+bounds.
 
 The representative fixture corpus lives in `tests/fixtures/curves_surfaces/`.
 A stdlib-only Python generator computes every reference from exact rational or
@@ -74,6 +78,26 @@ when a derivative overflows float32. Endpoints/corners preserve their stored
 values, including signed zero. Subdivision results are rounded controls, not
 symbolically exact children or certified enclosures. Derivatives are in each
 child's normalized domain. The public headers document supported aliasing.
+
+## Implemented prepared owners (G2)
+
+The installed `Ludus::FoundationGeometry` target (`modules/foundation/geometry`)
+exports `status.hpp`, `path.hpp`, `distance.hpp` and `track.hpp`; see the
+[module guide](../modules/foundation/geometry.md). `TryPreparePath` validates
+line and cubic spans against a whole `ToleranceProfile` and checks the float32
+position floor after float64 origin subtraction. It rejects disconnected joints,
+classifies C0/G1/C1/C2 continuity with domain-scaled derivatives and builds an
+immutable `PreparedPath`. Hermite and centripetal Catmull-Rom sources convert into
+caller-owned span ranges. `TryBuildDistanceMap` refines chord/control-polygon
+leaves under explicit limits, with outward accumulation, to a Certified
+whole-path gap. `TryResolveDistance` returns the earliest parameter with a
+Certified residual bound. `TryPrepareTrack` and `TryEvaluateTrack` implement
+Step, Linear and Hermite spans with the frozen span-side and boundary-policy rules.
+
+The outward-rounding helper lives in FoundationMath, behind its precise-arithmetic
+implementation boundary, so the existing Wasm math probe can validate it.
+Departures are recorded in the evidence ledger. Path cursors, a Visual-only
+Estimated build and Approximate table lookup are not implemented.
 
 No editor binding is needed for these math values. A useful editable curve
 document needs the G2 prepared owners and G5 authoring/undo/publication contracts;
@@ -137,8 +161,8 @@ capabilities.
 
 | Location and target | Owns | Depends on |
 | --- | --- | --- |
-| Implemented G1 additions to `modules/foundation/math`, `Ludus::FoundationMath` | Fixed-size scalar/vector cubic and bicubic values; evaluate, differentiate, split, Hermite conversion; conservative bound helpers remain future work | Base only |
-| Proposed `modules/foundation/geometry`, `Ludus::FoundationGeometry` | Prepared path/patch owners and views, scalar tracks, distance/frame/bounds caches, queries and mesh generation | Base, Math, Containers |
+| Implemented G1/G2 additions to `modules/foundation/math`, `Ludus::FoundationMath` | Fixed-size scalar/vector cubic and bicubic values; evaluate, differentiate, split, Hermite conversion; outward-rounded enclosures (G2) | Base only |
+| `modules/foundation/geometry`, `Ludus::FoundationGeometry` (G2 implemented) | Prepared path owners and views, scalar tracks and distance caches (G2); patch owners, frame/bounds caches, queries and mesh generation (proposed) | Base, Math, Containers |
 | Proposed `modules/content/geometry_format`, `Ludus::GeometryFormat` | Header-only versioned cooked record layouts, limits and constants shared by cooker and loader | Base only |
 | Proposed `modules/geometry/content`, `Ludus::GeometryContent` | Authoring codecs, source IDs, import/cook validation, loading and publication | Content, FoundationGeometry, GeometryFormat |
 | Editor-private adapters | Document edits, undo, handles, preview, inspection | GeometryContent, editor UI |
@@ -794,7 +818,7 @@ implementing an adapter.
 
 ## Validation and implementation gates
 
-The G0 freeze and G1 implementation and their checks are tracked in the
+The G0 freeze, the G1 and G2 implementations and their checks are tracked in the
 [evidence ledger](math-evidence/curves-surfaces.md). Completion of each
 remaining phase below requires its own evidence ledger, numerical limits and
 workload budgets; G0 references and G1 tests do not validate the proposed owners

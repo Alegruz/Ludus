@@ -54,9 +54,14 @@ namespace detail
 // This is the single insertion point for a future Ludus engine allocator: no
 // call site changes when it is re-pointed. Returns nullptr on failure (never
 // throws, never terminates here).
+/// Internal allocation seam used by Array; not a general allocator API.
+///
+/// Returns uninitialized storage of `bytes` bytes aligned to `alignment`, or nullptr on failure or for zero bytes.
+/// Never terminates and never throws; the calling container decides whether failure is fatal.
 [[nodiscard]] void*
 AllocateBytes(usize bytes, // NOLINT(bugprone-easily-swappable-parameters): allocation seam signature
               usize alignment) noexcept;
+/// Internal: release a block returned by AllocateBytes with the same size and alignment. A null pointer is ignored.
 void FreeBytes(void* ptr,
                usize bytes, // NOLINT(bugprone-easily-swappable-parameters): allocation seam signature
                usize alignment) noexcept;
@@ -66,15 +71,20 @@ void FreeBytes(void* ptr,
 //   * OnAllocationFailure / OnCapacityOverflow: LUDUS_FATAL sinks for the
 //     infallible API, kept out-of-line and cold so the hot path carries no
 //     diagnostic string weight.
+/// Internal growth policy: at least `requested` elements, 2x the current capacity and a cache-line minimum.
+/// @return The new element capacity, or 0 when `requested` exceeds the addressable element count.
 [[nodiscard]] usize
 ComputeGrowthCapacity(usize currentCapacity, // NOLINT(bugprone-easily-swappable-parameters): growth-policy inputs
                       usize requested,
                       usize elementSize) noexcept;
+/// Internal: fatal sink for allocation failure in the infallible container operations. Does not return.
 [[noreturn]] LUDUS_COLD void OnAllocationFailure() noexcept;
+/// Internal: fatal sink for a capacity request that overflows the element count. Does not return.
 [[noreturn]] LUDUS_COLD void OnCapacityOverflow() noexcept;
 
 // Largest element count representable without size overflow, for a given element
 // size. The exception-free replacement for std::length_error.
+/// Internal: largest element count whose byte size cannot overflow, for elements of `elementSize` bytes.
 [[nodiscard]] LUDUS_INLINE constexpr usize MaxElementCount(usize elementSize) noexcept
 {
     // Reserve headroom below SIZE_MAX; PTRDIFF_MAX-style ceiling on element count.
@@ -103,12 +113,17 @@ class Array
                   "Array<T> requires T to be trivially relocatable, nothrow-move-constructible, or copy-constructible");
 
 public:
+    /// Stored element type.
     using ValueType = ElementType;
+    /// Size and index type.
     using SizeType = usize;
+    /// Contiguous mutable iterator; invalidated with element borrows.
     using Iterator = ElementType*;
+    /// Contiguous read-only iterator; invalidated with element borrows.
     using ConstIterator = const ElementType*;
 
     // --- Construction / destruction ----------------------------------------
+    /// Empty array that owns no storage. Never allocates.
     constexpr Array() noexcept = default;
 
     /// @brief Braces supply elements: `Array<int32>{3}` holds one value, whereas (3) value-initializes three
@@ -127,6 +142,9 @@ public:
         }
     }
 
+    /// @brief Construct `count` value-initialized elements in one exact allocation.
+    ///
+    /// Allocation failure or capacity overflow is fatal. Use TryResize on an empty array for a fallible equivalent.
     explicit Array(usize count)
     {
         if (count > 0)
@@ -137,6 +155,9 @@ public:
         }
     }
 
+    /// @brief Construct `count` copies of `value` in one exact allocation.
+    ///
+    /// Allocation failure or capacity overflow is fatal.
     Array(usize count, const ElementType& value)
     {
         if (count > 0)
@@ -147,6 +168,7 @@ public:
         }
     }
 
+    /// @brief Deep copy with capacity equal to other's size. Allocation failure is fatal.
     Array(const Array& other)
     {
         if (other.mSize > 0)
@@ -157,6 +179,9 @@ public:
         }
     }
 
+    /// @brief Take other's storage without allocating. other becomes empty and owns no storage.
+    ///
+    /// Borrows into other's elements now refer to this array's elements.
     Array(Array&& other) noexcept : mData(other.mData), mSize(other.mSize), mCapacity(other.mCapacity)
     {
         other.mData = nullptr;
@@ -164,6 +189,10 @@ public:
         other.mCapacity = 0;
     }
 
+    /// @brief Replace the contents with a copy of other.
+    ///
+    /// Reuses capacity when it suffices; otherwise frees and reallocates exactly. Existing elements are destroyed
+    /// first, and allocation failure is fatal. Self-assignment does nothing.
     Array& operator=(const Array& other)
     {
         if (this == &other)
@@ -182,6 +211,9 @@ public:
         return *this;
     }
 
+    /// @brief Destroy the current elements, free the storage, then take other's storage.
+    ///
+    /// other becomes empty. Self-assignment does nothing. Never allocates.
     Array& operator=(Array&& other) noexcept
     {
         if (this == &other)
@@ -199,6 +231,7 @@ public:
         return *this;
     }
 
+    /// Destroy the live elements and free the storage.
     ~Array()
     {
         ClearElements();
@@ -206,26 +239,32 @@ public:
     }
 
     // --- Size / capacity ----------------------------------------------------
+    /// Number of live elements.
     [[nodiscard]] usize GetSize() const noexcept
     {
         return mSize;
     }
+    /// Number of elements the current storage holds without reallocating.
     [[nodiscard]] usize GetCapacity() const noexcept
     {
         return mCapacity;
     }
+    /// True when the array holds no live elements; capacity may still be retained.
     [[nodiscard]] bool IsEmpty() const noexcept
     {
         return mSize == 0;
     }
+    /// First element, or nullptr when no storage is owned. Valid until the next reallocation or destruction.
     [[nodiscard]] ElementType* GetData() noexcept
     {
         return mData;
     }
+    /// Read-only first element, or nullptr when no storage is owned.
     [[nodiscard]] const ElementType* GetData() const noexcept
     {
         return mData;
     }
+    /// Largest element count the array can request without byte-size overflow.
     [[nodiscard]] static constexpr usize GetMaxSize() noexcept
     {
         return detail::MaxElementCount(kElementSize);
@@ -257,6 +296,10 @@ public:
         return ReallocateTo(newCapacity);
     }
 
+    /// @brief Set the size to `newSize`, destroying the tail or value-initializing new elements.
+    ///
+    /// Growth reallocates to exactly `newSize` and invalidates all borrows. Allocation failure is fatal. Supports
+    /// move-only element types.
     void Resize(usize newSize)
     {
         if (!TryResizeImpl(newSize, nullptr))
@@ -275,11 +318,19 @@ public:
         }
     }
 
+    /// @brief Fallible Resize with value-initialized new elements.
+    ///
+    /// @return False on allocation failure or overflow, leaving the size, capacity and elements unchanged. Shrinking
+    /// always succeeds without allocating.
     [[nodiscard]] bool TryResize(usize newSize)
     {
         return TryResizeImpl(newSize, nullptr);
     }
 
+    /// @brief Fallible Resize that copies `value` into new elements.
+    ///
+    /// `value` may refer to an element of this array; it is copied before any relocation.
+    /// @return False on allocation failure or overflow, leaving the array and `value` unchanged.
     [[nodiscard]] bool TryResize(usize newSize, const ElementType& value)
         requires std::is_copy_constructible_v<ElementType>
     {
@@ -302,37 +353,44 @@ public:
         (void)ReallocateTo(mSize);
     }
 
+    /// Destroy every live element and keep the capacity. Never allocates.
     void Clear() noexcept
     {
         ClearElements();
     }
 
     // --- Element access -----------------------------------------------------
+    /// Element at `index`. @pre index < GetSize() (asserted in checked builds).
     [[nodiscard]] ElementType& operator[](usize index) noexcept
     {
         LUDUS_ASSERT(index < mSize);
         return mData[index];
     }
+    /// Read-only element at `index`. @pre index < GetSize() (asserted in checked builds).
     [[nodiscard]] const ElementType& operator[](usize index) const noexcept
     {
         LUDUS_ASSERT(index < mSize);
         return mData[index];
     }
+    /// First element. @pre The array is not empty.
     [[nodiscard]] ElementType& GetFirst() noexcept
     {
         LUDUS_ASSERT(mSize > 0);
         return mData[0];
     }
+    /// Read-only first element. @pre The array is not empty.
     [[nodiscard]] const ElementType& GetFirst() const noexcept
     {
         LUDUS_ASSERT(mSize > 0);
         return mData[0];
     }
+    /// Last element. @pre The array is not empty.
     [[nodiscard]] ElementType& GetLast() noexcept
     {
         LUDUS_ASSERT(mSize > 0);
         return mData[mSize - 1];
     }
+    /// Read-only last element. @pre The array is not empty.
     [[nodiscard]] const ElementType& GetLast() const noexcept
     {
         LUDUS_ASSERT(mSize > 0);
@@ -340,48 +398,63 @@ public:
     }
 
     // --- Iterators (lowercase for range-for / ranges / std interop) ---------
+    /// Range-for/standard interop: pointer to the first element (null when no storage is owned).
     [[nodiscard]] Iterator begin() noexcept
     {
         return mData;
     }
+    /// Range-for/standard interop: read-only pointer to the first element.
     [[nodiscard]] ConstIterator begin() const noexcept
     {
         return mData;
     }
+    /// Standard interop: read-only pointer to the first element.
     [[nodiscard]] ConstIterator cbegin() const noexcept
     {
         return mData;
     }
+    /// Range-for/standard interop: one past the last live element.
     [[nodiscard]] Iterator end() noexcept
     {
         return mData + mSize;
     }
+    /// Range-for/standard interop: read-only one past the last live element.
     [[nodiscard]] ConstIterator end() const noexcept
     {
         return mData + mSize;
     }
+    /// Standard interop: read-only one past the last live element.
     [[nodiscard]] ConstIterator cend() const noexcept
     {
         return mData + mSize;
     }
+    /// Standard interop spelling of GetData().
     [[nodiscard]] ElementType* data() noexcept
     {
         return mData;
     }
+    /// Standard interop spelling of the read-only GetData().
     [[nodiscard]] const ElementType* data() const noexcept
     {
         return mData;
     }
+    /// Standard interop spelling of GetSize().
     [[nodiscard]] usize size() const noexcept
     {
         return mSize;
     }
 
     // --- Adding elements ----------------------------------------------------
+    /// @brief Append a copy of `value`; allocation failure is fatal.
+    ///
+    /// `value` may refer to an element of this array. Growth invalidates all borrows.
     void Add(const ElementType& value)
     {
         AddInPlace(value);
     }
+    /// @brief Append by moving `value`; allocation failure is fatal.
+    ///
+    /// Growth invalidates all borrows. Use TryAdd at a status-returning boundary.
     void Add(ElementType&& value)
     {
         AddInPlace(static_cast<ElementType&&>(value));
@@ -416,11 +489,20 @@ public:
     {
         return TryAddInPlace(value) != nullptr;
     }
+    /// @brief Fallible move append.
+    ///
+    /// @return False on allocation failure or overflow; the array is unchanged and `value` is not moved from, even when
+    /// it refers to an element of this array.
     [[nodiscard]] bool TryAdd(ElementType&& value)
     {
         return TryAddInPlace(static_cast<ElementType&&>(value)) != nullptr;
     }
 
+    /// @brief Fallible append that constructs the element from `args`.
+    ///
+    /// On growth the new element is constructed in the new block before existing elements are relocated, so `args` may
+    /// borrow from this array.
+    /// @return The new element, or nullptr on allocation failure or overflow with the array and `args` untouched.
     template <typename... Args>
     [[nodiscard]] ElementType*
     TryAddInPlace(Args&&... args) noexcept(std::is_nothrow_constructible_v<ElementType, Args...> &&
@@ -445,6 +527,10 @@ public:
         }
     }
 
+    /// @brief Fallible append of copies of `items`, with at most one allocation.
+    ///
+    /// @pre `items` does not overlap this array's storage (asserted).
+    /// @return False on allocation failure or overflow, leaving the array unchanged.
     [[nodiscard]] bool TryAddRange(std::span<const ElementType> items)
     {
         const usize count = items.size();
@@ -475,6 +561,7 @@ public:
     }
 
     // --- Removing elements --------------------------------------------------
+    /// Destroy the last element. @pre The array is not empty. Keeps the capacity.
     void RemoveLast() noexcept
     {
         LUDUS_ASSERT(mSize > 0);
@@ -531,10 +618,17 @@ public:
     }
 
     // --- Inserting elements -------------------------------------------------
+    /// @brief Insert a copy of `value` at `index`, shifting later elements; allocation failure is fatal.
+    ///
+    /// @pre index <= GetSize(). `value` may refer to an element of this array. Invalidates borrows at and after
+    /// `index`, or all borrows on growth.
     ElementType& InsertAt(usize index, const ElementType& value)
     {
         return InsertAtInPlace(index, value);
     }
+    /// @brief Move `value` into `index`, shifting later elements; allocation failure is fatal.
+    ///
+    /// @pre index <= GetSize().
     ElementType& InsertAt(usize index, ElementType&& value)
     {
         return InsertAtInPlace(index, static_cast<ElementType&&>(value));
@@ -574,6 +668,11 @@ public:
     {
         return TryInsertAtInPlace(index, value);
     }
+    /// @brief Fallible move insertion at `index`.
+    ///
+    /// @pre index <= GetSize().
+    /// @return The inserted element, or nullptr on allocation failure with the array unchanged and `value` not moved
+    /// from.
     [[nodiscard]] ElementType*
     TryInsertAt(usize index,
                 ElementType&& value) noexcept(noexcept(TryInsertAtInPlace(index, static_cast<ElementType&&>(value))))
@@ -581,6 +680,11 @@ public:
         return TryInsertAtInPlace(index, static_cast<ElementType&&>(value));
     }
 
+    /// @brief Fallible ordered insertion that constructs the element from `args`.
+    ///
+    /// Allocation happens before `args` are read; on growth the element is built in the new block while borrows into
+    /// the old block remain valid. @pre index <= GetSize().
+    /// @return The inserted element, or nullptr on allocation failure or overflow with the array and `args` untouched.
     template <typename... Args>
     [[nodiscard]] ElementType*
     TryInsertAtInPlace(usize index, Args&&... args) noexcept(std::is_nothrow_constructible_v<ElementType, Args...> &&
@@ -607,6 +711,7 @@ public:
     }
 
     // --- Misc ---------------------------------------------------------------
+    /// Exchange storage with `other` without allocating. Element borrows follow their storage.
     void Swap(Array& other) noexcept
     {
         ElementType* d = mData;
@@ -621,18 +726,22 @@ public:
     }
 
     // --- std::span interop --------------------------------------------------
+    /// Borrow the live elements as a mutable span; invalidated with element borrows.
     [[nodiscard]] operator std::span<ElementType>() noexcept
     {
         return std::span<ElementType>(mData, mSize);
     }
+    /// Borrow the live elements as a read-only span; invalidated with element borrows.
     [[nodiscard]] operator std::span<const ElementType>() const noexcept
     {
         return std::span<const ElementType>(mData, mSize);
     }
+    /// Mutable span over the live elements; invalidated with element borrows.
     [[nodiscard]] std::span<ElementType> AsSpan() noexcept
     {
         return std::span<ElementType>(mData, mSize);
     }
+    /// Read-only span over the live elements; invalidated with element borrows.
     [[nodiscard]] std::span<const ElementType> AsSpan() const noexcept
     {
         return std::span<const ElementType>(mData, mSize);
@@ -649,6 +758,7 @@ public:
     }
 
     // --- Comparison ---------------------------------------------------------
+    /// Element-wise equality; arrays of different sizes are unequal. Capacity is ignored.
     [[nodiscard]] friend bool operator==(const Array& a, const Array& b)
     {
         if (a.mSize != b.mSize)
@@ -893,6 +1003,7 @@ void Swap(Array<ElementType>& a, Array<ElementType>& b) noexcept
 
 namespace ludus::foundation
 {
+/// Engine-namespace alias for core::Array.
 template <typename ElementType>
 using Array = core::Array<ElementType>;
 } // namespace ludus::foundation

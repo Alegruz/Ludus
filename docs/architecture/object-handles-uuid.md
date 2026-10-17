@@ -1,8 +1,11 @@
 # Object handles and persistent UUID architecture
 
-**Status:** Proposed architecture and implementation contract. Existing entity,
-audio, and RHI identity mechanisms remain implemented as described below. The
-shared identity module and UUID content workflow are proposed.
+**Status:** Architecture and implementation contract. Stage 1 of the
+[implementation sequence](#implementation-sequence) is implemented as
+[FoundationIdentity](../modules/foundation/identity.md), with native and browser
+entropy adapters in Platform. Existing entity, audio, and RHI identity
+mechanisms remain implemented as described below. Registry alignment and the
+UUID content workflow are proposed.
 
 **Audience:** Engine, gameplay, tools, content, and SDK contributors.
 
@@ -588,6 +591,48 @@ and reserved capacity on each target before optimizing them.
 
 1. Add the pure identity values/codecs and lifetime source with tests and SDK
    header checks. Leave existing public types and formats unchanged.
+   *Implemented* in [FoundationIdentity](../modules/foundation/identity.md),
+   including the injected entropy-source seam. `Ludus::PlatformEntropy` supplies the
+   production source (`GetSystemEntropySource`): `getentropy` on macOS/Linux and
+   a guarded Web Crypto `crypto.getRandomValues` bridge in browsers. Emscripten's
+   own `getentropy` is not used because a missing Web Crypto object raises a
+   JavaScript exception instead of reporting failure.
+
+   **SceneCook entropy decision.** SceneCook mints level, import-namespace and
+   object UUIDs through `TryGenerateUuidV4`, the only UUIDv4 construction path;
+   its private helper no longer calls `getentropy` or sets version bits itself.
+   The source is injected through `AssetOptions::EntropyOrNull`, and SceneCook
+   acquires no entropy of its own. A null or failing source reports
+   `AssetErrorCode::MissingTools` before any level is returned or catalog
+   published. The adapter is a separate `Ludus::PlatformEntropy` target
+   (`ludus/platform/entropy.h`, FoundationBase and FoundationIdentity only), which
+   `Ludus::Platform` re-exports. The `ludus-cook` CLI links that target, so a
+   command-line tool does not link window backends, AppKit or Wayland. The
+   Editor already links Platform and passes the same source, which also replaces
+   the cooker's unguarded `getentropy` call in browser builds.
+
+   **Editor entropy decision.** The Editor mints World entity IDs, world-demo
+   settings-entity IDs and new 3D-level IDs through the same `TryGenerateUuidV4`
+   path; Qt's `QUuid::createUuid()` is no longer a parallel generator. The World
+   and level workspaces hold an `EntropySource`, defaulting to
+   `GetSystemEntropySource()`, and pass it to `WorldDocument` entity creation and
+   duplication and to every SceneCook operation; Editor tests inject failing or
+   fixed sources through the same seam. Existing text forms are unchanged:
+   canonical lowercase UUID text for live-edit entities and level IDs, and the
+   world-demo sample's truncated `entity-` (24 UUID characters) and `settings-`
+   (22) forms, which fit its 32-byte name field. Those truncated forms are
+   legacy sample identifiers, not UUIDs, and remain so until the stage 3 authoring
+   records replace them. When entropy is unavailable, the operation fails before
+   the document, history or workspace changes and shows that reason in the status
+   line; there is no fallback.
+
+   Alternatives considered: linking SceneCook to `Ludus::Platform` would make a
+   content library depend on windowing. A tools-owned copy of the adapter would
+   duplicate the browser guard. A default system source inside SceneCook would
+   hide an OS dependency in the cooker and let tests reach real entropy by
+   omission. `AssetOptions::UuidsOrNull` is kept only so golden tests can replay
+   the Python reference's sequential, non-v4 identifiers verbatim. Tests that need
+   new identities inject controlled entropy, and no replay source is a production default.
 2. Align duplicate generation/token helpers behind existing subsystem facades
    where policies actually match. Validate old-world, old-audio-session, and RHI
    session rejection independently. Preserve audio callback and RHI fence protocols.

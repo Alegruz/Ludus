@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -12,7 +13,8 @@ import zipfile
 import warnings
 from unittest.mock import patch
 
-from api_reference import (baseline_at_revision, bootstrap, check_baseline_growth, check_coverage,
+from api_markdown import render_reference
+from api_reference import (ROOT, baseline_at_revision, bootstrap, check_baseline_growth, check_coverage,
                            check_extracted_files, coverage, main, public_inputs, validate_coverage)
 
 
@@ -294,6 +296,127 @@ class ApiReferenceTests(unittest.TestCase):
         symbols, missing = coverage(self.root)
         self.assertEqual(symbols, {"concept ns::Valid"})
         self.assertEqual(missing, symbols)
+
+    def write_xml(self, directory, compounds):
+        directory.mkdir(parents=True, exist_ok=True)
+        directory.joinpath("index.xml").write_text("<doxygenindex>" + "".join(
+            f'<compound refid="{refid}" kind="{kind}"/>' for refid, kind, _ in compounds) + "</doxygenindex>")
+        for refid, kind, body in compounds:
+            directory.joinpath(refid + ".xml").write_text(
+                f'<doxygen><compounddef kind="{kind}" id="{refid}">{body}</compounddef></doxygen>')
+
+    def render(self, xml, header):
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/api-main.md").write_text("# API\n\nPublic contracts.\n")
+        output = self.root / "markdown"
+        render_reference(self.root, xml, output, [header])
+        return {path.name: path.read_text() for path in (output / "api").glob("*.md")}
+
+    def test_detail_and_internal_namespaces_are_neither_counted_nor_rendered(self):
+        header = self.header("include/ludus/example.h")
+        xml = self.root / "xml"
+        undocumented = ('<memberdef kind="function" prot="public" id="{id}"><name>{name}</name>'
+                        '<qualifiedname>{qualified}</qualifiedname><definition>void {qualified}</definition>'
+                        '<argsstring>() noexcept</argsstring></memberdef>')
+        self.write_xml(xml, [
+            ("namespacens", "namespace",
+             "<compoundname>ns</compoundname><briefdescription><para>Public.</para></briefdescription>"
+             '<innernamespace refid="namespacens_1_1detail">ns::detail</innernamespace>'
+             '<sectiondef kind="func">' +
+             undocumented.format(id="namespacens_1avisible", name="Visible", qualified="ns::Visible") +
+             undocumented.format(id="namespacens_1adetail", name="detail", qualified="ns::detail") +
+             # File and namespace compounds can both list a hidden namespace's members.
+             undocumented.format(id="namespacens_1_1detail_1ahelper", name="Helper",
+                                 qualified="ns::detail::Helper") + "</sectiondef>"),
+            ("namespacens_1_1detail", "namespace", "<compoundname>ns::detail</compoundname>"
+             '<sectiondef kind="func">' + undocumented.format(
+                 id="namespacens_1_1detail_1ahelper", name="Helper", qualified="ns::detail::Helper") +
+             "</sectiondef>"),
+            ("namespacens_1_1internal", "namespace", "<compoundname>ns::internal</compoundname>"),
+            ("structns_1_1detail_1_1nested_1_1Impl", "struct",
+             "<compoundname>ns::detail::nested::Impl</compoundname>"),
+            ("classns_1_1internal_1_1Device", "class", "<compoundname>ns::internal::Device</compoundname>"),
+        ])
+        symbols, missing = coverage(xml)
+        self.assertEqual(symbols, {"function ns::Visible() noexcept", "function ns::detail() noexcept"})
+        self.assertEqual(missing, symbols)
+        pages = self.render(xml, header)
+        self.assertEqual(set(pages), {"namespacens.md", "namespaces.md", "annotated.md", "concepts.md",
+                                      "files.md", "index.md"})
+        rendered = "".join(pages.values())
+        for hidden in ("Helper", "Impl", "Device", "ns::internal", "namespacens_1_1detail"):
+            self.assertNotIn(hidden, rendered)
+        self.assertIn("ns::Visible", pages["namespacens.md"])
+        self.assertIn("ns::detail() noexcept", pages["namespacens.md"])
+
+    def pinned_doxygen(self):
+        pin = json.loads((ROOT / "config/doxygen_toolchain.json").read_text())
+        for candidate in (ROOT / "out/doxygen-tools/bin/doxygen", shutil.which("doxygen")):
+            if candidate is None or not Path(candidate).is_file():
+                continue
+            try:
+                version = subprocess.check_output([str(candidate), "--version"], text=True).split()[0]
+            except (OSError, subprocess.CalledProcessError, IndexError):
+                continue
+            if version == pin["version"]:
+                return str(candidate)
+        self.skipTest(f"pinned Doxygen {pin['version']} is unavailable; run scripts/build-api --bootstrap")
+
+    def test_doxyfile_excludes_detail_and_internal_namespaces(self):
+        executable = self.pinned_doxygen()
+        # Doxygen matches the main page against resolved inputs (macOS /var is a symlink).
+        self.root = self.root.resolve()
+        header = self.root / "modules/example/include/ludus/example.hpp"
+        header.parent.mkdir(parents=True)
+        header.write_text("""#pragma once
+/// @file
+/// Public example declarations.
+namespace ns
+{
+/// Public entry point.
+void Visible() noexcept;
+/// A public type whose member reuses a hidden scope's spelling.
+struct Holder
+{
+    /// Public accessor.
+    void detail() noexcept;
+};
+namespace detail
+{
+void Helper() noexcept;
+namespace nested
+{
+struct Impl
+{
+    int Value;
+};
+}
+}
+namespace internal
+{
+enum class State
+{
+    On,
+};
+}
+}
+""")
+        (self.root / "docs").mkdir()
+        main_page = self.root / "docs/api-main.md"
+        main_page.write_text("# API\n\nPublic contracts.\n")
+        output = self.root / "out"
+        config = self.root / "Doxyfile"
+        config.write_text((ROOT / "docs/Doxyfile").read_text() + f'\nOUTPUT_DIRECTORY = "{output}"\n' +
+                          f'INPUT = "{header}" "{main_page}"\n')
+        subprocess.run([executable, str(config)], cwd=self.root, check=True)
+        xml = output / "xml"
+        self.assertEqual(sorted(path.name for path in xml.glob("namespace*.xml")), ["namespacens.xml"])
+        symbols, _ = coverage(xml)
+        self.assertEqual(symbols, {"function ns::Visible() noexcept", "struct ns::Holder",
+                                   "function ns::Holder::detail() noexcept"})
+        rendered = "".join(self.render(xml, header).values())
+        for hidden in ("Helper", "Impl", "State", "ns::internal"):
+            self.assertNotIn(hidden, rendered)
 
 
 if __name__ == "__main__":
