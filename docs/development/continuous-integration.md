@@ -242,10 +242,12 @@ The separate `performance` workflow runs runtime profiling scenarios nightly on
 hosted Ubuntu and macOS runners, and on manual dispatch. It is not a pull-request
 or batch check: scenario correctness failures fail that workflow, and
 timings are report-only. Reports, Perfetto traces and logs are kept as artifacts
-for 90 days. See [Runtime profiling](runtime-profiling.md).
+for 90 days. See [Runtime profiling](runtime-profiling.md). The hosted macOS
+lane also runs the RHI and renderer GPU scenarios on its paravirtual Metal GPU,
+for correctness and rough trends rather than hardware timing.
 
 Its opt-in `device` job adds self-hosted machines with a declared physical GPU,
-where the RHI and renderer GPU scenarios run. Lanes are listed in the
+where the same GPU scenarios produce hardware timings. Lanes are listed in the
 `LUDUS_PERF_DEVICE_LANES` repository variable; without it the job is skipped.
 The job runs only scheduled or manually dispatched `main` code, never pull
 requests or forks. Each device runner's job-started hook

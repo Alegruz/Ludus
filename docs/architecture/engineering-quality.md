@@ -122,9 +122,10 @@ Add functions to existing scripts rather than a new all-purpose CI executor.
 The hardware/performance lane is implemented as the nightly `performance`
 workflow ([Runtime profiling](../development/runtime-profiling.md)). It records
 report-only timings and traces on GitHub-hosted runners and on opt-in
-self-hosted device lanes. Device lanes declare a GPU class and identity, run the
-RHI and renderer GPU scenarios, and admit only scheduled or dispatched `main`
-runs through a runner-side hook. Base/head repetitions and calibrated timing
+self-hosted device lanes. The hosted macOS lane runs the RHI and renderer GPU
+scenarios on a declared paravirtual GPU for nightly correctness, not hardware
+timing. Device lanes declare a physical GPU class and identity and admit only
+scheduled or dispatched `main` runs through a runner-side hook. Base/head repetitions and calibrated timing
 gates remain proposed; the guide describes the calibration that comes first.
 
 Documentation-only exemptions remain the existing conservative allowlist. Unknown
