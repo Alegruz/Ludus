@@ -875,6 +875,20 @@ Qt 6.4 shares GPU textures without CPU readback. Hardware adapters are preferred
 over software rasterizers. The editor destroys the device only after Qt Quick and
 the RHI have released it.
 
+The viewport keeps presenting on Wayland after it is hidden and shown again, for
+example by switching work tabs or hiding the editor window. QtWayland before 6.5.1
+has two bugs on that path. It keeps the Vulkan surface of the unmapped
+`wl_surface`, so the next present targets a recycled protocol object and the
+compositor disconnects the editor. It also creates no subsurface for a viewport
+shown before its parent window, so that viewport is never exposed again. On those
+releases the editor destroys the viewport's native window when it is hidden, which
+releases Qt Quick's swapchain and Vulkan surface. It recreates the window once the
+parent window is visible, and Qt Quick builds a new swapchain. The shared device,
+scene graph and frame leases persist, so presentation resumes from the same GPU
+textures without readback. Releasing a swapchain makes Qt wait for the device to
+go idle, as it already does on resize. Newer Qt releases and X11 keep Qt's own
+hide/show handling.
+
 If no adapter can present to the window with a shareable device, the viewport
 falls back to an offscreen path. The engine creates its own headless Vulkan device,
 renders the same raster viewport into its two display images, and copies the
