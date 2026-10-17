@@ -7,13 +7,15 @@ import stat
 import zipfile
 from pathlib import Path
 
+from .package_limits import (
+    MAX_MANIFEST_BYTES as MAX_MANIFEST,
+    MAX_CENTRAL_DIRECTORY_BYTES as MAX_CENTRAL_DIRECTORY,
+)
 from .package_native import POLICY, validate_native
 from .release_model import fields, json_bytes, payload_path, sha256, string, fail, DIGEST
 
 MAX_ENTRIES = 10_000
 MAX_EXPANDED = 30_000_000_000
-MAX_MANIFEST = 4 * 1024 * 1024
-MAX_CENTRAL_DIRECTORY = 8 * 1024 * 1024
 FORBIDDEN_SUFFIXES = {".a", ".o", ".h", ".hpp", ".pdb", ".rdi", ".dSYM"}
 
 

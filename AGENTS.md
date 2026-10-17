@@ -220,6 +220,13 @@ rejects the explicit `== true`/`== false` style.
   shader `PI`. Changed Slang rejects recognizable duplicated pi literals outside
   that owner. Other constants still need semantic review; give tolerances units
   and purpose rather than mechanically naming every zero or one.
+- Admission limits have one owner per policy. Reuse the owner's named constant
+  at reads, parsing, validation and publication; equal numbers do not establish
+  shared policy. Keep encoded inputs, decoded payloads and peak-memory budgets
+  distinct. See `docs/architecture/content-resources.md#limit-ownership`.
+  The changed-source gate catches recognizable duplicated capacity literals in
+  the consolidated content/scene paths; arbitrary expressions and the choice of
+  semantic owner remain review responsibilities.
 - Name representation tags, versions, strides and serialized record widths in
   their owner. Share host/shader layout constants rather than repeating literals;
   derive serialized widths from their explicit field schema, never host padding.

@@ -7,6 +7,12 @@ itch.io account. This implements the first part of the
 Editor setup, browser packaging and automated uploads are described in
 [Editor-managed game releases](editor-game-releases.md).
 
+Native ZIP manifests (4 MiB), central directories (8 MiB), Mach-O load-command
+tables (8 MiB) and native inspection output (8 MiB) use named policies from
+`scripts/python/ludus_tools/package_limits.py`. These encoded metadata and
+diagnostic ceilings are independent of the engine's
+[scene and Content limits](../architecture/content-resources.md#limit-ownership).
+
 ## Create a project with release files
 
 Use an installed Release SDK that matches the project's engine requirement and

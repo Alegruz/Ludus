@@ -119,6 +119,34 @@ Lower application limits are allowed; increasing them requires capacity and
 peak-memory evidence. Audio byte and PCM limits remain separate and use the
 existing AudioSystem budget. Check every size product and peak allocation.
 
+### Limit ownership
+
+Admission ceilings are inclusive. `ludus/content/limits.h` owns Content's
+`MAX_DOCUMENT_BYTES`, `MAX_RESOURCES` and the independent `MAX_SAVE_BYTES`
+persistence budget. `ludus/content/scene_format/limits.h` owns cooked mesh,
+texture and bundle ceilings shared by producers and runtime decoders.
+`ludus/content/scene_cook/limits.h` owns importer source-file, metadata,
+artifact/resident-closure and scene-catalog budgets. The original public headers
+continue to expose these names for source compatibility.
+
+The scene asset catalog (`assets/catalog.json`, an object of resource records)
+is a different schema from Content's audio catalog (an array of records): its
+encoded JSON ceiling is **64 MiB**, while scene level/metadata documents remain
+**1 MiB**. Each scene record retains its import's source-input digest map for
+artifact-key compatibility; the catalog grows with resources times source files.
+The 4096-record ceiling is unchanged. Neither catalog's encoded byte ceiling is
+a peak-memory guarantee: parsing, candidate construction and serialization can
+coexist with the published representation.
+
+Editor preview JSON/mesh files and encoded PNG files have independent input
+ceilings in `apps/editor/src/internal/render_scene_limits.h`. Decoded texture
+and assembled bundle checks use SceneFormat's constants. Equal numeric values
+do not imply shared policy; source bytes, decoded bytes and peak allocations
+must remain distinct. Changes to capacity require updating readers, parser
+budgets, writers, diagnostics and boundary regressions together. Do not raise a
+limit as part of a naming or ownership refactor.
+
+
 Definitions form an acyclic dependency graph: sound/music -> audio-source.
 Future dynamic music also references stinger sound definitions. No executable
 scripts, plugin names or arbitrary runtime function references belong in content.

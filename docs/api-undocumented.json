@@ -1769,8 +1769,6 @@
   "variable ludus::content::Diagnostic::Result",
   "variable ludus::content::Digest::Data[32]",
   "variable ludus::content::JsonValue::Value",
-  "variable ludus::content::MAX_DOCUMENT_BYTES",
-  "variable ludus::content::MAX_RESOURCES",
   "variable ludus::content::Resource::Id",
   "variable ludus::content::Resource::Path",
   "variable ludus::content::Resource::Type",

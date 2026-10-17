@@ -2,15 +2,14 @@
 
 #include <ludus/foundation/base/core.h>
 
+#include <ludus/content/limits.h>
+
 #include <span>
 #include <string_view>
 
 namespace ludus::content
 {
 using namespace ludus::foundation;
-
-inline constexpr usize MAX_DOCUMENT_BYTES = usize{1024} * 1024;
-inline constexpr usize MAX_RESOURCES = 4096;
 
 enum class Status : uint8
 {

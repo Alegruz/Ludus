@@ -1,4 +1,5 @@
 #include <ludus/content/json.h>
+#include <ludus/content/limits.h>
 
 #include <cstring>
 #include <initializer_list>
@@ -79,7 +80,9 @@ Status JsonDocument::Read(std::string_view input, Diagnostic& diagnostic) noexce
         return diagnostic.Result = Status::Limit;
     }
     foundation::parsing::ParseError error;
-    const auto result = mDocument.Read(input, error);
+    foundation::parsing::JsonLimits limits;
+    limits.MaxInputBytes = MAX_DOCUMENT_BYTES;
+    const foundation::parsing::ParseStatus result = mDocument.Read(input, error, limits);
     diagnostic.Offset = error.Offset == foundation::parsing::UNKNOWN_BYTE_OFFSET ? 0 : error.Offset;
     return diagnostic.Result = Convert(result, error.Limit);
 }

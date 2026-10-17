@@ -2,6 +2,8 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/content/scene_format/limits.h>
+
 #include <cstddef>
 #include <string_view>
 #include <type_traits>
@@ -66,28 +68,8 @@ inline constexpr uint32 LIGHT_ENABLED = 1;
 /// Largest admitted analytic RGB intensity or unresolved luminous flux.
 inline constexpr float32 MAX_LIGHT_INTENSITY = 1000000.0F;
 
-/// Largest admitted bundle.
-inline constexpr usize MAX_BUNDLE_BYTES = usize{64} * 1024 * 1024;
-/// Most meshes in a bundle.
-inline constexpr uint32 MAX_MESHES = 6;
-/// Most materials in a bundle.
-inline constexpr uint32 MAX_MATERIALS = 8;
-/// Most textures in a bundle.
-inline constexpr uint32 MAX_TEXTURES = 8;
-/// Most placed objects in a bundle.
-inline constexpr uint32 MAX_OBJECTS = 128;
-/// Largest texture width or height in texels.
-inline constexpr uint32 MAX_TEXTURE_DIMENSION = 4096;
-/// Largest single texture in bytes.
-inline constexpr usize MAX_TEXTURE_BYTES = usize{16} * 1024 * 1024;
-/// Largest combined texture bytes in a bundle.
-inline constexpr usize MAX_TOTAL_TEXTURE_BYTES = usize{32} * 1024 * 1024;
 /// RGBA8 bytes per texel.
 inline constexpr uint32 TEXEL_BYTES = 4;
-/// Most vertices per mesh and combined across all meshes.
-inline constexpr uint32 MAX_VERTICES = 500000;
-/// Most indices per mesh.
-inline constexpr uint32 MAX_INDICES = 1500000;
 /// MaterialRecord::Texture value for an untextured surface.
 inline constexpr uint32 NO_TEXTURE = ~uint32{0};
 /// MaterialRecordV2::AddressMode: clamp texture coordinates at the borders.

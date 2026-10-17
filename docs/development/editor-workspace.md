@@ -1091,7 +1091,9 @@ Native support follows the [host prerequisites](#prerequisites-optional-editor-s
 Browser import and persistence still need acceptance.
 
 The table uses a Qt model/view projection with no widget per asset row. Actual
-catalog admission remains **4096 resources / 1 MiB JSON**, as required by Content.
+audio catalog admission remains **4096 resources / 1 MiB JSON**. The separate
+scene asset catalog admits **4096 resources / 64 MiB JSON**; see
+[limit ownership](../architecture/content-resources.md#limit-ownership).
 The `[content][scale]` fixture separately measures a synthetic **100,000-row**
 view: population, 20 searches (p50/p95), and stable-ID lookup. The optional-editor
 CI records host/OS/architecture, Qt version and the Development profile in its

@@ -3,6 +3,8 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
+from ludus_tools.package_limits import MAX_MACHO_LOAD_COMMAND_BYTES
+
 # Thanks to Apple, XNU EXTERNAL_HEADERS/mach-o/loader.h, mach_header_64,
 # uuid_command and section_64: these layouts inform this independent reader.
 # https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/loader.h
@@ -23,7 +25,7 @@ def inspect(path: Path) -> dict:
         magic, cpu, subtype, kind, count, length, flags, reserved = struct.unpack("<8I", header)
         if magic != 0xfeedfacf or cpu not in (0x1000007, 0x100000c) or kind not in (2, 6, 8, 10):
             raise ProbeError("expected a thin macOS ARM64/x64 Mach-O executable/module/symbol image")
-        if not 1 <= count <= 4096 or length > 8 * 1024 * 1024 or 32 + length > size:
+        if not 1 <= count <= 4096 or length > MAX_MACHO_LOAD_COMMAND_BYTES or 32 + length > size:
             raise ProbeError("invalid Mach-O command bounds")
         commands = source.read(length)
         if len(commands) != length:
