@@ -86,6 +86,8 @@ void* AllocateRecorded(void* context, usize bytes, usize alignment) noexcept
     return nullptr;
 }
 
+// The parameter order is fixed by AllocationDomain::FreeFunction.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void FreeRecorded(void* context, void* pointer, usize bytes, usize alignment) noexcept
 {
     DomainRecord& record = *static_cast<DomainRecord*>(context);
@@ -137,7 +139,7 @@ struct Tracked
 struct Payload
 {
     explicit Payload(int32 value) noexcept : Value(value) {}
-    Payload(Payload&& other) noexcept : Value(other.Value), IsMovedFrom(false)
+    Payload(Payload&& other) noexcept : Value(other.Value)
     {
         other.IsMovedFrom = true;
     }
