@@ -559,12 +559,13 @@ header equivalence and rejects a nonvoid depth function with real Slang.
 
 Local qualification uses warning-clean Clang 18 production code, pinned Slang
 Metal/WGSL and Metal pixel regressions. CI additionally compiles/renders the
-SPIR-V/Vulkan profile and qualifies installed SPIR-V/WGSL/GLSL headers. Browser
-runtime graph execution is not established by WGSL stage admission; it remains
-a platform qualification gate before editor/browser adoption. The RG2 Renderer unit suite also passes UBSan locally; ASan still stalls before
+SPIR-V/Vulkan profile and qualifies installed SPIR-V/WGSL/GLSL headers. WGSL
+stage admission alone does not establish browser runtime graph execution. The
+installed RG3 runtime fixture (see [RG3 acceptance evidence](#rg3-acceptance-evidence))
+also executes a compiled-header graph on WebGPU in the browser CI job. The RG2
+Renderer unit suite also passes UBSan locally; ASan still stalls before
 main in an empty control executable on this host. RG2 WGSL stages pass pinned
-Chromium software-adapter admission; that check does not execute the C++ graph
-runtime in a browser.
+Chromium software-adapter admission.
 
 
 ## Edit and reload graphs (RG3)
@@ -689,6 +690,8 @@ addition. Neither command writes sources, values or packages.
 
 ### RG3 acceptance evidence
 
+What each fixture establishes:
+
 - `test_render_graph_authoring` covers mapped graph/shader locations, CLI JSON
   locations, draft-snapshot plan equality, layout-only digest stability,
   migration and restart verdicts, deterministic runtime packages and header/package
@@ -698,17 +701,61 @@ addition. Neither command writes sources, values or packages.
   failed reloads that preserve output revisions, `RestartRequired`, activation
   waiting for a confirmed submission, completion-gated retirement and superseded
   candidates. They also check that caller bytes can be released after decoding.
-- The `[render-graph][gpu]` test loads the CMake-cooked `.lurgrt`, activates it
-  twice and compares its pixels byte for byte with the compiled-header graph.
+- SPIR-V decoding: a generation carrying Metal, SPIR-V, WGSL and GLSL ES stages
+  decodes each SPIR-V word little-endian, from a source buffer at an odd address,
+  beside the text targets and their entries. A SPIR-V artifact that is not a whole
+  number of words, or a vertex stage without its fragment stage for that target, is
+  rejected as malformed. A role the generation does not carry stays empty, as it
+  does in a compiled header.
+- The cooked-fixture `[render-graph][activation]` test decodes the CMake-cooked
+  `rg2_surface.lurgrt` and compares it with its compiled header: plan records,
+  CPU interface identity and every stage artifact (SPIR-V words, Metal/WGSL/GLSL
+  text, entries and inputs). The host's native target (Metal on macOS, SPIR-V
+  elsewhere) and WGSL must be present.
+- The `[render-graph][gpu][activation]` test loads the same `.lurgrt`, activates
+  it twice and compares its pixels byte for byte with the compiled-header graph.
+- The installed-SDK check (`tests/sdk_consumer/verify_render_graph_execution.py`)
+  requires identical `.lurgrt` bytes from three cooks of one package: the installed
+  CLI's `cook-runtime`, the relocated CMake helper's `RUNTIME_PACKAGE`, and the
+  source-tree tool. The generation's identity must equal the emitted header's
+  `INTERFACE_IDENTITY`. The installed CLI also runs `schema-diff`.
+- The installed runtime consumer (`tests/sdk_consumer/render_graph_runtime.cpp`)
+  is built against the installed SDK for the host's single target: Metal, SPIR-V,
+  or WGSL in the browser. It renders the cooked offscreen graph from its compiled
+  header, then decodes the embedded `.lurgrt` and activates it twice. After each
+  activation it reads the exported color back through the RHI and compares every
+  byte with the compiled-header frame.
 - Editor `[render-graph]` tests cover canonical JSON bytes, draft/save separation,
   undo coalescing, save conflicts, snapshots and diagnostic navigation. They run
   the real CLI to check that the editor and CLI produce the same plan and the same
   mapped failure.
 
-Local qualification ran these suites with Clang 18 on macOS, including the Metal
-pixel test. Linux/Vulkan and browser execution of runtime generations are not
-established by these local runs. RG3a makes no scheduling, memory or performance
-claim; the editor renders runtime generations only through the RG3b preview below.
+`render_graph_authoring.py`, which provides `schema-diff` and `migrate`, ships in
+the `ludus-tools` package behind the installed `ludus` CLI. The relocated CMake
+helper installs only the build and execution modules. `cook_runtime` lives in
+`render_graph_execution.py`, so the helper never imports the authoring module.
+
+Platform status:
+
+| Platform | Established | Evidence |
+| --- | --- | --- |
+| macOS / Metal | Decode, artifact equivalence, activation pixel parity, installed CLI/CMake/source byte equivalence, installed runtime consumer | Local Clang 18 runs; CI macOS jobs run the same suites |
+| Linux / Vulkan (Mesa llvmpipe) | Activation pixel parity under the Khronos validation layer | The October 16, 2026 batch validation of `develop` commit `c2d299d0` ran the 20 non-hidden `ludus_renderer_render_tests` cases with none skipped, including this parity case, and reported no validation messages |
+| Linux / Vulkan, added checks | SPIR-V decode and artifact equivalence; a dedicated `[render-graph]` step that fails on any skipped case; installed `.lurgrt` equivalence for SPIR-V/WGSL/GLSL; installed runtime consumer under the validation layer | CI "Development and SDK" job; not runnable on the macOS development host |
+| Browser / WebGPU | `GraphicsRenderer`, including `RenderGraphPackage` and `RenderGraphActivation`, is part of the web SDK. A WGSL-only `.lurgrt` is decoded and activated twice in Chromium on the SwiftShader WebGPU adapter, with byte-identical exported pixels | `render-graph-runtime-browser-test.mjs` in the "Renderer browser tests (baseline)" job. Browser builds need the Linux-pinned SPIR-V validator, so this fixture has no local run |
+
+Remaining gaps:
+
+- WebGL 2 / GLSL ES: the browser fixture cooks only WGSL and requests WebGPU; no
+  runtime generation is qualified on the WebGL 2 fallback.
+- Browser delivery: the fixture embeds the `.lurgrt` bytes in the module. Fetching
+  a generation at run time, and browser editor preview, are not established.
+- Physical GPUs: Linux and browser evidence uses software adapters (llvmpipe and
+  SwiftShader).
+- RG3b editor preview on Linux/Vulkan is not covered by this evidence.
+- No scheduling, memory or performance claim; RG4 owns measured pooling, aliasing
+  and scheduling. The editor renders runtime generations only through the RG3b
+  preview below.
 
 ## Node canvas and preview (RG3b)
 

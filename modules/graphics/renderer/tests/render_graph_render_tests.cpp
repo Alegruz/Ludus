@@ -8,6 +8,7 @@
 #include <ludus/foundation/base/compiler.h>
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/borrowed_view.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/filesystem/filesystem.hpp>
 #include <ludus/graphics/renderer/render_graph.hpp>
@@ -24,6 +25,7 @@ namespace renderer = ludus::graphics::renderer;
 namespace rhi = ludus::graphics::rhi;
 namespace packages = ludus::render_graph_packages;
 namespace shaders = ludus::shaders;
+namespace format = ludus::content::render_graph_format;
 namespace
 {
 constexpr uint32 WIDTH = 96;
@@ -107,6 +109,30 @@ core::UniquePtr<renderer::RenderGraphPackage> LoadSurfacePackage()
     REQUIRE(package.Get() != nullptr);
     REQUIRE(package->Decode({bytes.GetData(), bytes.GetSize()}) == renderer::RenderGraphPackageStatus::Ready);
     return package;
+}
+/// Compare one runtime stage description with the compiled header's, target by target.
+void CheckSameStage(const rhi::RasterShaderDescription& runtime, const rhi::RasterShaderDescription& compiled)
+{
+    CHECK(runtime.Artifact.Stage == compiled.Artifact.Stage);
+    REQUIRE(runtime.Artifact.Spirv.size() == compiled.Artifact.Spirv.size());
+    for (usize word = 0; word < compiled.Artifact.Spirv.size(); ++word)
+    {
+        REQUIRE(runtime.Artifact.Spirv[word] == compiled.Artifact.Spirv[word]);
+    }
+    CHECK(runtime.Artifact.SpirvEntry == compiled.Artifact.SpirvEntry);
+    CHECK(runtime.Artifact.Msl == compiled.Artifact.Msl);
+    CHECK(runtime.Artifact.MslEntry == compiled.Artifact.MslEntry);
+    CHECK(runtime.Artifact.Wgsl == compiled.Artifact.Wgsl);
+    CHECK(runtime.Artifact.WgslEntry == compiled.Artifact.WgslEntry);
+    CHECK(runtime.Artifact.GlslEs == compiled.Artifact.GlslEs);
+    CHECK(runtime.Artifact.GlslEsEntry == compiled.Artifact.GlslEsEntry);
+    REQUIRE(runtime.Inputs.size() == compiled.Inputs.size());
+    for (usize input = 0; input < compiled.Inputs.size(); ++input)
+    {
+        CHECK(runtime.Inputs[input].Location == compiled.Inputs[input].Location);
+        CHECK(runtime.Inputs[input].Format == compiled.Inputs[input].Format);
+    }
+    CHECK(runtime.Bindings.size() == compiled.Bindings.size());
 }
 } // namespace
 TEST_CASE("RG2 cooked graph renders extracted geometry and follows camera/instance changes", "[render-graph][gpu]")
@@ -267,6 +293,69 @@ TEST_CASE("RG2 depth-only export samples actual opaque geometry depth", "[render
     displayDepth();
     CHECK(fixture.Pixels[centerPixel] >= 127);
     CHECK(fixture.Pixels[centerPixel] <= 128);
+}
+TEST_CASE("RG3 cooked runtime generation decodes the compiled header's plan and stage artifacts",
+          "[render-graph][activation]")
+{
+    const core::UniquePtr<renderer::RenderGraphPackage> package = LoadSurfacePackage();
+    const BorrowedView<const uint8> identity = package->GetInterfaceIdentity();
+    REQUIRE(identity.GetSize() == packages::rg2_surface::INTERFACE_IDENTITY.GetSize());
+    for (usize i = 0; i < identity.GetSize(); ++i)
+    {
+        CHECK(identity[i] == packages::rg2_surface::INTERFACE_IDENTITY[i]);
+    }
+    const renderer::RenderGraphPlan runtimePlan = package->GetPlan();
+    const renderer::RenderGraphPlan compiledPlan = packages::rg2_surface::MakePlan();
+    CHECK(runtimePlan.Description.Version == compiledPlan.Description.Version);
+    CHECK(runtimePlan.Description.CameraCount == compiledPlan.Description.CameraCount);
+    REQUIRE(runtimePlan.Resources.GetSize() == compiledPlan.Resources.GetSize());
+    for (usize i = 0; i < compiledPlan.Resources.GetSize(); ++i)
+    {
+        const format::Resource& runtime = runtimePlan.Resources[i];
+        const format::Resource& compiled = compiledPlan.Resources[i];
+        CHECK(runtime.Width == compiled.Width);
+        CHECK(runtime.Height == compiled.Height);
+        CHECK(runtime.Kind == compiled.Kind);
+        CHECK(runtime.Backing == compiled.Backing);
+        CHECK(runtime.IsSurface == compiled.IsSurface);
+        CHECK(runtime.IsExported == compiled.IsExported);
+    }
+    REQUIRE(runtimePlan.Cameras.GetSize() == compiledPlan.Cameras.GetSize());
+    for (usize i = 0; i < compiledPlan.Cameras.GetSize(); ++i)
+    {
+        CHECK(runtimePlan.Cameras[i].Target == compiledPlan.Cameras[i].Target);
+    }
+    REQUIRE(runtimePlan.Passes.GetSize() == compiledPlan.Passes.GetSize());
+    for (usize i = 0; i < compiledPlan.Passes.GetSize(); ++i)
+    {
+        const format::Pass& runtime = runtimePlan.Passes[i];
+        const format::Pass& compiled = compiledPlan.Passes[i];
+        CHECK(runtime.Program == compiled.Program);
+        CHECK(runtime.Camera == compiled.Camera);
+        CHECK(runtime.Color == compiled.Color);
+        CHECK(runtime.Depth == compiled.Depth);
+        CHECK(runtime.ColorLoad == compiled.ColorLoad);
+        CHECK(runtime.ColorStore == compiled.ColorStore);
+        CHECK(runtime.DepthLoad == compiled.DepthLoad);
+        CHECK(runtime.DepthStore == compiled.DepthStore);
+        CHECK(runtime.AllowsRepeatedCoverage == compiled.AllowsRepeatedCoverage);
+    }
+    const renderer::RenderGraphPrograms runtime = package->GetPrograms({}, {});
+    const renderer::RenderGraphPrograms compiled = packages::rg2_surface::MakePrograms({}, {});
+    CheckSameStage(runtime.ColorVertex, compiled.ColorVertex);
+    CheckSameStage(runtime.ColorFragment, compiled.ColorFragment);
+    CheckSameStage(runtime.DepthVertex, compiled.DepthVertex);
+    CheckSameStage(runtime.DepthFragment, compiled.DepthFragment);
+    // The fixture is cooked for this host's native target and WGSL; neither may be silently absent.
+#if defined(LUDUS_TEST_METAL)
+    CHECK(runtime.ColorVertex.Artifact.Msl.empty() == false);
+    CHECK(runtime.ColorFragment.Artifact.Msl.empty() == false);
+#else
+    CHECK(runtime.ColorVertex.Artifact.Spirv.empty() == false);
+    CHECK(runtime.ColorFragment.Artifact.Spirv.empty() == false);
+#endif
+    CHECK(runtime.ColorVertex.Artifact.Wgsl.empty() == false);
+    CHECK(runtime.ColorFragment.Artifact.Wgsl.empty() == false);
 }
 TEST_CASE("RG3 runtime generation renders the same pixels as its compiled header across activation",
           "[render-graph][gpu][activation]")

@@ -45,6 +45,8 @@ public:
     [[nodiscard]] RenderGraphPlan GetPlan() const noexcept;
     /// Describe the cooked stages, borrowing owned artifacts and the caller's composite recipes.
     /// The composite descriptions are copied by value; their artifact storage must outlive use.
+    /// A role the generation carries no stage for (for example DepthOnly in a color-only graph)
+    /// stays a default description, exactly as the matching compiled header leaves it.
     [[nodiscard]] RenderGraphPrograms GetPrograms(const rhi::RasterShaderDescription& compositeVertex,
                                                   const rhi::RasterShaderDescription& compositeFragment) const noexcept;
     /// SHA-256 of the CPU-visible vertex/instance interface; empty when not loaded.
