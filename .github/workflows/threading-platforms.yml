@@ -53,8 +53,13 @@ jobs:
         run: |
           llvm="$(python -c "import json; print(json.load(open('config/tool_versions.json'))['minimum']['clang'].split('.')[0])")"
           choco install llvm --version=18.1.8 --allow-downgrade --yes --no-progress
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          "$vswhere" -all -products '*' -format text | grep -E '^(installationPath|catalog_productDisplayVersion):' || true
+          for root in "/c/Program Files/Microsoft Visual Studio"/*/*/VC/Tools/MSVC; do ls "$root"; done || true
           "/c/Program Files/LLVM/bin/clang++.exe" --version | tee out-clang-version.txt
           grep -q "clang version ${llvm}\." out-clang-version.txt
+          printf '#include <atomic>\n#include <new>\nint main() { return 0; }\n' > out-stl-probe.cpp
+          "/c/Program Files/LLVM/bin/clang++.exe" -std=c++23 -v -fsyntax-only out-stl-probe.cpp 2>&1 | grep -iE 'msvc|stl|error|include' || true
           python -m venv out/host-tools/venv
           versions="$(python -c "import json; m=json.load(open('config/tool_versions.json'))['managed']; print(' '.join(f'{k}=={v}' for k, v in m.items()))")"
           # shellcheck disable=SC2086
