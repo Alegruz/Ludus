@@ -176,3 +176,99 @@ out/host-tools/venv/bin/cmake --preset macos-clang-development -B out/build/t1-b
 out/host-tools/venv/bin/cmake --build out/build/t1-benchmark --target ludus_static_lighting_benchmark
 out/build/t1-benchmark/modules/graphics/renderer/ludus_static_lighting_benchmark
 ```
+
+## Execution traces (T2)
+
+### Contended sweep (2026-10-17)
+
+Measured on the same Apple M5 (4 performance and 6 efficiency cores, 16 GiB, macOS
+26.6) with the pinned Clang 18.1.8 Development build (optimized, assertions
+enabled), with no affinity or frequency pinning. Other sessions were building on
+the machine throughout: the one-minute load average, sampled every 5 s, ranged from
+**24.5 to 99.5** between 01:15 and 01:37. These figures are **relative overhead
+measured under heavy contention, not isolated timings**. No absolute latency from
+this sweep is reported as a result.
+
+Method: each benchmark keeps two systems with the same worker budget, one without
+hooks and one with `MakeProfilerJobHooks`. It alternates which system runs first
+in each round, so drift affects both alike. Each round gives one *pair*, and the
+overhead of a pair is traced/untraced − 1. The tables show the median overhead and
+the p25–p75 interval across pairs (nearest rank). Every traced and untraced output
+matched the serial oracle (threading) or the `Step` oracle charts (bake), and no
+trace event was dropped. Run `ludus_threading_benchmark --tracing` and
+`ludus_static_lighting_benchmark --tracing [trace.json]` to reproduce.
+
+**Tracing off: hooks installed, no capture.** `ludus_threading_benchmark` ran 31
+pairs for each of 15 configurations (0, 10,000 and 100,000 iterations × 0, 1, 2, 4
+and 8 workers), in three sweeps. The 45 median overheads range from −35% to +8%, and
+every p25–p75 interval contains zero (one has zero as its upper bound). **No overhead
+is measurable at this noise level**, as the design predicts: a declined submission
+adds one branch per job.
+
+**Tracing on: capture active.** Empty jobs (0 iterations) isolate the recording
+cost: every job records two slices, a flow end, a counter sample and any flow
+starts. That cost is clearly separable:
+
+| Workers | Sweep 1 median (p25–p75) | Sweep 2 | Sweep 3 |
+| ---: | ---: | ---: | ---: |
+| 0 | +766% (+736 to +1186) | +758% (+693 to +1015) | +779% (+759 to +999) |
+| 1 | +516% (+237 to +926) | +362% (+240 to +527) | +919% (+451 to +1243) |
+| 2 | +569% (+181 to +1019) | +262% (+148 to +448) | +519% (+286 to +937) |
+| 4 | +153% (+59 to +790) | +189% (+130 to +323) | +265% (+198 to +405) |
+| 8 | +159% (+95 to +284) | +136% (+98 to +208) | +221% (+112 to +339) |
+
+On the serial executor, recording an empty job's trace costs about eight times
+more than scheduling it, and the factor is stable across sweeps. With workers, the
+recording runs in parallel on each executing thread and the base cost includes wake
+latency, so the relative figure is lower and less stable. With work in the jobs
+(10,000 or 100,000 iterations), 29 of the 30 per-sweep configurations have a
+p25–p75 interval containing zero (medians −8% to +29%). The exception (100,000
+iterations, 4 workers, sweep 2: +11%, +0.7 to +17.9%) did not repeat in the other
+sweeps. At these grain sizes the recording cost cannot be separated from noise.
+
+**Static-lighting bake** (21 pairs per row; 65 jobs per bake; 0 workers and the
+editor's 3):
+
+| Configuration | Sweep 1 median (p25–p75) | Sweep 2 |
+| --- | ---: | ---: |
+| No capture, 0 workers | −9% (−14 to +16) | +34% (−9 to +76) |
+| No capture, 3 workers | −12% (−44 to +49) | −1% (−16 to +10) |
+| Capture, 0 workers | −8% (−23 to +17) | −1% (−22 to +11) |
+| Capture, 3 workers | +6% (−32 to +87) | −3% (−11 to +21) |
+
+Every interval contains zero. Tracing a real bake, idle or recording, shows **no
+overhead measurable at this noise level**. With about 65 × 6 events per bake, the
+recording cost is small next to the bake's path tracing. The exported traces show
+the `StaticLightingPrepare` slice, 64 `StaticLightingRange` slices per bake on the
+named `Bake worker` tracks and the helping owner, the dispatch arrows and the
+ready-depth counter. The capture of sweep 1 holds 66 bakes: 66 preparation
+slices, 4,224 range slices and 4,290 `JobDispatch` flow ends, one for every job.
+
+A load-gated sweep (one-minute load below 4) is still pending. When it runs, its
+results will be added here as a separate sweep to narrow these intervals.
+
+Correctness evidence, in the threading suites:
+
+- `[threading][trace]` cases (0, 1 and 4 workers, helping and non-helping `Wait`, 20
+  reuses each): every executed job reports `Started`, its `Signalled` edges and
+  `Finished` on one thread, in that order. Ready sequences form a permutation with
+  roots first in Add order. A dependent's `Started` names the edge whose earlier
+  `Signalled` released it. Every report has returned when `Wait` returns. The serial
+  executor reports one fixed order. Failed jobs signal no edges, Blocked jobs are not
+  reported, a declining filter leaves a submission completely untraced, and worker
+  hooks run once per worker on the worker before `Initialize` returns and before
+  `Shutdown` joins. Lifecycle calls from hooks return `InsideJob`.
+- `ludus_threading_profiling_tests` exports a capture of a labelled fan-out graph and
+  checks named worker tracks, one slice per job under its label, balanced slices,
+  five `JobDispatch` flow starts with five matching ends, and six ready-depth samples.
+  A profiling-disabled build checks that the adapter returns empty hooks.
+- `ludus_threading_alloc_tests` counts zero allocations over 100
+  Add/DependsOn/Seal/Submit/Wait/Reset cycles, with 0 and 3 workers, in four modes: no
+  hooks, a plain trace hook, profiler hooks without a capture and profiler hooks
+  recording into an active capture.
+
+The trace cases passed 300 consecutive runs and the profiler/allocation executables
+50 runs each on this machine. The renderer suite (96 cases) and the full CTest run
+passed except `ludus_platform_cocoa_tests`, which skips every case without
+`LUDUS_TEST_COCOA=1` and is unaffected by this change. As in T0 and T1, ASan/UBSan and
+TSan results for these paths come from CI.

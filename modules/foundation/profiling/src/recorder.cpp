@@ -329,6 +329,11 @@ std::string_view TraceRecorder::ThreadName(uint32 threadId) const noexcept
     return std::string_view{};
 }
 
+uint32 TraceRecorder::ThreadIdAt(usize index) const noexcept
+{
+    return index < ThreadCount() ? mThreadNames[index].Id : 0;
+}
+
 usize TraceRecorder::ThreadCount() const noexcept
 {
     return mThreadNameCount.load(std::memory_order_acquire);

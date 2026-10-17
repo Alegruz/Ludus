@@ -18,6 +18,9 @@ clock)** and **Phase 1 (CPU Trace MVP + Perfetto export)** of the finalized
   4,096 events.
 - Capture lifecycle (`BeginCapture` / `EndCapture`) and Chrome/Perfetto JSON
   export (`ExportPerfettoTrace`) — open the file in <https://ui.perfetto.dev>.
+  The export names each registered thread's track.
+- An [integration emission API](#integration-emission-api) for runtime systems,
+  such as the job scheduler, that identify their work at run time.
 
 ## Capture lifecycle contract
 
@@ -62,6 +65,23 @@ ExportPerfettoTrace("trace.json");
 
 For scheduled captures of engine applications and benchmark harnesses, see
 [Runtime profiling](../../development/runtime-profiling.md).
+
+## Integration emission API
+
+`<ludus/foundation/profiling/integration.hpp>` exposes the per-thread recorder
+through plain functions for code that receives site IDs as data instead of
+declaring a static site per lexical scope. `RegisterSite` records a descriptor's
+name once; `BeginSite`/`EndSite` open and close a slice by site ID;
+`StartFlow`/`FinishFlow` link slices with a caller-owned flow ID, which must set
+`CALLER_FLOW_ID_BIT` so it cannot collide with `LUDUS_PROFILE_FLOW_OUT` IDs; and
+`SampleCounter` records a timestamped counter value, exported as a Chrome counter
+event (`"ph":"C"`). Counter samples are trace-timeline events, not the planned
+Phase 2 per-frame counters and gauges. Every function is a relaxed load and branch
+while no capture is active and never allocates.
+
+The [job scheduler's profiler adapter](threading.md#execution-traces) is the first
+user: it records Submit/Wait slices, one slice per job, dispatch flows and a
+ready-queue counter.
 
 ## Build flavors
 
@@ -124,6 +144,8 @@ incomplete) and gates G1 (disabled = no evaluation), G3 (clock monotonicity),
 and G13 (incomplete scopes exported as `"incomplete":true`). The `recorder`
 tests cover slab alignment and overflow, joins with live and exiting threads,
 stop/restart while producers keep emitting, concurrent drain/recycle and
-concurrent registration; run them under ASan/UBSan and TSan. The pinned toolchain
+concurrent registration; run them under ASan/UBSan and TSan. An export test
+checks integration slices, matched caller flows, counter samples and thread-name
+records. The pinned toolchain
 (Clang 18 + Conan + Catch2) runs the authoritative warnings-as-errors, ASan/UBSan
 and build-budget checks in CI.
