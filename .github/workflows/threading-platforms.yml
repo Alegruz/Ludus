@@ -36,7 +36,10 @@ env:
 jobs:
   windows:
     name: Windows Clang threading
-    runs-on: windows-2025
+    # Current Visual Studio STLs reject Clang 18 (STL1000 requires Clang 19 in VS
+    # 2022 17.13+ and Clang 20 in VS 2026). Keep the pinned LLVM and select the
+    # MSVC 14.40 (VS 2022 17.10 LTSC) toolset, the last one admitting it.
+    runs-on: windows-2022
     timeout-minutes: 60
     defaults:
       run:
@@ -49,17 +52,29 @@ jobs:
         with:
           ref: ${{ inputs.batch_sha || github.sha }}
           persist-credentials: false
+      - name: Install the MSVC 14.40 toolset
+        shell: pwsh
+        run: |
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+          $vs = & "$installer\vswhere.exe" -latest -products * -property installationPath
+          $component = "Microsoft.VisualStudio.Component.VC.14.40.17.10.x86.x64"
+          $process = Start-Process -FilePath "$installer\vs_installer.exe" -Wait -PassThru -ArgumentList `
+            "modify", "--installPath", "`"$vs`"", "--add", $component, "--quiet", "--norestart", "--nocache"
+          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { throw "vs_installer exited $($process.ExitCode)" }
+          $tools = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Where-Object Name -like "14.40.*" | Select-Object -First 1
+          if ($null -eq $tools) { Get-ChildItem "$vs\VC\Tools\MSVC"; throw "MSVC 14.40 toolset not installed" }
+          Write-Output "Selected MSVC toolset: $($tools.FullName)"
+          # Clang's MSVC driver prefers this variable over Visual Studio discovery.
+          "VCToolsInstallDir=$($tools.FullName)\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install pinned LLVM and host tools
         run: |
           llvm="$(python -c "import json; print(json.load(open('config/tool_versions.json'))['minimum']['clang'].split('.')[0])")"
+          mkdir -p out
           choco install llvm --version=18.1.8 --allow-downgrade --yes --no-progress
-          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
-          "$vswhere" -all -products '*' -format text | grep -E '^(installationPath|catalog_productDisplayVersion):' || true
-          for root in "/c/Program Files/Microsoft Visual Studio"/*/*/VC/Tools/MSVC; do ls "$root"; done || true
-          "/c/Program Files/LLVM/bin/clang++.exe" --version | tee out-clang-version.txt
-          grep -q "clang version ${llvm}\." out-clang-version.txt
-          printf '#include <atomic>\n#include <new>\nint main() { return 0; }\n' > out-stl-probe.cpp
-          "/c/Program Files/LLVM/bin/clang++.exe" -std=c++23 -v -fsyntax-only out-stl-probe.cpp 2>&1 | grep -iE 'msvc|stl|error|include' || true
+          "/c/Program Files/LLVM/bin/clang++.exe" --version | tee out/clang-version.txt
+          grep -q "clang version ${llvm}\." out/clang-version.txt
+          printf '#include <atomic>\n#include <new>\nint main() { return 0; }\n' > out/stl-probe.cpp
+          "/c/Program Files/LLVM/bin/clang++.exe" -std=c++23 -fsyntax-only out/stl-probe.cpp
           python -m venv out/host-tools/venv
           versions="$(python -c "import json; m=json.load(open('config/tool_versions.json'))['managed']; print(' '.join(f'{k}=={v}' for k, v in m.items()))")"
           # shellcheck disable=SC2086
@@ -91,6 +106,9 @@ jobs:
             --tests-regex '^ludus_(foundation_threading|threading_startup|threading_profiling|threading_alloc)_tests$'
           ctest --test-dir out/build/windows-clang-development --output-on-failure --no-tests=error \
             --tests-regex '^ludus_(foundation_threading|threading_startup)_tests$' --repeat until-fail:20
+          for suite in ludus_foundation_threading_tests ludus_threading_startup_tests ludus_threading_profiling_tests ludus_threading_alloc_tests; do
+            out/build/windows-clang-development/modules/foundation/threading/"$suite".exe | tail -n 2
+          done
       - name: Preserve Windows test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -130,6 +148,9 @@ jobs:
             --tests-regex '^ludus_(foundation_threading|threading_startup|threading_profiling)_tests$'
           out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --output-on-failure --no-tests=error \
             --tests-regex '^ludus_(foundation_threading|threading_startup)_tests$' --repeat until-fail:10
+          for suite in ludus_foundation_threading_tests ludus_threading_startup_tests ludus_threading_profiling_tests; do
+            out/build/threading-tsan/modules/foundation/threading/"$suite" | tail -n 2
+          done
       - name: Preserve race-detection diagnostics
         if: always()
         uses: actions/upload-artifact@v4
