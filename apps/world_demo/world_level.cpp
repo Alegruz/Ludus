@@ -1,6 +1,8 @@
 #include "internal/level.h"
 
 #include <ludus/foundation/base/parse_number.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/identity/uuid.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/parsing/json.hpp>
 
@@ -8,7 +10,24 @@ namespace ludus::world_demo
 {
 namespace
 {
+using foundation::identity::Uuid;
 using foundation::parsing::JsonValue;
+/// Envelope version whose entities carry only scoped string IDs.
+constexpr uint64 WORLD_VERSION_SCOPED_IDS = 1;
+/// Envelope version with a document UUID, per-entity UUIDs and labels, and UUID entity references
+/// (docs/architecture/object-handles-uuid.md#stage-3-uuid-authoring-records).
+constexpr uint64 WORLD_VERSION_UUID_RECORDS = 2;
+/// Most authoring entities in one World: actors, collision boxes and the settings entity.
+constexpr usize MAX_WORLD_ENTITIES = 49;
+bool IdentityValue(JsonValue value, Uuid& output) noexcept
+{
+    std::string_view text;
+    return value.String(text) == true &&
+           foundation::identity::TryParseUuid(text.data(),
+                                              text.size(),
+                                              foundation::identity::UuidPolicy::RequireVersion4,
+                                              output) == foundation::identity::UuidStatus::Success;
+}
 bool NameValue(JsonValue value, Name& output, bool empty = false) noexcept
 {
     std::string_view text;
@@ -43,13 +62,17 @@ bool Transform(JsonValue value, Recipe& recipe) noexcept
            Number(value.Get("y"), recipe.Position.Y) && Number(value.Get("rotation"), recipe.Rotation) &&
            Number(value.Get("scale_x"), recipe.Scale.X) && Number(value.Get("scale_y"), recipe.Scale.Y);
 }
-bool Actor(JsonValue value, Recipe& recipe, bool enemy) noexcept
+// A version-2 enemy names its target by UUID in `outTarget`; version 1 names it by ID in `recipe`.
+bool Actor(JsonValue value, Recipe& recipe, bool enemy, bool hasUuidReferences, Uuid& outTarget) noexcept
 {
     uint64 health = 0;
-    if (!(enemy ? value.Fields({"speed", "health", "sprite", "target"})
-                : value.Fields({"speed", "health", "sprite"})) ||
-        !Number(value.Get("speed"), recipe.Speed) || !value.Get("health").Integer(health) || health > 100000 ||
-        !NameValue(value.Get("sprite"), recipe.Sprite) || (enemy && !NameValue(value.Get("target"), recipe.Target)))
+    const JsonValue target = value.Get("target");
+    const bool isTargetRead = enemy == false || (hasUuidReferences == true ? IdentityValue(target, outTarget)
+                                                                           : NameValue(target, recipe.Target));
+    if ((enemy == true ? value.Fields({"speed", "health", "sprite", "target"})
+                       : value.Fields({"speed", "health", "sprite"})) == false ||
+        Number(value.Get("speed"), recipe.Speed) == false || value.Get("health").Integer(health) == false ||
+        health > 100000 || NameValue(value.Get("sprite"), recipe.Sprite) == false || isTargetRead == false)
     {
         return false;
     }
@@ -77,7 +100,7 @@ LevelResult ReadWorldLevel(std::string_view source, Level& output) noexcept
     parsing::ParseError error;
     parsing::JsonLimits limits;
     limits.MaxInputBytes = 65536;
-    limits.MaxArrayElements = 49;
+    limits.MaxArrayElements = MAX_WORLD_ENTITIES;
     limits.MaxValues = 4096;
     limits.MaxStringBytes = 128;
     if (source.size() > limits.MaxInputBytes)
@@ -91,38 +114,61 @@ LevelResult ReadWorldLevel(std::string_view source, Level& output) noexcept
     const auto root = document.Root();
     uint64 version = 0;
     std::string_view schema;
-    const auto entities = root.Get("entities");
-    if (!root.Fields({"version", "schema", "entities"}) || !root.Get("version").Integer(version) || version != 1 ||
-        !root.Get("schema").String(schema) || schema != "ludus.world-demo.v1" || !entities.Array())
+    const JsonValue entities = root.Get("entities");
+    if (root.Get("version").Integer(version) == false ||
+        (version != WORLD_VERSION_SCOPED_IDS && version != WORLD_VERSION_UUID_RECORDS))
+    {
+        return {LevelError::InvalidValue, 0};
+    }
+    // Version 2 adds a document UUID; each entity's version-1 `id` became its `label`, and `uuid` is its identity.
+    const bool hasUuidRecords = version == WORLD_VERSION_UUID_RECORDS;
+    const bool hasRootFields = hasUuidRecords == true ? root.Fields({"version", "schema", "document", "entities"})
+                                                      : root.Fields({"version", "schema", "entities"});
+    if (hasRootFields == false || root.Get("schema").String(schema) == false || schema != "ludus.world-demo.v1" ||
+        entities.Array() == false)
     {
         return {LevelError::InvalidValue, 0};
     }
     Level candidate;
+    if (hasUuidRecords == true && IdentityValue(root.Get("document"), candidate.Document.Value) == false)
+    {
+        return {LevelError::InvalidValue, 0};
+    }
     bool settingsSeen = false;
-    Name ids[49]{};
+    foundation::StaticArray<Name, MAX_WORLD_ENTITIES> ids{};
+    foundation::StaticArray<Uuid, MAX_WORLD_ENTITIES> objects{};
+    // Version-2 enemy targets, resolved to labels after every entity's UUID is known.
+    foundation::StaticArray<Uuid, MAX_WORLD_ENTITIES> targets{};
+    const char* const idKey = hasUuidRecords == true ? "label" : "id";
     for (usize i = 0; i < entities.Count(); ++i)
     {
-        const auto entity = entities.At(i);
+        const JsonValue entity = entities.At(i);
         std::string_view displayName;
-        const auto components = entity.Get("components");
-        if (!entity.Fields({"id", "name", "components"}) || !NameValue(entity.Get("id"), ids[i]) ||
-            !entity.Get("name").String(displayName) || displayName.empty() || !components.Object())
+        const JsonValue components = entity.Get("components");
+        const bool hasEntityFields = hasUuidRecords == true ? entity.Fields({"uuid", "label", "name", "components"})
+                                                            : entity.Fields({"id", "name", "components"});
+        if (hasEntityFields == false || NameValue(entity.Get(idKey), ids[i]) == false ||
+            entity.Get("name").String(displayName) == false || displayName.empty() == true ||
+            components.Object() == false ||
+            (hasUuidRecords == true && IdentityValue(entity.Get("uuid"), objects[i]) == false))
         {
             return {LevelError::InvalidValue, 0};
         }
         for (usize prior = 0; prior < i; ++prior)
         {
-            if (ids[i] == ids[prior])
+            if (ids[i] == ids[prior] || (hasUuidRecords == true && objects[i] == objects[prior]))
             {
                 return {LevelError::DuplicateField, 0};
             }
         }
         if (components.Get("settings").Valid())
         {
-            if (settingsSeen || !components.Fields({"settings"}) || !Settings(components.Get("settings"), candidate))
+            if (settingsSeen == true || components.Fields({"settings"}) == false ||
+                Settings(components.Get("settings"), candidate) == false)
             {
                 return {LevelError::InvalidValue, 0};
             }
+            candidate.SettingsObject.Value = objects[i];
             settingsSeen = true;
         }
         else if (components.Get("collision").Valid())
@@ -134,6 +180,7 @@ LevelResult ReadWorldLevel(std::string_view source, Level& output) noexcept
             auto& box = candidate.Collision[candidate.CollisionCount++];
             const auto collision = components.Get("collision");
             box.Id = ids[i];
+            box.Object.Value = objects[i];
             if (!components.Fields({"collision"}) || !collision.Fields({"x", "y", "half_x", "half_y"}) ||
                 !Number(collision.Get("x"), box.Center.X) || !Number(collision.Get("y"), box.Center.Y) ||
                 !Number(collision.Get("half_x"), box.HalfExtent.X) ||
@@ -148,8 +195,10 @@ LevelResult ReadWorldLevel(std::string_view source, Level& output) noexcept
             {
                 return {LevelError::Capacity, 0};
             }
+            Uuid& target = targets[candidate.EntityCount];
             auto& recipe = candidate.Entities[candidate.EntityCount++];
             recipe.Id = ids[i];
+            recipe.Object.Value = objects[i];
             if (!Transform(components.Get("transform"), recipe))
             {
                 return {LevelError::InvalidValue, 0};
@@ -169,17 +218,42 @@ LevelResult ReadWorldLevel(std::string_view source, Level& output) noexcept
             else
             {
                 const bool enemy = components.Get("enemy").Valid();
-                if (!(enemy ? components.Fields({"transform", "enemy"}) : components.Fields({"transform", "player"})) ||
-                    !Actor(components.Get(enemy ? "enemy" : "player"), recipe, enemy))
+                if ((enemy == true ? components.Fields({"transform", "enemy"})
+                                   : components.Fields({"transform", "player"})) == false ||
+                    Actor(components.Get(enemy == true ? "enemy" : "player"), recipe, enemy, hasUuidRecords, target) ==
+                        false)
                 {
                     return {LevelError::InvalidValue, 0};
                 }
             }
         }
     }
-    if (!settingsSeen)
+    if (settingsSeen == false)
     {
         return {LevelError::MissingField, 0};
+    }
+    // Version 2 references are UUIDs of entities in the same document; resolve each to its label so
+    // runtime lookup, validation and replay hashing are identical for both versions.
+    for (usize i = 0; i < candidate.EntityCount && hasUuidRecords == true; ++i)
+    {
+        Recipe& recipe = candidate.Entities[i];
+        if (recipe.Type != Kind::Enemy)
+        {
+            continue;
+        }
+        bool isResolved = false;
+        for (usize j = 0; j < entities.Count() && isResolved == false; ++j)
+        {
+            if (objects[j] == targets[i])
+            {
+                recipe.Target = ids[j];
+                isResolved = true;
+            }
+        }
+        if (isResolved == false)
+        {
+            return {LevelError::InvalidReference, 0};
+        }
     }
     const auto valid = ValidateLevel(candidate);
     if (valid != LevelError::None)

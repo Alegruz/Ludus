@@ -168,3 +168,32 @@ subtraction, so there are no timing claims.
 - **SDK and browser.** `tests/sdk_consumer/containers.cpp` exercises full
   rejection and wraparound, but those targets were not built locally; CI's SDK
   and browser jobs build them.
+
+## M5 StaticBitSet and key and asset masks
+
+Recorded 2026-10-17 for [M5](../architecture/container-systems.md#staticbitset-contract)
+on the same host and pinned toolchain as M1. Only the fixed-size form shipped;
+the dynamic `BitSet` is deferred because no consumer needs a run-time bit count.
+There are no timing claims.
+
+- **Correctness.** `[bit-set]` in `ludus_foundation_containers_tests` checks
+  0, 1, 63, 64, 65 and 130 bits against a plain bool-array model. It covers
+  first, last and word-edge bits, `FlipAll`/`SetAll`/`ResetAll` with tail
+  masking, every left and right shift amount from 0 through `N + 2`, set
+  operations, and `FindNextSet` visiting exactly the set bits. A
+  20,000-operation seeded stream on 193 bits mixes set, reset, flip and shifts.
+  Compile-time assertions check layout and size (one word for 64 bits, two for
+  65), trivial copyability, `constexpr` use, and the popcount and trailing-zero
+  helpers against direct loops and edge words.
+- **Allocation.** `ludus_containers_alloc_tests` counts every global
+  `operator new`/`delete`. Whole-set operations, shifts, complement and copies
+  of a 200-bit set make no allocation.
+- **Consumers.** The Input reducer's live-down, live-suppressed and
+  reset-baseline masks, and the Resources manager's dependency-closure and
+  catalog-duplicate sets, now use `StaticBitSet` instead of `bool` arrays. The
+  existing Input and Resources suites pass unchanged. The public
+  `KeyboardSnapshot` and `FocusBaseline` bool arrays were deliberately left
+  alone to keep the SDK API and ABI stable.
+- **SDK and browser.** `tests/sdk_consumer/containers.cpp` exercises a 65-bit
+  set, but those targets were not built locally; CI's SDK and browser jobs build
+  them.
