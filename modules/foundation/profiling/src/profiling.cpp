@@ -143,7 +143,7 @@ void UnregisterThreadForTrace() noexcept
 bool BeginCapture(usize maxChunks) noexcept
 {
     // Ensure the calling thread is registered so its events are attributed.
-    if (!internal::CurrentThreadRecorder().Registered)
+    if (internal::CurrentThreadRecorder().IsRegistered == false)
     {
         (void)internal::TraceRecorder::Instance().RegisterThread(std::string_view{"Main"});
     }
@@ -152,10 +152,9 @@ bool BeginCapture(usize maxChunks) noexcept
 
 void EndCapture() noexcept
 {
+    // Waits for in-flight producers and publishes every thread's partial chunk,
+    // so the capture is complete before export.
     internal::TraceRecorder::Instance().EndCapture();
-    // Flush the calling thread's partial chunk so a single-threaded capture is
-    // complete before export.
-    internal::TraceRecorder::Instance().FlushAllForExport();
 }
 
 TraceHealth GetTraceHealth() noexcept

@@ -1,0 +1,544 @@
+{
+  "revision": "02e6256fc3b032bb5e77e4195261f2a8e14e0494",
+  "working_tree_modified": true,
+  "binary_sha256": "d55105bc3baae757dee57928885dd28d5252397e490c1e7ebbbde799f00f9e75",
+  "build": {
+    "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+    "CMAKE_CXX_COMPILER": "/Users/alegruz/Ludus/.claude/worktrees/memory-profiling-milestone-0-a713d5/out/host-tools/bin/clang++",
+    "CMAKE_CXX_FLAGS": "-stdlib=libc++ -nostdinc++ -isystem \"/Users/alegruz/Ludus/.claude/worktrees/memory-profiling-milestone-0-a713d5/out/host-tools/libcxx-include\"",
+    "LUDUS_BUILD_FLAVOR": "Profile",
+    "LUDUS_PROFILING_ENABLED": "1",
+    "compiler_version": "Homebrew clang version 18.1.8"
+  },
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpu": "Apple M5",
+  "logical_cpus": 10,
+  "load_average_1_5_15_before": [
+    5.60595703125,
+    9.9287109375,
+    15.376953125
+  ],
+  "load_average_1_5_15_after": [
+    5.39697265625,
+    9.8134765625,
+    15.30419921875
+  ],
+  "seed": 10,
+  "processes_per_workload": 5,
+  "method": "Each workload runs in a fresh process per round, in seeded random order; one warmup then seven timed samples per process. Rates are nanoseconds per workload operation; peak RSS is the process's ru_maxrss. No sanitizer, capture or CPU pinning; other host load is recorded as load averages, not controlled.",
+  "process_runs": [
+    {
+      "workload": "array-append-reserved",
+      "process": 0,
+      "order": 0,
+      "wall_seconds": 0.012084417001460679,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-large-blocks",
+      "process": 0,
+      "order": 1,
+      "wall_seconds": 0.004997292002371978,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 0,
+      "order": 2,
+      "wall_seconds": 0.35152837499481393,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-small-churn",
+      "process": 0,
+      "order": 3,
+      "wall_seconds": 0.23340058400208363,
+      "peak_rss_kib": 1824,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 0,
+      "order": 4,
+      "wall_seconds": 0.46768641699600266,
+      "peak_rss_kib": 45280,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-unreserved",
+      "process": 0,
+      "order": 5,
+      "wall_seconds": 0.01130745899718022,
+      "peak_rss_kib": 9776,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-remote-free",
+      "process": 0,
+      "order": 6,
+      "wall_seconds": 0.021908875001827255,
+      "peak_rss_kib": 6112,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-aligned64",
+      "process": 0,
+      "order": 7,
+      "wall_seconds": 0.00796529200306395,
+      "peak_rss_kib": 9776,
+      "exit_code": 0
+    },
+    {
+      "workload": "idle",
+      "process": 0,
+      "order": 8,
+      "wall_seconds": 0.00465654100116808,
+      "peak_rss_kib": 1376,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 0,
+      "order": 9,
+      "wall_seconds": 0.011012791997927707,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-aligned64",
+      "process": 1,
+      "order": 0,
+      "wall_seconds": 0.007223459004308097,
+      "peak_rss_kib": 11840,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-small-churn",
+      "process": 1,
+      "order": 1,
+      "wall_seconds": 0.2620242499979213,
+      "peak_rss_kib": 1808,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-reserved",
+      "process": 1,
+      "order": 2,
+      "wall_seconds": 0.008993791998364031,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 1,
+      "order": 3,
+      "wall_seconds": 0.413532500002475,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 1,
+      "order": 4,
+      "wall_seconds": 0.451352832998964,
+      "peak_rss_kib": 45280,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-remote-free",
+      "process": 1,
+      "order": 5,
+      "wall_seconds": 0.01939904099708656,
+      "peak_rss_kib": 6640,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 1,
+      "order": 6,
+      "wall_seconds": 0.011041750003641937,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "idle",
+      "process": 1,
+      "order": 7,
+      "wall_seconds": 0.0038759589951951057,
+      "peak_rss_kib": 1376,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-large-blocks",
+      "process": 1,
+      "order": 8,
+      "wall_seconds": 0.005289916996844113,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-unreserved",
+      "process": 1,
+      "order": 9,
+      "wall_seconds": 0.009240666004188824,
+      "peak_rss_kib": 10304,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 2,
+      "order": 0,
+      "wall_seconds": 0.010253875007038005,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-reserved",
+      "process": 2,
+      "order": 1,
+      "wall_seconds": 0.008618540996394586,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-small-churn",
+      "process": 2,
+      "order": 2,
+      "wall_seconds": 0.25230349999765167,
+      "peak_rss_kib": 1808,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 2,
+      "order": 3,
+      "wall_seconds": 0.4327964999974938,
+      "peak_rss_kib": 45296,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-remote-free",
+      "process": 2,
+      "order": 4,
+      "wall_seconds": 0.018213167000794783,
+      "peak_rss_kib": 6112,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 2,
+      "order": 5,
+      "wall_seconds": 0.3847607079951558,
+      "peak_rss_kib": 45120,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-unreserved",
+      "process": 2,
+      "order": 6,
+      "wall_seconds": 0.011477292006020434,
+      "peak_rss_kib": 9776,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-large-blocks",
+      "process": 2,
+      "order": 7,
+      "wall_seconds": 0.0057746660022530705,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-aligned64",
+      "process": 2,
+      "order": 8,
+      "wall_seconds": 0.0071056660017347895,
+      "peak_rss_kib": 9776,
+      "exit_code": 0
+    },
+    {
+      "workload": "idle",
+      "process": 2,
+      "order": 9,
+      "wall_seconds": 0.0038338749945978634,
+      "peak_rss_kib": 1376,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-aligned64",
+      "process": 3,
+      "order": 0,
+      "wall_seconds": 0.006627292001212481,
+      "peak_rss_kib": 9760,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 3,
+      "order": 1,
+      "wall_seconds": 0.010133792005944997,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "idle",
+      "process": 3,
+      "order": 2,
+      "wall_seconds": 0.0036719589988933876,
+      "peak_rss_kib": 1376,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-remote-free",
+      "process": 3,
+      "order": 3,
+      "wall_seconds": 0.016719833001843654,
+      "peak_rss_kib": 6112,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-small-churn",
+      "process": 3,
+      "order": 4,
+      "wall_seconds": 0.23786749999999302,
+      "peak_rss_kib": 1808,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 3,
+      "order": 5,
+      "wall_seconds": 0.48793250000016997,
+      "peak_rss_kib": 45296,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-reserved",
+      "process": 3,
+      "order": 6,
+      "wall_seconds": 0.009803166998608503,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-unreserved",
+      "process": 3,
+      "order": 7,
+      "wall_seconds": 0.009622375000617467,
+      "peak_rss_kib": 9776,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-large-blocks",
+      "process": 3,
+      "order": 8,
+      "wall_seconds": 0.005507708003278822,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 3,
+      "order": 9,
+      "wall_seconds": 0.41439312500006054,
+      "peak_rss_kib": 45120,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-large-blocks",
+      "process": 4,
+      "order": 0,
+      "wall_seconds": 0.005605332997220103,
+      "peak_rss_kib": 5536,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-remote-free",
+      "process": 4,
+      "order": 1,
+      "wall_seconds": 0.017526791998534463,
+      "peak_rss_kib": 6112,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-reserved",
+      "process": 4,
+      "order": 2,
+      "wall_seconds": 0.008526833000360057,
+      "peak_rss_kib": 5552,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 4,
+      "order": 3,
+      "wall_seconds": 0.4284630420006579,
+      "peak_rss_kib": 45280,
+      "exit_code": 0
+    },
+    {
+      "workload": "system-small-churn",
+      "process": 4,
+      "order": 4,
+      "wall_seconds": 0.23267124999983935,
+      "peak_rss_kib": 1824,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 4,
+      "order": 5,
+      "wall_seconds": 0.3808212919975631,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-unreserved",
+      "process": 4,
+      "order": 6,
+      "wall_seconds": 0.014027083001565188,
+      "peak_rss_kib": 9776,
+      "exit_code": 0
+    },
+    {
+      "workload": "idle",
+      "process": 4,
+      "order": 7,
+      "wall_seconds": 0.003691541998705361,
+      "peak_rss_kib": 1376,
+      "exit_code": 0
+    },
+    {
+      "workload": "array-append-aligned64",
+      "process": 4,
+      "order": 8,
+      "wall_seconds": 0.0061404999942169525,
+      "peak_rss_kib": 9776,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 4,
+      "order": 9,
+      "wall_seconds": 0.008982583000033628,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    }
+  ],
+  "summary": {
+    "array-append-aligned64": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 5.06591796875,
+      "ns_per_operation_p25": 4.9864501953125,
+      "ns_per_operation_p75": 5.14825439453125,
+      "ns_per_operation_min": 4.4358673095703125,
+      "ns_per_operation_max": 8.354827880859375,
+      "peak_rss_kib_median": 9776.0,
+      "peak_rss_kib_max": 11840.0
+    },
+    "array-append-reserved": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 0.5371971130371094,
+      "ns_per_operation_p25": 0.4780092239379883,
+      "ns_per_operation_p75": 0.539421558380127,
+      "ns_per_operation_min": 0.4080533981323242,
+      "ns_per_operation_max": 0.5475683212280273,
+      "peak_rss_kib_median": 5552.0,
+      "peak_rss_kib_max": 5552.0
+    },
+    "array-append-unreserved": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 0.5981531143188477,
+      "ns_per_operation_p25": 0.5946755409240723,
+      "ns_per_operation_p75": 0.6104707717895508,
+      "ns_per_operation_min": 0.592310905456543,
+      "ns_per_operation_max": 0.7253093719482422,
+      "peak_rss_kib_median": 9776.0,
+      "peak_rss_kib_max": 10304.0
+    },
+    "idle": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 0.0,
+      "ns_per_operation_p25": 0.0,
+      "ns_per_operation_p75": 0.0,
+      "ns_per_operation_min": 0.0,
+      "ns_per_operation_max": 0.0,
+      "peak_rss_kib_median": 1376.0,
+      "peak_rss_kib_max": 1376.0
+    },
+    "system-large-blocks": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 5813.78125,
+      "ns_per_operation_p25": 5182.3125,
+      "ns_per_operation_p75": 5839.1875,
+      "ns_per_operation_min": 4464.84375,
+      "ns_per_operation_max": 6080.75,
+      "peak_rss_kib_median": 5552.0,
+      "peak_rss_kib_max": 5552.0
+    },
+    "system-remote-free": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 11.1236572265625,
+      "ns_per_operation_p25": 10.54541015625,
+      "ns_per_operation_p75": 12.376785278320312,
+      "ns_per_operation_min": 10.0828857421875,
+      "ns_per_operation_max": 23.081466674804688,
+      "peak_rss_kib_median": 6112.0,
+      "peak_rss_kib_max": 6640.0
+    },
+    "system-small-churn": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 27.95549201965332,
+      "ns_per_operation_p25": 26.817798614501953,
+      "ns_per_operation_p75": 29.73562479019165,
+      "ns_per_operation_min": 26.491005897521973,
+      "ns_per_operation_max": 32.06185531616211,
+      "peak_rss_kib_median": 1808.0,
+      "peak_rss_kib_max": 1824.0
+    },
+    "trace-emit-1-thread": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 30.25958,
+      "ns_per_operation_p25": 28.516355,
+      "ns_per_operation_p75": 32.011145,
+      "ns_per_operation_min": 26.201875,
+      "ns_per_operation_max": 32.696045,
+      "peak_rss_kib_median": 45136.0,
+      "peak_rss_kib_max": 45136.0
+    },
+    "trace-emit-4-threads": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 56.51083,
+      "ns_per_operation_p25": 54.1358325,
+      "ns_per_operation_p75": 62.62177,
+      "ns_per_operation_min": 48.258955,
+      "ns_per_operation_max": 76.97229,
+      "peak_rss_kib_median": 45280.0,
+      "peak_rss_kib_max": 45296.0
+    },
+    "trace-session-setup": {
+      "samples": 35,
+      "processes": 5,
+      "ns_per_operation_median": 41065.0625,
+      "ns_per_operation_p25": 40856.78125,
+      "ns_per_operation_p75": 41363.28125,
+      "ns_per_operation_min": 36750.0,
+      "ns_per_operation_max": 52898.4375,
+      "peak_rss_kib_median": 13904.0,
+      "peak_rss_kib_max": 13904.0
+    }
+  }
+}

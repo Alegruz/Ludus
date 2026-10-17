@@ -5,16 +5,33 @@
 // §8, §21, §23). Internal — never installed.
 //
 // Ownership model:
-//   * Each producing thread owns a TLS `ThreadRecorder` holding the current
-//     chunk. Pushing an event is single-writer, no atomics on the common path.
-//   * A process-wide `TraceRecorder` owns the chunk pool (free list), the queue
-//     of full chunks, the registered-thread list, and the capture-enabled flag.
-//   * Full chunks move producer -> recorder via the lock-free ChunkStack.
+//   * Each producing thread owns a TLS `ThreadRecorder` holding its current
+//     chunk. Writing an event into that chunk needs no lock.
+//   * A process-wide, never-destroyed `TraceRecorder` owns the aligned chunk
+//     slab, the free and full chunk lists, the list of producers that hold or
+//     have held a chunk, the registration tables and the capture-enabled flag.
+//     One mutex guards the lists, slab and registration writers; it is taken
+//     once per chunk (4096 events), never per event.
 //
-// Capture lifecycle: BeginCapture() pre-reserves all chunks and flips the
-// enabled flag; EndCapture() flushes partial chunks and assembles a Capture.
-// Nothing allocates on the hot path; over-capacity events are dropped and
-// counted (Trace overflow policy, §21).
+// Capture lifecycle (memory profiling phase 0 lifetime repair):
+//   * BeginCapture() reserves the slab, rebuilds the free list from every chunk
+//     and arms capture.
+//   * Emit() announces itself in its thread's `IsEmitting` flag before testing
+//     the capture flag. EndCapture() clears the capture flag first and then
+//     waits until no linked producer is emitting. That store/load pairing is
+//     sequentially consistent, so a producer either observes the disarm and
+//     touches no chunk, or EndCapture observes its write in flight and waits.
+//   * After that wait EndCapture() publishes every producer's partial chunk, so
+//     a capture ends as a join: all events recorded before it returns are
+//     drainable, whether or not their threads are still alive.
+//   * A producer only holds a chunk between acquiring it under the mutex while
+//     capture is armed and the next EndCapture() or its own thread exit, so the
+//     slab is never released or rebuilt while a producer can write into it.
+//
+// Capture control calls (Begin/End/Reset/export) are serialized by their caller;
+// the recorder does not support concurrent controllers. Nothing allocates on the
+// hot path; over-capacity events are dropped and counted (Trace overflow
+// policy, §21).
 // -----------------------------------------------------------------------------
 
 #include "internal/trace_chunk.hpp"
@@ -23,6 +40,7 @@
 #include <ludus/foundation/base/types.h>
 
 #include <atomic>
+#include <mutex>
 #include <string_view>
 
 namespace ludus::foundation::profiling::internal
@@ -51,30 +69,56 @@ struct TraceHealth
     uint64 ThreadsRegistered = 0;
 };
 
-// Process-wide recorder. Single instance accessed via Instance(). Lifetime is
-// managed like the logging AsyncBackend: Shutdown() joins/flushes before freeing
-// (§21) — for the MVP the collector drain is synchronous in EndCapture(), so
-// there is no background thread to join yet (documented deviation; see
-// recorder.cpp).
+// Thread-local recorder state, one per producing thread. Only its own thread
+// writes `CurrentOrNull` while capture is armed; EndCapture() and thread exit
+// change it under the recorder mutex once the thread is not emitting.
+struct ThreadRecorder
+{
+    TraceChunk* CurrentOrNull = nullptr;
+    // Intrusive membership in the recorder's producer list (mutex-guarded).
+    ThreadRecorder* NextOrNull = nullptr;
+    ThreadRecorder* PreviousOrNull = nullptr;
+    // True while Emit() may read or write CurrentOrNull; see the file header.
+    std::atomic<bool> IsEmitting{false};
+    uint32 ThreadId = 0;
+    bool IsRegistered = false;
+    bool IsLinked = false;
+
+    ThreadRecorder() noexcept = default;
+    ThreadRecorder(const ThreadRecorder&) = delete;
+    ThreadRecorder& operator=(const ThreadRecorder&) = delete;
+    ThreadRecorder(ThreadRecorder&&) = delete;
+    ThreadRecorder& operator=(ThreadRecorder&&) = delete;
+    ~ThreadRecorder() noexcept;
+};
+
+[[nodiscard]] ThreadRecorder& CurrentThreadRecorder() noexcept;
+
+// Process-wide recorder. Single instance accessed via Instance(); it is never
+// destroyed, so thread-exit hooks running during process teardown can still
+// detach. The collector drain is synchronous (EndCapture/export run on the
+// calling thread); see recorder.cpp.
 class TraceRecorder
 {
 public:
     [[nodiscard]] static TraceRecorder& Instance() noexcept;
 
-    // Pre-reserve the chunk pool and arm capture. `maxChunks` bounds total trace
-    // memory (maxChunks * sizeof(TraceChunk)). Idempotent-safe: a second call
-    // while active is a no-op that returns false.
+    // Reserve the chunk pool and arm capture. `maxChunks` bounds total trace
+    // memory (maxChunks * sizeof(TraceChunk)); zero is treated as one. Returns
+    // false, leaving capture disarmed, when a capture is already active or the
+    // slab cannot be reserved. Any events left from a previous capture that were
+    // not drained are discarded, and previously drained chunk pointers become
+    // invalid.
     bool BeginCapture(usize maxChunks) noexcept;
 
-    // Disarm capture, flush every thread's partial chunk, and return the number
-    // of full chunks now queued for draining. After this the events can be
-    // assembled into a Capture (see capture.hpp / EndCaptureInto).
+    // Disarm capture, wait for producers that are writing an event, and publish
+    // every producer's partial chunk to the full list. Safe to call when no
+    // capture is active.
     void EndCapture() noexcept;
 
     // Register/unregister the calling thread. Registration assigns a stable
     // profiling-local thread id and stores the name for export. Safe to call
-    // before BeginCapture. Unregister flushes the thread's partial chunk (§21,
-    // thread destruction).
+    // before BeginCapture. Unregister publishes the thread's partial chunk.
     uint32 RegisterThread(std::string_view name) noexcept;
     void UnregisterThread() noexcept;
 
@@ -82,69 +126,71 @@ public:
     [[nodiscard]] std::string_view ThreadName(uint32 threadId) const noexcept;
     [[nodiscard]] usize ThreadCount() const noexcept;
 
-    // Site registry (§13/§14). RegisterSite records id -> {name,file,line} at
-    // most once per site (caller guards with a per-site static). Names are
-    // borrowed string_views into process-lifetime string literals, so we store
-    // the view directly. SiteName returns empty for an unknown id.
+    // Site registry (§13/§14). RegisterSite records id -> {name,file,line} once
+    // per site (the instrumentation macro guards it with a function-local
+    // static). Names are borrowed string_views into process-lifetime string
+    // literals. SiteName returns empty for an unknown id.
     void RegisterSite(uint32 siteId, std::string_view name, std::string_view file, uint32 line) noexcept;
     [[nodiscard]] std::string_view SiteName(uint32 siteId) const noexcept;
 
-    // Emit one event from the current thread. Returns false if dropped (pool
-    // exhausted). Hot path: called via the inline detail::Emit* wrappers.
+    // Emit one event from the current thread. Returns false if capture is not
+    // armed or the event was dropped (pool exhausted). Hot path: called via the
+    // inline detail::Emit* wrappers.
     bool Emit(const TraceEvent& event) noexcept;
 
-    // Publish the calling thread's partial chunk so a single-threaded capture is
-    // fully drained before export (§21). Spanning-thread captures must quiesce
-    // their threads before relying on this.
-    void FlushAllForExport() noexcept;
-
-    // Thread-exit hook: publish a partial chunk that still holds events, else
-    // return it to the free list. Called from ThreadRecorder's destructor.
-    void RecycleOrPublishOnThreadExit(TraceChunk* chunk) noexcept;
+    // Publish the calling thread's partial chunk and leave the producer list.
+    // Called from ThreadRecorder's destructor and UnregisterThread().
+    void DetachThread(ThreadRecorder& inoutRecorder) noexcept;
 
     // Collector side ---------------------------------------------------------
-    // Take ownership of all full chunks (LIFO). Caller walks PoolNext and, when
+    // Take ownership of all full chunks (LIFO). Caller walks PoolNextOrNull and, when
     // done, returns each chunk via RecycleChunk so the pool can be reused.
+    // Callable during capture as well as after EndCapture().
     [[nodiscard]] TraceChunk* DrainFullChunks() noexcept;
     void RecycleChunk(TraceChunk* chunk) noexcept;
 
     [[nodiscard]] TraceHealth Health() const noexcept;
 
-    // Release all pooled memory. Only valid when capture is inactive and no
-    // producer holds a chunk (asserted). Mirrors AsyncBackend::Stop discipline.
-    void Reset() noexcept;
+    // Release the chunk slab. Returns false, keeping the slab, while capture is
+    // active. Drained chunk pointers become invalid.
+    bool Reset() noexcept;
+
+    // Number of chunks in the reserved slab (0 when none is reserved).
+    [[nodiscard]] usize PoolCapacity() const noexcept;
 
 private:
-    TraceRecorder() = default;
+    friend union ImmortalTraceRecorder;
 
-    [[nodiscard]] TraceChunk* AcquireChunk(uint32 threadId) noexcept;
-    void PublishChunk(TraceChunk* chunk) noexcept;
+    constexpr TraceRecorder() noexcept = default;
 
-public:
-    // Current capture generation. A ThreadRecorder whose Generation differs owns
-    // a Current that points into a (possibly reallocated) previous pool and must
-    // not be dereferenced.
-    [[nodiscard]] uint32 Generation() const noexcept
-    {
-        return mGeneration.load(std::memory_order_acquire);
-    }
+    [[nodiscard]] TraceChunk* replaceChunk(ThreadRecorder& inoutRecorder) noexcept;
+    [[nodiscard]] bool isAnyProducerEmitting() const noexcept;
+    void harvestProducerChunks() noexcept;
+    void returnHeldChunk(ThreadRecorder& inoutRecorder) noexcept;
+    void linkProducer(ThreadRecorder& inoutRecorder) noexcept;
+    void unlinkProducer(ThreadRecorder& inoutRecorder) noexcept;
+    void pushFree(TraceChunk* chunk) noexcept;
+    void pushFull(TraceChunk* chunk) noexcept;
+    [[nodiscard]] TraceChunk* popFree() noexcept;
+    [[nodiscard]] bool reservePool(usize chunkCount) noexcept;
+    void releasePool() noexcept;
 
-private:
     // Bounded thread-name table (§14/§21: fixed capacity, drop-with-none on
-    // overflow — a rare event since threads register once). Guarded by a small
-    // mutex used only off the hot path (registration/export), never per event.
-    static constexpr usize kMaxThreads = 256;
-    static constexpr usize kThreadNameCap = 32;
+    // overflow — a rare event since threads register once). Writers append
+    // under the mutex and publish the count with release ordering; readers load
+    // the count with acquire ordering and read only published, immutable entries.
+    static constexpr usize MAX_THREADS = 256;
+    static constexpr usize THREAD_NAME_CAPACITY = 32;
     struct ThreadNameEntry
     {
         uint32 Id = 0;
-        uint16 Len = 0;
-        char Name[kThreadNameCap] = {};
+        uint16 Length = 0;
+        char Name[THREAD_NAME_CAPACITY] = {};
     };
 
     // Site registry entry: borrowed process-lifetime views (string literals /
-    // __func__ static arrays).
-    static constexpr usize kMaxSites = 4096;
+    // __func__ static arrays). Published like the thread-name table.
+    static constexpr usize MAX_SITES = 4096;
     struct SiteEntry
     {
         uint32 SiteId = 0;
@@ -153,38 +199,23 @@ private:
         std::string_view File;
     };
 
-    ChunkStack mFreeList;               // recycled/empty chunks
-    ChunkStack mFullChunks;             // chunks handed to the collector
-    TraceChunk* mPoolStorage = nullptr; // contiguous backing array
-    usize mPoolCapacity = 0;
+    mutable std::mutex mMutex;
+    TraceChunk* mFreeHeadOrNull = nullptr;      // guarded by mMutex
+    TraceChunk* mFullHeadOrNull = nullptr;      // guarded by mMutex
+    ThreadRecorder* mProducersOrNull = nullptr; // guarded by mMutex
+    TraceChunk* mPoolStorageOrNull = nullptr;   // guarded by mMutex; aligned slab
+    usize mPoolCapacity = 0;                    // guarded by mMutex
+    usize mPoolBytes = 0;                       // guarded by mMutex
+    // Lock-free hint that lets exhausted producers drop without the mutex. The
+    // mutex-guarded free list remains authoritative.
+    std::atomic<bool> mHasFreeChunks{false};
     std::atomic<uint64> mEventsRecorded{0};
     std::atomic<uint64> mEventsDropped{0};
-    std::atomic<uint32> mGeneration{0}; // bumped on each BeginCapture reservation
     std::atomic<uint32> mNextThreadId{0};
-    ThreadNameEntry mThreadNames[kMaxThreads];
+    ThreadNameEntry mThreadNames[MAX_THREADS];
     std::atomic<uint32> mThreadNameCount{0};
-    SiteEntry mSites[kMaxSites];
+    SiteEntry mSites[MAX_SITES];
     std::atomic<uint32> mSiteCount{0};
 };
-
-// Thread-local recorder state. Holds the current chunk for this thread. The
-// producer writes here with no synchronisation; when the chunk fills it is
-// published and a fresh one acquired.
-//
-// `Generation` guards against a stale Current surviving across capture sessions:
-// BeginCapture bumps the recorder generation, and a Current tagged with an older
-// generation is discarded (not touched) rather than written through, because the
-// pool it pointed into may have been reallocated (§21 lifetime discipline).
-struct ThreadRecorder
-{
-    TraceChunk* Current = nullptr;
-    uint32 ThreadId = 0;
-    uint32 Generation = 0;
-    bool Registered = false;
-
-    ~ThreadRecorder() noexcept;
-};
-
-[[nodiscard]] ThreadRecorder& CurrentThreadRecorder() noexcept;
 
 } // namespace ludus::foundation::profiling::internal

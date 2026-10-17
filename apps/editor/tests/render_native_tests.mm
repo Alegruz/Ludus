@@ -8,6 +8,7 @@
 #include "renderer_flat.h"
 #include <QQuickWindow>
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/platform/entropy.h>
 
 #import <Cocoa/Cocoa.h>
 
@@ -386,7 +387,10 @@ TEST_CASE("Native World preview renders authored assets, cameras, culling, updat
     for (int32 i = 0; i < 11; ++i)
     {
         QString id;
-        REQUIRE(world.DuplicateEntity(error, QStringLiteral("starter.cube"), id));
+        REQUIRE(world.DuplicateEntity(ludus::platform::GetSystemEntropySource(),
+                                      error,
+                                      QStringLiteral("starter.cube"),
+                                      id));
     }
     REQUIRE(RenderScene::Load(root, world, scene, error));
     CHECK(scene.Surfaces.size() == 1);

@@ -1,3 +1,5 @@
+#include "entropy_fixture.h"
+#include "internal/editor_identity.h"
 #include "internal/level_workspace.h"
 #include "internal/preview_viewport.h"
 #include "scene_fixture.h"
@@ -88,6 +90,24 @@ TEST_CASE("unsupported scene import and saved-file conflicts retain the active s
     REQUIRE(workspace.Document() == original);
     REQUIRE(file.open(QIODevice::ReadOnly));
     REQUIRE(file.readAll() == QByteArray("external edit"));
+}
+TEST_CASE("new 3D level IDs come from FoundationIdentity and fail without entropy", "[editor][level][identity]")
+{
+    namespace fixture = ludus::editor::tests;
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString path = QDir(directory.path()).filePath(QStringLiteral("scenes/test.lulevel"));
+    LevelWorkspace workspace(SceneTools());
+    workspace.SetProject(directory.path(), 1);
+    workspace.SetEntropySource(fixture::MakeUnavailableEntropySource());
+    CHECK_FALSE(workspace.Create(path));
+    CHECK(workspace.StatusText() == DescribeEntropyUnavailable());
+    CHECK(workspace.Document().isEmpty());
+    CHECK_FALSE(workspace.Dirty());
+    workspace.SetEntropySource(fixture::MakeFixedEntropySource());
+    REQUIRE(workspace.Create(path));
+    CHECK(workspace.Document().value(QStringLiteral("id")) == QJsonValue(QLatin1String(fixture::FIXED_UUID_TEXT)));
+    CHECK(workspace.Dirty());
 }
 
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)

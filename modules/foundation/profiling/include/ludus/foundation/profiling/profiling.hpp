@@ -110,18 +110,16 @@ private:
 
 #if LUDUS_PROFILING_ENABLED
 
-// Register a site at most once (off the per-hit path): a function-local static
-// bool flips on first execution and calls RegisterSite. `desc` must be a stable
-// (static constexpr) descriptor.
+// Register a site at most once (off the per-hit path). The function-local
+// static's guarded initialization runs RegisterSite exactly once even when
+// several threads reach the site first concurrently; a plain static flag would
+// be a data race. `desc` must be a stable (static constexpr) descriptor.
 #    define LUDUS_PROFILE_DETAIL_REGISTER_ONCE(desc)                                                                   \
         do                                                                                                             \
         {                                                                                                              \
-            static bool LUDUS_PROFILE_DETAIL_UNIQUE(ludus_reg_) = false;                                               \
-            if (!LUDUS_PROFILE_DETAIL_UNIQUE(ludus_reg_))                                                              \
-            {                                                                                                          \
-                LUDUS_PROFILE_DETAIL_UNIQUE(ludus_reg_) = true;                                                        \
-                ::ludus::foundation::profiling::detail::RegisterSite(desc);                                            \
-            }                                                                                                          \
+            static const bool LUDUS_PROFILE_DETAIL_UNIQUE(ludus_reg_) =                                                \
+                (::ludus::foundation::profiling::detail::RegisterSite(desc), true);                                    \
+            (void)LUDUS_PROFILE_DETAIL_UNIQUE(ludus_reg_);                                                             \
         } while (false)
 
 // Overload plumbing so LUDUS_PROFILE_SCOPE accepts (name) or (name, category).
@@ -174,12 +172,7 @@ private:
         {                                                                                                              \
             static constexpr ::ludus::foundation::profiling::ZoneDescriptor ludus_mark_desc_{                          \
                 ::std::string_view{#name}};                                                                            \
-            static bool ludus_mark_reg_ = false;                                                                       \
-            if (!ludus_mark_reg_)                                                                                      \
-            {                                                                                                          \
-                ludus_mark_reg_ = true;                                                                                \
-                ::ludus::foundation::profiling::detail::RegisterSite(ludus_mark_desc_);                                \
-            }                                                                                                          \
+            LUDUS_PROFILE_DETAIL_REGISTER_ONCE(ludus_mark_desc_);                                                      \
             ::ludus::foundation::profiling::detail::EmitInstant(ludus_mark_desc_);                                     \
         } while (false)
 

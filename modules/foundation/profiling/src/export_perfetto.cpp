@@ -194,7 +194,7 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
     // events (an End and the next Begin on a fast clock) in recorded order
     // across a chunk boundary instead of emitting an End before its Begin.
     foundation::Array<TraceChunk*> drained;
-    for (TraceChunk* chunk = recorder.DrainFullChunks(); chunk != nullptr; chunk = chunk->PoolNext)
+    for (TraceChunk* chunk = recorder.DrainFullChunks(); chunk != nullptr; chunk = chunk->PoolNextOrNull)
     {
         drained.Add(chunk);
     }
