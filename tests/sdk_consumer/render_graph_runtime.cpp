@@ -43,7 +43,6 @@ constexpr uint64 GENERATION_COUNT = 2;
 constexpr usize VERTEX_COUNT = 3;
 constexpr usize INDEX_COUNT = 3;
 constexpr usize TABLE_COUNT = 1;
-constexpr uint64 NATIVE_TIMEOUT_SECONDS = 30;
 /// Center of the triangle; the comparison is over every byte, this only proves it is not empty.
 constexpr usize CENTER_PIXEL = (usize{HEIGHT / 2} * WIDTH + WIDTH / 2) * BYTES_PER_PIXEL;
 /// Steps of the qualification, in order.
@@ -422,6 +421,8 @@ int main()
 #if defined(LUDUS_PLATFORM_WEB)
     emscripten_set_main_loop(Tick, 0, 1);
 #else
+    // Native hosts have no browser event loop; bound the polling loop instead.
+    constexpr uint64 NATIVE_TIMEOUT_SECONDS = 30;
     const uint64 start = time::NowTicks();
     while (gIsDone == false && time::NowTicks() - start < NATIVE_TIMEOUT_SECONDS * time::NANOSECONDS_PER_SECOND)
     {
