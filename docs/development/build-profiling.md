@@ -418,3 +418,88 @@ target's scan and collation sit on the critical path before its first
 compilation. `tests/sdk_consumer` showed no consistent difference (10 of 18
 pairs, differences from −1.7 to +0.9 s). Six pairs at `--parallel 2` pointed
 the same way for the two examples but are too few to quantify.
+
+## Fresh worktree setup cost
+
+A new agent worktree runs
+`./init.sh --cli macos-clang-development --preset-only --locked --with-tests`
+and then a clean `./scripts/build macos-clang-development`. These runs measure
+that cost and the opt-in caches in
+[Sharing caches between checkouts](building.md#sharing-caches-between-checkouts).
+Every run used commit `8f570f74` on a 10-core Apple M5 with 16 GB. Other
+agents' builds shared the host, with load averages from 24 to 109. Wall time
+moved with that load, so the tables report ranges and CPU time (user plus
+system, from `/usr/bin/time`), which moved much less. Runs during which the
+host slept are excluded from wall-time figures.
+
+| Fresh checkout | Checkout-local caches (two runs) | Shared caches, first checkout | Shared caches, later checkouts |
+| --- | ---: | ---: | ---: |
+| `./init.sh` wall time | 219–814 s | 288 s | 11–16 s |
+| `./init.sh` CPU time | 409–491 s | 437 s | 6–14 s |
+| Clean build wall time | 342–512 s | 122–1531 s | 79–195 s |
+| Clean build CPU time | 517–557 s | 472–964 s | 97–110 s |
+| ccache hits | not used | 1 of 392 | 380 of 392 |
+| `out/conan/` size | 667–672 MB | 144 KB | 144 KB |
+| Shared Conan home | none | 673 MB | 673 MB, shared |
+| Shared ccache | none | 52 MB | 61 MB after four builds, shared |
+
+`out/host-tools/` stayed 155 MB in every checkout. The later-checkout init
+times ran at load 24–31; the first-checkout init ran at load 37–58.
+
+### Where a checkout-local init spends its time
+
+A checkout-local init builds five Conan packages from source: Catch2,
+FreeType, HarfBuzz, and Conan's own `ninja` and `pkgconf` build tools. In the
+slower baseline run, at load 60–76, the Conan install took 728 of 814 s.
+HarfBuzz alone took 417 s, including 55 s to unpack its source archive. The
+virtual environment and pinned Python packages took 51 s at that load and
+4 s at load 24. The macOS SDK compile/link probe runs twice per init, at
+0.8–7 s each. Downloads were at most about 15 s. A checkout-local cache also
+keeps 517 MB of build folders in its 672 MB.
+
+### Conan sharing options
+
+| Option | Saved per later checkout | Per-checkout cost | Notes |
+| --- | --- | --- | --- |
+| `core.download:download_cache` | Downloads only, about 15 s | Still builds all five packages, 672 MB | Conan locks it for concurrent use |
+| `conan cache save` / `restore` | The package builds | 60 s wall and 279 MB to restore (4 s CPU) | Saving took 300 s wall at load 70 and must be redone whenever recipes or `conan.lock` change |
+| Shared `LUDUS_CONAN_HOME` | The package builds and downloads | 144 KB | One 673 MB home; `./init.sh` serializes its Conan steps |
+
+The shared home costs nothing extra for the first checkout: its 437 s of
+init CPU falls within the checkout-local range. A second init started while
+the first held the lock printed the waiting message after 29 s. It waited
+226 s, then installed every package from the cache in 9 s, with 12 s of CPU
+for the whole init.
+
+### Compiler cache across checkouts
+
+A clean development build compiles 392 cacheable C and C++ translation
+units. The four Objective-C++ files have no ccache launcher. Three later
+checkouts at different paths reused 380 of them:
+`/private/tmp/ludus-wtcost-d`, `/private/tmp/ludus-wtcost/nested/e` (two
+directories deeper), and a worktree under `/Users/.../.claude/worktrees/` (no
+symlink in its path). Their clean builds used 97–110 s of CPU, about a fifth of
+a checkout-local build, and took 79–195 s at load 70–109. The 12 misses are
+test and sample translation units whose definitions name an absolute checkout
+path: scene goldens, text and game-host fixtures, and the smoke app's font.
+Six more such units hit in ccache's preprocessed mode, because they do not use
+the definition.
+
+Filling an empty cache added no measurable CPU at moderate load: 472 s at load
+24–40. A second fill at a sustained load near 100 used 964 s, 255 s of it
+system time. At that load even CPU time inflates, so that run says more about
+the host than about ccache.
+
+Before the launcher handled symlinked checkout paths, each checkout under
+`/private/tmp` hit only 1 of 392. CMake spelled its paths `/tmp/...`, and
+ccache relativized them from the resolved working directory, through `/` and
+the checkout's own directory name. Listing both spellings in `base_dir` and
+setting `PWD` to the build directory fixed this. The `/Users` checkout above
+then reused objects compiled under `/private/tmp`.
+
+Sharing leaves incremental builds unchanged. After a warm build, touching
+`core.h` dirtied 381 Ninja steps, as in a checkout-local tree, even though the
+depfiles now list relative paths. A reused object records its source as
+`../../../modules/...` and names the build directory of the checkout that
+compiled it first as `DW_AT_comp_dir`. A checkout-local object records the
+absolute source path and its own build directory.
