@@ -1,0 +1,211 @@
+{
+  "revision": "02e6256fc3b032bb5e77e4195261f2a8e14e0494",
+  "working_tree_modified": true,
+  "binary_sha256": "d55105bc3baae757dee57928885dd28d5252397e490c1e7ebbbde799f00f9e75",
+  "build": {
+    "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+    "CMAKE_CXX_COMPILER": "/Users/alegruz/Ludus/.claude/worktrees/memory-profiling-milestone-0-a713d5/out/host-tools/bin/clang++",
+    "CMAKE_CXX_FLAGS": "-stdlib=libc++ -nostdinc++ -isystem \"/Users/alegruz/Ludus/.claude/worktrees/memory-profiling-milestone-0-a713d5/out/host-tools/libcxx-include\"",
+    "LUDUS_BUILD_FLAVOR": "Profile",
+    "LUDUS_PROFILING_ENABLED": "1",
+    "compiler_version": "Homebrew clang version 18.1.8"
+  },
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpu": "Apple M5",
+  "logical_cpus": 10,
+  "load_average_1_5_15_before": [
+    5.33544921875,
+    9.65478515625,
+    15.18359375
+  ],
+  "load_average_1_5_15_after": [
+    5.38818359375,
+    9.59375,
+    15.12939453125
+  ],
+  "seed": 11,
+  "processes_per_workload": 6,
+  "method": "Each workload runs in a fresh process per round, in seeded random order; one warmup then seven timed samples per process. Rates are nanoseconds per workload operation; peak RSS is the process's ru_maxrss. No sanitizer, capture or CPU pinning; other host load is recorded as load averages, not controlled.",
+  "process_runs": [
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 0,
+      "order": 0,
+      "wall_seconds": 0.387836709000112,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 0,
+      "order": 1,
+      "wall_seconds": 0.011119624999992084,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 0,
+      "order": 2,
+      "wall_seconds": 0.43184341699816287,
+      "peak_rss_kib": 45296,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 1,
+      "order": 0,
+      "wall_seconds": 0.0104769590034266,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 1,
+      "order": 1,
+      "wall_seconds": 0.38526945900230203,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 1,
+      "order": 2,
+      "wall_seconds": 0.4242275829965365,
+      "peak_rss_kib": 45296,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 2,
+      "order": 0,
+      "wall_seconds": 0.0110090830057743,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 2,
+      "order": 1,
+      "wall_seconds": 0.44030779100285145,
+      "peak_rss_kib": 45312,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 2,
+      "order": 2,
+      "wall_seconds": 0.3795718749970547,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 3,
+      "order": 0,
+      "wall_seconds": 0.43125904200132936,
+      "peak_rss_kib": 45280,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 3,
+      "order": 1,
+      "wall_seconds": 0.37933016699389555,
+      "peak_rss_kib": 45664,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 3,
+      "order": 2,
+      "wall_seconds": 0.0093979590019444,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 4,
+      "order": 0,
+      "wall_seconds": 0.008649541006889194,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 4,
+      "order": 1,
+      "wall_seconds": 0.4206387909944169,
+      "peak_rss_kib": 45296,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 4,
+      "order": 2,
+      "wall_seconds": 0.377440458003548,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-session-setup",
+      "process": 5,
+      "order": 0,
+      "wall_seconds": 0.009196958999382332,
+      "peak_rss_kib": 13904,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-1-thread",
+      "process": 5,
+      "order": 1,
+      "wall_seconds": 0.39791404199786484,
+      "peak_rss_kib": 45136,
+      "exit_code": 0
+    },
+    {
+      "workload": "trace-emit-4-threads",
+      "process": 5,
+      "order": 2,
+      "wall_seconds": 0.43223904100159416,
+      "peak_rss_kib": 45296,
+      "exit_code": 0
+    }
+  ],
+  "summary": {
+    "trace-emit-1-thread": {
+      "samples": 42,
+      "processes": 6,
+      "ns_per_operation_median": 28.6350025,
+      "ns_per_operation_p25": 28.42999875,
+      "ns_per_operation_p75": 28.97239875,
+      "ns_per_operation_min": 28.25521,
+      "ns_per_operation_max": 32.43271,
+      "peak_rss_kib_median": 45136.0,
+      "peak_rss_kib_max": 45664.0
+    },
+    "trace-emit-4-threads": {
+      "samples": 42,
+      "processes": 6,
+      "ns_per_operation_median": 52.82510499999999,
+      "ns_per_operation_p25": 50.35271125,
+      "ns_per_operation_p75": 57.35255124999999,
+      "ns_per_operation_min": 46.943125,
+      "ns_per_operation_max": 66.830625,
+      "peak_rss_kib_median": 45296.0,
+      "peak_rss_kib_max": 45312.0
+    },
+    "trace-session-setup": {
+      "samples": 42,
+      "processes": 6,
+      "ns_per_operation_median": 38459.625,
+      "ns_per_operation_p25": 36762.34375,
+      "ns_per_operation_p75": 40284.546875,
+      "ns_per_operation_min": 36658.8125,
+      "ns_per_operation_max": 64377.5625,
+      "peak_rss_kib_median": 13904.0,
+      "peak_rss_kib_max": 13904.0
+    }
+  }
+}
