@@ -204,7 +204,7 @@ copied from `modules/content/scene_cook/.clang-tidy`) are checked in full.
 
 | Rule | Enforcement |
 | --- | --- |
-| `condition == false` instead of `!condition`/`not` | `tools/check_naming.py` N1, **every** first-party C++ file (preprocessor directives, `EM_JS` JavaScript bodies and `operator!` declarations exempt) |
+| `condition == false` instead of `!condition`/`not` | `tools/check_naming.py` N1, **every** first-party C++ file (preprocessor directives, `EM_JS` JavaScript bodies, `operator!` declarations and the Catch2 export sources `tests/support/catch_stream.*` exempt) |
 | Case rules: private/protected methods camelCase; public methods, free functions, types PascalCase; private members `m` + PascalCase; parameters and locals camelCase; constants UPPER_CASE | clang-tidy `readability-identifier-naming`: adopted scopes in full, `--tidy-changed` on changed lines |
 | No magic numbers | `source_policy.py` (lexical) and clang-tidy `readability-magic-numbers` (`--tidy-changed`) on changed non-test lines; waive a justified literal with `// ludus-style: magic-number <reason>` |
 | Pointers/integers compared explicitly | clang-tidy `readability-implicit-bool-conversion` on changed lines |

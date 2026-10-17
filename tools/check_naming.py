@@ -39,6 +39,9 @@ from source_policy import code_only  # noqa: E402
 SOURCE_SUFFIXES = {".h", ".hpp", ".cpp", ".cc", ".mm"}
 NEGATION_ROOTS = ("modules", "apps", "tools", "tests", "examples")
 SKIPPED_DIRECTORIES = {"third_party", "out", "build", "node_modules"}
+# Export sources of the local catch2 Conan recipe: editing them changes the
+# recipe revision that conan.lock pins, so they keep Catch2's own style.
+NEGATION_EXEMPT_FILES = {"tests/support/catch_stream.hpp", "tests/support/catch_stream.cpp"}
 
 NEGATION = re.compile(r"!(?!=)|\bnot\b")
 
@@ -97,7 +100,12 @@ def negation_files(root: Path) -> list[Path]:
             continue
         for path in base.rglob("*"):
             relative = path.relative_to(root).parts
-            if path.suffix in SOURCE_SUFFIXES and SKIPPED_DIRECTORIES.isdisjoint(relative) and path.is_file():
+            if (
+                path.suffix in SOURCE_SUFFIXES
+                and SKIPPED_DIRECTORIES.isdisjoint(relative)
+                and "/".join(relative) not in NEGATION_EXEMPT_FILES
+                and path.is_file()
+            ):
                 files.append(path)
     return sorted(files)
 

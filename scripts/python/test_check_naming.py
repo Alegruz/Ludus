@@ -47,6 +47,8 @@ class CheckNamingTests(unittest.TestCase):
             )
             (root / "third_party" / "lib").mkdir(parents=True)
             (root / "third_party" / "lib" / "b.cpp").write_text("bool b = !a;\n")
+            (root / "tests" / "support").mkdir(parents=True)
+            (root / "tests" / "support" / "catch_stream.hpp").write_text("bool b = !a;\n")
             self.assertEqual(check_naming.negation_files(root), [source])
             findings = check_naming.check_negation(root, source)
             self.assertEqual(len(findings), 2)
