@@ -10,7 +10,7 @@ target_sources(ludus_scene_cook PUBLIC FILE_SET public_headers TYPE HEADERS BASE
     FILES include/ludus/content/scene_cook/scene_cook.h include/ludus/content/scene_cook/scene_assets.h
     include/ludus/content/scene_cook/best_effort_import.h)
 target_link_libraries(ludus_scene_cook
-    PUBLIC Ludus::Content Ludus::FoundationContainers Ludus::FoundationStrings
+    PUBLIC Ludus::Content Ludus::FoundationContainers Ludus::FoundationIdentity Ludus::FoundationStrings
     PRIVATE Ludus::SceneFormat Ludus::FoundationMath Ludus::FoundationParsingJson ludus_stb_image)
 # Byte identity with the float64 reference requires unfused IEEE arithmetic.
 target_compile_options(ludus_scene_cook PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
@@ -26,7 +26,9 @@ endif()
 # Developer tool; built in the tree, not part of the installed SDK.
 add_executable(ludus_cook tool/ludus_cook.cpp)
 set_target_properties(ludus_cook PROPERTIES OUTPUT_NAME ludus-cook)
-target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook)
+# The CLI supplies operating-system entropy for new UUIDs; the entropy target
+# avoids linking Platform's window backends into a command-line tool.
+target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook Ludus::PlatformEntropy)
 ludus_apply_project_defaults(ludus_cook)
 
 if(LUDUS_BUILD_TESTS)

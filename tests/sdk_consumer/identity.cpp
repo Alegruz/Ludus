@@ -1,6 +1,7 @@
 #include <ludus/foundation/identity/handle.hpp>
 #include <ludus/foundation/identity/lifetime.hpp>
 #include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
 
 #include <string_view>
 
@@ -30,6 +31,13 @@ int ExerciseInstalledIdentity() noexcept
     if (TryParseUuid(TEXT.data(), TEXT.size(), UuidPolicy::RequireVersion4, value) != UuidStatus::Success ||
         FormatUuid(value, formatted, sizeof(formatted)) != UuidStatus::Success || std::string_view(formatted) != TEXT ||
         AssetId{value}.IsNil() == true)
+    {
+        return 92;
+    }
+    // Installed Platform supplies the production entropy source for new identities.
+    Uuid generated;
+    if (TryGenerateUuidV4(ludus::platform::GetSystemEntropySource(), generated) != UuidStatus::Success ||
+        ValidateUuid(generated, UuidPolicy::RequireVersion4) != UuidStatus::Success)
     {
         return 92;
     }

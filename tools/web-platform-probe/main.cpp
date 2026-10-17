@@ -1,9 +1,12 @@
 #include <ludus/foundation/base/core.h>
 #include <ludus/foundation/base/pointer.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
+#include <ludus/foundation/identity/uuid.hpp>
 #include <ludus/foundation/logging/category.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/platform/base/window.h>
 #include <ludus/platform/browser/window.h>
+#include <ludus/platform/entropy.h>
 #include <ludus/platform/native_window.h>
 
 #include <string_view>
@@ -61,6 +64,17 @@ EM_JS(void, Scenario, (int32 step), {
     if (step == 11) { canvas.remove(); }
 });
 EM_JS(int32, WasPrevented, (), { return Module.lastPrevented ? 1 : 0; });
+// Replace Web Crypto with a throwing stub (or restore it) to exercise the entropy failure path.
+EM_JS(void, SetWebCryptoBroken, (int32 isBroken), {
+    if (isBroken) {
+        Module.savedCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+        Object.defineProperty(globalThis, 'crypto', {configurable: true, writable: true,
+            value: {getRandomValues: () => { throw new Error('entropy unavailable'); }}});
+        return;
+    }
+    if (Module.savedCrypto) Object.defineProperty(globalThis, 'crypto', Module.savedCrypto);
+    else delete globalThis.crypto;
+});
 EM_JS(void, DrawState,
       (uint32 width, uint32 height, float64 cssWidth, float64 cssHeight, float64 ratio,
        int32 focused, int32 visible, uint32 buttons, uint32 held, uint32 events, uint32 keys,
@@ -133,6 +147,59 @@ void Frame() noexcept
               state.PointerY);
 }
 
+// The browser entropy adapter must satisfy the native contract: every request
+// either fills all bytes from crypto.getRandomValues or reports failure.
+bool VerifyEntropy() noexcept
+{
+    constexpr usize UUID_COUNT = 8;
+    // Spans several 256-byte entropy requests and ends in a partial one.
+    constexpr usize LARGE_REQUEST_BYTES = 1000;
+    // 2048 zero bits at the tail occur by chance with negligible probability.
+    constexpr usize TAIL_CHECK_BYTES = 256;
+    const identity::EntropySource source = GetSystemEntropySource();
+    StaticArray<identity::Uuid, UUID_COUNT> values{};
+    for (usize i = 0; i < UUID_COUNT; ++i)
+    {
+        identity::Uuid value;
+        if (identity::TryGenerateUuidV4(source, value) != identity::UuidStatus::Success ||
+            identity::ValidateUuid(value, identity::UuidPolicy::RequireVersion4) != identity::UuidStatus::Success)
+        {
+            return false;
+        }
+        for (usize j = 0; j < i; ++j)
+        {
+            if (values[j] == value)
+            {
+                return false;
+            }
+        }
+        values[i] = value;
+    }
+    // A throwing Web Crypto must be reported as unavailable, not raised through wasm.
+    const identity::Uuid preserved = values[0];
+    identity::Uuid unchanged = preserved;
+    SetWebCryptoBroken(1);
+    const identity::UuidStatus brokenStatus = identity::TryGenerateUuidV4(source, unchanged);
+    SetWebCryptoBroken(0);
+    if (brokenStatus != identity::UuidStatus::EntropyUnavailable || (unchanged == preserved) == false)
+    {
+        return false;
+    }
+    StaticArray<uint8, LARGE_REQUEST_BYTES> bytes{};
+    if (TryFillSystemEntropy(bytes.GetData(), bytes.GetSize()) == false || TryFillSystemEntropy(nullptr, 1) == true)
+    {
+        return false;
+    }
+    for (usize i = LARGE_REQUEST_BYTES - TAIL_CHECK_BYTES; i < LARGE_REQUEST_BYTES; ++i)
+    {
+        if (bytes[i] != 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool Create() noexcept
 {
     return gManager.CreateWindow({}, gWindow);
@@ -140,6 +207,10 @@ bool Create() noexcept
 
 bool Automated() noexcept
 {
+    if (Verify(VerifyEntropy(), "entropy") == false)
+    {
+        return false;
+    }
     if (!Verify(Create(), "create"))
     {
         return false;

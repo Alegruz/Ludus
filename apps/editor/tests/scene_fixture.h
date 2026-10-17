@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ludus/content/scene_cook/scene_assets.h>
+#include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
 
 #include <QByteArray>
 #include <QCryptographicHash>
@@ -109,8 +111,10 @@ inline bool PrepareImportedLevel(const QString& root, const QString& relative, c
     const auto span = [](const foundation::Array<foundation::uint8>& bytes) {
         return std::span<const foundation::uint8>(bytes.GetData(), bytes.GetSize());
     };
+    const foundation::identity::EntropySource entropy = platform::GetSystemEntropySource();
     cook::AssetOptions options;
     options.CookOrNull = &CookFixture;
+    options.EntropyOrNull = &entropy;
     cook::AssetError error;
     foundation::Array<foundation::uint8> level;
     foundation::Array<foundation::uint8> imported;

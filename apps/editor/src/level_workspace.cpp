@@ -1,5 +1,6 @@
 #include "internal/level_workspace.h"
 
+#include "internal/editor_identity.h"
 #include "internal/import_report.h"
 #include "internal/preview_viewport.h"
 #include <QGuiApplication>
@@ -21,9 +22,10 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QTimer>
-#include <QUuid>
 #include <QVBoxLayout>
 #include <ludus/content/scene_cook/scene_assets.h>
+#include <ludus/foundation/identity/uuid.hpp>
+#include <ludus/platform/entropy.h>
 
 #include <span>
 #include <string_view>
@@ -266,6 +268,12 @@ bool LevelWorkspace::Create(const QString& path)
         Status_->setText(QStringLiteral("Choose a new .lulevel path inside this project, or open the existing scene."));
         return false;
     }
+    QString levelId;
+    if (TryGenerateUuidText(mEntropy, levelId) == false)
+    {
+        Status_->setText(DescribeEntropyUnavailable());
+        return false;
+    }
     if (!ConfirmDiscard())
     {
         return false;
@@ -275,7 +283,7 @@ bool LevelWorkspace::Create(const QString& path)
     Viewport_->ClearFrame(QStringLiteral("Import a reference scene to render it here."));
     Warnings_->clear();
     Level_ = QJsonObject{{QStringLiteral("version"), 1},
-                         {QStringLiteral("id"), QUuid::createUuid().toString(QUuid::WithoutBraces)},
+                         {QStringLiteral("id"), levelId},
                          {QStringLiteral("name"), QFileInfo(path).completeBaseName()},
                          {QStringLiteral("profile"), QStringLiteral("resident-reference-v1")},
                          {QStringLiteral("objects"), QJsonArray{}},
@@ -570,8 +578,11 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
         Cancellation cancel;
         cancel.Requested = &IsCancelRequested;
         cancel.ContextOrNull = &CancelRequested_;
+        // SetEntropySource() is refused while an operation runs, so this read does not race.
+        const foundation::identity::EntropySource entropy = mEntropy;
         AssetOptions options;
         options.CancelOrNull = &cancel;
+        options.EntropyOrNull = &entropy;
         options.SourceEntry = ToView(entry);
         options.ExpectedSourceDigest = ToView(expectedSource);
         EditorSceneRequest request;
