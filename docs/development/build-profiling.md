@@ -42,6 +42,10 @@ recognizes Clang 19 and later header trace events. Thanks to
 Each analyzer version has its own source/build directory, so an older cached
 binary cannot silently satisfy a newer pin. Existing profiling budgets remain
 unchanged.
+Bootstrap also adds the explicit `<cstdlib>`, `<type_traits>` and `<exception>`
+includes required by its bundled enkiTS and LLVM demangler with libc++ 23.
+These marked include edits preserve upstream bodies and licenses, accept an
+already applied profile, and reject changed include anchors.
 
 ## How to improve, quantitatively
 

@@ -647,6 +647,33 @@ class BrowserAnalysisTests(unittest.TestCase):
 
 
 class BuildAnalyzerBootstrapTests(unittest.TestCase):
+    def test_include_profile_preserves_bodies_and_rejects_changed_anchors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            files = (
+                ("enkiTS/TaskScheduler.cpp", '#include "TaskScheduler.h"\n'),
+                ("llvm-Demangle/include/Utility.h", '#include "StringView.h"\n'),
+                ("llvm-Demangle/include/ItaniumDemangle.h", '#include "DemangleConfig.h"\n'),
+            )
+            for name, anchor in files:
+                path = source / "src/external" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("// upstream license\n" + anchor + "// unchanged body\n")
+            engine.prepare_clang_build_analyzer_includes(source)
+            patched = {name: (source / "src/external" / name).read_text() for name, _ in files}
+            engine.prepare_clang_build_analyzer_includes(source)
+            for name, anchor in files:
+                text = (source / "src/external" / name).read_text()
+                self.assertEqual(text, patched[name])
+                self.assertTrue(text.startswith("// upstream license\n" + anchor))
+                self.assertTrue(text.endswith("// unchanged body\n"))
+            path = source / "src/external" / files[0][0]
+            for changed in ("unrecognized source", files[0][1] * 2,
+                            patched[files[0][0]].replace("#include <cstdlib>\n", "")):
+                path.write_text(changed)
+                with self.assertRaisesRegex(engine.EngineError, "include profile no longer matches"):
+                    engine.prepare_clang_build_analyzer_includes(source)
+
     def test_an_older_cached_binary_cannot_satisfy_the_current_pin(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -662,7 +689,8 @@ class BuildAnalyzerBootstrapTests(unittest.TestCase):
                 if "--build" in command:
                     binary.write_bytes(b"current analyzer")
 
-            with patch.object(engine, "run", side_effect=build) as run:
+            with patch.object(engine, "run", side_effect=build) as run, \
+                    patch.object(engine, "prepare_clang_build_analyzer_includes"):
                 self.assertEqual(engine.ensure_clang_build_analyzer(root), binary)
                 self.assertEqual(binary.read_bytes(), b"current analyzer")
                 self.assertEqual(old.read_bytes(), b"old analyzer")

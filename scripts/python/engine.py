@@ -2191,6 +2191,31 @@ def clang_build_analyzer_binary(root: Path) -> Path:
     return clang_build_analyzer_dir(root) / "build" / f"ClangBuildAnalyzer{suffix}"
 
 
+def prepare_clang_build_analyzer_includes(source_dir: Path) -> None:
+    """Make the pinned host tool's standard dependencies explicit for libc++ 23.
+
+    Thanks to Doug Binks/enkiTS and LLVM's demangler contributors, as bundled
+    by Aras Pranckevičius in ClangBuildAnalyzer v1.6.0. Preserve their licensed
+    bodies; these marked edits only add the headers declaring existing uses.
+    https://github.com/aras-p/ClangBuildAnalyzer/tree/v1.6.0/src/external
+    """
+    profiles = (
+        ("enkiTS/TaskScheduler.cpp", '#include "TaskScheduler.h"\n', "#include <cstdlib>\n#include <type_traits>\n"),
+        ("llvm-Demangle/include/Utility.h", '#include "StringView.h"\n', "#include <exception>\n"),
+        ("llvm-Demangle/include/ItaniumDemangle.h", '#include "DemangleConfig.h"\n', "#include <type_traits>\n"),
+    )
+    marker = "// Ludus host-tool include profile: explicit standard dependencies.\n"
+    for name, anchor, includes in profiles:
+        path = source_dir / "src/external" / name
+        original = path.read_text()
+        replacement = anchor + marker + includes
+        if original.count(replacement) == 1:
+            continue
+        if original.count(anchor) != 1 or marker in original:
+            raise EngineError(f"ClangBuildAnalyzer include profile no longer matches {name}")
+        path.write_text(original.replace(anchor, replacement))
+
+
 def ensure_clang_build_analyzer(root: Path) -> Path:
     """Fetch and build the pinned ClangBuildAnalyzer on demand.
 
@@ -2224,6 +2249,7 @@ def ensure_clang_build_analyzer(root: Path) -> Path:
             shutil.rmtree(source_dir)
         extracted.rename(source_dir)
 
+    prepare_clang_build_analyzer_includes(source_dir)
     build_dir = source_dir / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
     env = tool_env(root)
