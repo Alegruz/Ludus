@@ -22,7 +22,10 @@ registry owns slots with live state and a nonzero generation. Destruction advanc
 the generation before making a slot reusable. A slot whose generation would wrap
 is permanently retired; world-identity exhaustion returns an error rather than
 wrapping. New process runs may reuse numbers because runtime handles are never
-serialized or accepted from outside that process.
+serialized or accepted from outside that process. The world identity and
+generation rules come from [FoundationIdentity](../modules/foundation/identity.md);
+see [object handles, stage 2](object-handles-uuid.md#implementation-sequence) for
+the reload limitation of a registry linked into a gameplay module.
 
 `IsAlive` checks the world identity, slot range, live bit, and exact generation.
 Release builds perform these checks for externally held handles too; assertions

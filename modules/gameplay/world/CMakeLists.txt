@@ -5,13 +5,15 @@ target_sources(ludus_gameplay_world PUBLIC FILE_SET public_headers TYPE HEADERS 
     include/ludus/gameplay/world/entity_id.h
     include/ludus/gameplay/world/entity_registry.h
     include/ludus/gameplay/world/component_pool.hpp)
-target_link_libraries(ludus_gameplay_world PUBLIC Ludus::FoundationBase Ludus::FoundationContainers)
+# World tokens and slot generations come from FoundationIdentity; its headers stay
+# private so EntityId and the public registry headers are unchanged.
+target_link_libraries(ludus_gameplay_world PUBLIC Ludus::FoundationBase Ludus::FoundationContainers PRIVATE Ludus::FoundationIdentity)
 ludus_apply_project_defaults(ludus_gameplay_world)
 install(TARGETS ludus_gameplay_world EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_gameplay_world_tests tests/world_tests.cpp)
-    target_link_libraries(ludus_gameplay_world_tests PRIVATE Ludus::GameplayWorld Catch2::Catch2WithMain)
+    target_link_libraries(ludus_gameplay_world_tests PRIVATE Ludus::GameplayWorld Ludus::FoundationIdentity Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_gameplay_world_tests)
     ludus_enable_test_exceptions(ludus_gameplay_world_tests)
     add_test(NAME ludus_gameplay_world_tests COMMAND ludus_gameplay_world_tests)
