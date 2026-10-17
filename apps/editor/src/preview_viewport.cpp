@@ -12,6 +12,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #if defined(LUDUS_EDITOR_SOFTWARE_VIEWPORT)
@@ -596,9 +597,10 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     mNavigationTimer.setInterval(16);
     connect(&mNavigationTimer, &QTimer::timeout, this, [this]() { advanceNavigation(); });
     connect(preview, &RenderPreview::Stopped, this, [this]() { stopNavigation(); });
-    setToolTip(QStringLiteral(
-        "Right-drag to look · hold right mouse + WASD/QE to fly · Alt/Option-left-drag to orbit · middle-drag to pan · "
-        "wheel to dolly (right mouse: speed) · F frames selection · Home frames all"));
+    setToolTip(
+        QStringLiteral("Right-drag to look · hold right mouse + WASD/QE to fly · Alt/Option-left-drag to orbit · "
+                       "Shift-Alt/Option-left-drag or middle-drag to pan · "
+                       "wheel to dolly (right mouse: speed) · F frames selection · Home frames all"));
     mState->Preview = preview;
     mState->IsAutomatic = isAutomatic;
     mState->CanShowFrames = isAutomatic;
@@ -608,6 +610,9 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
     QComboBox* shading = new QComboBox(this);
     shading->setObjectName(QStringLiteral("viewportShading"));
     shading->setAccessibleName(QStringLiteral("Viewport shading"));
+    shading->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    shading->setMinimumContentsLength(4);
+    shading->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     shading->addItem(QStringLiteral("Solid — neutral preview shading"));
     shading->addItem(QStringLiteral("Albedo — unlit surface colors"));
     shading->addItem(QStringLiteral("Lit — scene lighting"));
@@ -615,21 +620,42 @@ PreviewViewport::PreviewViewport(RenderPreview* preview, QWidget* parentOrNull, 
                                        "base colors without illumination. Lit shows authored lights, emitting surfaces "
                                        "as shadowed area lights and, once baked, static diffuse lighting."));
     shading->setCurrentIndex(static_cast<foundation::int32>(preview->GetShading()));
-    // One header row: shading, then what the Lit bake needs the user to know or decide.
-    QHBoxLayout* header = new QHBoxLayout;
-    header->setContentsMargins(0, 0, 0, 0);
-    header->addWidget(shading, 1);
+    QHBoxLayout* controls = new QHBoxLayout;
+    controls->addWidget(shading, 1);
+    QToolButton* frameAll = new QToolButton(this);
+    frameAll->setObjectName(QStringLiteral("viewportFrameAll"));
+    frameAll->setText(QStringLiteral("Frame all"));
+    frameAll->setAccessibleName(QStringLiteral("Frame all visible objects"));
+    frameAll->setToolTip(QStringLiteral("Fit all visible geometry in the viewport (Home)."));
+    controls->addWidget(frameAll);
+    connect(frameAll, &QToolButton::clicked, preview, &RenderPreview::FrameAll);
+    mState->Layout->addLayout(controls);
+    QLabel* navigationHint = new QLabel(this);
+    navigationHint->setObjectName(QStringLiteral("viewportNavigationHint"));
+    navigationHint->setTextFormat(Qt::PlainText);
+#if defined(Q_OS_MACOS)
+    navigationHint->setText(QStringLiteral("Option-drag: orbit · Shift-Option-drag: pan · Scroll: zoom"));
+#else
+    navigationHint->setText(QStringLiteral("Alt-drag: orbit · Shift-Alt-drag: pan · Scroll: zoom"));
+#endif
+    navigationHint->setWordWrap(true);
+    navigationHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    navigationHint->setToolTip(toolTip());
+    mState->Layout->addWidget(navigationHint);
+    // Keep bake diagnostics from squeezing the shading and framing controls.
+    QHBoxLayout* bakeControls = new QHBoxLayout;
+    bakeControls->setContentsMargins(0, 0, 0, 0);
     QLabel* bakeNotice = new QLabel(this);
     bakeNotice->setObjectName(QStringLiteral("viewportBakeNotice"));
-    // The header keeps its natural height; the frame below takes the remaining space.
-    bakeNotice->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    bakeNotice->setWordWrap(true);
+    bakeNotice->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     bakeNotice->hide();
-    header->addWidget(bakeNotice);
+    bakeControls->addWidget(bakeNotice, 1);
     QPushButton* bakeAction = new QPushButton(this);
     bakeAction->setObjectName(QStringLiteral("viewportBakeAction"));
     bakeAction->hide();
-    header->addWidget(bakeAction);
-    mState->Layout->addLayout(header);
+    bakeControls->addWidget(bakeAction);
+    mState->Layout->addLayout(bakeControls);
     const auto updateBake = [preview, bakeNotice, bakeAction]() {
         const PreviewBakeState state = preview->GetBakeState();
         PreviewBakeNotice notice;

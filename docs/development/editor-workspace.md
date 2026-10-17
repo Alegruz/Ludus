@@ -580,6 +580,11 @@ the open World; it does not introduce another authoring workspace.
 
 ### World viewport navigation
 
+The World hierarchy scrolls when the available dock height cannot fit its entity
+list and commands. **Import report**, beside the World path, opens the full stored
+report in the scrollable inspector; opening it does not reduce viewport height.
+The import confirmation preview remains visible before an import is accepted.
+
 The editor owns a separate camera controller and publishes a validated C0
 pose/lens sample to the renderer. Navigation never changes an authored camera,
 World Save/Undo history, or simulation state. Starting navigation from an
@@ -595,7 +600,7 @@ that preview. Zero-motion input leaves the selected camera unchanged.
 | Shift while flying | Four-times movement speed |
 | Wheel while holding right mouse | Adjust fly speed without dollying |
 | Alt/Option + left-drag | Orbit around the current focus pivot |
-| Middle-drag | Pan in the camera plane |
+| Middle-drag or Shift + Alt/Option + left-drag | Pan in the camera plane |
 | Wheel / high-resolution trackpad scroll | Proportional dolly; orthographic views change visible span |
 | F | Frame the selected rendered World entity |
 | Home / **Frame all visible objects** | Fit all extracted visible geometry |
@@ -607,6 +612,11 @@ no-op. Framing uses transformed mesh bounds, fits both viewport axes, and
 preserves orientation. Pan uses the current lens, focus distance and drawable
 height, so resizing and display scaling do not change the intended displacement.
 Fractional pointer/scroll input is retained rather than rounded to mouse notches.
+The controls hint stays visible above the image. On a Mac trackpad, hold Option
+while clicking and dragging to orbit, add Shift to pan, and use two-finger scroll
+to dolly. These gestures do not require a secondary or middle button. **Frame all**
+beside the shading selector fits the scene without a Home key. Fly/look still
+uses a held secondary click (including macOS Control-click) and WASD/QE.
 On Cocoa and X11, fly look recenters the captured pointer and restores its starting
 position on release. Wayland forbids pointer warping through this Qt API, so it
 uses the delivered drag motion; continuous look at the screen edge still needs a
@@ -819,9 +829,9 @@ and retain specular reflection after the bake. No editor fill is added to Lit.
 
 The status shows planar proxy/shadow counts, bake progress, completion or failure.
 A failed bake retains the direct-lit viewport and camera controls. While the bake
-runs, **Cancel bake** beside the shading selector stops it and keeps direct
+runs, **Cancel bake** below the shading selector stops it and keeps direct
 lighting; **Bake again** restarts it. When the bake tolerates input flaws, such as
-zero-area triangles in imported meshes, the header shows a warning with the
+zero-area triangles in imported meshes, the bake controls show a warning with the
 skipped count, and its tooltip names each affected object, as soon as preparation
 completes. The status line repeats the count, so you can fix the meshes or cancel
 the bake instead of waiting for a rejection. Camera, orbit,
