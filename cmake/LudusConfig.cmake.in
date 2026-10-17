@@ -153,6 +153,13 @@ endif()
 if(NOT COMMAND ludus_apply_app_policy)
     function(ludus_apply_app_policy target)
         target_compile_features(${target} PRIVATE cxx_std_23)
+        # Ludus uses no C++20 named modules. Left on, CMake (CMP0155) runs
+        # clang-scan-deps on every C++ source and collates each target before
+        # it compiles; see docs/development/build-profiling.md. Set per target
+        # rather than CMAKE_CXX_SCAN_FOR_MODULES so other consumer targets keep
+        # CMake's default. Set the property back ON after this call for a
+        # target that adopts named modules.
+        set_target_properties(${target} PROPERTIES CXX_SCAN_FOR_MODULES OFF)
         if(NOT MSVC)
             target_compile_options(${target} PRIVATE -fno-exceptions)
         else()
