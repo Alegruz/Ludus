@@ -1,6 +1,6 @@
 # Container systems
 
-Status: M0 to M4 implemented. This design extends the implemented
+Status: M0 to M5 implemented. This design extends the implemented
 [contiguous containers](containers.md#34-ludus-native-taxonomy-and-api-authoritative-naming)
 and respects [memory ownership](memory-management.md). It does not replace
 those contracts. Types marked planned below are architectural decisions, not
@@ -71,7 +71,7 @@ through FoundationContainers' CMake header file set.
 | Small or read-mostly ordered dictionary | `SortedMap<K, V, Compare>` | First increment; binary search, contiguous iteration, O(n) insert/remove |
 | Runtime size within a hard bound | `FixedArray<T, N>` | Implemented (M3); live prefix, no heap, full is a status |
 | FIFO with hard capacity | `RingBuffer<T, N>` | Implemented (M4); inline storage, single owner, two spans for wrapped storage |
-| Dense index membership/flags | `BitSet`, `StaticBitSet<N>` | Planned; packed words, no proxy references |
+| Dense index membership/flags | `StaticBitSet<N>`; `BitSet` | `StaticBitSet` implemented (M5); dynamic `BitSet` deferred for lack of a consumer |
 | Larger mutable dictionary | `HashMap<K, V, Hash, Equal>` | Planned; flat storage, measurement gates below |
 | Uniqueness without mapped values | `SortedSet<K>` / `HashSet<K>` | Planned; share the corresponding lookup policy |
 | Dense traversal with durable identity | subsystem typed handle + `SlotMap<T>` | Planned; generation checking and swap removal |
@@ -218,13 +218,41 @@ consumer is the Input reducer's pending-transition queue. Its overflow policy
 is unchanged: a rejected `TryAdd` leaves the queue untouched, then the reducer
 discards the batch and arms a reset.
 
-## Planned structures and decision gates
+## StaticBitSet contract
 
-`BitSet` uses `uint64` words, masks unused tail bits, specifies resize initialization
-and index bounds, and exposes test/set/reset plus word-oriented operations. Use
-portable `<bit>` operations privately where worthwhile; never alias packed bits
-as `bool&`. Test 0/1/63/64/65 boundaries and all shifts. Wire encoding specifies
-bit order independently of the host representation.
+`StaticBitSet<N>` (in `static_bit_set.hpp`) packs `N` bits into
+`(N + 63) / 64` `uint64` words held in a `StaticArray`. It never allocates and
+is a trivially copyable `constexpr` value type. Bits at or above `N` in the last
+word are always zero. Every operation that could set them (`SetAll`, `FlipAll`,
+`operator~`, `operator<<=`) masks them again, so counts and comparisons never see
+stale tail bits. A zero-bit set stores one always-zero word, so every operation
+compiles without a separate specialization.
+
+Bits are read with `IsSet` and written with `Set`, `Reset`, `Assign` and `Flip`.
+There is no `bool&` proxy. Index arguments are preconditions asserted in checked
+builds. Whole-set operations are `SetAll`, `ResetAll`, `FlipAll`, `CountSet`,
+`IsAnySet`/`IsNoneSet`/`AreAllSet` and `FindNextSet`, the word-wise scan used to
+visit set bits. Set operations `&`, `|`, `^` and `~` combine word by word.
+Shifts move bits toward higher (`<<`) or lower (`>>`) indices, discard bits
+shifted past either end, and reset every bit for a shift of `N` or more.
+`GetWords()` exposes read-only words, least significant bit of word 0 first.
+That in-memory layout is not a wire format; persist bits through an explicit
+schema.
+
+Population count and trailing-zero count are portable `constexpr`
+implementations of the classic algorithms in Henry S. Warren, Jr., *Hacker's
+Delight*, 2nd edition, sections 5-1 and 5-4. Neither `<bit>` nor compiler
+intrinsics are used, because ADR 0003 does not list them. An intrinsic path
+needs that policy change and a measured benefit first.
+
+The M5 consumers are the Input reducer's private live-down, live-suppressed and
+reset-baseline key masks, and the Resources manager's dependency-closure
+`Wanted` set and catalog-duplicate `seen` set. The public `KeyboardSnapshot`
+and `FocusBaseline` bool arrays are unchanged, because packing them would change
+the SDK's API and ABI. A dynamically sized `BitSet` with fallible growth is
+deferred: no consumer needs a run-time bit count.
+
+## Planned structures and decision gates
 
 `HashMap` should compare a scalar flat open-addressed baseline against an
 established grouped-control implementation before committing to SIMD. Grouped
@@ -282,7 +310,7 @@ below determine which increments can proceed independently.
 | M2 | Complete existing container API documentation | Implemented | Every public `Array`, `StaticArray`, `SortedMap` and relocation-trait declaration has a Doxygen contract, and their 158 baseline entries were removed from `api-undocumented.json`. The [container guide](../wiki/guides/containers.md) covers selection, failure handling and borrow rules, and separates shipped types from planned ones. Strict wiki/API builds and coverage checks pass. |
 | M3 | `FixedArray<T, N>` and one Input migration | Implemented | `FixedArray` keeps a live prefix in inline raw storage, reports full explicitly and constructs only occupied slots ([contract](#fixedarray-contract)). The Input reducer's binding table and step-event buffer use it. Zero allocation, zero capacity, non-default/move-only values, aliasing, failure preservation and balanced lifetimes are tested, including against a seeded model. |
 | M4 | Single-owner `RingBuffer<T, N>` | Implemented | Inline storage with compile-time capacity was selected ([contract](#ringbuffer-contract)); a heap-backed run-time-capacity ring stays gated on a consumer. Wrapped leading/trailing spans and explicit full/empty behavior are implemented. The Input reducer's pending-transition queue uses it with its overflow/reset policy unchanged. Wraparound and lifetimes are model-tested. |
-| M5 | `BitSet` and `StaticBitSet<N>` | Gated | Select a flags/membership consumer and define resize initialization, bounds and word operations. Verify 0/1/63/64/65-bit boundaries, tail masking, shifts and fallible dynamic growth; measure storage/operation costs and migrate the selected consumer. |
+| M5 | `StaticBitSet<N>`; dynamic `BitSet` | Implemented; dynamic `BitSet` deferred | `StaticBitSet` packs bits into `uint64` words with tail masking, single-bit and whole-set operations, `FindNextSet`, set operations and shifts ([contract](#staticbitset-contract)). The Input reducer's private key masks and the Resources manager's membership sets use it. 0/1/63/64/65/130-bit boundaries, tail masking, every shift amount and a seeded model are tested, with zero allocation. Dynamic `BitSet` with fallible growth is deferred until a consumer needs a run-time bit count. |
 | M6 | Array allocation-domain integration | Planned; Memory prerequisites | Reuse FoundationMemory through the Array byte seam, then introduce domain ownership as a separately measured layout change. Test original-domain frees, copy/move/swap rules, nested owners, over-alignment and OOM preservation; version the SDK owning-layout boundary. |
 | M7 | `SortedSet<K>` | Gated | Identify an ordered uniqueness consumer. Reuse the ordering/equivalence contract and contiguous lifetime helpers; verify duplicate insertion consumes nothing, keys remain immutable through public access, and ordered output matches an independent model. |
 | M8 | `HashMap` and consumer-required `HashSet` | Gated | Compare a scalar flat table with grouped-control alternatives on a named mutable-lookup workload. Select and implement one algorithm, reuse FoundationHash, and migrate the consumer. Collision/deletion/rehash models, bounded probing and allocation-failure rollback pass; record native/Wasm results. |
@@ -335,8 +363,8 @@ or unrelated ownership types stays in their own workstreams.
 M2 documented the containers that existed when it landed. Every subsequent
 milestone includes Doxygen for its new/changed API and the relevant
 [guide](../wiki/guides/containers.md) update in the same change, including moving
-a type from its planned table to its shipped table. M3 delivered `FixedArray`
-and M4 delivered `RingBuffer`. M5 may follow once its consumer is established.
+a type from its planned table to its shipped table. M3 delivered `FixedArray`,
+M4 delivered `RingBuffer` and M5 delivered `StaticBitSet`.
 Generic rings retain single-owner semantics and do not replace the
 audio/logging/profiling publication protocols.
 

@@ -35,6 +35,7 @@ These types ship today. Each has its reference page in the
 | In-place ordering, no stability | `Sort` | `sort.hpp` | Heap sort; O(1) extra storage; equal elements may reorder |
 | Stable ordering | `StableSort` | `stable_sort.hpp` | Merge sort into caller-supplied scratch; no allocation |
 | Bounded first-in, first-out queue | `RingBuffer<T, N>` | `ring_buffer.hpp` | Inline storage; full is a status; wrapped contents as two spans; single owner; never allocates |
+| Flags or membership over a fixed index range | `StaticBitSet<N>` | `static_bit_set.hpp` | `N` bits packed into `uint64` words; set operations and shifts; trivially copyable; never allocates |
 
 `Array` is the default. Use linear search over a small `Array` for short-lived
 tables. Use `SortedMap` when ordered iteration or binary lookup helps. There is
@@ -48,7 +49,7 @@ tracks their status and gating consumers.
 
 | Planned type | Intended use |
 | --- | --- |
-| `BitSet`, `StaticBitSet<N>` | Packed flags and dense index membership |
+| `BitSet` | Packed bits with a run-time size; deferred until a consumer needs one |
 | `HashMap`, `HashSet` | Larger mutable dictionaries, after a measured algorithm selection |
 | `SortedSet<K>` | Ordered uniqueness without mapped values |
 | `SlotMap<T>` with typed handles | Dense traversal with generation-checked durable identity |
@@ -191,6 +192,37 @@ void DrainCommands(CommandQueue& inoutQueue, const ApplyFunction& apply) noexcep
 The ring is not contiguous once it wraps, so it has no `begin`/`end`. Index it
 with `operator[]` (0 is the oldest) or walk the two spans. It is single-owner,
 not a thread-safe queue.
+
+## Track flags and membership in bits
+
+Use `StaticBitSet<N>` instead of a `bool` array when an index range is known at
+compile time: a key per input key, an asset per slot, a flag per channel. It
+uses an eighth of the memory, copies as a plain value, and supports whole-set
+operations. Read bits with `IsSet` and write them with `Set`, `Reset`,
+`Assign` or `Flip`. There is no `bits[i] = true` proxy.
+
+```cpp
+#include <ludus/foundation/containers/static_bit_set.hpp>
+
+constexpr ludus::foundation::usize MAX_ASSETS = 64;
+using AssetSet = ludus::foundation::StaticBitSet<MAX_ASSETS>;
+
+// Visits every asset that is wanted but not yet resident, in index order.
+template <typename VisitFunction>
+void VisitMissing(const AssetSet& wanted, const AssetSet& resident, const VisitFunction& visit) noexcept
+{
+    const AssetSet missing = wanted & ~resident;
+    for (ludus::foundation::usize asset = missing.FindNextSet(0); asset < missing.GetSize();
+         asset = missing.FindNextSet(asset + 1))
+    {
+        visit(asset);
+    }
+}
+```
+
+`FindNextSet` returns `GetSize()` when no further bit is set, which ends the
+loop. Indices past the end are asserted in checked builds. `GetWords()` exposes
+the packed words for word-wise algorithms; their layout is not a file format.
 
 ## Register and look up by key
 
