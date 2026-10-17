@@ -2,6 +2,8 @@
 
 #include "internal/counters.hpp"
 
+#include <ludus/foundation/containers/static_bit_set.hpp>
+
 #include <atomic>
 #include <new>
 
@@ -166,7 +168,7 @@ struct Manager::Impl final
     uint32 Cursor = 0;
     struct Plan final
     {
-        bool Wanted[MAX_ASSETS]{};
+        ludus::foundation::StaticBitSet<MAX_ASSETS> Wanted;
         uint32 Slots[MAX_ASSETS]{};
         uint32 NewAssets[MAX_DEPENDENCIES]{};
         uint32 VersionSlots[MAX_DEPENDENCIES]{}, OperationSlots[MAX_DEPENDENCIES]{};
@@ -827,15 +829,15 @@ struct Manager::Impl final
             snapshot.Bindings[i] = NONE;
             snapshot.ChildCount[i] = 0;
         }
-        bool seen[MAX_ASSETS]{};
+        ludus::foundation::StaticBitSet<MAX_ASSETS> seen;
         for (const auto& resource : catalog.Entries())
         {
             const auto index = FindAsset(resource.Id);
-            if (index == NONE || seen[index] || Assets[index].Type != resource.Type)
+            if (index == NONE || seen.IsSet(index) || Assets[index].Type != resource.Type)
             {
                 return Status::Conflict;
             }
-            seen[index] = true;
+            seen.Set(index);
             snapshot.Resources[index] = resource;
         }
         snapshot.AdapterCount = static_cast<uint32>(count);
@@ -905,16 +907,16 @@ struct Manager::Impl final
         }
         for (uint32 i = 0; i < rootCount; ++i)
         {
-            plan.Wanted[roots[i]] = true;
+            plan.Wanted.Set(roots[i]);
         }
         // Each pass moves toward children; DAG depth is bounded by AssetCount.
         for (uint32 pass = 0; pass < AssetCount; ++pass)
         {
             for (uint32 i = 0; i < snapshot.EdgeCount; ++i)
             {
-                if (plan.Wanted[snapshot.Edges[i].Parent])
+                if (plan.Wanted.IsSet(snapshot.Edges[i].Parent))
                 {
-                    plan.Wanted[snapshot.Edges[i].Child] = true;
+                    plan.Wanted.Set(snapshot.Edges[i].Child);
                 }
             }
         }
@@ -922,7 +924,7 @@ struct Manager::Impl final
         for (uint32 rank = 0; rank < snapshot.OrderCount; ++rank)
         {
             const auto asset = snapshot.Order[rank];
-            if (!plan.Wanted[asset])
+            if (plan.Wanted.IsSet(asset) == false)
             {
                 continue;
             }
@@ -1460,7 +1462,7 @@ Status Manager::BeginReplacement(const content::Catalog& catalog,
     }
     for (uint32 i = 0; i < state.AssetCount; ++i)
     {
-        if (plan.Wanted[i])
+        if (plan.Wanted.IsSet(i))
         {
             state.Catalogs[catalogSlot].Bindings[i] = plan.Slots[i];
         }

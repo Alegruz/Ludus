@@ -134,6 +134,12 @@ slot, generation, pointer, or world identity. The loader resolves all local
 references in a second pass, so forward references work and array order does not
 change reference meaning.
 
+These scoped IDs are labels, not durable identity. Version-2 World records add a
+document UUID and one source-object UUID per entity, keep each version-1 `id` as
+the entity's `label`, and store entity references as UUIDs. A committed migration
+manifest assigns those UUIDs once; loading a version-1 file never mints them. See
+[UUID authoring records](object-handles-uuid.md#stage-3-uuid-authoring-records).
+
 `target` in the example requires an entity produced by the player recipe.
 Validators check the required capability as well as the existence of the name.
 Only explicitly nullable fields may omit a target; a broken required reference
