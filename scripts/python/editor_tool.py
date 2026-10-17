@@ -974,7 +974,8 @@ class Operation:
 
                 compiler = plan.compiler
                 if compiler is None:
-                    compiler = shutil.which("clang++-18", path=plan.env.get("PATH"))
+                    pinned = self._context.engine.pinned_llvm_tool(self._context.tooling_root, "clang++")
+                    compiler = shutil.which(pinned, path=plan.env.get("PATH"))
                 sdk_prefix = str(plan.resolution.prefix) if plan.resolution is not None else None
                 try:
                     inspect_project_setup(

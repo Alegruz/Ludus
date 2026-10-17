@@ -19,6 +19,70 @@ from unittest.mock import patch
 import engine
 import web_build
 
+LLVM_MAJOR = engine.pinned_llvm_major(engine.repo_root())
+CLANG_TIDY = engine.pinned_llvm_tool(engine.repo_root(), "clang-tidy")
+
+
+class ToolchainPinTests(unittest.TestCase):
+    """Copies of the LLVM pin that cannot read config/tool_versions.json must agree with it."""
+    ROOT = Path(__file__).resolve().parents[2]
+
+    def test_llvm_tool_minimums_share_the_pinned_major(self):
+        minimum = engine.load_tool_versions(self.ROOT)["minimum"]
+        for tool in ("clang", "lld", "clang-format", "clang-tidy"):
+            self.assertEqual(engine.version_tuple(minimum[tool])[0], LLVM_MAJOR, tool)
+
+    def test_redistributable_tooling_mirrors_the_pin(self):
+        from ludus_tools import toolchain
+
+        self.assertEqual(toolchain.PINNED_LLVM_MAJOR, LLVM_MAJOR)
+
+    def test_conan_profiles_and_example_presets_use_the_pinned_compiler(self):
+        for profile in sorted((self.ROOT / "config/conan/profiles").glob("*-clang-*")):
+            with self.subTest(profile=profile.name):
+                self.assertIn(f"\ncompiler.version={LLVM_MAJOR}\n", profile.read_text())
+        compilers = set()
+        for presets in sorted((self.ROOT / "examples").glob("*/CMakePresets.json")):
+            for preset in json.loads(presets.read_text()).get("configurePresets", []):
+                compiler = preset.get("cacheVariables", {}).get("CMAKE_CXX_COMPILER", "")
+                if compiler.startswith("clang++-"):
+                    compilers.add(compiler)
+        self.assertEqual(compilers, {f"clang++-{LLVM_MAJOR}"})
+
+    def test_generated_project_files_and_setup_follow_a_changed_pin(self):
+        from ludus_tools import project_setup, release_setup, templates, toolchain
+        from ludus_tools.errors import ToolingError
+
+        with patch.object(toolchain, "PINNED_LLVM_MAJOR", 23), patch.object(release_setup, "PINNED_LLVM_MAJOR", 23):
+            linux = release_setup.workflow_text("linux-release", "game:linux", "linux-x64")
+            macos = release_setup.workflow_text("macos-release", "game:mac", "macos-arm64")
+            rendered = templates.render_files(templates.get_template("minimal"),
+                                              templates.ProjectInputs("Game", "game", "1", []))
+        self.assertIn("clang-23 lld-23", linux)
+        self.assertIn("brew install python@3.12 llvm@23\n", macos)
+        self.assertIn('"$(brew --prefix llvm@23)"', macos)
+        presets = next(item.content for item in rendered if item.relpath == "CMakePresets.json")
+        self.assertIn('"CMAKE_CXX_COMPILER": "clang++-23"', presets)
+        self.assertNotIn("LLVM_MAJOR_TOKEN", linux + macos)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "config").mkdir()
+            (root / "config/tool_versions.json").write_text(json.dumps(
+                {"managed": {"cmake": "3.29.6", "ninja": "1.11.1.3"}, "minimum": {"clang": "23.0.0"}}))
+            configured = {"cmake": Path("cmake"), "ninja": Path("ninja"), "compiler": Path("clang++")}
+
+            def runner(compiler_version):
+                replies = {"cmake": "cmake version 3.29.6", "ninja": "1.11.1",
+                           "clang++": f"clang version {compiler_version}"}
+                return lambda command, **_: replies[command[0]]
+
+            project_setup.verify_tool_versions(configured, root, runner("23.1.4"), {})
+            with self.assertRaisesRegex(ToolingError, "pinned version 23"):
+                project_setup.verify_tool_versions(configured, root, runner("18.1.8"), {})
+
+    def test_missing_clang_pin_is_an_explicit_error(self):
+        with self.assertRaisesRegex(engine.EngineError, "minimum.clang"):
+            engine.llvm_major_version({"minimum": {"clang": ""}})
 
 class NativePrerequisiteTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
@@ -85,7 +149,7 @@ class NativePrerequisiteTests(unittest.TestCase):
 
     def test_macos_profile_can_disable_editor_packages_and_initialization(self):
         action = (self.ROOT / ".github/actions/macos-setup/action.yml").read_text()
-        install = action.split("    - name: Install upstream Clang 18 and native prerequisites\n", 1)[1]
+        install = action.split(f"    - name: Install upstream Clang {LLVM_MAJOR} and native prerequisites\n", 1)[1]
         install = install.split("      run: |\n", 1)[1].split("    - name:", 1)[0]
         initialize = action.split("    - name: Prepare pinned native dependencies\n", 1)[1]
         initialize = initialize.split("      run: |\n", 1)[1].split("    - name:", 1)[0]
@@ -110,7 +174,7 @@ class NativePrerequisiteTests(unittest.TestCase):
                     packages = result.stdout.splitlines()
                     for package in ("qtbase", "qtdeclarative"):
                         self.assertEqual(package in packages, editor == "true")
-                    for package in ("llvm@18", "ccache"):
+                    for package in (f"llvm@{LLVM_MAJOR}", "ccache"):
                         self.assertIn(package, packages)
                     subprocess.run(["/bin/bash", "-e", "-c", initialize], cwd=root,
                                    env=environment, check=True, capture_output=True)
@@ -356,7 +420,7 @@ class BrowserAnalysisTests(unittest.TestCase):
         sources = [root / "out/script-interaction/cooked/bindings.cpp", root / "out/vendor.cpp"]
         entries = [{"file": str(source), "command": f"em++ -c {source} -o object.o"}
                    for source in sources]
-        commands = web_build.analysis_commands(root, entries, "clang-tidy-18", root / "sysroot",
+        commands = web_build.analysis_commands(root, entries, CLANG_TIDY, root / "sysroot",
                                               owned_generated=(sources[0],))
         self.assertEqual([command[2] for command in commands], [str(sources[0])])
 
@@ -368,7 +432,7 @@ class BrowserAnalysisTests(unittest.TestCase):
         entries = [{"file": name, "directory": str(root),
                     "command": f"em++ -std=c++23 --use-port=emdawnwebgpu -DWEB=1 -c {name} -o object.o"}
                    for name in sources]
-        commands = web_build.analysis_commands(root, entries, "clang-tidy-18", root / "sysroot")
+        commands = web_build.analysis_commands(root, entries, CLANG_TIDY, root / "sysroot")
         self.assertEqual([command[2] for command in commands], [str(root / source) for source in sources[:4]])
         for command in commands:
             self.assertIn("--warnings-as-errors=*", command)
@@ -383,7 +447,7 @@ class BrowserAnalysisTests(unittest.TestCase):
         root = Path("/tmp/browser project").resolve()
         source = str(root / "modules/base/src/main.cpp")
         entries = [{"file": source, "arguments": ["em++", "-I", str(root / "include"), "-c", source, "-o", "main.o"]}]
-        command = web_build.analysis_commands(root, entries, "clang-tidy-18", root / "sysroot")[0]
+        command = web_build.analysis_commands(root, entries, CLANG_TIDY, root / "sysroot")[0]
         self.assertEqual(command[2], source)
         self.assertIn(str(root / "include"), command)
 
@@ -407,10 +471,12 @@ class ShaderBootstrapCacheTests(unittest.TestCase):
                    "source_sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}
             (root / "config").mkdir()
             (root / "config/spirv_cross_toolchain.json").write_text(json.dumps({"spirv_cross": pin}))
-            manifest = {**pin, "compiler": "clang version 18.1.8", "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
+            shutil.copyfile(engine.repo_root() / "config/tool_versions.json", root / "config/tool_versions.json")
+            compiler = f"clang version {LLVM_MAJOR}.1.8"
+            manifest = {**pin, "compiler": compiler, "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
             Path(str(binary) + ".build.json").write_text(json.dumps(manifest))
             namespace = runpy.run_path(str(copy))
-            with patch.object(subprocess, "check_output", return_value="clang version 18.1.8\n"), \
+            with patch.object(subprocess, "check_output", return_value=compiler + "\n"), \
                     patch.object(subprocess, "run") as build, \
                     patch("urllib.request.urlretrieve") as download, contextlib.redirect_stdout(io.StringIO()):
                 namespace["main"]()

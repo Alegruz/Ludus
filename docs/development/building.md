@@ -15,9 +15,11 @@ separate Emscripten toolchain checks. Configuration never runs init for you.
 
 On macOS, init compiles and links a small probe using the actual Clang compiler,
 libc++ headers and SDK before installing managed tools or building Conan
-packages. It checks `NAN` and `INFINITY`, whose header definitions HarfBuzz needs.
-Clang 18 with the macOS 27 SDK fails this check; macOS 26.5 passes on the tested
-host. Without `SDKROOT`, init tests Clang's default SDK first, then installed
+packages. It checks `NAN` and `INFINITY`, whose header definitions HarfBuzz needs,
+and that `<cfloat>` still defines `DBL_MAX_10_EXP` after `<cmath>`, which Catch2
+needs. Clang 18 with the macOS 27 SDK fails the first check; libc++ 22 with that
+SDK fails the second ([llvm/llvm-project#175849](https://github.com/llvm/llvm-project/pull/175849)).
+macOS 26.5 passes both on the tested host. Without `SDKROOT`, init tests Clang's default SDK first, then installed
 sibling SDKs newest first, selecting the first that passes. It does not download
 an older SDK or change the system's Xcode selection.
 
@@ -279,7 +281,11 @@ On an affected Mac:
 Using a different LLVM for this preset is not supported. The repository pins
 LLVM 18 for compilation, formatting and analysis
 (`config/tool_versions.json`), so a newer toolchain would need to be adopted
-deliberately across all tools.
+deliberately across all tools. Repository scripts and CMake compiler gates read
+the major from that file's `minimum.clang`. The ludus-tools wheel constant, Conan
+profiles and example presets cannot read it; `test_ci.ToolchainPinTests` fails
+when they disagree. CI workflows, the devcontainer and Behavior profiles still
+name the version and change with the pin.
 
 Platform now provides [native Cocoa windows and keyboard input](../architecture/macos-platform.md).
 It publishes borrowed native handles and backing-pixel dimensions for the Metal backend. RHI supports Cocoa presentation and headless rendering,

@@ -4,7 +4,8 @@ if(LUDUS_ENABLE_ASAN OR LUDUS_ENABLE_UBSAN OR LUDUS_ENABLE_TSAN)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         get_filename_component(quality_compiler "${CMAKE_CXX_COMPILER}" REALPATH)
         get_filename_component(quality_compiler_bin "${quality_compiler}" DIRECTORY)
-        find_program(LUDUS_QUALITY_SYMBOLIZER NAMES llvm-symbolizer-18 llvm-symbolizer
+        ludus_get_pinned_llvm_major(quality_llvm_major)
+        find_program(LUDUS_QUALITY_SYMBOLIZER NAMES llvm-symbolizer-${quality_llvm_major} llvm-symbolizer
             HINTS "${quality_compiler_bin}" REQUIRED)
     else()
         set(LUDUS_QUALITY_SYMBOLIZER "none")

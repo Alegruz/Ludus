@@ -5,7 +5,9 @@
 ---
 Checks: '-*,clang-analyzer-core.*,clang-analyzer-cplusplus.*,clang-analyzer-unix.*'
 WarningsAsErrors: '*'
-HeaderFilterRegex: '(.*/)?(modules|apps|tools|tests|examples)/.*'
+# Match whole directory components: an unanchored 'tools/' also matched
+# out/host-tools/ (vendored libc++ headers on macOS).
+HeaderFilterRegex: '(^|.*/)(modules|apps|tools|tests|examples)/.*'
 CheckOptions:
   # LLVM 18's released Move option retains checks for modeled standard types,
   # while respecting Ludus-owned types' documented empty/reusable moved state.
