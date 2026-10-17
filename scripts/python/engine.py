@@ -842,7 +842,11 @@ def print_missing_tool_help(name: str, version: str, path: str, minimum: str,
     print(f"Minimum required version: {minimum}")
     print("One-command onboarding command:")
     print("  ./init.sh")
-    if name != "Python" and llvm_major is not None:
+    if name != "Python" and llvm_major is not None and platform.system() == "Darwin":
+        formulae = " ".join(formula for formula, _ in homebrew_llvm_formulae(llvm_major))
+        print("Manual Homebrew install or upgrade (refresh first: stale formula metadata can install an older patch):")
+        print(f"  brew update && brew install {formulae} && brew upgrade {formulae}")
+    elif name != "Python" and llvm_major is not None:
         print("Manual Ubuntu fallback, if automatic sudo installation is unavailable:")
         print(
             "  sudo apt-get update && sudo apt-get install -y "

@@ -1,4 +1,6 @@
 """Host selection regressions for the compile-only macOS slice."""
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -177,6 +179,15 @@ class MacosSetupTests(unittest.TestCase):
 
     def test_homebrew_setup_installs_llvm_and_lld_for_the_pinned_major(self):
         self.assertEqual(engine.homebrew_llvm_formulae(23), (("llvm@23", "clang"), ("lld@23", "ld.lld")))
+
+    def test_missing_tool_help_on_macos_refreshes_homebrew_before_installing(self):
+        # Stale formula metadata installed LLVM 23.1.0 on a CI runner, below the 23.1.3 minimum.
+        output = io.StringIO()
+        with patch.object(engine.platform, "system", return_value="Darwin"), contextlib.redirect_stdout(output):
+            engine.print_missing_tool_help("Clang", "Homebrew clang version 23.1.0", "/opt/homebrew/opt/llvm/bin/clang++",
+                                           "23.1.3", 23)
+        self.assertIn("brew update && brew install llvm@23 lld@23 && brew upgrade llvm@23 lld@23", output.getvalue())
+        self.assertNotIn("apt-get", output.getvalue())
 
     def test_homebrew_alias_drift_to_another_major_is_rejected(self):
         # llvm@<major> aliases the unversioned formula until Homebrew versions

@@ -131,6 +131,8 @@ jobs:
         run: |
           llvm="$(python3 -c "import json; print(json.load(open('config/tool_versions.json'))['minimum']['clang'].split('.')[0])")"
           # Homebrew ships LLD separately; init requires it on every host.
+          # Refresh stale runner formula metadata so the bottle meets the pinned minimum.
+          brew update --quiet
           brew install "llvm@$llvm" "lld@$llvm"
           ./init.sh --cli --preset macos-clang-development --preset-only --locked --with-tests --no-system-install
           git diff --exit-code -- conan.lock
