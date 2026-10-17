@@ -346,6 +346,9 @@ AppState Application::Frame() noexcept
         Shutdown();
         return mState;
     }
+    // A minimized or occluded window paces at the hidden rate, also during startup and loading.
+    const bool isWindowVisible = mWindow->GetVisibility() == platform::WindowVisibility::Visible;
+    mPacing.SetVisible(isWindowVisible);
     // The one frame timestamp; lifecycle resets below apply before the driver samples it.
     const foundation::time::Timestamp now = foundation::time::Now();
     if (mSession.PollLoad() != Status::Success)
@@ -387,7 +390,8 @@ AppState Application::Frame() noexcept
     else
     {
         const auto native = mWindow->GetNativeWindowInfo();
-        window.Visible = true;
+        // Like a hidden browser page, a hidden native window drops simulation time instead of ticking.
+        window.Visible = isWindowVisible;
         window.FramebufferWidth = native.Width;
         window.FramebufferHeight = native.Height;
     }

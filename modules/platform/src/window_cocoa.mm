@@ -109,6 +109,7 @@ public:
     bool Open() noexcept;
     bool HandleEvent(const Event&) noexcept override;
     void RefreshExtent() noexcept;
+    void RefreshVisibility() noexcept;
     void FocusChanged(bool focused) noexcept;
     void Closed() noexcept;
     void SynchronizeSink() noexcept;
@@ -408,6 +409,33 @@ void CocoaWindow::RefreshExtent() noexcept
     const bool minimized = mWindow.miniaturized;
     mNativeWindowInfo.Width = minimized ? 0 : PixelExtent(backing.size.width);
     mNativeWindowInfo.Height = minimized ? 0 : PixelExtent(backing.size.height);
+    RefreshVisibility();
+}
+
+void CocoaWindow::RefreshVisibility() noexcept
+{
+    if (mClosed)
+    {
+        return;
+    }
+    // Thanks to Apple, AppKit Release Notes for OS X 10.9 Mavericks, "Application and
+    // Window Occlusion": occlusionState is a bitfield tested with NSWindowOcclusionStateVisible;
+    // a window is occluded when fully covered by opaque windows, ordered off screen,
+    // minimized or on another Space, and partial occlusion counts as visible. Ludus
+    // reports minimization separately because the published extent is then zero.
+    // https://developer.apple.com/library/archive/releasenotes/AppKit/RN-AppKitOlderNotes/index.html
+    if (mWindow.miniaturized == YES)
+    {
+        mVisibility = WindowVisibility::Minimized;
+    }
+    else if ((mWindow.occlusionState & NSWindowOcclusionStateVisible) == 0)
+    {
+        mVisibility = WindowVisibility::Occluded;
+    }
+    else
+    {
+        mVisibility = WindowVisibility::Visible;
+    }
 }
 
 void CocoaWindow::Reset(input::ResetReason reason, bool focused) noexcept
@@ -451,6 +479,7 @@ void CocoaWindow::Closed() noexcept
         mNativeWindowInfo.CocoaView = nullptr;
         mNativeWindowInfo.Width = 0;
         mNativeWindowInfo.Height = 0;
+        mVisibility = WindowVisibility::Occluded;
         Reset(input::ResetReason::WindowClosed, false);
     }
 }
@@ -533,6 +562,14 @@ void CocoaWindow::KeyEvent(NSEvent* event) noexcept
 - (void)windowDidDeminiaturize:(NSNotification*)notification
 {
     [self windowDidResize:notification];
+}
+- (void)windowDidChangeOcclusionState:(NSNotification*)notification
+{
+    (void)notification;
+    if (self.owner != nullptr)
+    {
+        self.owner->RefreshVisibility();
+    }
 }
 @end
 

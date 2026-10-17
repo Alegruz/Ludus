@@ -22,6 +22,7 @@
 #include "internal/environment_data.h"
 #include "internal/gpu_preview_data.h"
 #include "internal/reference_data.h"
+#include "internal/uniform_set_table.h"
 
 namespace ludus::graphics::renderer
 {
@@ -71,6 +72,8 @@ namespace
 {
 using internal::Access;
 constexpr usize NO_MATERIAL = ~usize{0}, NO_SHADOW = ~usize{0};
+/// Packet/item marker for a flat draw using the bound program's zero-filled default uniforms.
+constexpr usize NO_UNIFORM = ~usize{0};
 constexpr usize SHADOW_DATA_BYTES = SHADOW_DATA_WORDS * sizeof(math::Vector4);
 constexpr usize LIT_SHADOW_OFFSET = (9 + 8 * 4) * sizeof(math::Vector4);
 constexpr usize CLUSTER_SHADOW_OFFSET = (9 + 128 * 4) * sizeof(math::Vector4);
@@ -136,7 +139,8 @@ bool ValidCapacities(const Limits& limits) noexcept
                           limits.Presentations,
                           limits.MaterialPrograms,
                           limits.Materials,
-                          limits.ShadowAtlases};
+                          limits.ShadowAtlases,
+                          limits.UniformSets};
     for (const auto count : counts)
     {
         if (count == 0 || count == invalid)
@@ -314,6 +318,7 @@ bool Overlap(const Rect& left, const Rect& right) noexcept
 struct Candidate final
 {
     usize Item = 0, MeshSlot = 0, MaterialSlot = NO_MATERIAL;
+    usize UniformSlot = NO_UNIFORM;
     bool Coarse = false;
     Rect Bounds;
     Instance Data;
@@ -322,8 +327,12 @@ struct MeshLess final
 {
     bool operator()(const Candidate& left, const Candidate& right) const noexcept
     {
-        return left.MaterialSlot != right.MaterialSlot ? left.MaterialSlot < right.MaterialSlot
-                                                       : left.MeshSlot < right.MeshSlot;
+        if (left.MaterialSlot != right.MaterialSlot)
+        {
+            return left.MaterialSlot < right.MaterialSlot;
+        }
+        return left.UniformSlot != right.UniformSlot ? left.UniformSlot < right.UniformSlot
+                                                     : left.MeshSlot < right.MeshSlot;
     }
 };
 } // namespace
@@ -341,6 +350,7 @@ struct Renderer::State final
     {
         SceneItem Input;
         usize MeshSlot = 0, MaterialSlot = NO_MATERIAL;
+        usize UniformSlot = NO_UNIFORM;
         math::Aabb3 Bounds;
     };
     struct SnapshotRecord final : SlotIdentity
@@ -357,6 +367,7 @@ struct Renderer::State final
         uint32 Count = 0;
         Layer Pass = Layer::Opaque;
         usize MaterialSlot = NO_MATERIAL;
+        usize UniformSlot = NO_UNIFORM;
     };
     struct ViewRecord final : SlotIdentity
     {
@@ -461,6 +472,10 @@ struct Renderer::State final
     rhi::RasterShaderHandle Vertex{}, Fragment{};
     rhi::BindingLayoutHandle Layout{};
     rhi::BindingSetHandle Bindings{};
+    /// Bound flat program layout (empty when unbound), its zero-filled defaults and per-draw sets.
+    internal::FlatUniformLayout FlatUniforms;
+    rhi::BufferHandle DefaultUniforms{};
+    internal::UniformSetTable UniformSets;
     rhi::RasterPipelineHandle Opaque{}, Overlay{};
     uint32 Phase = 0;
     Status Setup = Status::Pending;
@@ -579,6 +594,8 @@ struct Renderer::State final
         static_cast<void>(rhi::Destroy(Device, CompositeVertex));
         static_cast<void>(rhi::Destroy(Device, Overlay));
         static_cast<void>(rhi::Destroy(Device, Opaque));
+        UniformSets.Clear(Device);
+        static_cast<void>(rhi::Destroy(Device, DefaultUniforms));
         static_cast<void>(rhi::Destroy(Device, Bindings));
         static_cast<void>(rhi::Destroy(Device, Layout));
         static_cast<void>(rhi::Destroy(Device, Fragment));
@@ -761,6 +778,10 @@ struct Renderer::State final
                     --Materials[material].References;
                     DropMaterial(material);
                 }
+                if (scene.Items[i].UniformSlot != NO_UNIFORM)
+                {
+                    UniformSets.Unretain(Device, scene.Items[i].UniformSlot);
+                }
             }
             Retire(scene);
         }
@@ -811,7 +832,10 @@ Status Renderer::State::ReserveStorage(const Limits& limits) noexcept
         charge(snapshotGroups, sizeof(math::Aabb3) + sizeof(bool)) == false ||
         charge(viewPackets, sizeof(Packet)) == false ||
         charge(limits.Objects, 2 * sizeof(Candidate) + sizeof(Instance)) == false ||
-        charge(groups, sizeof(math::FrustumRelation)) == false || bytes > limits.HostBytes)
+        charge(groups, sizeof(math::FrustumRelation)) == false ||
+        TryAdd(bytes, internal::UniformSetTable::GetHostBytes(limits.UniformSets, FlatUniforms.BufferBytes), bytes) ==
+            false ||
+        bytes > limits.HostBytes)
     {
         return Status::CapacityExceeded;
     }
@@ -825,7 +849,8 @@ Status Renderer::State::ReserveStorage(const Limits& limits) noexcept
         reserve(Programs, limits.MaterialPrograms) == false || reserve(Shadows, limits.ShadowAtlases) == false ||
         reserve(Presentations, limits.Presentations) == false || reserve(Candidates, limits.Objects) == false ||
         reserve(Scratch, limits.Objects) == false || reserve(Instances, limits.Objects) == false ||
-        reserve(GroupRelations, groups) == false)
+        reserve(GroupRelations, groups) == false ||
+        UniformSets.Reserve(limits.UniformSets, FlatUniforms.BufferBytes) == false)
     {
         return Status::OutOfMemory;
     }
@@ -889,9 +914,14 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
     {
         return Status::Unsupported;
     }
+    internal::FlatUniformLayout uniforms;
     if (vertex.Artifact.Stage != rhi::ShaderStage::Vertex || fragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
-        vertex.Bindings.empty() == false || fragment.Bindings.empty() == false || vertex.Inputs.size() != 6 ||
-        fragment.Inputs.empty() == false)
+        vertex.Inputs.size() != 6 || fragment.Inputs.empty() == false ||
+        internal::MergeFlatUniformLayout(vertex.Bindings,
+                                         fragment.Bindings,
+                                         capabilities.UniformOffsetAlignment,
+                                         capabilities.MaxUniformRange,
+                                         uniforms) == false)
     {
         return Status::InvalidDescription;
     }
@@ -910,6 +940,7 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
     }
     mState.Reset(state);
     state->Device = device;
+    state->FlatUniforms = uniforms;
     status = state->ReserveStorage(limits);
     if (status != Status::Ready)
     {
@@ -970,15 +1001,32 @@ Status Renderer::Poll() noexcept
                 }
                 if (status == Status::Ready)
                 {
-                    status = rhi::CreateBindingLayout(state.Device, {}, state.Layout);
+                    status = rhi::CreateBindingLayout(state.Device,
+                                                      {state.FlatUniforms.Bindings.GetData(), state.FlatUniforms.Count},
+                                                      state.Layout);
+                    if (Accepted(status) && state.FlatUniforms.Count != 0)
+                    {
+                        status =
+                            state.UniformSets.CreateDefault(state.Device, state.FlatUniforms, state.DefaultUniforms);
+                    }
                     ++state.Phase;
                 }
                 break;
             case 1:
                 status = rhi::GetStatus(state.Device, state.Layout);
+                if (status == Status::Ready && state.FlatUniforms.Count != 0)
+                {
+                    status = rhi::GetStatus(state.Device, state.DefaultUniforms);
+                }
                 if (status == Status::Ready)
                 {
-                    status = rhi::CreateBindingSet(state.Device, state.Layout, {}, state.Bindings);
+                    state.FlatUniforms.Handle = state.Layout;
+                    status = state.FlatUniforms.Count == 0
+                                 ? rhi::CreateBindingSet(state.Device, state.Layout, {}, state.Bindings)
+                                 : internal::CreateFlatUniformBindings(state.Device,
+                                                                       state.FlatUniforms,
+                                                                       state.DefaultUniforms,
+                                                                       state.Bindings);
                     ++state.Phase;
                 }
                 break;
@@ -1256,7 +1304,8 @@ Status Renderer::DrawView(PreparedView handle, const rhi::RasterPassDescription&
                                       : (view.Depth == DepthConvention::ReverseZ ? s.TargetReverse : s.TargetOpaque);
         const auto overlay = hdr ? s.HdrFlat[2] : (surface ? s.Overlay : s.TargetOverlay);
         auto pipeline = packet.Pass == Layer::Opaque ? opaque : overlay;
-        auto bindings = s.Bindings;
+        rhi::BindingSetHandle bindings =
+            packet.UniformSlot != NO_UNIFORM ? s.UniformSets.GetBindings(packet.UniformSlot) : s.Bindings;
         if (packet.MaterialSlot != NO_MATERIAL)
         {
             const auto& material = s.Materials[packet.MaterialSlot];
@@ -2393,6 +2442,57 @@ Status Renderer::Release(MaterialVersion& handle) noexcept
     return Status::Ready;
 }
 
+usize Renderer::GetUniformBytes() const noexcept
+{
+    return mState.Get() != nullptr ? mState->FlatUniforms.CallerBytes : 0;
+}
+Status Renderer::CreateUniformSet(BorrowedView<const uint8> bytes, UniformSet& output) noexcept
+{
+    if (mState.Get() == nullptr || mState->Setup != Status::Ready)
+    {
+        return Status::NotReady;
+    }
+    if (Access::Owner(output) != 0)
+    {
+        return Status::InvalidState;
+    }
+    const Status admitted = RendererAdmission(mState->Device);
+    if (admitted != Status::Ready)
+    {
+        return admitted;
+    }
+    internal::UniformSetIdentity identity;
+    const Status created = mState->UniformSets.Create(mState->Device, mState->FlatUniforms, bytes, identity);
+    if (Accepted(created) == false)
+    {
+        return created;
+    }
+    output = Access::Make<UniformSet>({mState->Owner, identity.Generation, identity.Slot});
+    return created;
+}
+Status Renderer::GetStatus(UniformSet handle) noexcept
+{
+    if (mState.Get() == nullptr || Access::Owner(handle) != mState->Owner)
+    {
+        return Status::InvalidHandle;
+    }
+    return mState->UniformSets.GetStatus(mState->Device,
+                                         mState->FlatUniforms,
+                                         Access::Slot(handle),
+                                         Access::Generation(handle));
+}
+Status Renderer::Release(UniformSet& handle) noexcept
+{
+    if (mState.Get() == nullptr || Access::Owner(handle) != mState->Owner ||
+        mState->UniformSets.IsOwned(Access::Slot(handle), Access::Generation(handle)) == false)
+    {
+        return Status::InvalidHandle;
+    }
+    mState->UniformSets.Detach(mState->Device, Access::Slot(handle));
+    handle = {};
+    return Status::Ready;
+}
+
 Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) noexcept
 {
     if (mState.Get() == nullptr || mState->Setup != Status::Ready)
@@ -2669,6 +2769,21 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
         {
             return Status::InvalidDescription;
         }
+        usize uniformSlot = NO_UNIFORM;
+        if (Access::Owner(item.Uniforms) != 0)
+        {
+            if (Access::Owner(item.Uniforms) != mState->Owner || Access::Owner(item.Surface) != 0 ||
+                mState->FlatUniforms.Count == 0)
+            {
+                return Status::InvalidDescription;
+            }
+            status = GetStatus(item.Uniforms);
+            if (status != Status::Ready)
+            {
+                return status == Status::Pending ? Status::NotReady : status;
+            }
+            uniformSlot = Access::Slot(item.Uniforms);
+        }
         usize materialSlot = NO_MATERIAL;
         if (Access::Owner(item.Surface) != 0)
         {
@@ -2710,6 +2825,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
         destination.Input = item;
         destination.MeshSlot = Access::Slot(item.Geometry);
         destination.MaterialSlot = materialSlot;
+        destination.UniformSlot = uniformSlot;
         if (math::TryTransformAabb(item.Transform,
                                    mState->MeshRecords[destination.MeshSlot].Bounds,
                                    destination.Bounds) != math::MathStatus::Success)
@@ -2778,6 +2894,10 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
         if (snapshot.Items[i].MaterialSlot != NO_MATERIAL)
         {
             ++mState->Materials[snapshot.Items[i].MaterialSlot].References;
+        }
+        if (snapshot.Items[i].UniformSlot != NO_UNIFORM)
+        {
+            mState->UniformSets.Retain(snapshot.Items[i].UniformSlot);
         }
     }
     snapshot.Count = count;
@@ -2941,6 +3061,7 @@ Status Renderer::PrepareView(Snapshot handle,
             candidate.Item = i;
             candidate.MeshSlot = item.MeshSlot;
             candidate.MaterialSlot = item.MaterialSlot;
+            candidate.UniformSlot = item.UniformSlot;
             candidate.Coarse = false;
             const auto clip = (pass == Layer::Opaque ? description.WorldToClip : description.OverlayToClip) *
                               Matrix(item.Input.Transform);
@@ -3043,7 +3164,8 @@ Status Renderer::PrepareView(Snapshot handle,
     for (usize i = 1; i < opaqueCount; ++i)
     {
         homogeneous &= candidates[i].MeshSlot == candidates[0].MeshSlot &&
-                       candidates[i].MaterialSlot == candidates[0].MaterialSlot;
+                       candidates[i].MaterialSlot == candidates[0].MaterialSlot &&
+                       candidates[i].UniformSlot == candidates[0].UniformSlot;
     }
     // Already compatible objects need no reordering or pairwise overlap search;
     // preserving their source order also preserves equal-depth ownership.
@@ -3109,13 +3231,15 @@ Status Renderer::PrepareView(Snapshot handle,
         if (description.Reference == false && view.DrawCount != 0 &&
             view.Packets[view.DrawCount - 1].MeshSlot == candidate.MeshSlot &&
             view.Packets[view.DrawCount - 1].Pass == item.Pass &&
-            view.Packets[view.DrawCount - 1].MaterialSlot == candidate.MaterialSlot)
+            view.Packets[view.DrawCount - 1].MaterialSlot == candidate.MaterialSlot &&
+            view.Packets[view.DrawCount - 1].UniformSlot == candidate.UniformSlot)
         {
             ++view.Packets[view.DrawCount - 1].Count;
         }
         else
         {
-            view.Packets[view.DrawCount++] = {candidate.MeshSlot, i, 1, item.Pass, candidate.MaterialSlot};
+            view.Packets[view.DrawCount++] =
+                {candidate.MeshSlot, i, 1, item.Pass, candidate.MaterialSlot, candidate.UniformSlot};
         }
     }
     status = Status::Ready;
@@ -3234,7 +3358,9 @@ Status Renderer::Submit(PreparedView handle, rhi::SurfaceHandle surface, rhi::Su
                 {mesh.Vertices, 0, mesh.VertexCount * sizeof(Vertex)},
                 {view.Instances, packet.First * sizeof(Instance), packet.Count * sizeof(Instance)}};
             auto pipeline = packet.Pass == Layer::Opaque ? mState->Opaque : mState->Overlay;
-            auto bindings = mState->Bindings;
+            rhi::BindingSetHandle bindings = packet.UniformSlot != NO_UNIFORM
+                                                 ? mState->UniformSets.GetBindings(packet.UniformSlot)
+                                                 : mState->Bindings;
             if (packet.MaterialSlot != NO_MATERIAL)
             {
                 const auto& material = mState->Materials[packet.MaterialSlot];
