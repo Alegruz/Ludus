@@ -2,6 +2,7 @@
 
 #include "internal/editor_identity.h"
 
+#include <ludus/foundation/base/core.h>
 #include <ludus/foundation/base/parse_number.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/scalar.hpp>
@@ -345,7 +346,7 @@ bool WorldDocument::LoadSchema(const QByteArray& bytes, QString& error)
             }
         }
     }
-    Schema_ = schema;
+    Schema_ = foundation::Move(schema);
     error.clear();
     return true;
 }
@@ -717,7 +718,7 @@ bool WorldDocument::CreateEntity(const foundation::identity::EntropySource& entr
     {
         return false;
     }
-    outId = fresh;
+    outId = foundation::Move(fresh);
     return true;
 }
 bool WorldDocument::DuplicateEntity(const foundation::identity::EntropySource& entropy,
@@ -768,7 +769,7 @@ bool WorldDocument::DuplicateEntity(const foundation::identity::EntropySource& e
     {
         return false;
     }
-    outId = fresh;
+    outId = foundation::Move(fresh);
     return true;
 }
 bool WorldDocument::RemoveEntity(const QString& id, QString& error)
@@ -1069,7 +1070,7 @@ bool WorldDocument::ParseValue(const QJsonObject& p, const QString& text, QJsonV
     {
         return false;
     }
-    value = candidate;
+    value = foundation::Move(candidate);
     return true;
 }
 } // namespace ludus::editor
