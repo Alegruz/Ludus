@@ -646,6 +646,31 @@ class BrowserAnalysisTests(unittest.TestCase):
         self.assertIn(str(root / "include"), command)
 
 
+class BuildAnalyzerBootstrapTests(unittest.TestCase):
+    def test_an_older_cached_binary_cannot_satisfy_the_current_pin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            old = root / "out/host-tools/clang-build-analyzer/build/ClangBuildAnalyzer"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"old analyzer")
+            source = engine.clang_build_analyzer_dir(root)
+            source.mkdir(parents=True)
+            (source / "CMakeLists.txt").touch()
+            binary = engine.clang_build_analyzer_binary(root)
+
+            def build(command, **kwargs):
+                if "--build" in command:
+                    binary.write_bytes(b"current analyzer")
+
+            with patch.object(engine, "run", side_effect=build) as run:
+                self.assertEqual(engine.ensure_clang_build_analyzer(root), binary)
+                self.assertEqual(binary.read_bytes(), b"current analyzer")
+                self.assertEqual(old.read_bytes(), b"old analyzer")
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(engine.ensure_clang_build_analyzer(root), binary)
+                self.assertEqual(run.call_count, 2)
+
+
 class ShaderBootstrapCacheTests(unittest.TestCase):
     def test_relocated_verified_tool_needs_no_download_or_cmake_build(self):
         script = Path(engine.__file__).resolve().parents[2] / "scripts/bootstrap-spirv-cross"

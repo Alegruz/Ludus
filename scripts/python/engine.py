@@ -45,7 +45,10 @@ BOOTSTRAP_STATE_VERSION = 2
 # ClangBuildAnalyzer aggregates Clang -ftime-trace outputs into a single ranked
 # report. Pinned so the profiling harness is reproducible. It is fetched/built
 # on demand by `profile-build` only, never by init.sh.
-CLANG_BUILD_ANALYZER_VERSION = "1.5.0"
+# Thanks to Aras Pranckevičius and contributors, v1.6.0 updates simdjson for
+# newer compilers and accounts for Clang 19+ header trace events.
+# https://github.com/aras-p/ClangBuildAnalyzer/releases/tag/v1.6.0
+CLANG_BUILD_ANALYZER_VERSION = "1.6.0"
 CLANG_BUILD_ANALYZER_REPO = "https://github.com/aras-p/ClangBuildAnalyzer"
 
 PRESET_BUILD_TYPES: dict[str, str] = {
@@ -2180,7 +2183,7 @@ def command_install_sdk(args: argparse.Namespace) -> int:
 
 
 def clang_build_analyzer_dir(root: Path) -> Path:
-    return root / "out" / "host-tools" / "clang-build-analyzer"
+    return root / "out" / "host-tools" / f"clang-build-analyzer-{CLANG_BUILD_ANALYZER_VERSION}"
 
 
 def clang_build_analyzer_binary(root: Path) -> Path:

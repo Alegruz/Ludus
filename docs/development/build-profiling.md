@@ -36,6 +36,12 @@ Flags:
 
 ClangBuildAnalyzer is fetched and built on demand into `out/host-tools/`; it is
 **not** part of `./init.sh`, so normal onboarding is unaffected.
+The pinned 1.6.0 release updates its bundled simdjson for newer compilers and
+recognizes Clang 19 and later header trace events. Thanks to
+[Aras Pranckevičius and the release contributors](https://github.com/aras-p/ClangBuildAnalyzer/releases/tag/v1.6.0).
+Each analyzer version has its own source/build directory, so an older cached
+binary cannot silently satisfy a newer pin. Existing profiling budgets remain
+unchanged.
 
 ## How to improve, quantitatively
 
