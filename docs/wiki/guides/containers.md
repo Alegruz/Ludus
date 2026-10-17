@@ -28,6 +28,7 @@ These types ship today. Each has its reference page in the
 | Need | Use | Header | Contract summary |
 | --- | --- | --- | --- |
 | Count fixed at compile time | `StaticArray<T, N>` | `static_array.hpp` | Inline aggregate; all `N` elements are always live; never allocates |
+| Runtime size within a hard bound | `FixedArray<T, N>` | `fixed_array.hpp` | Live prefix of inline storage; only occupied slots are constructed; full is a status; never allocates |
 | Growable contiguous sequence | `Array<T>` | `array.hpp` | One heap block; 2x growth; growth invalidates every element borrow |
 | Small or read-mostly ordered dictionary | `SortedMap<K, V>` | `sorted_map.hpp` | Sorted `Array` of entries; O(log n) lookup, O(n) insert/remove |
 | Borrowed read or write of caller storage | `BorrowedView<T>` or `std::span<T>` | `borrowed_view.hpp` | Pointer and count only; never owns or extends the storage's lifetime |
@@ -46,7 +47,6 @@ tracks their status and gating consumers.
 
 | Planned type | Intended use |
 | --- | --- |
-| `FixedArray<T, N>` | Runtime size within a hard bound, inline storage, full is a status |
 | `RingBuffer<T>` | Single-owner FIFO with a hard capacity |
 | `BitSet`, `StaticBitSet<N>` | Packed flags and dense index membership |
 | `HashMap`, `HashSet` | Larger mutable dictionaries, after a measured algorithm selection |
@@ -100,6 +100,43 @@ leaves size, capacity, elements and borrows unchanged. It also leaves the
 argument untouched, including a move-only value or one that refers to an
 element of the same array. Use `Add`, `Resize` and `EnsureCapacity` only where
 running out of memory may end the process, such as tests and tools.
+
+## Bound a buffer without allocating
+
+`FixedArray<T, N>` is for a size that varies at run time but must never exceed
+a known bound, such as an event batch or a binding table. Its storage is inline,
+so it suits hot paths that must not allocate. Element types need not be
+default-constructible, because only occupied slots hold objects. There is no
+infallible `Add`: every add or insert is a `Try` operation that returns `false`
+or `nullptr` when the array is full, leaving it unchanged.
+
+```cpp
+#include <ludus/foundation/containers/fixed_array.hpp>
+
+#include <span>
+
+constexpr ludus::foundation::usize MAX_TOUCHES = 10;
+
+struct Touch
+{
+    ludus::foundation::uint32 Id;
+    ludus::foundation::float32 X;
+    ludus::foundation::float32 Y;
+};
+
+// Returns false, keeping every earlier touch, when the frame's bound is reached.
+[[nodiscard]] bool RecordTouch(ludus::foundation::FixedArray<Touch, MAX_TOUCHES>& inoutTouches,
+                               const Touch& touch) noexcept
+{
+    return inoutTouches.TryAdd(touch);
+}
+```
+
+`TryAddRange` appends a whole span or nothing. Storage never moves, so element
+borrows stay valid until that element is removed or shifted by an ordered
+insert or `RemoveAt`. Copying or moving the array copies or moves its elements;
+borrows do not follow, and a moved-from `FixedArray` is empty. Use
+`StaticArray` instead when every element is always live.
 
 ## Register and look up by key
 
