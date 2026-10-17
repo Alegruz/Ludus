@@ -2,10 +2,19 @@
 #
 # C++ exceptions are banned project-wide. This is enforced primarily by the
 # compiler: engine code builds with -fno-exceptions (cmake/EngineOptions.cmake),
-# so any throw / try / catch in engine code is a hard compile error. The
-# hicpp-exception-baseclass check below is an additional guard. Do not add
+# so any throw / try / catch in engine code is a hard compile error.
+# bugprone-std-exception-baseclass (enabled by bugprone-*; LLVM 23 removed its
+# former hicpp-exception-baseclass alias) is an additional guard. Do not add
 # exception-based error handling; use status codes / std::optional / return
 # values instead.
+#
+# portability-avoid-pragma-once is off: `#pragma once` is the repository's
+# header-guard convention (AGENTS.md "Formatting and static analysis"), and
+# every supported compiler (Clang, Apple Clang, Emscripten) implements it.
+#
+# bugprone-signed-bitwise ignores positive integer literals: the operands of
+# `byte >> 4` or `0x80 | value` are promoted to int by the language, so a
+# literal operand is not a signedness defect. Signed variables remain reported.
 #
 # readability-simplify-boolean-expr is deliberately off: the house style
 # (AGENTS.md "Naming") writes `condition == false` and `condition == true`,
@@ -22,7 +31,7 @@ Checks: >
   -bugprone-chained-comparison,
   performance-*,
   portability-*,
-  hicpp-exception-baseclass,
+  -portability-avoid-pragma-once,
   modernize-avoid-bind,
   modernize-use-default-member-init,
   modernize-use-nodiscard,
@@ -44,3 +53,5 @@ FormatStyle: file
 CheckOptions:
   - key: readability-braces-around-statements.ShortStatementLines
     value: '1'
+  - key: bugprone-signed-bitwise.IgnorePositiveIntegerLiterals
+    value: 'true'

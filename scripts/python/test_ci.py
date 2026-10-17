@@ -59,6 +59,10 @@ class ToolchainPinTests(unittest.TestCase):
             rendered = templates.render_files(templates.get_template("minimal"),
                                               templates.ProjectInputs("Game", "game", "1", []))
         self.assertIn("clang-23 lld-23", linux)
+        self.assertIn("Suites: llvm-toolchain-noble-23\\n", linux)
+        self.assertIn(f'[[ "$fingerprint" == {toolchain.LLVM_APT_KEY_FINGERPRINT} ]]', linux)
+        self.assertNotIn("apt.llvm.org", macos)
+        self.assertNotIn("LLVM_APT_KEY_TOKEN", linux)
         self.assertIn("brew install python@3.12 llvm@23\n", macos)
         self.assertIn('"$(brew --prefix llvm@23)"', macos)
         presets = next(item.content for item in rendered if item.relpath == "CMakePresets.json")
@@ -98,8 +102,11 @@ class ToolchainPinTests(unittest.TestCase):
     def test_committed_llvm_apt_key_matches_the_published_fingerprint(self):
         import llvm_apt_source
 
+        from ludus_tools import toolchain
+
         key = (self.ROOT / llvm_apt_source.KEY_SOURCE).read_text(encoding="ascii")
         self.assertEqual(llvm_apt_source.openpgp_fingerprint(key), llvm_apt_source.KEY_FINGERPRINT)
+        self.assertEqual(toolchain.LLVM_APT_KEY_FINGERPRINT, llvm_apt_source.KEY_FINGERPRINT)
         tampered = key.replace(key.splitlines()[3], key.splitlines()[4], 1)
         self.assertNotEqual(llvm_apt_source.openpgp_fingerprint(tampered), llvm_apt_source.KEY_FINGERPRINT)
 
@@ -165,7 +172,7 @@ class NativePrerequisiteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for name, body in (("timeout", 'shift 3; exec "$@"'), ("sudo", 'exec "$@"'),
-                               ("apt-get", 'printf "%s\n" "$@"')):
+                               ("apt-get", 'printf "%s\n" "$@"'), ("python3", 'printf "python3 %s\n" "$*"')):
                 tool = root / name
                 tool.write_text("#!/bin/sh\n" + body + "\n")
                 tool.chmod(0o755)
@@ -174,6 +181,9 @@ class NativePrerequisiteTests(unittest.TestCase):
                 result = subprocess.run(["/bin/bash", "-e", "-c", command], env=environment,
                                         capture_output=True, text=True, check=True)
                 arguments = result.stdout.splitlines()
+                # The pinned LLVM suite is registered before apt resolves clang-<major>.
+                self.assertEqual(arguments[0], "python3 scripts/python/llvm_apt_source.py")
+                self.assertIn(f"clang-{LLVM_MAJOR}", arguments)
                 for package in ("qt6-base-dev", "qt6-declarative-dev", "qt6-wayland", "libvulkan1", "mesa-vulkan-drivers"):
                     self.assertEqual(package in arguments, editor == "true", package)
 
