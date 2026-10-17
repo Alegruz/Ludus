@@ -28,7 +28,7 @@ add_executable(ludus_cook tool/ludus_cook.cpp)
 set_target_properties(ludus_cook PROPERTIES OUTPUT_NAME ludus-cook)
 # The CLI supplies operating-system entropy for new UUIDs; the entropy target
 # avoids linking Platform's window backends into a command-line tool.
-target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook Ludus::PlatformEntropy)
+target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook Ludus::ContentIdentity Ludus::PlatformEntropy)
 ludus_apply_project_defaults(ludus_cook)
 
 if(LUDUS_BUILD_TESTS)

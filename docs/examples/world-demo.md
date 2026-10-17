@@ -84,6 +84,13 @@ JSON parser during loading; it owns the resulting typed Level and releases all
 parser storage before returning. Input is limited to 64 KiB, 49 authoring
 entities, bounded nesting/strings and no duplicate or unknown fields.
 
+`ReadWorldLevel` also reads version-2 World records, which carry a document UUID
+and one UUID per entity, keep each `id` as `label`, and name enemy targets by UUID.
+It resolves targets back to labels, so gameplay and the replay hash do not change.
+The committed rooms stay version 1. [identity-migration.json](../../apps/world_demo/levels/identity-migration.json)
+holds their committed UUIDs, and `ludus-cook identity apply` produces the version-2
+form without minting; see [UUID authoring records](../architecture/object-handles-uuid.md#stage-3-uuid-authoring-records).
+
 Use the [World workflow](../development/editor-workspace.md#s4-scene-authoring)
 for transforms, player/enemy/exit fields, collision boxes, camera/bounds and seed.
 The same saved World feeds both trusted preview and the sample player.

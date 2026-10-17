@@ -478,6 +478,9 @@ self-references, and preserves references to other entities. New entity IDs are
 FoundationIdentity UUIDv4 text from the operating system's entropy source; if it
 is unavailable, Add and Duplicate change nothing and report that in the status
 line (see [the UUID architecture](../architecture/object-handles-uuid.md#implementation-sequence)).
+The Editor opens and saves version-1 Worlds only. Version-2 records with committed
+UUIDs are produced by `ludus-cook identity` and are not yet editable here; see
+[UUID authoring records](../architecture/object-handles-uuid.md#stage-3-uuid-authoring-records).
 
 Runtime integration stays game-owned: parse/validate into temporary owned data;
 create registry entities; map persisted IDs to new runtime handles; populate

@@ -193,6 +193,8 @@ add_subdirectory(modules/content/render_graph_format)
 # LUSTR cooked string dictionary contract, validating reader and deterministic writer.
 add_subdirectory(modules/content/string_dictionary_format)
 add_subdirectory(modules/content/string_dictionary)
+# Versioned UUID authoring records and the one-time World ID migration manifest.
+add_subdirectory(modules/content/identity_records)
 # Scene cooker (pbrt-reference-v1). The library builds for every target; its
 # file I/O reports Unsupported where Ludus::Content has no native file access,
 # and the ludus-cook CLI plus golden tests are native-host only.
